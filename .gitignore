@@ -1,15 +1,33 @@
-# ── State (never commit) ──────────────────────────────────────
+# Runtime state and experiment outputs
 state/
-
-
-# dump/
-dump/
-
-# ── Legacy root-level state (if still present) ────────────────
 results.tsv
 run.log
+*.log
+*.sqlite
+*.sqlite3
+*.db
 
-# ── Python ────────────────────────────────────────────────────
+# Local data dumps and generated warehouse artifacts
+dump/
+workspaces/**/*.csv
+workspaces/**/*.parquet
+workspaces/**/*.duckdb
+workspaces/**/*.pdf
+workspaces/**/hotspots.json
+workspaces/**/experiment_profile/
+workspaces/**/csv_profile/
+
+# Secrets and local credentials
+.env
+.env.*
+!.env.example
+secrets.toml
+*.pem
+*.key
+*.token
+.databrickscfg
+
+# Python build/cache artifacts
 __pycache__/
 *.py[cod]
 *.pyo
@@ -19,30 +37,23 @@ __pycache__/
 dist/
 build/
 .eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.coverage
+coverage.xml
+htmlcov/
 
-# ── Virtual envs ──────────────────────────────────────────────
+# Virtual environments
 .venv/
 venv/
 env/
-.env
 
-# ── Secrets ───────────────────────────────────────────────────
-.env.local
-secrets.toml
-*.pem
-*.key
-*.token
-.databrickscfg
-
-# ── Cache ─────────────────────────────────────────────────────
-~/.cache/autoresearch/
-.cache/
-*.pyc
-.ruff_cache/
-
-# ── Editor ────────────────────────────────────────────────────
+# Notebook/editor/local agent metadata
 .idea/
 .vscode/
+.ipynb_checkpoints/
 .claude/
 .memory/
 .code-review-graph/
@@ -51,14 +62,7 @@ secrets.toml
 .DS_Store
 Thumbs.db
 
-# Local datasets / generated warehouse artifacts
-workspaces/**/*.csv
-workspaces/**/*.parquet
-workspaces/**/*.duckdb
-workspaces/**/*.pdf
-workspaces/**/hotspots.json
-
-# ── ML artefacts (if used) ────────────────────────────────────
+# ML/model artifacts
 *.pt
 *.ckpt
 *.safetensors
