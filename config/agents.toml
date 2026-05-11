@@ -1,0 +1,11 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# autoresearch — AGENT CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[interns.sql_optimization]
+active = ["code_reviewer", "insights", "methodology_analyst"]
+
+[interns.limits]
+max_calls_per_session = 50
+timeout_seconds       = 45
+max_output_tokens     = 2000

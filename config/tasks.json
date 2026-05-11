@@ -1,0 +1,30 @@
+{
+  "active_task": "06_sql_optimization",
+  "tasks": [
+    {
+      "id": "06_sql_optimization",
+      "name": "Test 6 \u2014 SQL Performance Optimization",
+      "description": "Optimize prescriber_features.sql to run as fast as possible in DuckDB while scoring 100% on the profiler methodology guardrails.",
+      "domain": "sql_optimization",
+      "editable_file": "workspaces/sql_optimization/prescriber_features.sql",
+      "experiment_cmd": ["uv", "run", "python", "tests/06_sql_optimization/experiment.py"],
+      "evaluator_cmd": ["uv", "run", "python", "tests/06_sql_optimization/evaluator.py"],
+      "metric_key": "primary_metric",
+      "direction": "higher",
+      "hotspots_file": "workspaces/sql_optimization/hotspots.json",
+      "semantic_contract": {
+        "kpi_registry": "workspaces/sql_optimization/healthcare_kpi_registry.md",
+        "methodology_json": "state/healthcare_rules.json",
+        "rules": [
+          {
+            "id": "correctness_before_speed",
+            "kind": "decision_gate",
+            "description": "Reject any candidate that improves runtime but fails profiler matching or semantic guardrails.",
+            "severity": "error",
+            "source": "task"
+          }
+        ]
+      }
+    }
+  ]
+}

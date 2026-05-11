@@ -1,0 +1,65 @@
+[project]
+name = "autoresearch"
+version = "2.0.0"
+description = "Autonomous experiment agent with intern system"
+requires-python = ">=3.10"
+
+dependencies = [
+    # Config
+    "toml>=0.10.2",
+    # ML training tasks — uncomment if using train.py
+    # "torch>=2.3",
+    # "transformers>=4.40",
+    # "tiktoken>=0.6",
+    # "datasets>=2.19",
+    # Workflow / data pipeline tasks — uncomment as needed
+    # "httpx>=0.27",
+    # "pandas>=2.2",
+    "notebook>=7.5.6",
+    "polars>=1.40.1",
+    "rich>=15.0.0",
+    "deltalake>=1.5.1",
+    "pyspark>=3.5.1",    # NOTE: Lowered from 4.1.1 (Spark 4 is not officially released yet)
+    "sqlalchemy>=2.0.49",
+    "pyarrow>=4.0.0",    # relaxed upper bound — mlflow 3.x requires pyarrow<24
+    "numpy>=1.26,<2.0",  # <--- THE FIX: Capped below 2.0 to prevent ancient numba fallback
+    "scikit-learn>=1.5",
+    "shap>=0.46",
+    "fastexcel>=0.12.0",
+    "duckdb>=1.5.2",
+    "dash>=4.1.0",
+    "dash-bootstrap-components>=2.0.4",
+    # Databricks integration
+    "databricks-sdk>=0.20",
+    "mlflow>=3.0",
+]
+
+[project.scripts]
+loop      = "core.loop:main"
+prepare   = "prepare:main"
+
+[build-system]
+requires      = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["core", "interns"]
+
+# <--- THE FIX: Updated to the new uv standard to remove the dev-dependencies warning
+[dependency-groups]
+dev = [
+    "ruff>=0.4",
+    "pyright>=1.1",
+]
+
+# Optional extras: install with `uv sync --extra databricks-full`
+[project.optional-dependencies]
+databricks-full = [
+    "databricks-sql-connector>=3.0",   # warehouse execution mode
+    "databricks-connect>=13.3",        # connect execution mode
+    "pandas>=2.2",                     # required by mlflow.evaluate()
+]
+
+[tool.ruff]
+line-length    = 100
+target-version = "py310"

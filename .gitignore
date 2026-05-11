@@ -1,0 +1,65 @@
+# ── State (never commit) ──────────────────────────────────────
+state/
+
+
+# dump/
+dump/
+
+# ── Legacy root-level state (if still present) ────────────────
+results.tsv
+run.log
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual envs ──────────────────────────────────────────────
+.venv/
+venv/
+env/
+.env
+
+# ── Secrets ───────────────────────────────────────────────────
+.env.local
+secrets.toml
+*.pem
+*.key
+*.token
+.databrickscfg
+
+# ── Cache ─────────────────────────────────────────────────────
+~/.cache/autoresearch/
+.cache/
+*.pyc
+.ruff_cache/
+
+# ── Editor ────────────────────────────────────────────────────
+.idea/
+.vscode/
+.claude/
+.memory/
+.code-review-graph/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local datasets / generated warehouse artifacts
+workspaces/**/*.csv
+workspaces/**/*.parquet
+workspaces/**/*.duckdb
+workspaces/**/*.pdf
+workspaces/**/hotspots.json
+
+# ── ML artefacts (if used) ────────────────────────────────────
+*.pt
+*.ckpt
+*.safetensors
+checkpoints/

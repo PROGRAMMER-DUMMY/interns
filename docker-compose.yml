@@ -1,0 +1,38 @@
+version: "3.9"
+
+# autoresearch — Full Stack (loop + dashboard)
+# Usage:
+#   cp .env.example .env      # fill in credentials
+#   docker-compose up
+
+services:
+  loop:
+    build: .
+    env_file: .env
+    environment:
+      DATABRICKS_HOST: ${DATABRICKS_HOST:-}
+      DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
+      DATABRICKS_HTTP_PATH: ${DATABRICKS_HTTP_PATH:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./state:/app/state
+      - ./workspaces:/app/workspaces
+      - ./config:/app/config:ro
+    restart: "no"
+
+  dashboard:
+    build: .
+    command: ["uv", "run", "python", "dashboard.py"]
+    env_file: .env
+    environment:
+      DATABRICKS_HOST: ${DATABRICKS_HOST:-}
+      DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
+    ports:
+      - "8050:8050"
+    volumes:
+      - ./state:/app/state
+    depends_on:
+      - loop
+    restart: unless-stopped

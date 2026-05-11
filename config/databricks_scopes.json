@@ -1,0 +1,340 @@
+{
+  "_meta": {
+    "description": "Databricks API token scopes — mapped to docs, descriptions, and project relevance.",
+    "project": "autoresearch",
+    "last_updated": "2026-05-11",
+    "databricks_docs_root": "https://docs.databricks.com/en/"
+  },
+
+  "scopes": {
+    "sql": {
+      "description": "Run SQL queries and manage SQL warehouses (Databricks SQL).",
+      "docs_url": "https://docs.databricks.com/en/sql/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/statementexecution",
+      "project_status": "essential",
+      "project_reason": "Core compute for SQL experiment runs — replaces or augments local DuckDB."
+    },
+    "clusters": {
+      "description": "Create, start, stop, and configure all-purpose and job compute clusters.",
+      "docs_url": "https://docs.databricks.com/en/compute/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/clusters",
+      "project_status": "essential",
+      "project_reason": "Needed to run PySpark jobs (pyspark dependency in pyproject.toml) and experiment workers."
+    },
+    "jobs": {
+      "description": "Create, run, monitor, and cancel Databricks workflow jobs.",
+      "docs_url": "https://docs.databricks.com/en/jobs/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/jobs",
+      "project_status": "essential",
+      "project_reason": "Schedule and trigger experiment loops instead of running them locally."
+    },
+    "files": {
+      "description": "Upload and download files to/from DBFS and Unity Catalog Volumes.",
+      "docs_url": "https://docs.databricks.com/en/files/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/files",
+      "project_status": "essential",
+      "project_reason": "Transfer SQL scripts (prescriber_features.sql), data CSVs, and run.log artifacts."
+    },
+    "secrets": {
+      "description": "Store and retrieve encrypted key-value secrets (API keys, connection strings).",
+      "docs_url": "https://docs.databricks.com/en/security/secrets/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/secrets",
+      "project_status": "essential",
+      "project_reason": "Safely store GEMINI_API_KEY, ANTHROPIC_API_KEY used by LLMEngine."
+    },
+    "mlflow": {
+      "description": "Log experiment runs, metrics, parameters, and artifacts via MLflow Tracking.",
+      "docs_url": "https://docs.databricks.com/en/mlflow/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/experiments",
+      "project_status": "essential",
+      "project_reason": "Natural fit for tracking primary_metric per experiment run; replaces results.tsv."
+    },
+    "query-history": {
+      "description": "Access historical SQL query execution data including runtime and resource usage.",
+      "docs_url": "https://docs.databricks.com/en/sql/admin/query-history.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/queryhistory",
+      "project_status": "essential",
+      "project_reason": "Directly useful for SQL optimization task — surface slow queries and bottlenecks."
+    },
+    "settings": {
+      "description": "Read and update workspace-level settings and configurations.",
+      "docs_url": "https://docs.databricks.com/en/admin/workspace-settings/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/settings",
+      "project_status": "essential",
+      "project_reason": "Basic workspace configuration required by most SDK operations."
+    },
+    "unity-catalog": {
+      "description": "Govern and discover data assets (tables, volumes, schemas) across workspaces.",
+      "docs_url": "https://docs.databricks.com/en/data-governance/unity-catalog/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/catalogs",
+      "project_status": "optional",
+      "project_reason": "Useful if storing Delta Lake tables for prescriber data; not required for MVP."
+    },
+    "pipelines": {
+      "description": "Build and manage Delta Live Tables (DLT) declarative data pipelines.",
+      "docs_url": "https://docs.databricks.com/en/delta-live-tables/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/pipelines",
+      "project_status": "optional",
+      "project_reason": "Could replace manual ETL steps with managed Delta pipelines in future."
+    },
+    "workspace": {
+      "description": "Manage workspace objects: notebooks, folders, repos, and imports/exports.",
+      "docs_url": "https://docs.databricks.com/en/workspace/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/workspace",
+      "project_status": "optional",
+      "project_reason": "Needed only if storing notebooks or importing code directly into Databricks workspace."
+    },
+    "environments": {
+      "description": "Manage serverless compute environment dependencies and library versions.",
+      "docs_url": "https://docs.databricks.com/en/compute/serverless/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/environments",
+      "project_status": "optional",
+      "project_reason": "Useful for pinning Python package versions on serverless clusters."
+    },
+    "libraries": {
+      "description": "Install and manage libraries on clusters (PyPI, Maven, DBFS).",
+      "docs_url": "https://docs.databricks.com/en/libraries/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/libraries",
+      "project_status": "optional",
+      "project_reason": "Install project dependencies (duckdb, polars, shap) on Databricks clusters."
+    },
+    "vector-search": {
+      "description": "Create and query vector search indexes for semantic similarity retrieval.",
+      "docs_url": "https://docs.databricks.com/en/generative-ai/vector-search.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/vectorsearchindexes",
+      "project_status": "not-needed",
+      "project_reason": "No RAG or embedding features in the project."
+    },
+    "model-serving": {
+      "description": "Deploy and query ML models as REST API endpoints.",
+      "docs_url": "https://docs.databricks.com/en/machine-learning/model-serving/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/servingendpoints",
+      "project_status": "not-needed",
+      "project_reason": "Using external LLM APIs (Gemini, Anthropic) directly via APIEngine/CLIEngine."
+    },
+    "custom-llms": {
+      "description": "Register and use custom or fine-tuned LLMs within Databricks AI Gateway.",
+      "docs_url": "https://docs.databricks.com/en/generative-ai/external-models/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/aigateway",
+      "project_status": "not-needed",
+      "project_reason": "Direct API calls to Gemini/Anthropic; no need to route through Databricks."
+    },
+    "ai-gateway": {
+      "description": "Centralized gateway for routing, rate-limiting, and monitoring LLM API calls.",
+      "docs_url": "https://docs.databricks.com/en/generative-ai/ai-gateway/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/aigateway",
+      "project_status": "not-needed",
+      "project_reason": "LLM calls go directly to upstream providers; no proxy needed."
+    },
+    "supervisor-agents": {
+      "description": "Orchestrate Mosaic AI Agents with tool use, memory, and multi-step reasoning.",
+      "docs_url": "https://docs.databricks.com/en/generative-ai/agent-framework/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/agents",
+      "project_status": "not-needed",
+      "project_reason": "Project has its own intern/agent orchestration in core/; Databricks agents not used."
+    },
+    "knowledge-assistants": {
+      "description": "Genie-powered natural language Q&A interface over your data.",
+      "docs_url": "https://docs.databricks.com/en/genie/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/genie",
+      "project_status": "not-needed",
+      "project_reason": "No conversational data Q&A feature in the project."
+    },
+    "genie": {
+      "description": "Natural language to SQL interface for Databricks data assets.",
+      "docs_url": "https://docs.databricks.com/en/genie/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/genie",
+      "project_status": "not-needed",
+      "project_reason": "SQL is written and optimized by the agent itself, not via NL interface."
+    },
+    "forecasting": {
+      "description": "AutoML-powered time-series forecasting on Databricks.",
+      "docs_url": "https://docs.databricks.com/en/machine-learning/automl/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/forecasting",
+      "project_status": "not-needed",
+      "project_reason": "No forecasting workloads in the project."
+    },
+    "databricks-connect": {
+      "description": "Run local Spark code remotely on a Databricks cluster.",
+      "docs_url": "https://docs.databricks.com/en/dev-tools/databricks-connect/index.html",
+      "api_ref": "https://pypi.org/project/databricks-connect/",
+      "project_status": "not-needed",
+      "project_reason": "Experiment scripts run inside Databricks Jobs, not hybrid local/remote."
+    },
+    "dashboards": {
+      "description": "Create and manage Databricks Lakeview dashboards and legacy dashboards.",
+      "docs_url": "https://docs.databricks.com/en/dashboards/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/dashboards",
+      "project_status": "not-needed",
+      "project_reason": "Dashboard runs locally via Dash/Plotly on port 8050 (dashboard.py)."
+    },
+    "apps": {
+      "description": "Deploy and host custom web applications on Databricks infrastructure.",
+      "docs_url": "https://docs.databricks.com/en/dev-tools/databricks-apps/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/apps",
+      "project_status": "not-needed",
+      "project_reason": "Dash app runs locally; no need to host on Databricks."
+    },
+    "qualitymonitor": {
+      "description": "Monitor data quality, drift, and model accuracy over time.",
+      "docs_url": "https://docs.databricks.com/en/lakehouse-monitoring/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/qualitymonitors",
+      "project_status": "not-needed",
+      "project_reason": "Metric tracking handled by evaluator.py and results.tsv / MLflow."
+    },
+    "dataquality": {
+      "description": "Define and enforce data quality rules on Delta tables.",
+      "docs_url": "https://docs.databricks.com/en/delta-live-tables/expectations.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/qualitymonitors",
+      "project_status": "not-needed",
+      "project_reason": "No formal data quality enforcement needed for experiment data."
+    },
+    "dataclassification": {
+      "description": "Automatically tag and classify sensitive data (PII, PHI) in tables.",
+      "docs_url": "https://docs.databricks.com/en/data-governance/unity-catalog/data-classification.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/dataclassification",
+      "project_status": "not-needed",
+      "project_reason": "Prescriber data is already de-identified for the experiment."
+    },
+    "sharing": {
+      "description": "Share data with external organizations via Delta Sharing protocol.",
+      "docs_url": "https://docs.databricks.com/en/data-sharing/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/shares",
+      "project_status": "not-needed",
+      "project_reason": "No external data sharing in the project."
+    },
+    "cleanrooms": {
+      "description": "Collaborate on sensitive data with other organizations without raw data exposure.",
+      "docs_url": "https://docs.databricks.com/en/clean-rooms/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/cleanrooms",
+      "project_status": "not-needed",
+      "project_reason": "Single-org project; no clean room collaboration needed."
+    },
+    "marketplace": {
+      "description": "Discover and install datasets, notebooks, and models from Databricks Marketplace.",
+      "docs_url": "https://docs.databricks.com/en/marketplace/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/marketplace",
+      "project_status": "not-needed",
+      "project_reason": "Data comes from local CSV files, not Marketplace listings."
+    },
+    "billing": {
+      "description": "Access DBU usage, cost, and billing reports.",
+      "docs_url": "https://docs.databricks.com/en/admin/account-settings/index.html",
+      "api_ref": "https://docs.databricks.com/api/account/billableusage",
+      "project_status": "not-needed",
+      "project_reason": "Admin-level scope; not needed for running experiments."
+    },
+    "provisioning": {
+      "description": "Create and delete workspaces at the account level.",
+      "docs_url": "https://docs.databricks.com/en/admin/account-settings/index.html",
+      "api_ref": "https://docs.databricks.com/api/account/workspaces",
+      "project_status": "not-needed",
+      "project_reason": "Account-level admin scope; irrelevant for experiment workloads."
+    },
+    "networking": {
+      "description": "Configure VPCs, private endpoints, and network policies.",
+      "docs_url": "https://docs.databricks.com/en/security/network/index.html",
+      "api_ref": "https://docs.databricks.com/api/account/networkconnectivityconfigurations",
+      "project_status": "not-needed",
+      "project_reason": "Free trial workspace uses default networking."
+    },
+    "disaster-recovery": {
+      "description": "Manage workspace backup and cross-region failover.",
+      "docs_url": "https://docs.databricks.com/en/admin/disaster-recovery.html",
+      "api_ref": "https://docs.databricks.com/api/account/workspaces",
+      "project_status": "not-needed",
+      "project_reason": "Not relevant for a free trial or experimental workload."
+    },
+    "scim": {
+      "description": "Provision and sync users/groups via the SCIM 2.0 identity protocol.",
+      "docs_url": "https://docs.databricks.com/en/admin/users-groups/scim/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/users",
+      "project_status": "not-needed",
+      "project_reason": "Single-user account; no SSO or user provisioning needed."
+    },
+    "identity": {
+      "description": "Manage service principals, groups, and permission assignments.",
+      "docs_url": "https://docs.databricks.com/en/admin/users-groups/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/serviceprincipals",
+      "project_status": "not-needed",
+      "project_reason": "Personal account with personal access token; no identity management needed."
+    },
+    "authentication": {
+      "description": "Configure SSO, OAuth, and token-based authentication policies.",
+      "docs_url": "https://docs.databricks.com/en/admin/account-settings/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/tokenmanagement",
+      "project_status": "not-needed",
+      "project_reason": "Already authenticated via personal access token."
+    },
+    "access-management": {
+      "description": "Manage role assignments and permissions across workspace objects.",
+      "docs_url": "https://docs.databricks.com/en/security/auth/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/permissionmigration",
+      "project_status": "not-needed",
+      "project_reason": "Single-user workspace; no ACL management needed."
+    },
+    "instance-profiles": {
+      "description": "Attach AWS IAM instance profiles to clusters for S3 and resource access.",
+      "docs_url": "https://docs.databricks.com/en/connect/storage/tutorial-s3-instance-profile.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/instanceprofiles",
+      "project_status": "not-needed",
+      "project_reason": "AWS-specific scope; not applicable unless migrating to AWS."
+    },
+    "instance-pools": {
+      "description": "Pre-allocate idle VMs to reduce cluster start time.",
+      "docs_url": "https://docs.databricks.com/en/compute/pool-index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/instancepools",
+      "project_status": "not-needed",
+      "project_reason": "Useful at scale, but unnecessary on free trial with occasional runs."
+    },
+    "global-init-scripts": {
+      "description": "Run shell scripts on every cluster at startup (workspace-wide).",
+      "docs_url": "https://docs.databricks.com/en/init-scripts/global.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/globalinitialization",
+      "project_status": "not-needed",
+      "project_reason": "Dependencies are managed via pyproject.toml / uv, not cluster init scripts."
+    },
+    "command-execution": {
+      "description": "Execute arbitrary code on a running cluster via the Commands API.",
+      "docs_url": "https://docs.databricks.com/en/dev-tools/api/workspace/commands.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/commandexecution",
+      "project_status": "not-needed",
+      "project_reason": "Use Jobs API instead; direct command execution is interactive and not reproducible."
+    },
+    "notifications": {
+      "description": "Create notification destinations (email, Slack, PagerDuty) for job alerts.",
+      "docs_url": "https://docs.databricks.com/en/admin/account-settings/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/notificationdestinations",
+      "project_status": "not-needed",
+      "project_reason": "No alerting pipeline wired up in the project."
+    },
+    "alerts": {
+      "description": "Set threshold-based alerts on SQL query results.",
+      "docs_url": "https://docs.databricks.com/en/sql/user/alerts/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/alerts",
+      "project_status": "not-needed",
+      "project_reason": "Metric evaluation is handled by evaluator.py, not SQL alerts."
+    },
+    "search": {
+      "description": "Search across workspace objects: notebooks, jobs, queries, dashboards.",
+      "docs_url": "https://docs.databricks.com/en/workspace/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/search",
+      "project_status": "not-needed",
+      "project_reason": "No search-driven workflows in the project."
+    },
+    "tags": {
+      "description": "Apply key-value tags to clusters, jobs, and other resources for cost tracking.",
+      "docs_url": "https://docs.databricks.com/en/admin/account-settings/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/clusters",
+      "project_status": "not-needed",
+      "project_reason": "No cost attribution tagging required on free trial."
+    },
+    "postgres": {
+      "description": "Connect to and query external PostgreSQL databases via Lakehouse Federation.",
+      "docs_url": "https://docs.databricks.com/en/query-federation/index.html",
+      "api_ref": "https://docs.databricks.com/api/workspace/connections",
+      "project_status": "not-needed",
+      "project_reason": "Data source is CSV files, not a Postgres database."
+    }
+  }
+}
