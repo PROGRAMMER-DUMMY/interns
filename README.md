@@ -28,6 +28,87 @@ The platform engine is organized by responsibility:
 - `core/observability/` owns metric parsing and telemetry.
 - `core/storage/` owns SQLite/Git state.
 
+## Agent Guidance
+
+Agents should start with `AGENTS.md`. Repo-native operating skills live in `skills/` and cover
+ambiguity handling, stakeholder interviews, preference memory, domain modeling, task onboarding,
+workspace governance, and evolution.
+
+## Workspace Output Layout
+
+New projects live under `workspaces/<project>/`. Platform-generated outputs for
+that project are grouped under `workspaces/<project>/interns/` so the project
+root stays readable:
+
+```text
+workspaces/<project>/
+  interns/
+    state/        # workspace.db, run.log
+    runs/         # per-run artifacts
+    generated/    # contracts, profiles, evidence, solutions, requirements, memory
+    reports/      # human-readable reports
+```
+
+`workspaces/**/interns/` is ignored by git because it contains local run output.
+
+Fresh workspace onboarding:
+
+```powershell
+uv run onboard-workspace --workspace workspaces/<project>
+```
+
+The onboarding command discovers data, KPI/metric registries, and data model
+artifacts, profiles datasets with the canonical profiler, and generates baseline
+contracts, reports, runner/evaluator scripts, and query artifacts under
+`workspaces/<project>/interns/`.
+
+## Metadata Store
+
+Autoresearch uses hybrid storage:
+
+- executable artifacts stay as files under `workspaces/<project>/interns/`
+  (`kpi_metrics.sql`, evaluator scripts, reports, logs, DuckDB state);
+- structured JSON state is written through a metadata store
+  (`contracts`, `profiles`, `requirements`, `bootstrap`, mappings, decisions).
+
+Local mode requires no setup and stores structured metadata as local Delta tables under:
+
+```text
+workspaces/<project>/interns/state/delta_metadata/
+```
+
+If Delta writes fail, the system falls back to JSON under:
+
+```powershell
+workspaces/<project>/interns/state/metadata_store/
+```
+
+Enterprise Databricks deployments can map the same collections to Delta tables
+in Unity Catalog. MongoDB remains optional for document-store environments:
+
+```powershell
+$env:AUTORESEARCH_METADATA_BACKEND = "mongo"
+$env:AUTORESEARCH_MONGO_URI = "mongodb://..."
+$env:AUTORESEARCH_MONGO_DB = "autoresearch"
+uv sync --extra enterprise-metadata
+```
+
+If MongoDB is unavailable, writes fall back to the local JSON metadata store and
+record a warning under the workspace reports.
+
+The experiment loop also performs local-safe auto-bootstrap. If required
+`interns/` artifacts are missing or stale, it fingerprints workspace inputs,
+reruns onboarding, and then executes the local baseline. Existing artifacts are
+reused when the input fingerprint is current.
+
+Databricks is never used for remote execution just because credentials exist.
+The system may health-check Databricks, but remote execution requires explicit
+approval via:
+
+```powershell
+$env:AUTORESEARCH_ALLOW_REMOTE_EXECUTION = "1"
+```
+
 
 ## Promotion Model
 

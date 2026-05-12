@@ -309,6 +309,14 @@ def build_execution_backend(cfg: "Config") -> ExecutionBackend:
     db_cfg = cfg.databricks
     if not db_cfg.is_active():
         return DuckDBBackend()
+    if os.environ.get("AUTORESEARCH_ALLOW_REMOTE_EXECUTION") != "1":
+        print(
+            "[execution_backend] Databricks configured; remote execution requires "
+            "explicit approval. Set AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1 to use it. "
+            "Falling back to DuckDB.",
+            flush=True,
+        )
+        return DuckDBBackend()
 
     from core.execution.databricks_client import DatabricksClient
     client = DatabricksClient(db_cfg)

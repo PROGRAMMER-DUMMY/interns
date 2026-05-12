@@ -32,10 +32,12 @@ dependencies = [
     # Databricks integration
     "databricks-sdk>=0.20",
     "mlflow>=3.0",
+    "tabulate>=0.10.0",
 ]
 
 [project.scripts]
 loop      = "core.orchestration.loop:main"
+onboard-workspace = "core.onboarding.workspace_onboarding:main"
 prepare   = "prepare:main"
 
 [build-system]
@@ -58,6 +60,9 @@ databricks-full = [
     "databricks-sql-connector>=3.0",   # warehouse execution mode
     "databricks-connect>=13.3",        # connect execution mode
     "pandas>=2.2",                     # required by mlflow.evaluate()
+]
+enterprise-metadata = [
+    "pymongo>=4.7",
 ]
 
 [tool.ruff]

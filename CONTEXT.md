@@ -19,6 +19,10 @@
 - **OptimizationPolicy**: Versioned execution, failure, approval, downcast, and SLA policy loaded from task config. Production mode is bounded; global exploration is evidence-only unless explicitly allowed.
 - **DataModelProfiler**: Metadata-first profiler that records schema, source stats, sample bounds, exact bounds, and conservative downcast recommendations for local file-backed datasets.
 - **GovernanceEvaluator**: Promotion gatekeeper that converts run evidence into `approved`, `needs_review`, or `rejected` decisions with evidence packs and alert events.
+- **Polars-first data handling**: Dataframe work uses Polars by default for profiling,
+  schema inspection, sampling, KPI preparation, and file processing. Pandas is allowed
+  only at narrow third-party integration boundaries that require it, with the reason
+  documented and conversion back to Polars kept local.
 
 ## Core Package Layout
 
@@ -32,6 +36,26 @@
 - `core/agents/`: intern routing, registry, and LLM engine abstractions.
 - `core/observability/`: metric parsing and telemetry backends.
 - `core/storage/`: SQLite/Git workspace state.
+
+Project-specific runtime output belongs under `workspaces/<project>/interns/`,
+not directly in the project root. The loop stores task-scoped `workspace.db`,
+`run.log`, run artifacts, generated evidence, and reports there.
+
+Fresh workspace setup is local-safe by default. The loop fingerprints workspace
+inputs and auto-runs onboarding when generated `interns/` artifacts are missing
+or stale. Remote execution such as Databricks requires explicit approval and
+falls back to local DuckDB without that approval.
+
+Structured JSON artifacts use a pluggable metadata store. Local mode stores
+metadata as Delta tables under `interns/state/delta_metadata/`, with JSON fallback
+under `interns/state/metadata_store/`. Enterprise Databricks deployments can map
+the same contracts, profiles, requirements, bootstrap state, mappings, decisions,
+and evidence to Delta tables in Unity Catalog. Executable SQL, scripts, logs,
+reports, images, and raw workspace inputs remain file-based.
+
+Agents should read `AGENTS.md` for operating rules. Repo-native skills in `skills/`
+define the stakeholder interview, preference memory, task onboarding, workspace
+governance, and evolution process.
 
 
 ## Enterprise Data Flow

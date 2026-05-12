@@ -6,14 +6,15 @@
       "name": "Healthcare RCM KPI Optimization",
       "description": "Optimize the KPI generation queries for the Healthcare-RCM platform according to docs/Sample KPI.xlsx.",
       "domain": "healthcare_kpi",
-      "editable_file": "workspaces/Healthcare-RCM-Data-Platform/kpi_metrics.sql",
-      "experiment_cmd": ["uv", "run", "python", "workspaces/Healthcare-RCM-Data-Platform/experiment.py"],
-      "evaluator_cmd": ["uv", "run", "python", "workspaces/Healthcare-RCM-Data-Platform/evaluator.py"],
+      "workspace": "workspaces/Healthcare-RCM-Data-Platform",
+      "editable_file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/solutions/kpi_metrics.sql",
+      "experiment_cmd": ["uv", "run", "python", "workspaces/Healthcare-RCM-Data-Platform/interns/evaluation/experiment.py"],
+      "evaluator_cmd": ["uv", "run", "python", "workspaces/Healthcare-RCM-Data-Platform/interns/evaluation/evaluator.py"],
       "metric_key": "primary_metric",
       "direction": "higher",
       "semantic_contract": {
         "kpi_registry": "workspaces/Healthcare-RCM-Data-Platform/docs/Sample KPI.xlsx",
-        "methodology_json": "state/rcm_rules.json",
+        "methodology_json": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/contracts/semantic_contract.json",
         "rules": []
       },
       "optimization_policy": {
@@ -70,6 +71,7 @@
       "name": "Test 6 — SQL Performance Optimization",
       "description": "Optimize prescriber_features.sql to run as fast as possible in DuckDB while scoring 100% on the profiler methodology guardrails.",
       "domain": "sql_optimization",
+      "workspace": "workspaces/sql_optimization",
       "editable_file": "workspaces/sql_optimization/prescriber_features.sql",
       "experiment_cmd": ["uv", "run", "python", "tests/06_sql_optimization/experiment.py"],
       "evaluator_cmd": ["uv", "run", "python", "tests/06_sql_optimization/evaluator.py"],
