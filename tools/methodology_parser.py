@@ -8,12 +8,9 @@
 import argparse
 import json
 import logging
-import os
 import re
-import urllib.request
-import urllib.error
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("semantic_engine")
@@ -167,7 +164,7 @@ def extract_schema_with_intern(text: str) -> Dict[str, Any]:
             sys.path.insert(0, root_dir)
             
         from core.config import load
-        from core.registry import InternRegistry
+        from core.agents.registry import InternRegistry
         
         cfg = load()
         registry = InternRegistry(cfg)

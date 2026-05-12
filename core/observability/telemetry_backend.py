@@ -21,9 +21,9 @@ from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from core.config import DatabricksConfig
-    from core.workspace import Workspace
+    from core.storage.workspace import Workspace
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 
 # ── Abstract interface ─────────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ class DatabricksTelemetry(TelemetryBackend):
 
     def _setup_mlflow(self) -> None:
         import mlflow
-        from core.databricks_client import DatabricksClient
+        from core.execution.databricks_client import DatabricksClient
         mlflow.set_tracking_uri("databricks")
         client = DatabricksClient(self.cfg)
         client.create_mlflow_experiment(self.experiment_path)

@@ -3,9 +3,9 @@ core/registry.py — manages dynamic loading of built-in interns.
 """
 import importlib
 from pathlib import Path
-from core.llm_engine import APIEngine, CLIEngine
+from core.agents.llm_engine import APIEngine, CLIEngine
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 _BUILTIN_INTERNS = {
     "insights":            "interns.insights.InsightsIntern",

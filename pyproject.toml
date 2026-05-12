@@ -35,7 +35,7 @@ dependencies = [
 ]
 
 [project.scripts]
-loop      = "core.loop:main"
+loop      = "core.orchestration.loop:main"
 prepare   = "prepare:main"
 
 [build-system]

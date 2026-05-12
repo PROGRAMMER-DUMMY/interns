@@ -79,7 +79,7 @@ class SemanticContract:
     def merge_kpi_registry(self, path: Path) -> None:
         if not path.exists():
             return
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = _read_registry_text(path)
         self.sources.append(str(path))
 
         for name, formula in _extract_kpi_formulas(text).items():
@@ -118,15 +118,21 @@ class SemanticContract:
 def _extract_kpi_formulas(text: str) -> dict[str, str]:
     formulas: dict[str, str] = {}
     for line in text.splitlines():
-        if "|" not in line or "`" not in line:
+        if "|" not in line:
             continue
         cells = [cell.strip(" *") for cell in line.strip().strip("|").split("|")]
         if len(cells) < 2:
             continue
         name = cells[0].strip()
         match = re.search(r"`([^`]+)`", line)
-        if name and match and not name.lower().startswith(":---"):
-            formulas[name] = match.group(1).strip()
+        formula = match.group(1).strip() if match else cells[1].strip()
+        if (
+            name
+            and formula
+            and not name.lower().startswith(":---")
+            and name.lower() not in {"kpi", "kpi name", "metric", "metric name", "name"}
+        ):
+            formulas[name] = formula
     return formulas
 
 
@@ -147,3 +153,70 @@ def _extract_guardrails(text: str) -> list[str]:
 
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") or "unnamed"
+
+
+def _read_registry_text(path: Path) -> str:
+    if path.suffix.lower() not in {".xlsx", ".xls"}:
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    try:
+        import polars as pl
+    except ImportError:
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    try:
+        df = pl.read_excel(str(path))
+    except Exception:
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    name_col = _find_excel_column(df.columns, ["key business", "kpi", "metric", "question", "name"])
+    first_row = df.row(0, named=True) if df.height else {}
+    formula_col = _find_excel_column(
+        df.columns,
+        ["formula", "calculation", "metric"],
+        first_row=first_row,
+        exclude={name_col} if name_col else set(),
+    )
+    if name_col and formula_col:
+        lines = ["|KPI Name|Formula|"]
+        for row in df.iter_rows(named=True):
+            name = str(row.get(name_col, "") or "").replace("\n", " ").strip()
+            formula = str(row.get(formula_col, "") or "").replace("\n", " ").strip()
+            if not name or not formula:
+                continue
+            lower_name = name.lower()
+            if "meant to answer" in lower_name or lower_name in {"key business question"}:
+                continue
+            if formula.lower() in {"metric", "formula", "calculation"}:
+                continue
+            lines.append(f"|{name}|{formula}|")
+        return "\n".join(lines)
+
+    lines = ["|" + "|".join(df.columns) + "|"]
+    for row in df.iter_rows(named=True):
+        cells = [str(row.get(column, "") or "").replace("\n", " ").strip() for column in df.columns]
+        lines.append("|" + "|".join(cells) + "|")
+    return "\n".join(lines)
+
+
+def _find_excel_column(
+    columns: list[str],
+    keywords: list[str],
+    first_row: dict[str, Any] | None = None,
+    exclude: set[str] | None = None,
+) -> str | None:
+    exclude = exclude or set()
+    for column in columns:
+        if column in exclude:
+            continue
+        lower = column.lower()
+        if any(keyword in lower for keyword in keywords):
+            return column
+    if first_row:
+        for column in columns:
+            if column in exclude:
+                continue
+            value = str(first_row.get(column, "") or "").lower()
+            if any(keyword in value for keyword in keywords):
+                return column
+    return None

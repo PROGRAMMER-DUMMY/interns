@@ -10,7 +10,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
-from core.workspace import Workspace
+from core.storage.workspace import Workspace
 
 
 @dataclass

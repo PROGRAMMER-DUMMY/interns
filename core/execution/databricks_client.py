@@ -7,7 +7,7 @@ All SDK imports are lazy so the module loads fine when Databricks is disabled.
 from __future__ import annotations
 
 import shlex
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Tuple
 
 if TYPE_CHECKING:
     from core.config import DatabricksConfig
@@ -112,7 +112,7 @@ class DatabricksClient:
 
     def submit_job_run(self, task: dict, time_budget: int) -> int:
         """Submit experiment_cmd as a one-time Databricks job run. Returns run_id."""
-        from databricks.sdk.service.jobs import RunTask, SparkPythonTask, TaskDependency
+        from databricks.sdk.service.jobs import RunTask, SparkPythonTask
         client = self.get_client()
         cmd = task.get("experiment_cmd", [])
         if isinstance(cmd, str):

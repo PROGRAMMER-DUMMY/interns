@@ -16,17 +16,38 @@
 - **ChangeClassifier**: A deterministic diff classifier that labels candidate patches as optimization patterns such as `predicate_pushdown`, `join_rewrite`, `cte_rewrite`, `aggregation_rewrite`, `case_simplification`, or `column_pruning`.
 - **OptimizationMemory**: Structured experiment memory stored in `workspace.db`. It records what changed, why it was expected to help, what happened, which guardrails passed or failed, and whether the candidate was kept or discarded.
 - **OptimizationPlanner**: A strategy ranker that combines hotspot reports, semantic contracts, and optimization memory to recommend the next optimization pattern. This is the first step toward adaptive optimization.
+- **OptimizationPolicy**: Versioned execution, failure, approval, downcast, and SLA policy loaded from task config. Production mode is bounded; global exploration is evidence-only unless explicitly allowed.
+- **DataModelProfiler**: Metadata-first profiler that records schema, source stats, sample bounds, exact bounds, and conservative downcast recommendations for local file-backed datasets.
+- **GovernanceEvaluator**: Promotion gatekeeper that converts run evidence into `approved`, `needs_review`, or `rejected` decisions with evidence packs and alert events.
+
+## Core Package Layout
+
+`core/` is split by platform responsibility:
+
+- `core/orchestration/`: experiment loop and runner.
+- `core/execution/`: local and Databricks execution backends.
+- `core/governance/`: contracts, policies, semantic rules, mode planning, and promotion gates.
+- `core/optimization/`: diff classification, strategy planning, decision strategy, and adaptive memory.
+- `core/profiling/`: data model profiling and downcast diagnostics.
+- `core/agents/`: intern routing, registry, and LLM engine abstractions.
+- `core/observability/`: metric parsing and telemetry backends.
+- `core/storage/`: SQLite/Git workspace state.
+
 
 ## Enterprise Data Flow
 
 ```
 KPI registry / data model / methodology
   -> SemanticContract
+  -> OptimizationPolicy + ModePlan
+  -> DataModelProfiler metadata/sample/exact evidence
   -> OptimizationPlanner
   -> intern suggestions / candidate patch
   -> ExecutionBackend
   -> evaluator + profiler guardrails
   -> ChangeClassifier
+  -> GovernanceEvaluator + EvidencePack + AlertEvent
   -> OptimizationMemory
+  -> dashboard review / approval queue
   -> next-run strategy ranking
 ```

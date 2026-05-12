@@ -9,7 +9,7 @@ import json
 import os
 import sqlite3
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import dash
@@ -27,7 +27,12 @@ INTERN_LOG_JSONL = STATE_DIR / "intern_log.jsonl"
 IDEAS_MD = STATE_DIR / "ideas.md"
 CONFIG_TASKS = ROOT / "config" / "tasks.json"
 
-STATUS_COLORS = {"keep": "#28a745", "discard": "#fd7e14", "crash": "#dc3545"}
+STATUS_COLORS = {
+    "keep": "#28a745",
+    "review": "#58a6ff",
+    "discard": "#fd7e14",
+    "crash": "#dc3545",
+}
 REFRESH_MS = 5_000
 
 # ─── Data loading ─────────────────────────────────────────────────────────────
@@ -45,8 +50,9 @@ def _active_task() -> dict:
 
 
 def load_data():
-    """Return (results, intern_logs, loop_status, ideas_text)."""
+    """Return dashboard state from SQLite or flat-file fallback."""
     results, intern_logs, loop_status, ideas = [], [], {}, ""
+    governance, alerts = [], []
 
     if DB_PATH.exists():
         conn = sqlite3.connect(str(DB_PATH))
@@ -99,6 +105,46 @@ def load_data():
         if row and row["content"]:
             ideas = row["content"]
 
+        try:
+            cur = conn.execute(
+                "SELECT * FROM governance_decisions ORDER BY id DESC LIMIT 20"
+            )
+            for row in cur.fetchall():
+                try:
+                    gates = json.loads(row["gates"] or "[]")
+                except Exception:
+                    gates = []
+                governance.append({
+                    "run_id": row["run_id"] or "",
+                    "task_id": row["task_id"] or "",
+                    "decision": row["decision"] or "",
+                    "approval_state": row["approval_state"] or "",
+                    "promotion_allowed": bool(row["promotion_allowed"]),
+                    "rationale": row["rationale"] or "",
+                    "failed_gates": ", ".join(
+                        gate.get("gate_id", "")
+                        for gate in gates
+                        if not gate.get("passed", False) and gate.get("severity") == "error"
+                    ),
+                    "timestamp": row["timestamp"] or "",
+                })
+        except sqlite3.OperationalError:
+            governance = []
+
+        try:
+            cur = conn.execute("SELECT * FROM alerts ORDER BY id DESC LIMIT 30")
+            for row in cur.fetchall():
+                alerts.append({
+                    "severity": row["severity"] or "",
+                    "title": row["title"] or "",
+                    "message": row["message"] or "",
+                    "run_id": row["run_id"] or "",
+                    "requires_human": bool(row["requires_human"]),
+                    "timestamp": row["timestamp"] or "",
+                })
+        except sqlite3.OperationalError:
+            alerts = []
+
         conn.close()
 
     else:
@@ -143,7 +189,7 @@ def load_data():
         if IDEAS_MD.exists():
             ideas = IDEAS_MD.read_text()
 
-    return results, intern_logs, loop_status, ideas
+    return results, intern_logs, loop_status, ideas, governance, alerts
 
 
 def get_git_diff() -> str:
@@ -258,6 +304,14 @@ app.layout = dbc.Container(
         # ── Results table ─────────────────────────────────────────────────────
         _card("Experiment Results", "results-table"),
 
+        dbc.Row(
+            [
+                dbc.Col(_card("Governance Decisions", "governance-panel"), md=7),
+                dbc.Col(_card("Human Alerts", "alerts-panel"), md=5),
+            ],
+            className="g-3",
+        ),
+
         # ── Ideas ─────────────────────────────────────────────────────────────
         _card("Ideas & Hypotheses", "ideas-panel"),
     ],
@@ -274,12 +328,14 @@ app.layout = dbc.Container(
         Output("intern-feed", "children"),
         Output("git-log", "children"),
         Output("results-table", "children"),
+        Output("governance-panel", "children"),
+        Output("alerts-panel", "children"),
         Output("ideas-panel", "children"),
     ],
     Input("tick", "n_intervals"),
 )
 def refresh(_n):
-    results, intern_logs, loop_status, ideas = load_data()
+    results, intern_logs, loop_status, ideas, governance, alerts = load_data()
     task = _active_task()
 
     # ── Header label ─────────────────────────────────────────────────────────
@@ -384,7 +440,7 @@ def refresh(_n):
         counts = Counter(r["status"] for r in results)
         labels = list(counts.keys())
         values = list(counts.values())
-        pie_colors = [STATUS_COLORS.get(l, "#8b949e") for l in labels]
+        pie_colors = [STATUS_COLORS.get(label, "#8b949e") for label in labels]
         pie_fig = go.Figure(go.Pie(
             labels=labels, values=values,
             marker=dict(colors=pie_colors, line=dict(color="#0b1622", width=2)),
@@ -516,6 +572,7 @@ def refresh(_n):
             },
             style_data_conditional=[
                 {"if": {"filter_query": '{Status} = "keep"'}, "color": "#28a745"},
+                {"if": {"filter_query": '{Status} = "review"'}, "color": "#58a6ff"},
                 {"if": {"filter_query": '{Status} = "discard"'}, "color": "#fd7e14"},
                 {"if": {"filter_query": '{Status} = "crash"'}, "color": "#dc3545"},
                 {"if": {"row_index": "odd"}, "background": "#0b1622"},
@@ -525,6 +582,77 @@ def refresh(_n):
         results_table = html.Div("No experiment results yet.", style={"color": "#8b949e", "textAlign": "center", "padding": "40px"})
 
     # ── Ideas panel ───────────────────────────────────────────────────────────
+    if governance:
+        governance_table = dash_table.DataTable(
+            data=[
+                {
+                    "Run": row["run_id"],
+                    "Decision": row["decision"],
+                    "Approval": row["approval_state"],
+                    "Promote": "yes" if row["promotion_allowed"] else "no",
+                    "Failed Gates": row["failed_gates"],
+                    "Rationale": row["rationale"],
+                    "Time": row["timestamp"][:19],
+                }
+                for row in governance
+            ],
+            columns=[
+                {"name": c, "id": c}
+                for c in ["Run", "Decision", "Approval", "Promote", "Failed Gates", "Rationale", "Time"]
+            ],
+            page_size=10,
+            style_table={"overflowX": "auto"},
+            style_cell={
+                "background": "#0d1b2a",
+                "color": "#c9d1d9",
+                "border": "1px solid #21262d",
+                "fontSize": "0.76rem",
+                "fontFamily": "monospace",
+                "padding": "6px 8px",
+                "textAlign": "left",
+                "whiteSpace": "normal",
+            },
+            style_header={
+                "background": "#161b22",
+                "color": "#58a6ff",
+                "fontWeight": "600",
+                "border": "1px solid #21262d",
+                "fontSize": "0.72rem",
+            },
+            style_data_conditional=[
+                {"if": {"filter_query": '{Decision} = "approved"'}, "color": "#28a745"},
+                {"if": {"filter_query": '{Decision} = "needs_review"'}, "color": "#58a6ff"},
+                {"if": {"filter_query": '{Decision} = "rejected"'}, "color": "#dc3545"},
+            ],
+        )
+    else:
+        governance_table = html.Div("No governance decisions yet.", style={"color": "#8b949e", "textAlign": "center", "padding": "40px"})
+
+    if alerts:
+        alert_rows = []
+        for alert in alerts[:12]:
+            color = "#dc3545" if alert["severity"] == "critical" else "#58a6ff"
+            alert_rows.append(
+                html.Div(
+                    [
+                        html.Div(
+                            [
+                                html.Span(alert["severity"], style={"color": color, "fontWeight": "700"}),
+                                html.Span(f"  {alert['run_id']}", style={"color": "#8b949e", "marginLeft": "8px"}),
+                                html.Span(alert["timestamp"][:19], style={"color": "#484f58", "float": "right"}),
+                            ],
+                            style={"fontSize": "0.75rem", "marginBottom": "4px"},
+                        ),
+                        html.Div(alert["title"], style={"color": "#f0f6fc", "fontWeight": "600", "fontSize": "0.8rem"}),
+                        html.Div(alert["message"], style={"color": "#c9d1d9", "fontSize": "0.76rem", "lineHeight": "1.4"}),
+                    ],
+                    style={"padding": "9px 10px", "borderBottom": "1px solid #21262d"},
+                )
+            )
+        alerts_panel = html.Div(alert_rows, style={"overflowY": "auto", "maxHeight": "320px"})
+    else:
+        alerts_panel = html.Div("No human alerts yet.", style={"color": "#8b949e", "textAlign": "center", "padding": "40px"})
+
     if ideas:
         ideas_panel = html.Pre(
             ideas,
@@ -550,6 +678,8 @@ def refresh(_n):
         intern_feed,
         git_log,
         results_table,
+        governance_table,
+        alerts_panel,
         ideas_panel,
     )
 

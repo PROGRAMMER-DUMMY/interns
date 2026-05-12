@@ -4,20 +4,19 @@ core/intern_bus.py — intern invocation, routing, and activity logging.
 Every intern call goes through this bus. Calls are logged to workspace.db
 and optionally traced via TelemetryBackend (MLflow 3 LLM Tracing).
 """
-import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from core.config import Config
-from core.registry import InternRegistry
-from core.workspace import Workspace
+from core.agents.registry import InternRegistry
+from core.storage.workspace import Workspace
 
 if TYPE_CHECKING:
-    from core.telemetry_backend import TelemetryBackend
+    from core.observability.telemetry_backend import TelemetryBackend
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class InternBus:

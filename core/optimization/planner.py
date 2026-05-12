@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from core.optimization_memory import OptimizationMemory
-from core.semantic_contract import SemanticContract
+from core.optimization.memory import OptimizationMemory
+from core.governance.semantic_contract import SemanticContract
 
 
 @dataclass(frozen=True)

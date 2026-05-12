@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Union
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 @dataclass
 class RunRecord:
@@ -81,6 +81,32 @@ class Workspace:
                     execution_time_seconds REAL,
                     matching_score REAL,
                     confidence TEXT,
+                    evidence TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS governance_decisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT,
+                    task_id TEXT,
+                    decision TEXT,
+                    approval_state TEXT,
+                    promotion_allowed INTEGER,
+                    rationale TEXT,
+                    gates TEXT,
+                    evidence_pack TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alert_id TEXT,
+                    run_id TEXT,
+                    task_id TEXT,
+                    severity TEXT,
+                    title TEXT,
+                    message TEXT,
+                    requires_human INTEGER,
                     evidence TEXT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
@@ -256,6 +282,89 @@ class Workspace:
                 "success_rate": round(keeps / attempts, 4) if attempts else 0.0,
                 "avg_metric_delta": row["avg_metric_delta"],
             })
+        return rows
+
+    # --- Governance decisions and alerts ---
+
+    def log_governance_decision(self, decision: dict) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO governance_decisions (
+                    run_id, task_id, decision, approval_state, promotion_allowed,
+                    rationale, gates, evidence_pack
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    decision.get("run_id"),
+                    decision.get("task_id"),
+                    decision.get("decision"),
+                    decision.get("approval_state"),
+                    1 if decision.get("promotion_allowed") else 0,
+                    decision.get("rationale"),
+                    self.redact_keys(json.dumps(decision.get("gates", []))),
+                    self.redact_keys(json.dumps(decision.get("evidence_pack", {}))),
+                ),
+            )
+            for alert in decision.get("alerts", []):
+                self.conn.execute(
+                    """
+                    INSERT INTO alerts (
+                        alert_id, run_id, task_id, severity, title, message,
+                        requires_human, evidence
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        alert.get("alert_id"),
+                        alert.get("run_id"),
+                        alert.get("task_id"),
+                        alert.get("severity"),
+                        alert.get("title"),
+                        alert.get("message"),
+                        1 if alert.get("requires_human", True) else 0,
+                        self.redact_keys(json.dumps(alert.get("evidence", {}))),
+                    ),
+                )
+
+    def get_recent_governance_decisions(self, limit: int = 20) -> list[dict]:
+        cur = self.conn.execute(
+            """
+            SELECT * FROM governance_decisions
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = []
+        for row in cur.fetchall():
+            data = dict(row)
+            for key, default in (("gates", []), ("evidence_pack", {})):
+                try:
+                    data[key] = json.loads(data.get(key) or json.dumps(default))
+                except json.JSONDecodeError:
+                    data[key] = default
+            data["promotion_allowed"] = bool(data.get("promotion_allowed"))
+            rows.append(data)
+        return rows
+
+    def get_recent_alerts(self, limit: int = 30) -> list[dict]:
+        cur = self.conn.execute(
+            """
+            SELECT * FROM alerts
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = []
+        for row in cur.fetchall():
+            data = dict(row)
+            try:
+                data["evidence"] = json.loads(data.get("evidence") or "{}")
+            except json.JSONDecodeError:
+                data["evidence"] = {}
+            data["requires_human"] = bool(data.get("requires_human"))
+            rows.append(data)
         return rows
 
     def diff_file(self, editable_file: str) -> str:

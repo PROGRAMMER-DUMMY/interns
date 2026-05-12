@@ -15,7 +15,6 @@ What it does:
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -89,7 +88,7 @@ def step_load_config():
 
 
 def step_validate_connection(cfg) -> bool:
-    from core.databricks_client import DatabricksClient
+    from core.execution.databricks_client import DatabricksClient
     db = cfg.databricks
 
     print(f"\n  Host  : {db.host or '(not set)'}")
@@ -117,7 +116,7 @@ def step_validate_connection(cfg) -> bool:
 
 
 def step_create_mlflow_experiment(cfg) -> bool:
-    from core.databricks_client import DatabricksClient
+    from core.execution.databricks_client import DatabricksClient
     client = DatabricksClient(cfg.databricks)
     try:
         exp_id = client.create_mlflow_experiment("/autoresearch/experiments")
@@ -129,7 +128,7 @@ def step_create_mlflow_experiment(cfg) -> bool:
 
 
 def step_create_delta_schema(cfg) -> bool:
-    from core.databricks_client import DatabricksClient
+    from core.execution.databricks_client import DatabricksClient
     client = DatabricksClient(cfg.databricks)
     catalog = cfg.databricks.catalog
     schema = cfg.databricks.schema
@@ -139,7 +138,7 @@ def step_create_delta_schema(cfg) -> bool:
         return True
     except Exception as exc:
         print(f"  Delta schema creation failed (non-fatal): {exc}")
-        print(f"  You may need Unity Catalog permissions on your workspace.")
+        print("  You may need Unity Catalog permissions on your workspace.")
         return False
 
 
@@ -151,7 +150,7 @@ def step_test_query(cfg) -> bool:
         return True
 
     try:
-        from core.databricks_client import DatabricksClient
+        from core.execution.databricks_client import DatabricksClient
         client = DatabricksClient(db).get_client()
         warehouse_id = db.http_path.rstrip("/").split("/")[-1]
         resp = client.statement_execution.execute_statement(

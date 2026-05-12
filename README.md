@@ -9,8 +9,38 @@ Autoresearch is a governed optimization control plane for scoreable data-enginee
 - Optional Databricks execution and telemetry scaffolding
 - Semantic contracts from KPI registries, methodology JSON, and task-level rules
 - Optimization memory for adaptive learning across runs
+- Enterprise policy contracts for execution modes, SLA, approvals, failure behavior, and downcasting
+- Governance decisions with evidence packs, policy gates, approval state, and human alerts
+- Metadata-first data model profiling with sample/exact bounds and conservative downcast recommendations
 - Dataset profiling, representation checks, and guardrail scoring
-- Dashboard for run history and intern activity
+- Dashboard for run history, intern activity, governance decisions, and human alerts
+
+## Core Layout
+
+The platform engine is organized by responsibility:
+
+- `core/orchestration/` wires runs together.
+- `core/execution/` owns local and Databricks execution.
+- `core/governance/` owns contracts, policies, approvals, and promotion gates.
+- `core/optimization/` owns planning, memory, diff classification, and decision strategy.
+- `core/profiling/` owns data model diagnostics.
+- `core/agents/` owns intern and LLM routing.
+- `core/observability/` owns metric parsing and telemetry.
+- `core/storage/` owns SQLite/Git state.
+
+
+## Promotion Model
+
+Candidate optimizations are evaluated in a sandbox first. An improved metric is
+not enough to promote a change: the run must pass semantic, SLA, correctness,
+mode, and policy gates. Production defaults require human review; global
+exploration can discover options but cannot auto-promote.
+
+The default downcast policy is conservative:
+
+- Integer downcasts require exact min/max proof.
+- Float and decimal downcasts require explicit approval.
+- Sample min/max values are diagnostic only; exact bounds are authoritative for production.
 
 ## Fresh Start
 

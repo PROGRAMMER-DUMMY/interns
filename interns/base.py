@@ -6,10 +6,8 @@ All model IDs, CLI commands, and API routes come from cfg (lock.toml).
 Interns never hardcode models or API keys.
 """
 from pathlib import Path
-from typing import Optional
-
 from core.config import Config
-from core.llm_engine import LLMEngine
+from core.agents.llm_engine import LLMEngine
 
 ROOT = Path(__file__).parent.parent
 

@@ -6,7 +6,7 @@ Analyzes run logs, synthesises experiment results, identifies patterns, and rank
 from datetime import datetime, timezone
 from pathlib import Path
 from interns.base import InternBase
-from core.workspace import Workspace
+from core.storage.workspace import Workspace
 
 ROOT = Path(__file__).parent.parent
 

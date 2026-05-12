@@ -9,24 +9,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from core.change_classifier import classify_diff, expected_reason
+from core.optimization.change_classifier import classify_diff, expected_reason
 from core.config import Config, load as load_config
-from core.execution_backend import ExecutionBackend, build_execution_backend
-from core.intern_bus import InternBus
-from core.optimization_memory import (
+from core.governance.contracts import OptimizationPolicy
+from core.execution.backend import ExecutionBackend, build_execution_backend
+from core.governance.evaluator import GovernanceEvaluator
+from core.agents.intern_bus import InternBus
+from core.governance.mode_policy import ModePlanner
+from core.optimization.memory import (
     OptimizationMemory,
     OptimizationMemoryRecord,
     describe_actual_result,
 )
-from core.optimization_planner import OptimizationPlanner
-from core.parser import RegexLogParser
-from core.semantic_contract import SemanticContract
-from core.strategy import SingleMetricDecisionStrategy
-from core.telemetry_backend import build_telemetry_backend
-from core.workspace import Workspace
+from core.optimization.planner import OptimizationPlanner
+from core.observability.parser import RegexLogParser
+from core.governance.semantic_contract import SemanticContract
+from core.optimization.strategy import SingleMetricDecisionStrategy
+from core.observability.telemetry_backend import build_telemetry_backend
+from core.storage.workspace import Workspace
 
 HEADER = "commit\tprimary_metric\tstatus\tdescription"
 
@@ -48,6 +51,9 @@ class ExperimentLoop:
         self.memory = OptimizationMemory(self.workspace)
         self.planner = OptimizationPlanner(self.memory, ROOT)
         self.semantic_contract = SemanticContract.from_task(self.task, ROOT)
+        self.optimization_policy = OptimizationPolicy.from_task(self.task)
+        self.mode_planner = ModePlanner(self.optimization_policy)
+        self.governance = GovernanceEvaluator(self.optimization_policy)
         self.metric_parser = RegexLogParser()
                  
         self.decision_strategy = SingleMetricDecisionStrategy()
@@ -94,6 +100,7 @@ class ExperimentLoop:
         if self.db_telemetry:
             self.db_telemetry.begin_run(run_name)
 
+        mode_plan = self.mode_planner.build_plan(None if mode in {"auto", "semi"} else mode)
         plan = self.planner.build_plan(self.task, self.semantic_contract)
         active_interns = self.bus.list_active(self.task["domain"])
         intern_reports = []
@@ -108,11 +115,13 @@ class ExperimentLoop:
                 "optimization_plan": plan.as_prompt_context(),
                 "optimization_memory": self.memory.as_prompt_context(),
                 "semantic_contract": json.dumps(self.semantic_contract.summary(), indent=2),
+                "optimization_policy": json.dumps(self.optimization_policy.summary(), indent=2),
+                "mode_plan": json.dumps(mode_plan.as_dict(), indent=2),
             })
             intern_reports.append(report)
 
         # Execute via configured backend (DuckDB | Jobs | Warehouse | Connect)
-        from core.execution_backend import ExecutionResult
+        from core.execution.backend import ExecutionResult
         result: ExecutionResult = self.backend.execute(
             self.task, self.cfg.max_run_seconds, self.cfg.hard_timeout_seconds, self.cfg.run_log
         )
@@ -120,7 +129,34 @@ class ExperimentLoop:
         baseline_metric = self._state["best_metric"]
         artifact_diff = self.workspace.diff_file(self.task.get("editable_file", ""))
         classification = classify_diff(artifact_diff, self.task.get("editable_file", ""))
-        status = self._decide(result.metric)
+        status = self.decision_strategy.decide(result.metric, self._state, self.task)
+        all_metrics = self.metric_parser.parse_all_metrics(result.log_content)
+        matching_score = all_metrics.get("matching_score")
+        execution_time = all_metrics.get("execution_time_seconds", result.elapsed_seconds)
+        metric_delta, _actual_result = describe_actual_result(
+            baseline_metric,
+            result.metric,
+            self.task.get("direction", "higher"),
+            status,
+        )
+        governance_decision = self.governance.evaluate(
+            run_id=run_name,
+            task=self.task,
+            status=status,
+            baseline_metric=baseline_metric,
+            candidate_metric=result.metric,
+            metric_delta=metric_delta,
+            execution_time_seconds=execution_time,
+            matching_score=matching_score,
+            classification=classification,
+            semantic_contract=self.semantic_contract,
+            mode_plan=mode_plan,
+            artifact_diff=artifact_diff,
+            planner_evidence=plan.evidence,
+            profiler_evidence={"parsed_metrics": all_metrics},
+        )
+        self.workspace.log_governance_decision(governance_decision.summary())
+        status = self._apply_decision(status, result.metric, governance_decision)
         desc = intern_reports[0].splitlines()[0][:80] if intern_reports else "no reports"
         self._log_result(n, result.metric, status, desc)
         self._record_optimization_memory(
@@ -130,6 +166,8 @@ class ExperimentLoop:
             status,
             classification,
             plan,
+            governance_decision,
+            all_metrics,
         )
 
         # Flush telemetry (logs metrics, ends MLflow run)
@@ -151,22 +189,29 @@ class ExperimentLoop:
         self._state["experiment_count"] = n
         self._write_status("running")
 
-    def _decide(self, metric: Optional[float]) -> str:
-        status = self.decision_strategy.decide(metric, self._state, self.task)
-        
+    def _apply_decision(self, status: str, metric: Optional[float], governance_decision) -> str:
         if status == "crash":
             self._state["consecutive_discards"] += 1
             self._git_reset()
         elif status == "keep":
-            self._state["best_metric"] = metric
-            self._state["best_commit"] = self.workspace.current_commit()
-            self._state["consecutive_discards"] = 0
-            self._git_commit(f"exp{self._state['experiment_count']+1}: {metric:.4f}")
-            print(f"[loop] ✓ KEEP  metric={metric}", flush=True)
+            if governance_decision.decision == "approved" and governance_decision.promotion_allowed:
+                self._state["best_metric"] = metric
+                self._state["best_commit"] = self.workspace.current_commit()
+                self._state["consecutive_discards"] = 0
+                self._git_commit(f"exp{self._state['experiment_count']+1}: {metric:.4f}")
+                print(f"[loop] KEEP  metric={metric}", flush=True)
+            else:
+                self._git_reset()
+                print(
+                    "[loop] REVIEW  "
+                    f"metric={metric} governance={governance_decision.decision}",
+                    flush=True,
+                )
+                return "review"
         elif status == "discard":
             self._state["consecutive_discards"] += 1
             self._git_reset()
-            print(f"[loop] ✗ DISCARD  metric={metric}  best={self._state.get('best_metric')}", flush=True)
+            print(f"[loop] DISCARD  metric={metric}  best={self._state.get('best_metric')}", flush=True)
             
         return status
 
@@ -192,8 +237,9 @@ class ExperimentLoop:
         status: str,
         classification,
         plan,
+        governance_decision,
+        all_metrics: dict[str, float],
     ) -> None:
-        all_metrics = self.metric_parser.parse_all_metrics(result.log_content)
         matching_score = all_metrics.get("matching_score")
         execution_time = all_metrics.get("execution_time_seconds", result.elapsed_seconds)
         correctness_passed = status != "crash"
@@ -230,6 +276,8 @@ class ExperimentLoop:
                 "classification": classification.evidence,
                 "recommended_strategy": plan.recommended_strategy,
                 "planner_rationale": plan.rationale,
+                "governance_decision": governance_decision.decision,
+                "governance_rationale": governance_decision.rationale,
                 "backend": type(self.backend).__name__,
             },
         )
@@ -258,7 +306,11 @@ def main() -> None:
     task_id = data.get("active_task", "06_sql_optimization")
     
     p = argparse.ArgumentParser()
-    p.add_argument("--mode", choices=["auto", "semi"], default="auto")
+    p.add_argument(
+        "--mode",
+        choices=["auto", "semi", "sql", "polars", "sql_polars_hybrid", "global_exploration"],
+        default="auto",
+    )
     p.add_argument("--task", default=task_id)
     args = p.parse_args()
 

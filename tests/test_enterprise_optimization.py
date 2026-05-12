@@ -3,12 +3,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.change_classifier import classify_diff
-from core.execution_backend import normalize_command
-from core.optimization_memory import OptimizationMemory, OptimizationMemoryRecord
-from core.optimization_planner import OptimizationPlanner
-from core.semantic_contract import SemanticContract
-from core.workspace import Workspace
+from core.execution.backend import normalize_command
+from core.governance.contracts import OptimizationPolicy
+from core.governance.evaluator import GovernanceEvaluator
+from core.governance.mode_policy import ModePlanner
+from core.governance.semantic_contract import SemanticContract
+from core.optimization.change_classifier import classify_diff
+from core.optimization.memory import OptimizationMemory, OptimizationMemoryRecord
+from core.optimization.planner import OptimizationPlanner
+from core.profiling.data_model_profiler import DataModelProfiler
+from core.storage.workspace import Workspace
 
 
 class EnterpriseOptimizationTests(unittest.TestCase):
@@ -115,6 +119,63 @@ diff --git a/model.sql b/model.sql
                 SemanticContract(name="task"),
             )
             self.assertEqual(plan.recommended_strategy, "cte_rewrite")
+
+    def test_mode_policy_blocks_global_promotion_by_default(self):
+        policy = OptimizationPolicy.from_task({})
+        plan = ModePlanner(policy).build_plan("global_exploration")
+        self.assertEqual(plan.active_mode, "global_exploration")
+        self.assertFalse(plan.promotion_allowed)
+        self.assertIn("global_exploration_no_auto_promotion", plan.warnings)
+
+    def test_governance_records_review_decision_and_alert(self):
+        policy = OptimizationPolicy.from_task({})
+        mode_plan = ModePlanner(policy).build_plan("sql")
+        classification = classify_diff("+WHERE amount > 0", "model.sql")
+        contract = SemanticContract(name="task")
+        decision = GovernanceEvaluator(policy).evaluate(
+            run_id="exp_1",
+            task={"id": "task", "editable_file": "model.sql", "direction": "higher"},
+            status="keep",
+            baseline_metric=1.0,
+            candidate_metric=2.0,
+            metric_delta=1.0,
+            execution_time_seconds=1.5,
+            matching_score=100.0,
+            classification=classification,
+            semantic_contract=contract,
+            mode_plan=mode_plan,
+            artifact_diff="+WHERE amount > 0",
+        )
+        self.assertEqual(decision.decision, "needs_review")
+        self.assertEqual(decision.approval_state, "pending_human")
+        self.assertTrue(decision.alerts)
+
+        workspace = Workspace(":memory:")
+        workspace.log_governance_decision(decision.summary())
+        stored = workspace.get_recent_governance_decisions()
+        alerts = workspace.get_recent_alerts()
+        self.assertEqual(stored[0]["decision"], "needs_review")
+        self.assertEqual(alerts[0]["severity"], "review")
+
+    def test_data_model_profiler_records_exact_bounds_and_downcast(self):
+        try:
+            import polars as pl
+        except ImportError:
+            self.skipTest("polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "data.parquet"
+            pl.DataFrame({
+                "small_id": [1, 2, 3],
+                "amount": [1.1, 2.2, 3.3],
+            }).write_parquet(path)
+            profile = DataModelProfiler().profile_path(path, exact=True)
+            by_name = {col.name: col for col in profile.columns}
+            self.assertEqual(by_name["small_id"].exact_min, 1)
+            self.assertEqual(by_name["small_id"].exact_max, 3)
+            recs = {rec.column: rec for rec in profile.downcast_recommendations}
+            self.assertEqual(recs["small_id"].decision, "recommend")
+            self.assertEqual(recs["amount"].decision, "approval_required")
 
 
 if __name__ == "__main__":

@@ -22,10 +22,10 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from core.config import Config, DatabricksConfig
-    from core.databricks_client import DatabricksClient
-    from core.parser import MetricParser
+    from core.execution.databricks_client import DatabricksClient
+    from core.observability.parser import MetricParser
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def normalize_command(cmd) -> list[str]:
@@ -70,7 +70,7 @@ class DuckDBBackend(ExecutionBackend):
     """
 
     def __init__(self, parser: Optional["MetricParser"] = None):
-        from core.parser import RegexLogParser
+        from core.observability.parser import RegexLogParser
         self.parser = parser or RegexLogParser()
 
     def execute(self, task: dict, time_budget: int, hard_timeout: int, log_path: Path) -> ExecutionResult:
@@ -182,7 +182,7 @@ class JobsBackend(ExecutionBackend):
 
         log_path.write_text(log_content, encoding="utf-8")
 
-        from core.parser import RegexLogParser
+        from core.observability.parser import RegexLogParser
         parser = RegexLogParser()
         metric = parser.parse_metric(log_content, task.get("metric_key", "primary_metric"))
         all_metrics = parser.parse_all_metrics(log_content)
@@ -243,7 +243,7 @@ class WarehouseBackend(ExecutionBackend):
         log_content += f"execution_time_seconds: {elapsed:.4f}\n"
         log_path.write_text(log_content, encoding="utf-8")
 
-        from core.parser import RegexLogParser
+        from core.observability.parser import RegexLogParser
         metric = RegexLogParser().parse_metric(log_content, task.get("metric_key", "primary_metric"))
 
         return ExecutionResult(
@@ -286,7 +286,7 @@ class ConnectBackend(ExecutionBackend):
             open(log_path, "w", encoding="utf-8")
         )
         log_content = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
-        from core.parser import RegexLogParser
+        from core.observability.parser import RegexLogParser
         parser = RegexLogParser()
         metric = parser.parse_metric(log_content, task.get("metric_key", "primary_metric"))
         all_metrics = parser.parse_all_metrics(log_content)
@@ -310,7 +310,7 @@ def build_execution_backend(cfg: "Config") -> ExecutionBackend:
     if not db_cfg.is_active():
         return DuckDBBackend()
 
-    from core.databricks_client import DatabricksClient
+    from core.execution.databricks_client import DatabricksClient
     client = DatabricksClient(db_cfg)
 
     ok, msg = client.health_check()

@@ -14,9 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from .parser import MetricParser, RegexLogParser
+from core.observability.parser import MetricParser, RegexLogParser
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 @dataclass
 class RunResult:
