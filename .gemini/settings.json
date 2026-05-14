@@ -1,0 +1,14 @@
+{
+  "context": {
+    "fileName": [
+      "GEMINI.md",
+      "AGENTS.md",
+      "TOOLS.md",
+      ".agents/tools.json"
+    ],
+    "includeDirectoryTree": true
+  },
+  "experimental": {
+    "jitContext": false
+  }
+}

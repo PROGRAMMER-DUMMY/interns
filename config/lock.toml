@@ -68,7 +68,7 @@ main_agent = "gemini-cli"  # change to gemini-cli or codex if using those
 # When enabled = false (default), DuckDB + SQLite are used — no behaviour change.
 [databricks]
 enabled            = true           # flip to true to activate
-execution          = "jobs"         # jobs | warehouse | connect | duckdb
+execution          = "jobs"         # jobs | warehouse | connect | duckdb; use warehouse first for SQL KPI validation
 loop_on_databricks = false          # true = submit loop itself as Databricks Workflow
 fallback           = "duckdb"       # duckdb | fail — what to do when Databricks unreachable
 host_env           = "DATABRICKS_HOST"
@@ -84,7 +84,7 @@ http_timeout_sec   = 60
 max_token_count          = 800    # secondary constraint (cost_score hits 0 at this value)
 max_run_seconds          = 30     # wall-clock budget per experiment
 hard_timeout_seconds     = 90     # absolute kill if over this
-max_experiments_session  = 2    # safety cap per autonomous session
+max_experiments_session  = 10    # safety cap per autonomous session
 deep_research_every_n    = 1      # trigger deep research every N experiments
 stuck_threshold_discards = 3      # consecutive discards before forced deep research
 

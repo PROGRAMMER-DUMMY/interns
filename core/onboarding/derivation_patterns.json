@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "patterns": [
+    {
+      "id": "age_years",
+      "feature_terms": ["age", "member_age", "patient_age"],
+      "domain": ["general", "healthcare"],
+      "description": "Completed age in years from a birth date and an anchor date.",
+      "required_inputs": ["birth_date", "anchor_date"],
+      "candidate_columns": {
+        "birth_date": ["DOB", "date_of_birth", "birthdate", "birth_dt"],
+        "anchor_date": ["ServiceDate", "EncounterDate", "ClaimDate", "PaidDate"]
+      },
+      "templates": {
+        "duckdb_sql": "date_diff('year', {birth_date}, {anchor_date})",
+        "spark_sql": "floor(months_between({anchor_date}, {birth_date}) / 12)",
+        "polars": "((pl.col({anchor_date}) - pl.col({birth_date})).dt.total_days() / 365.25).floor()"
+      },
+      "requires": ["temporal_anchor_proof", "join_grain_check"],
+      "clarification_prompt": "Which date should anchor age calculation for this KPI?"
+    },
+    {
+      "id": "age_band",
+      "feature_terms": ["ageband", "age_band", "age_group"],
+      "domain": ["general", "healthcare"],
+      "description": "Bucketed age derived from an age-years feature.",
+      "required_inputs": ["age_years"],
+      "candidate_columns": {
+        "age_years": ["Age", "age", "age_years"]
+      },
+      "templates": {
+        "duckdb_sql": "case when {age_years} < 18 then '<18' when {age_years} < 35 then '18-34' when {age_years} < 50 then '35-49' when {age_years} < 65 then '50-64' else '65+' end",
+        "spark_sql": "case when {age_years} < 18 then '<18' when {age_years} < 35 then '18-34' when {age_years} < 50 then '35-49' when {age_years} < 65 then '50-64' else '65+' end",
+        "polars": "pl.when(pl.col({age_years}) < 18).then(pl.lit('<18')).when(pl.col({age_years}) < 35).then(pl.lit('18-34')).when(pl.col({age_years}) < 50).then(pl.lit('35-49')).when(pl.col({age_years}) < 65).then(pl.lit('50-64')).otherwise(pl.lit('65+'))"
+      },
+      "requires": ["bucket_definition_approval"],
+      "clarification_prompt": "Which age-band buckets should this KPI use?"
+    },
+    {
+      "id": "net_paid_amount",
+      "feature_terms": ["net_paid_amount", "netpaidamount", "net_paid", "final_paid"],
+      "domain": ["healthcare", "finance"],
+      "description": "Paid amount net of refunds, denials, or other adjustments.",
+      "required_inputs": ["paid_amount"],
+      "optional_inputs": ["refund_amount", "denied_amount", "denial_status"],
+      "candidate_columns": {
+        "paid_amount": ["PaidAmount", "Payor_Paid_Amount", "PrimaryPaidAmount"],
+        "refund_amount": ["RefundAmount", "Refund_Amount"],
+        "denied_amount": ["DeniedAmount", "Denied_Amount"],
+        "denial_status": ["DenialStatus", "Denial_Status"]
+      },
+      "templates": {
+        "duckdb_sql": "coalesce({paid_amount}, 0) - coalesce({refund_amount}, 0)",
+        "spark_sql": "coalesce({paid_amount}, 0) - coalesce({refund_amount}, 0)",
+        "polars": "pl.col({paid_amount}).fill_null(0) - pl.col({refund_amount}).fill_null(0)"
+      },
+      "requires": ["refund_source_proof", "denial_lifecycle_proof", "grain_check"],
+      "clarification_prompt": "What authoritative source or rule defines refunds and partial denials for net paid amount?"
+    },
+    {
+      "id": "cpt_family",
+      "feature_terms": ["cptfamily", "cpt_family", "cptgroup", "cpt_group"],
+      "domain": ["healthcare"],
+      "description": "CPT group or family derived by joining procedure code to a CPT reference table.",
+      "required_inputs": ["procedure_code", "cpt_reference"],
+      "candidate_columns": {
+        "procedure_code": ["ProcedureCode", "CPTCode", "CPT Codes"],
+        "cpt_reference": ["Procedure Code Category", "Procedure Code Descriptions"]
+      },
+      "templates": {
+        "duckdb_sql": "left join {cpt_reference_table} on {procedure_code} = {cpt_code}",
+        "spark_sql": "left join {cpt_reference_table} on {procedure_code} = {cpt_code}"
+      },
+      "requires": ["reference_table_proof", "join_cardinality_check"],
+      "clarification_prompt": "Which CPT reference column defines the family/group used by this KPI?"
+    },
+    {
+      "id": "provider_specialty",
+      "feature_terms": ["providerspecialty", "provider_specialty", "specialty"],
+      "domain": ["healthcare"],
+      "description": "Provider specialty derived from provider reference data.",
+      "required_inputs": ["provider_id", "specialization"],
+      "candidate_columns": {
+        "provider_id": ["ProviderID", "Provider_ID"],
+        "specialization": ["Specialization", "Specialty", "ProviderSpecialty"]
+      },
+      "templates": {
+        "duckdb_sql": "left join {provider_table} on {fact_provider_id} = {provider_id}",
+        "spark_sql": "left join {provider_table} on {fact_provider_id} = {provider_id}"
+      },
+      "requires": ["join_cardinality_check", "provider_attribution_proof"],
+      "clarification_prompt": "Which provider attribution rule should be used for specialty-level KPIs?"
+    },
+    {
+      "id": "days_in_ar",
+      "feature_terms": ["daysinar", "days_in_ar", "ar_age", "agingbucket", "aging_bucket"],
+      "domain": ["healthcare", "finance"],
+      "description": "Accounts-receivable age derived from a start date and balance/as-of date.",
+      "required_inputs": ["ar_start_date", "as_of_date"],
+      "candidate_columns": {
+        "ar_start_date": ["ClaimDate", "BillDate", "ServiceDate"],
+        "as_of_date": ["PaidDate", "SnapshotDate", "AsOfDate"]
+      },
+      "templates": {
+        "duckdb_sql": "date_diff('day', {ar_start_date}, {as_of_date})",
+        "spark_sql": "datediff({as_of_date}, {ar_start_date})",
+        "polars": "(pl.col({as_of_date}) - pl.col({ar_start_date})).dt.total_days()"
+      },
+      "requires": ["ar_start_date_proof", "balance_snapshot_proof"],
+      "clarification_prompt": "Which date starts AR aging and which date is the as-of date?"
+    }
+  ]
+}

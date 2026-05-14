@@ -13,6 +13,8 @@ workspaces/**/*.csv
 workspaces/**/*.parquet
 workspaces/**/*.duckdb
 workspaces/**/*.pdf
+workspaces/**/interns/
+workspaces/Healthcare-RCM-Data-Platform/
 workspaces/**/hotspots.json
 workspaces/**/experiment_profile/
 workspaces/**/csv_profile/

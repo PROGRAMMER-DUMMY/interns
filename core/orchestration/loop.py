@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from core.optimization.change_classifier import classify_diff, expected_reason
 from core.config import Config, load as load_config
 from core.governance.contracts import OptimizationPolicy
+from core.onboarding.auto_bootstrap import AutoBootstrap
 from core.execution.backend import ExecutionBackend, build_execution_backend
 from core.governance.evaluator import GovernanceEvaluator
 from core.agents.intern_bus import InternBus
@@ -30,13 +31,20 @@ from core.governance.semantic_contract import SemanticContract
 from core.optimization.strategy import SingleMetricDecisionStrategy
 from core.observability.telemetry_backend import build_telemetry_backend
 from core.storage.workspace import Workspace
+from core.storage.workspace_layout import WorkspaceLayout
 
 HEADER = "commit\tprimary_metric\tstatus\tdescription"
 
 class ExperimentLoop:
-    def __init__(self, cfg: Optional[Config] = None, task_id: str = "06_sql_optimization"):
+    def __init__(self, cfg: Optional[Config] = None, task_id: str | None = None):
         self.cfg = cfg or load_config()
-        self.workspace = Workspace(self.cfg.workspace_db)
+        self.tasks_path = ROOT / "config" / "tasks.json"
+        self._load_task(task_id)
+        self.workspace_layout = WorkspaceLayout.from_task(self.task, ROOT)
+        self.workspace_layout.ensure_runtime_dirs()
+        self.bootstrap_result = AutoBootstrap(ROOT, self.task, self.cfg).ensure_ready()
+        self._refresh_task_after_bootstrap()
+        self.workspace = Workspace(self.workspace_layout.workspace_db)
 
         # Build backends from config (Databricks if configured, else local)
         self.backend: ExecutionBackend = build_execution_backend(self.cfg)
@@ -44,9 +52,6 @@ class ExperimentLoop:
 
         # InternBus gets the Databricks telemetry for LLM tracing (or None)
         self.bus = InternBus(self.cfg, telemetry=self.db_telemetry)
-        
-        self.tasks_path = ROOT / "config" / "tasks.json"
-        self._load_task(task_id)
 
         self.memory = OptimizationMemory(self.workspace)
         self.planner = OptimizationPlanner(self.memory, ROOT)
@@ -67,22 +72,50 @@ class ExperimentLoop:
             "session_start":       datetime.now(timezone.utc).isoformat(),
         }
 
-    def _load_task(self, task_id: str):
+    def _load_task(self, task_id: str | None):
         if not self.tasks_path.exists():
             raise FileNotFoundError("config/tasks.json missing")
         data = json.loads(self.tasks_path.read_text(encoding="utf-8"))
+        task_id = task_id or data.get("active_task")
+        if not task_id:
+            raise ValueError("No active task configured in config/tasks.json")
         for t in data.get("tasks", []):
             if t["id"] == task_id:
                 self.task = t
                 return
         raise ValueError(f"Task '{task_id}' not found in tasks.json")
 
+    def _refresh_task_after_bootstrap(self) -> None:
+        generated = self.bootstrap_result.artifacts
+        if "baseline_sql" in generated:
+            self.task["editable_file"] = generated["baseline_sql"]
+            self.task.setdefault("sql_file", generated["baseline_sql"])
+        if "experiment" in generated:
+            self.task["experiment_cmd"] = ["uv", "run", "python", generated["experiment"]]
+        if "evaluator" in generated:
+            self.task["evaluator_cmd"] = ["uv", "run", "python", generated["evaluator"]]
+        if "semantic_contract" in generated:
+            contract_cfg = self.task.setdefault("semantic_contract", {})
+            contract_cfg["methodology_json"] = generated["semantic_contract"]
+
     def start(self, mode: str = "auto") -> None:
         self._running = True
-        self.cfg.state_dir.mkdir(parents=True, exist_ok=True)
+        self.workspace_layout.ensure_runtime_dirs()
         self._write_status("running")
 
         print(f"\n[loop] === {self.task['name']} ===", flush=True)
+        print(
+            "[loop] Bootstrap "
+            f"{self.bootstrap_result.action}: {self.bootstrap_result.reason}",
+            flush=True,
+        )
+        if self.bootstrap_result.databricks and self.bootstrap_result.databricks.configured:
+            print(
+                "[loop] Databricks readiness: "
+                f"{self.bootstrap_result.databricks.message} "
+                "(remote execution requires explicit approval)",
+                flush=True,
+            )
         while self._running and self._state["experiment_count"] < self.cfg.max_experiments_session:
             self._run_one(mode)
         self._finish()
@@ -111,19 +144,27 @@ class ExperimentLoop:
                 "best_metric": self._state["best_metric"],
                 "editable_file": self.task["editable_file"],
                 "results_tsv": self._read_results(),
-                "run_log": self.cfg.run_log.read_text(encoding="utf-8") if self.cfg.run_log.exists() else "",
+                "run_log": (
+                    self.workspace_layout.run_log.read_text(encoding="utf-8")
+                    if self.workspace_layout.run_log.exists()
+                    else ""
+                ),
                 "optimization_plan": plan.as_prompt_context(),
                 "optimization_memory": self.memory.as_prompt_context(),
                 "semantic_contract": json.dumps(self.semantic_contract.summary(), indent=2),
                 "optimization_policy": json.dumps(self.optimization_policy.summary(), indent=2),
                 "mode_plan": json.dumps(mode_plan.as_dict(), indent=2),
+                "workspace_layout": json.dumps(self.workspace_layout.summary(), indent=2),
             })
             intern_reports.append(report)
 
         # Execute via configured backend (DuckDB | Jobs | Warehouse | Connect)
         from core.execution.backend import ExecutionResult
         result: ExecutionResult = self.backend.execute(
-            self.task, self.cfg.max_run_seconds, self.cfg.hard_timeout_seconds, self.cfg.run_log
+            self.task,
+            self.cfg.max_run_seconds,
+            self.cfg.hard_timeout_seconds,
+            self.workspace_layout.run_log,
         )
 
         baseline_metric = self._state["best_metric"]
@@ -290,6 +331,8 @@ class ExperimentLoop:
             "experiment_count": self._state["experiment_count"],
             "best_metric": self._state["best_metric"],
             "last_updated": datetime.now(timezone.utc).isoformat(),
+            "workspace": self.task.get("workspace", ""),
+            "interns_dir": str(self.workspace_layout.interns_dir),
         }
         self.workspace.save_loop_status(status)
 
@@ -303,12 +346,15 @@ def main() -> None:
         print("Error: config/tasks.json not found")
         return
     data = json.loads(tasks_path.read_text(encoding="utf-8"))
-    task_id = data.get("active_task", "06_sql_optimization")
+    task_id = data.get("active_task")
+    if not task_id:
+        print("Error: active_task not configured in config/tasks.json")
+        return
     
     p = argparse.ArgumentParser()
     p.add_argument(
         "--mode",
-        choices=["auto", "semi", "sql", "polars", "sql_polars_hybrid", "global_exploration"],
+        choices=["auto", "semi", "sql", "polars", "sql_polars_hybrid", "pyspark", "global_exploration"],
         default="auto",
     )
     p.add_argument("--task", default=task_id)

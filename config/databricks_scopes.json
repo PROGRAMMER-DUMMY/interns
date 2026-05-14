@@ -33,7 +33,7 @@
       "docs_url": "https://docs.databricks.com/en/files/index.html",
       "api_ref": "https://docs.databricks.com/api/workspace/files",
       "project_status": "essential",
-      "project_reason": "Transfer SQL scripts (prescriber_features.sql), data CSVs, and run.log artifacts."
+      "project_reason": "Transfer generated KPI SQL, workspace data inputs, and run.log artifacts."
     },
     "secrets": {
       "description": "Store and retrieve encrypted key-value secrets (API keys, connection strings).",

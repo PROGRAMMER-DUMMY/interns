@@ -170,6 +170,8 @@ class DatabricksTelemetry(TelemetryBackend):
         """
         try:
             import mlflow
+            # MLflow's evaluate API expects pandas-compatible tabular input.
+            # Keep pandas isolated to this third-party telemetry boundary.
             import pandas as pd
 
             df = pd.DataFrame([{
