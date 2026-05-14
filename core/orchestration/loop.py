@@ -36,7 +36,7 @@ from core.storage.workspace_layout import WorkspaceLayout
 HEADER = "commit\tprimary_metric\tstatus\tdescription"
 
 class ExperimentLoop:
-    def __init__(self, cfg: Optional[Config] = None, task_id: str = "06_sql_optimization"):
+    def __init__(self, cfg: Optional[Config] = None, task_id: str | None = None):
         self.cfg = cfg or load_config()
         self.tasks_path = ROOT / "config" / "tasks.json"
         self._load_task(task_id)
@@ -72,10 +72,13 @@ class ExperimentLoop:
             "session_start":       datetime.now(timezone.utc).isoformat(),
         }
 
-    def _load_task(self, task_id: str):
+    def _load_task(self, task_id: str | None):
         if not self.tasks_path.exists():
             raise FileNotFoundError("config/tasks.json missing")
         data = json.loads(self.tasks_path.read_text(encoding="utf-8"))
+        task_id = task_id or data.get("active_task")
+        if not task_id:
+            raise ValueError("No active task configured in config/tasks.json")
         for t in data.get("tasks", []):
             if t["id"] == task_id:
                 self.task = t
@@ -343,12 +346,15 @@ def main() -> None:
         print("Error: config/tasks.json not found")
         return
     data = json.loads(tasks_path.read_text(encoding="utf-8"))
-    task_id = data.get("active_task", "06_sql_optimization")
+    task_id = data.get("active_task")
+    if not task_id:
+        print("Error: active_task not configured in config/tasks.json")
+        return
     
     p = argparse.ArgumentParser()
     p.add_argument(
         "--mode",
-        choices=["auto", "semi", "sql", "polars", "sql_polars_hybrid", "global_exploration"],
+        choices=["auto", "semi", "sql", "polars", "sql_polars_hybrid", "pyspark", "global_exploration"],
         default="auto",
     )
     p.add_argument("--task", default=task_id)

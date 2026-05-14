@@ -167,6 +167,26 @@ def step_test_query(cfg) -> bool:
         return False
 
 
+def step_discover_capabilities(cfg) -> None:
+    from core.execution.databricks_client import DatabricksClient
+    try:
+        caps = DatabricksClient(cfg.databricks).discover_capabilities()
+    except Exception as exc:
+        print(f"  Capability discovery failed: {exc}")
+        return
+    print("  Capability summary:")
+    for key in [
+        "current_user",
+        "unity_catalog",
+        "catalogs",
+        "sql_warehouses",
+        "jobs",
+        "mlflow",
+        "http_path_configured",
+    ]:
+        print(f"    {key}: {caps.get(key)}")
+
+
 def step_aad_warning(cfg) -> None:
     db = cfg.databricks
     if not db.loop_on_databricks:
@@ -207,6 +227,9 @@ def main() -> None:
 
     print("\n[6/6] Running test query...")
     step_test_query(cfg)
+
+    print("\n[extra] Discovering account capabilities...")
+    step_discover_capabilities(cfg)
 
     step_aad_warning(cfg)
 

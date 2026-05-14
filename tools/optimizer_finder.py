@@ -31,8 +31,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 
-DEFAULT_DB  = str(ROOT / "workspaces" / "sql_optimization" / "analytics.duckdb")
-DEFAULT_OUT = str(ROOT / "workspaces" / "sql_optimization" / "hotspots.json")
+DEFAULT_DB  = str(ROOT / "state" / "analytics.duckdb")
+DEFAULT_OUT = str(ROOT / "state" / "hotspots.json")
 
 
 # ── Data structures ──────────────────────────────────────────────────────────

@@ -68,7 +68,7 @@ main_agent = "gemini-cli"  # change to gemini-cli or codex if using those
 # When enabled = false (default), DuckDB + SQLite are used — no behaviour change.
 [databricks]
 enabled            = true           # flip to true to activate
-execution          = "jobs"         # jobs | warehouse | connect | duckdb
+execution          = "jobs"         # jobs | warehouse | connect | duckdb; use warehouse first for SQL KPI validation
 loop_on_databricks = false          # true = submit loop itself as Databricks Workflow
 fallback           = "duckdb"       # duckdb | fail — what to do when Databricks unreachable
 host_env           = "DATABRICKS_HOST"

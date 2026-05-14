@@ -12,8 +12,9 @@ description: >
 
 Clarify only when a wrong assumption would materially change the answer or cause wasted work.
 If ambiguity is low-risk and reversible, proceed with the most likely interpretation and state the
-assumption. If ambiguity is high-impact, irreversible, costly, unsafe, or likely to waste work, ask
-one targeted question before proceeding.
+assumption. For KPI/query mappings, derivation formulas, temporal anchors, policy, SLA, contract,
+or production-impacting choices, do not proceed from assumption; ask one targeted question before
+generating executable logic.
 
 ## Context First
 
@@ -45,6 +46,9 @@ For KPI/query optimization, inspect all available evidence before asking:
 Ask the user only when the missing or ambiguous mapping materially affects correctness. If a
 required dictionary/metadata/catalog file is missing, ask for that file or location directly and
 record the request under `workspaces/<project>/interns/reports/open_questions.md`.
+
+Accepted user answers are valid evidence. Save them as workspace artifacts before relying on them
+for generated KPI/query logic.
 
 ## Rules
 

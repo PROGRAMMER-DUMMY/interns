@@ -1,6 +1,6 @@
 # Test Suite Overview
 
-The active test surface covers the enterprise optimization foundation and the SQL optimization benchmark harness.
+The active test surface covers the enterprise optimization foundation and governed workspace onboarding.
 
 ## Unit Tests
 
@@ -15,14 +15,8 @@ These tests cover:
 - semantic contract ingestion
 - optimization memory stats
 - hotspot-driven planning
+- workspace kickstart
+- KPI feature resolution
+- gated KPI SQL generation
 
-## SQL Benchmark Harness
-
-The SQL benchmark files live in `tests/06_sql_optimization`.
-
-```bash
-uv run python tests/06_sql_optimization/experiment.py
-uv run python tests/06_sql_optimization/evaluator.py
-```
-
-The benchmark requires local or catalog-backed data to be provisioned first. Generated state, profiles, DuckDB databases, CSV/PDF dumps, parquet files, and logs are intentionally ignored by git.
+Workspace-specific benchmarks require local or catalog-backed data to be provisioned first. Generated state, profiles, DuckDB databases, CSV/PDF dumps, parquet files, and logs are intentionally ignored by git.

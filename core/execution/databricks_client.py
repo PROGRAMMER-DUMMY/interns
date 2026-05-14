@@ -6,6 +6,7 @@ All SDK imports are lazy so the module loads fine when Databricks is disabled.
 """
 from __future__ import annotations
 
+import json
 import shlex
 from typing import TYPE_CHECKING, Tuple
 
@@ -88,6 +89,56 @@ class DatabricksClient:
         except Exception:
             client.schemas.create(schema, catalog_name=catalog)
 
+    def discover_capabilities(self) -> dict:
+        """Best-effort Databricks capability discovery for setup/readiness reports."""
+        capabilities = {
+            "configured": self.is_configured(),
+            "current_user": None,
+            "sql_warehouses": "unknown",
+            "unity_catalog": "unknown",
+            "catalogs": [],
+            "can_create_schema": "unknown",
+            "jobs": "unknown",
+            "mlflow": "unknown",
+            "http_path_configured": bool(self.cfg.http_path),
+        }
+        if not self.is_configured():
+            return capabilities
+        client = self.get_client()
+        try:
+            me = client.current_user.me()
+            capabilities["current_user"] = me.user_name
+        except Exception as exc:
+            capabilities["current_user_error"] = str(exc)
+        try:
+            catalogs = list(client.catalogs.list())
+            capabilities["unity_catalog"] = "available"
+            capabilities["catalogs"] = [getattr(item, "name", "") for item in catalogs if getattr(item, "name", "")]
+        except Exception as exc:
+            capabilities["unity_catalog"] = "unavailable"
+            capabilities["catalog_error"] = str(exc)
+        try:
+            list(client.jobs.list(limit=1))
+            capabilities["jobs"] = "available"
+        except Exception as exc:
+            capabilities["jobs"] = "unavailable"
+            capabilities["jobs_error"] = str(exc)
+        try:
+            if hasattr(client, "warehouses"):
+                list(client.warehouses.list())
+                capabilities["sql_warehouses"] = "available"
+        except Exception as exc:
+            capabilities["sql_warehouses"] = "unavailable"
+            capabilities["sql_warehouses_error"] = str(exc)
+        try:
+            import mlflow
+            mlflow.set_tracking_uri("databricks")
+            capabilities["mlflow"] = "available"
+        except Exception as exc:
+            capabilities["mlflow"] = "unavailable"
+            capabilities["mlflow_error"] = str(exc)
+        return capabilities
+
     def write_delta(self, catalog: str, schema: str, table: str, records: list[dict]) -> None:
         """
         Append records to a Delta table via SQL statement execution.
@@ -95,7 +146,6 @@ class DatabricksClient:
         """
         if not records:
             return
-        import json
         rows_json = json.dumps(records)
         sql = f"""
         INSERT INTO {catalog}.{schema}.{table}
@@ -113,15 +163,20 @@ class DatabricksClient:
     def submit_job_run(self, task: dict, time_budget: int) -> int:
         """Submit experiment_cmd as a one-time Databricks job run. Returns run_id."""
         from databricks.sdk.service.jobs import RunTask, SparkPythonTask
-        client = self.get_client()
         cmd = task.get("experiment_cmd", [])
         if isinstance(cmd, str):
             cmd = shlex.split(cmd)
         if not cmd:
             raise ValueError("task has no experiment_cmd")
         script_idx = next((idx for idx, part in enumerate(cmd) if str(part).endswith(".py")), len(cmd) - 1)
-        python_file = cmd[script_idx]
+        python_file = task.get("databricks_python_file") or cmd[script_idx]
+        if not _is_remote_databricks_path(str(python_file)):
+            raise ValueError(
+                "Databricks Jobs require a remote python file path. "
+                "Set task['databricks_python_file'] to a /Workspace, /Volumes, or dbfs: path."
+            )
         params = cmd[script_idx + 1:]
+        client = self.get_client()
 
         run = client.jobs.submit(
             run_name=f"autoresearch_{task.get('id', 'run')}",
@@ -175,3 +230,7 @@ class DatabricksClient:
         path = self.cfg.http_path
         parts = path.rstrip("/").split("/")
         return parts[-1] if parts else ""
+
+
+def _is_remote_databricks_path(path: str) -> bool:
+    return path.startswith(("/Workspace/", "/Volumes/", "dbfs:/"))

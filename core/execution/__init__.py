@@ -3,6 +3,8 @@ from core.execution.backend import (
     DuckDBBackend,
     ExecutionBackend,
     ExecutionResult,
+    StrictJobsBackend,
+    StrictWarehouseBackend,
     build_execution_backend,
     normalize_command,
 )
@@ -13,6 +15,8 @@ __all__ = [
     "DuckDBBackend",
     "ExecutionBackend",
     "ExecutionResult",
+    "StrictJobsBackend",
+    "StrictWarehouseBackend",
     "build_execution_backend",
     "normalize_command",
 ]

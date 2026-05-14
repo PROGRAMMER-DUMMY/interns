@@ -15,6 +15,7 @@ import time
 import signal
 import subprocess
 import shlex
+import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +46,7 @@ class ExecutionResult:
     metric: Optional[float] = None
     token_count: int = 0
     telemetry_partial: bool = False
+    metadata: dict | None = None
 
 
 class ExecutionBackend(ABC):
@@ -301,6 +303,113 @@ class ConnectBackend(ExecutionBackend):
 
 # ── Factory ───────────────────────────────────────────────────────────────────
 
+class StrictJobsBackend(JobsBackend):
+    """Jobs backend variant that can fail closed instead of local fallback."""
+
+    def execute(self, task: dict, time_budget: int, hard_timeout: int, log_path: Path) -> ExecutionResult:
+        start = time.time()
+        try:
+            print("[backend:jobs] Submitting Databricks job run...", flush=True)
+            run_id = self.db.submit_job_run(task, time_budget)
+            result_state, log_content = self.db.poll_job_run(run_id, hard_timeout)
+        except Exception as exc:
+            if _strict_databricks(self.cfg):
+                log_content = f"[backend:jobs] Submission failed: {exc}\n"
+                log_path.write_text(log_content, encoding="utf-8")
+                return ExecutionResult(1, log_content, time.time() - start)
+            return super().execute(task, time_budget, hard_timeout, log_path)
+
+        log_path.write_text(log_content, encoding="utf-8")
+        from core.observability.parser import RegexLogParser
+        parser = RegexLogParser()
+        metric = parser.parse_metric(log_content, task.get("metric_key", "primary_metric"))
+        all_metrics = parser.parse_all_metrics(log_content)
+        exit_code = 0 if result_state == "SUCCESS" else 1
+        return ExecutionResult(
+            exit_code=exit_code,
+            log_content=log_content,
+            elapsed_seconds=time.time() - start,
+            metric=metric,
+            token_count=int(all_metrics.get("token_count", 0)),
+            metadata={"databricks_backend": "jobs", "run_id": run_id, "result_state": result_state},
+        )
+
+
+class StrictWarehouseBackend(WarehouseBackend):
+    """Warehouse backend with audit metadata and strict no-fallback support."""
+
+    def execute(self, task: dict, time_budget: int, hard_timeout: int, log_path: Path) -> ExecutionResult:
+        sql_file = task.get("sql_file") or task.get("editable_file", "")
+        if not sql_file or not str(sql_file).endswith(".sql"):
+            if _strict_databricks(self.cfg):
+                log_content = "[backend:warehouse] No sql_file in task\n"
+                log_path.write_text(log_content, encoding="utf-8")
+                return ExecutionResult(1, log_content, 0)
+            return super().execute(task, time_budget, hard_timeout, log_path)
+
+        start = time.time()
+        warehouse_id = ""
+        statement_id = ""
+        row_count = 0
+        sql_hash = ""
+        try:
+            from databricks.sdk.service.sql import StatementState
+            sql = Path(sql_file).read_text(encoding="utf-8")
+            sql_hash = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+            client = self.db.get_client()
+            warehouse_id = self.db._extract_warehouse_id()
+            resp = client.statement_execution.execute_statement(
+                warehouse_id=warehouse_id,
+                statement=sql,
+                wait_timeout=f"{min(time_budget, 50)}s",
+            )
+            state = resp.status.state
+            ok = state == StatementState.SUCCEEDED
+            row_count = resp.manifest.total_row_count if resp.manifest else 0
+            statement_id = _first_attr(resp, "statement_id", "id") or ""
+            log_content = (
+                "databricks_backend: warehouse\n"
+                f"warehouse_id: {warehouse_id}\n"
+                f"statement_id: {statement_id}\n"
+                f"sql_sha256: {sql_hash}\n"
+                f"warehouse_state: {state}\n"
+                f"row_count: {row_count}\n"
+            )
+            if not ok:
+                error = resp.status.error
+                log_content += f"error: {error.message if error else 'unknown'}\n"
+        except Exception as exc:
+            if _strict_databricks(self.cfg):
+                log_content = (
+                    "databricks_backend: warehouse\n"
+                    f"warehouse_id: {warehouse_id}\n"
+                    f"sql_sha256: {sql_hash}\n"
+                    f"error: {exc}\n"
+                )
+                log_path.write_text(log_content, encoding="utf-8")
+                return ExecutionResult(1, log_content, time.time() - start)
+            return super().execute(task, time_budget, hard_timeout, log_path)
+
+        elapsed = time.time() - start
+        log_content += f"execution_time_seconds: {elapsed:.4f}\n"
+        log_path.write_text(log_content, encoding="utf-8")
+        from core.observability.parser import RegexLogParser
+        metric = RegexLogParser().parse_metric(log_content, task.get("metric_key", "primary_metric"))
+        return ExecutionResult(
+            exit_code=0 if ok else 1,
+            log_content=log_content,
+            elapsed_seconds=elapsed,
+            metric=metric,
+            metadata={
+                "databricks_backend": "warehouse",
+                "warehouse_id": warehouse_id,
+                "statement_id": statement_id,
+                "sql_sha256": sql_hash,
+                "row_count": row_count,
+            },
+        )
+
+
 def build_execution_backend(cfg: "Config") -> ExecutionBackend:
     """
     Build the correct ExecutionBackend from config.
@@ -324,16 +433,27 @@ def build_execution_backend(cfg: "Config") -> ExecutionBackend:
     ok, msg = client.health_check()
     if not ok:
         print(f"[execution_backend] Databricks unavailable: {msg}")
-        if db_cfg.fallback == "fail":
+        if db_cfg.fallback == "fail" or _strict_databricks(db_cfg):
             raise RuntimeError(f"Databricks required but unavailable: {msg}")
         print("[execution_backend] Falling back to DuckDB")
         return DuckDBBackend()
 
     mode = db_cfg.execution
     if mode == "jobs":
-        return JobsBackend(client, db_cfg)
+        return StrictJobsBackend(client, db_cfg)
     if mode == "warehouse":
-        return WarehouseBackend(client, db_cfg)
+        return StrictWarehouseBackend(client, db_cfg)
     if mode == "connect":
         return ConnectBackend(db_cfg)
     return DuckDBBackend()
+
+
+def _strict_databricks(cfg: "DatabricksConfig") -> bool:
+    return cfg.fallback == "fail" or os.environ.get("AUTORESEARCH_DATABRICKS_STRICT") == "1"
+
+
+def _first_attr(obj, *names: str):
+    for name in names:
+        if hasattr(obj, name):
+            return getattr(obj, name)
+    return None

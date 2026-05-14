@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
-PRODUCTION_MODES = {"sql", "polars", "sql_polars_hybrid"}
+PRODUCTION_MODES = {"sql", "polars", "sql_polars_hybrid", "pyspark"}
 EXPLORATION_MODES = {"global_exploration"}
 ALL_MODES = PRODUCTION_MODES | EXPLORATION_MODES
 
@@ -104,7 +104,7 @@ class ApprovalContract:
 @dataclass(frozen=True)
 class ExecutionContract:
     production_mode: str = "bounded"
-    allowed_modes: tuple[str, ...] = ("sql", "polars", "sql_polars_hybrid")
+    allowed_modes: tuple[str, ...] = ("sql", "polars", "sql_polars_hybrid", "pyspark")
     exploration_modes: tuple[str, ...] = ("global_exploration",)
     default_mode: str = "sql"
     allow_global_promotion: bool = False

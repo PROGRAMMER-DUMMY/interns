@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feature Derivation Library"
+  short_description: "Use reusable KPI feature derivation patterns safely."
+  default_prompt: "Use reusable derivation patterns to propose evidence-backed KPI feature mappings without treating candidates as proof."

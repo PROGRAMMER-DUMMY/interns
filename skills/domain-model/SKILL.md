@@ -27,11 +27,17 @@ conversion local.
 
 - Entities, facts, dimensions.
 - Primary keys and foreign keys.
+- Source-to-target dataset eligibility for KPI/query, ETL, ELT, and medallion-layer outputs.
 - Output grain and valid aggregation levels.
+- Join paths, cardinality expectations, and invalid joins.
 - KPI formulas, tolerances, and filters.
+- Temporal anchors and lifecycle-state rules.
 - Required columns and forbidden transformations.
+- Bronze/raw, silver/conformed, and gold/KPI layer assumptions when pipeline generation is requested.
 - Business terms and synonyms.
 - Candidate KPI term mappings to tables/columns with evidence source and confidence.
+- Formula-derived, join-derived, taxonomy-derived, and temporal-anchor-derived features with
+  required inputs and proof source.
 - Missing metadata, dictionaries, catalog paths, SLA files, or contracts required to
   resolve a mapping.
 
@@ -45,3 +51,5 @@ workspaces/<project>/interns/reports/open_questions.md
 ```
 
 If source documents disagree, record the conflict instead of guessing.
+Do not mark a KPI feature ready unless it is proven by source evidence or explicitly confirmed by
+the user.

@@ -71,7 +71,11 @@ class OptimizationPlanner:
         )
 
     def _load_hotspots(self, task: dict) -> dict[str, Any]:
-        path_value = task.get("hotspots_file") or "workspaces/sql_optimization/hotspots.json"
+        workspace = str(task.get("workspace", "")).rstrip("/\\")
+        default_hotspots = f"{workspace}/interns/generated/evidence/hotspots.json" if workspace else ""
+        path_value = task.get("hotspots_file") or default_hotspots
+        if not path_value:
+            return {}
         path = self.root / path_value
         if not path.exists():
             return {}

@@ -104,7 +104,13 @@ class WorkspaceOnboarder:
             ),
             "kpi_registry": self._write_json(
                 self.layout.contracts_dir / "kpi_registry.json",
-                {"kpis": [asdict(kpi) for kpi in kpis]},
+                {
+                    "version": 1,
+                    "generated_by": "onboard-workspace",
+                    "workspace": _rel(self.workspace, self.repo_root),
+                    "source_registries": inputs.kpi_registries,
+                    "kpis": [asdict(kpi) for kpi in kpis],
+                },
             ),
             "domain_model": self._write_json(
                 self.layout.contracts_dir / "domain_model.json",
@@ -578,14 +584,18 @@ def _read_tabular_kpis(frame: Any, source: str) -> list[KpiDefinition]:
     kpis = []
     for row in frame.iter_rows(named=True):
         name = _clean_cell(row.get(name_col))
-        if not name:
+        if not name or _is_template_kpi_row(name):
             continue
+        metric = _clean_cell(row.get(metric_col)) if metric_col else ""
+        cuts = _clean_cell(row.get(cuts_col)) if cuts_col else ""
+        if not metric and not cuts:
+            metric, cuts = _infer_metric_and_cuts(name, _clean_cell(row.get(desc_col)) if desc_col else "")
         kpis.append(
             KpiDefinition(
                 name=name,
                 description=_clean_cell(row.get(desc_col)) if desc_col else "",
-                cuts=_clean_cell(row.get(cuts_col)) if cuts_col else "",
-                metric=_clean_cell(row.get(metric_col)) if metric_col else "",
+                cuts=cuts,
+                metric=metric,
                 refinement_required=_clean_cell(row.get(refine_col)) if refine_col else "",
                 source=source,
             )
@@ -618,14 +628,18 @@ def _read_xlsx_xml_kpis(path: Path) -> list[KpiDefinition]:
     kpis = []
     for row in rows[1:]:
         name = _cell_at(row, name_idx)
-        if not name:
+        if not name or _is_template_kpi_row(name):
             continue
+        metric = _cell_at(row, metric_idx)
+        cuts = _cell_at(row, cuts_idx)
+        if not metric and not cuts:
+            metric, cuts = _infer_metric_and_cuts(name, _cell_at(row, desc_idx))
         kpis.append(
             KpiDefinition(
                 name=name,
                 description=_cell_at(row, desc_idx),
-                cuts=_cell_at(row, cuts_idx),
-                metric=_cell_at(row, metric_idx),
+                cuts=cuts,
+                metric=metric,
                 refinement_required=_cell_at(row, refine_idx),
                 source=str(path),
             )
@@ -676,6 +690,51 @@ def _first_existing(lowered: dict[str, str], candidates: list[str]) -> str | Non
         if candidate in lowered:
             return lowered[candidate]
     return None
+
+
+def _is_template_kpi_row(name: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+    template_markers = (
+        "which key business question is the kpi metric feature meant to answer",
+        "key business question",
+        "short description of the kpi metric feature",
+    )
+    return any(marker in normalized for marker in template_markers)
+
+
+def _infer_metric_and_cuts(name: str, description: str = "") -> tuple[str, str]:
+    text = f"{name} {description}".lower()
+    metric = ""
+    cuts: list[str] = []
+    if "amount paid" in text or "paid amount" in text:
+        metric = "amount paid"
+    elif "percentage share of lives" in text or "share of lives" in text:
+        metric = "percentage share of lives"
+    elif "lives count" in text:
+        metric = "lives count"
+
+    if "lob" in text or "line of business" in text:
+        if "medicare" in text:
+            cuts.append("LOB = Medicare")
+        elif "commercial" in text:
+            cuts.append("LOB = Commercial")
+        else:
+            cuts.append("LOB")
+    if "gender" in text:
+        cuts.append("Gender")
+    if "payer" in text or "payor" in text:
+        cuts.append("Payer")
+    if "above 50" in text or "over 50" in text:
+        cuts.append("Age > 50")
+    elif re.search(r"\bage\b", text):
+        cuts.append("Age")
+    if "visit type" in text:
+        cuts.append("VisitType")
+    if "department" in text:
+        cuts.append("Department")
+    if "top 10" in text and "Payer" not in cuts:
+        cuts.append("Payer top 10")
+    return metric, ", ".join(dict.fromkeys(cuts))
 
 
 def _first_index(index: dict[str, int], candidates: list[str]) -> int | None:

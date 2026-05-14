@@ -2,7 +2,7 @@
 # autoresearch — AGENT CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-[interns.sql_optimization]
+[interns.healthcare]
 active = ["code_reviewer", "insights", "methodology_analyst"]
 
 [interns.limits]

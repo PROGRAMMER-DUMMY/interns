@@ -172,7 +172,7 @@ class AutoBootstrap:
         for folder in ["docs", "datasets"]:
             root = workspace / folder
             if root.exists():
-                candidates.extend(path for path in root.rglob("*") if path.is_file())
+                candidates.extend(path for path in root.rglob("*") if path.is_file() and not path.name.startswith(("~", ".")))
         for key in ["editable_file", "sql_file"]:
             value = self.task.get(key)
             if value:

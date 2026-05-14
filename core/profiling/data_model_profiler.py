@@ -45,6 +45,7 @@ class ColumnProfile:
     name: str
     dtype: str
     nullable: bool | None = None
+    sample_values: list[Any] = field(default_factory=list)
     sample_min: Any = None
     sample_max: Any = None
     exact_min: Any = None
@@ -270,6 +271,7 @@ class DataModelProfiler:
                         metadata_min=metadata_min,
                         metadata_max=metadata_max,
                         null_count=current.null_count,
+                        sample_values=current.sample_values,
                         source="parquet_row_group_stats",
                     )
         return {"schema": schema, "row_count": row_count, "columns": columns}
@@ -299,6 +301,7 @@ class DataModelProfiler:
             if source == "sample_profile":
                 kwargs["sample_min"] = stats.get(f"{name}__min")
                 kwargs["sample_max"] = stats.get(f"{name}__max")
+                kwargs["sample_values"] = _sample_values(lf, name)
             elif source == "exact_scan":
                 kwargs["exact_min"] = stats.get(f"{name}__min")
                 kwargs["exact_max"] = stats.get(f"{name}__max")
@@ -320,6 +323,7 @@ def _merge_columns(
             name=name,
             dtype=new.dtype or old.dtype,
             nullable=new.nullable if new.nullable is not None else old.nullable,
+            sample_values=new.sample_values or old.sample_values,
             sample_min=new.sample_min if new.sample_min is not None else old.sample_min,
             sample_max=new.sample_max if new.sample_max is not None else old.sample_max,
             exact_min=new.exact_min if new.exact_min is not None else old.exact_min,
@@ -330,6 +334,25 @@ def _merge_columns(
             source=new.source,
         )
     return merged
+
+
+def _sample_values(lf: Any, column: str, limit: int = 8) -> list[Any]:
+    try:
+        values = (
+            lf.select(pl.col(column).drop_nulls().unique().head(limit).alias(column))
+            .collect()
+            .get_column(column)
+            .to_list()
+        )
+    except Exception:
+        return []
+    return [_json_safe_value(value) for value in values]
+
+
+def _json_safe_value(value: Any) -> Any:
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
 
 
 def _detect_format(path: Path) -> str:

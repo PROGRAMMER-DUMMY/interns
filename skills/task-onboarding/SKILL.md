@@ -42,7 +42,10 @@ Continue only after confirmation, unless the user explicitly asks for best-effor
 5. Generate semantic/domain contract drafts.
 6. Create or update `config/tasks.json`.
 7. Define experiment and evaluator commands.
-8. Document missing blockers in `open_questions.json`.
+8. Document missing blockers in `interns/reports/open_questions.md` and, when useful, structured
+   metadata.
+9. Keep executable KPI/query logic blocked until mappings and derivations are backed by evidence or
+   explicit user decisions.
 
 Use Polars for dataframe/file inspection during onboarding. Do not introduce
 pandas-based profiling or helpers unless a third-party API explicitly requires
@@ -54,6 +57,7 @@ pandas; document that exception if it happens.
 workspaces/<project>/interns/generated/contracts/
 workspaces/<project>/interns/generated/profiles/
 workspaces/<project>/interns/generated/requirements/
+workspaces/<project>/interns/reports/open_questions.md
 ```
 
 Do not commit raw workspace data or generated intern outputs.

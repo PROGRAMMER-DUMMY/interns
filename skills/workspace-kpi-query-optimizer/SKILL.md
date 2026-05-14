@@ -90,6 +90,19 @@ document the reason and keep conversion at the integration boundary.
 For Excel KPI registries, prefer Polars/fastexcel when available. If unavailable, use a minimal XLSX
 reader fallback before installing new dependencies.
 
+## Tool And Profile Evidence Rule
+
+Before writing custom inspection code, read `TOOLS.md` and `.agents/tools.json` and prefer existing
+project tools. For dataset questions, use profile-first evidence:
+
+1. `interns/generated/profiles/profile_index.json`
+2. relevant `interns/generated/profiles/*.profile.json`
+3. bounded samples only when profiles are insufficient
+4. full raw dataset reads only with a concrete reason
+
+Do not paste raw datasets into prompts. If bounded sampling affects a mapping, formula, join, or
+verification decision, save the evidence under the active workspace's `interns/` artifacts.
+
 ## Required Workflow
 
 1. Read `AGENTS.md`, `CONTEXT.md`, `config/tasks.json`, and relevant repo skills.
@@ -122,16 +135,18 @@ Use the repo skills as an ordered workflow, not as isolated documents:
 
 1. `workspace-governance`: confirm the active workspace and protect source inputs.
 2. `domain-model`: extract entities, facts, dimensions, keys, joins, grain, terms, and synonyms.
-3. `task-onboarding`: create or refresh profiles, contracts, requirements, and baseline artifacts.
-4. `clarify-ambiguity`: ask one targeted question only when a mapping cannot be resolved from files,
-   metadata, dictionaries, catalog evidence, or reasonable reversible assumptions.
-5. `grill-requirements`: when several business-valid interpretations exist, interview the user/team
+3. `feature-derivation-library`: search reusable derivation patterns for blocked derived features;
+   treat returned patterns as candidates, not proof.
+4. `task-onboarding`: create or refresh profiles, contracts, requirements, and baseline artifacts.
+5. `clarify-ambiguity`: ask one targeted question when a mapping or derivation cannot be proven
+   from files, metadata, dictionaries, catalog evidence, or a previously accepted user decision.
+6. `grill-requirements`: when several business-valid interpretations exist, interview the user/team
    one decision at a time and save accepted answers.
-6. `stakeholder-memory`: persist accepted preferences, naming choices, risk tolerance, and recurring
+7. `stakeholder-memory`: persist accepted preferences, naming choices, risk tolerance, and recurring
    business definitions.
-7. `to-solution-brief`: convert accepted mapping and requirement decisions into implementation
+8. `to-solution-brief`: convert accepted mapping and requirement decisions into implementation
    direction for SQL/Polars generation.
-8. `evolution`: record lessons, rejected mappings, useful metadata sources, and future optimizer
+9. `evolution`: record lessons, rejected mappings, useful metadata sources, and future optimizer
    improvements after each run.
 
 KPI term resolution order:
@@ -147,6 +162,76 @@ KPI registry
 
 If a data dictionary, metadata export, catalog path, SLA file, or contract file is required but
 missing, ask the user for that file or location and save the request in `interns/reports/open_questions.md`.
+
+## Automatic Blocker Grilling
+
+When KPI/query work is blocked by an unproven mapping, missing source, conflicting definition,
+failed validation, or required approval, start a grilling session immediately after inspecting
+available evidence. Do not keep optimizing, generate executable SQL, or silently pick a business
+definition.
+
+Ask exactly one blocker question at a time. Name the blocked KPI, feature, rule, or approval; offer
+concrete options when possible; include a recommended answer and why. Prefer questions that unblock
+the most downstream work first.
+
+Do not run a full interview separately for each KPI. Before grilling, build a workspace-level
+blocker inventory:
+
+1. Extract unresolved features from all KPIs.
+2. Normalize aliases such as `DeniedAmount`, `Denied_Amount`, and `denied amount`.
+3. Count how many KPIs each feature blocks.
+4. Separate reusable workspace definitions from KPI-specific exceptions.
+5. Ask first about the reusable blocker with the highest downstream impact.
+
+Accepted answers that define a reusable feature, taxonomy, date anchor, grain, or formula must be
+saved as workspace-level definitions, not only as per-KPI notes. Suggested artifact:
+
+```text
+workspaces/<project>/interns/generated/contracts/workspace_feature_definitions.json
+```
+
+Use this structure when practical:
+
+```json
+{
+  "feature": "DeniedAmount",
+  "status": "user_confirmed",
+  "scope": "workspace",
+  "definition": "...",
+  "applies_to_kpis": ["kpi_001", "kpi_002"],
+  "exceptions": [],
+  "evidence": ["accepted user decision"],
+  "verification_status": "needs_data_validation"
+}
+```
+
+After a reusable definition is accepted, apply it automatically to other blocked KPIs that need the
+same feature. Do not ask the user again unless another KPI has a materially different grain, source,
+filter, date anchor, or business exception. When reusing a definition, report it briefly:
+
+```text
+Reusing accepted workspace definition for `DeniedAmount` from prior blocker grilling.
+```
+
+Use this shape:
+
+```markdown
+Blocker: ...
+
+Question: ...
+
+Options:
+- Option A: ...
+- Option B: ...
+
+Recommended answer: ...
+
+Why: ...
+```
+
+Record accepted answers under `interns/generated/requirements/`, `interns/generated/contracts/`,
+or `interns/reports/open_questions.md` before using them as evidence. Then continue from the
+unblocked step.
 
 ## Metadata And Profiling
 
@@ -180,22 +265,45 @@ workspaces/<project>/interns/generated/profiles/
 
 - Prefer SQL for SQL engines and warehouse execution.
 - Prefer Polars for local profiling, metadata, and file preparation.
+- Use PySpark only when the requested target environment, data volume, or medallion pipeline
+  requires distributed execution.
 - Use hybrid SQL + Polars only when the task benefits from both.
+- For ETL/ELT or medallion requests, design the source-to-target flow first:
+  bronze/raw ingestion, silver/conformed joins and cleansing, then gold/KPI aggregations.
+- Use the data model to choose datasets, joins, grain, temporal anchors, and output layer before
+  generating SQL, Polars, or PySpark.
+- Block generation when the data model does not prove a source table, join key, grain,
+  date anchor, or layer contract.
 - Do not hard-code absolute paths.
 - Derive paths from the workspace root or script location.
 - Keep generated query files under `interns/generated/solutions/`.
 - Keep execution databases under `interns/state/`.
 - Keep human-readable explanations under `interns/reports/`.
 
-## Ambiguity Handling
+## Evidence-Backed Feature Resolution
 
-KPI registries are often incomplete. When a KPI term cannot be mapped cleanly:
+KPI registries are often incomplete. Treat KPI terms as features to resolve, not only as column
+names. Classify each feature before writing executable query logic:
 
-- record the assumption,
-- cite the source field or missing field,
-- implement the safest executable approximation if useful,
-- mark the KPI as `needs_review` when correctness depends on a business decision,
-- ask one targeted question only if continuing would waste significant work.
+```text
+proven_direct
+proven_alias
+proven_join
+proven_formula
+proven_taxonomy
+user_confirmed
+blocked_missing_evidence
+blocked_ambiguous
+```
+
+For each resolved feature, cite evidence from schema/profile output, KPI registry text, data model
+docs, dictionaries, catalog metadata, code, or an accepted user decision. For formula-derived
+features, record required inputs, formula, null policy, grain, and temporal anchor.
+
+Do not generate executable KPI logic from unproven assumptions. If correctness depends on an
+unproven mapping, formula, taxonomy, temporal anchor, or missing source, mark the KPI as blocked or
+`needs_review`, ask the user a targeted question, and keep the generated SQL as a manifest/baseline
+placeholder until evidence is available.
 
 Save assumptions and gaps under:
 

@@ -68,11 +68,15 @@ Record findings under:
 workspaces/<project>/interns/generated/requirements/
   stakeholder_interview.md
   requirements.json
-  open_questions.json
+workspaces/<project>/interns/reports/
+  open_questions.md
 ```
 
 `stakeholder_interview.md` should include the conversation summary, task options
 shown to the user, recommended answers, accepted decisions, rejected options, and
 remaining unresolved questions.
+
+User answers that resolve KPI mappings, formula-derived features, temporal anchors, policy, SLA, or
+contract questions must be recorded as accepted decisions before implementation relies on them.
 
 Do not write outputs outside `workspaces/<project>/interns/`.
