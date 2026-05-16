@@ -36,6 +36,8 @@ Default behavior for huge external roots:
 4. Ask the user to approve a specific folder or file allowlist.
 5. Store workspace-approved dataset allowlists under
    `workspaces/<project>/interns/state/workspace_settings.json`.
+6. Never pass an external root as `--workspace`; use a repo workspace such as
+   `workspaces/CMS-Cold-Storage` and reference the external data through the allowlist.
 
 Example workspace setting:
 

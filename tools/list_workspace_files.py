@@ -5,6 +5,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from core.storage.external_data import (
+    bounded_external_files,
+    is_external_path,
+    load_external_data_policy,
+)
+
 
 KPI_HINTS = ("kpi", "metric", "registry")
 DATA_MODEL_HINTS = ("data_model", "datamodel", "model")
@@ -24,6 +30,7 @@ class WorkspaceFileListing:
     dataset_roots: list[str]
     docs: list[str]
     files: list[str]
+    external_state: str = "workspace"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -36,6 +43,11 @@ def list_workspace_files(
     max_files: int = 200,
 ) -> WorkspaceFileListing:
     root = Path(repo_root).resolve()
+    policy = load_external_data_policy(root)
+    requested_path = Path(workspace.strip().strip('"').strip("'")).expanduser()
+    if requested_path.is_absolute() and is_external_path(requested_path, root, policy):
+        return _list_external_files(root, requested_path.resolve(), policy, max_files=max_files)
+
     workspace_rel = _resolve_workspace(root, workspace)
     workspace_path = (root / workspace_rel).resolve()
     if not workspace_path.exists() or not workspace_path.is_dir():
@@ -73,6 +85,49 @@ def list_workspace_files(
         dataset_roots=_dataset_roots(rel_files),
         docs=_docs(rel_files),
         files=rel_files,
+    )
+
+
+def _list_external_files(
+    repo_root: Path,
+    external_root: Path,
+    policy,
+    *,
+    max_files: int,
+) -> WorkspaceFileListing:
+    if not external_root.exists() or not external_root.is_dir():
+        return WorkspaceFileListing(
+            workspace=external_root.as_posix(),
+            exists=False,
+            file_count=0,
+            truncated=False,
+            interns_state="external_missing",
+            possible_kpi_files=[],
+            possible_data_model_files=[],
+            dataset_roots=[],
+            docs=[],
+            files=[],
+            external_state="external_danger_root_missing",
+        )
+    cap = min(max_files, policy.max_paths)
+    files, truncated = bounded_external_files(
+        external_root,
+        max_paths=cap,
+        max_seconds=policy.max_seconds,
+    )
+    rel_files = [_display_path(repo_root, path) for path in files]
+    return WorkspaceFileListing(
+        workspace=external_root.as_posix(),
+        exists=True,
+        file_count=len(rel_files),
+        truncated=truncated,
+        interns_state="external_bounded_listing_only",
+        possible_kpi_files=_possible_kpi_files(rel_files),
+        possible_data_model_files=_possible_data_model_files(rel_files),
+        dataset_roots=_dataset_roots(rel_files),
+        docs=_docs(rel_files),
+        files=rel_files,
+        external_state="external_danger_root_bounded_listing_only",
     )
 
 
@@ -194,6 +249,7 @@ def main() -> None:
     print(f"Files listed: {listing.file_count}")
     print(f"Truncated: {listing.truncated}")
     print(f"Interns state: {listing.interns_state}")
+    print(f"External state: {listing.external_state}")
     _print_group("Possible KPI files", listing.possible_kpi_files)
     _print_group("Possible data model files", listing.possible_data_model_files)
     _print_group("Dataset roots", listing.dataset_roots)

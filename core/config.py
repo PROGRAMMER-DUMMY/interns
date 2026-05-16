@@ -122,12 +122,12 @@ class Config:
 
 def load() -> Config:
     """Load config from lock.toml + environment. Call once at startup."""
-    lock = toml.load(_LOCK_PATH)
+    lock = _load_lock()
 
     google_key = ""
     for env_var in [
-        lock["api"].get("google_api_key_env", "GOOGLE_API_KEY"),
-        lock["api"].get("gemini_api_key_env", "GEMINI_API_KEY"),
+        lock.get("api", {}).get("google_api_key_env", "GOOGLE_API_KEY"),
+        lock.get("api", {}).get("gemini_api_key_env", "GEMINI_API_KEY"),
     ]:
         val = os.environ.get(env_var, "")
         if val:
@@ -135,38 +135,44 @@ def load() -> Config:
             break
 
     anthropic_key = os.environ.get(
-        lock["api"].get("anthropic_api_key_env", "ANTHROPIC_API_KEY"), ""
+        lock.get("api", {}).get("anthropic_api_key_env", "ANTHROPIC_API_KEY"), ""
     )
 
-    m = lock["models"]
-    lim = lock["limits"]
-    cli = lock["cli"]
-    back = lock["backends"]
+    m = lock.get("models", {})
+    lim = lock.get("limits", {})
+    cli = lock.get("cli", {})
+    back = lock.get("backends", {})
 
     return Config(
         google_api_key=google_key,
         anthropic_api_key=anthropic_key,
         databricks=DatabricksConfig.from_lock(lock),
         models=ModelConfig(
-            llm_judge=m["llm_judge"],
-            deep_research=m["deep_research"],
-            prompt_engineer=m["prompt_engineer"],
-            eval_intern=m["eval_intern"],
-            fallback_strategy=m["fallback_strategy"],
+            llm_judge=m.get("llm_judge", "gemini-2.0-flash"),
+            deep_research=m.get("deep_research", "gemini-2.0-flash"),
+            prompt_engineer=m.get("prompt_engineer", "gemini-2.0-flash"),
+            eval_intern=m.get("eval_intern", "gemini-2.0-flash"),
+            fallback_strategy=m.get("fallback_strategy", "rule_based"),
         ),
-        gemini_cli=cli["gemini"],
-        python_cmd=cli["python"],
-        primary_backend=back["primary"],
-        force_cli=back["force_cli"],
+        gemini_cli=cli.get("gemini", "gemini"),
+        python_cmd=cli.get("python", "python"),
+        primary_backend=back.get("primary", "api"),
+        force_cli=back.get("force_cli", False),
         main_agent=lock.get("agent", {}).get("main_agent", "claude-code"),
         main_agent_timeout_sec=lock.get("agent", {}).get("main_agent_timeout_sec", 300),
         max_editable_file_kb=lock.get("agent", {}).get("max_editable_file_kb", 50),
         prior_output_max_chars=lock.get("agent", {}).get("prior_output_max_chars", 1800),
         intern_retry_backoff_s=lock.get("agent", {}).get("intern_retry_backoff_s", 5),
-        max_token_count=lim["max_token_count"],
-        max_run_seconds=lim["max_run_seconds"],
-        hard_timeout_seconds=lim["hard_timeout_seconds"],
-        max_experiments_session=lim["max_experiments_session"],
-        deep_research_every_n=lim["deep_research_every_n"],
-        stuck_threshold=lim["stuck_threshold_discards"],
+        max_token_count=lim.get("max_token_count", 800),
+        max_run_seconds=lim.get("max_run_seconds", 30),
+        hard_timeout_seconds=lim.get("hard_timeout_seconds", 90),
+        max_experiments_session=lim.get("max_experiments_session", 100),
+        deep_research_every_n=lim.get("deep_research_every_n", 5),
+        stuck_threshold=lim.get("stuck_threshold_discards", 3),
     )
+
+
+def _load_lock() -> dict:
+    if not _LOCK_PATH.exists():
+        return {}
+    return toml.load(_LOCK_PATH)

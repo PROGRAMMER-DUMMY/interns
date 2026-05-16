@@ -24,6 +24,7 @@ from core.onboarding.kpi_text_parser import (
     is_template_kpi_row,
 )
 from core.profiling.data_model_profiler import DataModelProfiler
+from core.storage.external_data import is_external_path, load_external_data_policy
 from core.storage.metadata_store import MetadataStore, build_metadata_store
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -169,6 +170,7 @@ class WorkspaceOnboarder:
                 path for path in datasets_dir.rglob("*")
                 if path.is_file() and path.suffix.lower() in DATA_SUFFIXES and self.layout.is_dataset_allowed(path)
             )
+        data_files.extend(self._external_data_files())
 
         docs_dir = self.workspace / "docs"
         if docs_dir.exists():
@@ -509,8 +511,30 @@ if __name__ == "__main__":
     def _validate_workspace(self) -> None:
         if not self.workspace.exists():
             raise FileNotFoundError(f"workspace not found: {self.workspace}")
+        policy = load_external_data_policy(self.repo_root)
+        if is_external_path(self.workspace, self.repo_root, policy):
+            raise ValueError(
+                "workspace must be a repo workspace, not an external data root: "
+                f"{self.workspace}. Use workspaces/<project> as the workspace and configure "
+                "external data through dataset_allowlist."
+            )
         if self.workspace == self.repo_root or not self.workspace.is_relative_to(self.repo_root):
             raise ValueError(f"workspace must be inside repo root: {self.workspace}")
+
+    def _external_data_files(self) -> list[Path]:
+        data_files: list[Path] = []
+        for allowed in self.layout.external_dataset_allowlist_paths():
+            if allowed.is_file() and allowed.suffix.lower() in DATA_SUFFIXES:
+                data_files.append(allowed)
+            elif allowed.is_dir():
+                data_files.extend(
+                    path
+                    for path in allowed.rglob("*")
+                    if path.is_file()
+                    and path.suffix.lower() in DATA_SUFFIXES
+                    and self.layout.is_dataset_allowed(path)
+                )
+        return sorted(set(data_files))
 
     def _clear_onboarding_artifacts(self) -> None:
         for path in self.layout.profiles_dir.glob("*.profile.json"):
