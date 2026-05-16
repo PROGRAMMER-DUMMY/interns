@@ -7,6 +7,9 @@ run.log
 *.sqlite3
 *.db
 
+# Local documentation drafts
+docs/
+
 # Local data dumps and generated warehouse artifacts
 dump/
 workspaces/**/*.csv
