@@ -6,7 +6,6 @@ under the active workspace before any user-facing KPI registry is written.
 """
 from __future__ import annotations
 
-import argparse
 import json
 import re
 from dataclasses import asdict, dataclass
@@ -14,6 +13,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.onboarding.kpi_generation_quality import (
+    advisor_notes as quality_advisor_notes,
+    column_like_token_overlap as quality_column_like_token_overlap,
+    looks_like_business_question as quality_looks_like_business_question,
+    merge_refinement as quality_merge_refinement,
+    missing_discussion_points as quality_missing_discussion_points,
+    score_kpis as quality_score_kpis,
+    suggest_seed_kpi as quality_suggest_seed_kpi,
+    unique_sorted as quality_unique_sorted,
+)
 from core.onboarding.workspace_onboarding import KpiDefinition, WorkspaceOnboarder
 from core.storage.workspace_layout import WorkspaceLayout
 from tools.list_workspace_files import list_workspace_files
@@ -589,67 +598,7 @@ def _score_kpis(
     listing: dict[str, Any],
     context_files: list[str],
 ) -> dict[str, Any]:
-    data_files = [
-        file
-        for file in listing.get("files", [])
-        if "/datasets/" in file and Path(file).suffix.lower() in {".csv", ".parquet", ".json"}
-    ]
-    has_data_model = bool(listing.get("possible_data_model_files"))
-    has_context = bool(context_files)
-    kpi_scores = []
-    for idx, kpi in enumerate(kpis, start=1):
-        text = " ".join([kpi.name, kpi.description, kpi.cuts, kpi.metric]).lower()
-        implementation = 0
-        implementation += 25 if kpi.metric else 0
-        implementation += 15 if kpi.cuts else 0
-        implementation += 20 if data_files else 0
-        implementation += 15 if has_data_model else 0
-        implementation += 15 if _column_like_token_overlap(text, data_files) else 0
-        implementation += 10 if kpi.refinement_required else 5
-        business = 0
-        business += 25 if _looks_like_business_question(kpi.name) else 10 if kpi.name else 0
-        business += 15 if kpi.description else 0
-        business += 15 if kpi.cuts else 0
-        business += 10 if kpi.refinement_required else 0
-        business += 10 if has_context else 0
-        business += 10 if any(token in text for token in ("trend", "top", "share", "rate", "ratio")) else 0
-        business += 15 if any(token in text for token in ("why", "which", "how", "what")) else 0
-        missing = _missing_discussion_points(kpi, has_context)
-        kpi_scores.append(
-            {
-                "kpi_id": f"kpi_{idx:03d}",
-                "business_question": kpi.name,
-                "implementation_readiness": min(100, implementation),
-                "business_quality": min(100, business),
-                "missing_discussion_points": missing,
-                "recommendation": "revise_before_implementation" if missing else "ready_for_mapping",
-            }
-        )
-    if not kpi_scores:
-        implementation_avg = 0
-        business_avg = 0
-    else:
-        implementation_avg = round(
-            sum(item["implementation_readiness"] for item in kpi_scores) / len(kpi_scores)
-        )
-        business_avg = round(sum(item["business_quality"] for item in kpi_scores) / len(kpi_scores))
-    overall = round((implementation_avg + business_avg) / 2)
-    return {
-        "implementation_readiness": implementation_avg,
-        "business_quality": business_avg,
-        "overall_score": overall,
-        "kpi_count": len(kpis),
-        "coverage": {
-            "kpi_file_present": bool(listing.get("possible_kpi_files")),
-            "data_model_present": has_data_model,
-            "dataset_file_count": len(data_files),
-            "optional_context_present": has_context,
-        },
-        "kpis": kpi_scores,
-        "missing_discussion_points": _unique_sorted(
-            point for item in kpi_scores for point in item.get("missing_discussion_points", [])
-        ),
-    }
+    return quality_score_kpis(kpis, listing, context_files)
 
 
 def _build_draft_kpis(session: dict[str, Any]) -> list[dict[str, Any]]:
@@ -881,86 +830,27 @@ def _default_preferences() -> dict[str, str]:
 
 
 def _missing_discussion_points(kpi: KpiDefinition, has_context: bool) -> list[str]:
-    missing = []
-    text = " ".join([kpi.name, kpi.description, kpi.cuts, kpi.metric, kpi.refinement_required]).lower()
-    if "owner" not in text:
-        missing.append("owner")
-    if not any(token in text for token in ("decision", "action", "use to", "why")):
-        missing.append("decision_supported")
-    if not kpi.cuts:
-        missing.append("grain_or_dimensions")
-    if not any(token in text for token in ("date", "month", "year", "trend", "period", "service")):
-        missing.append("temporal_anchor")
-    if not any(token in text for token in ("exclude", "include", "filter", "where")):
-        missing.append("inclusions_exclusions")
-    if any(token in text for token in ("percentage", "share", "rate", "ratio")) and "denominator" not in text:
-        missing.append("denominator")
-    if "test" not in text and "acceptance" not in text:
-        missing.append("acceptance_tests")
-    if not has_context:
-        missing.append("stakeholder_context")
-    return _unique_sorted(missing)
+    return quality_missing_discussion_points(kpi, has_context)
 
 
 def _advisor_notes(quality: dict[str, Any]) -> list[str]:
-    notes = []
-    for point in quality.get("missing_discussion_points", []):
-        notes.append(f"Discuss `{point}` before production approval.")
-    return notes or ["No high-risk missing discussion point detected in the current evidence."]
+    return quality_advisor_notes(quality)
 
 
 def _merge_refinement(existing: str, missing: list[str]) -> str:
-    parts = [existing] if existing else []
-    if missing:
-        parts.append("Discuss: " + ", ".join(missing))
-    return "; ".join(parts)
+    return quality_merge_refinement(existing, missing)
 
 
 def _suggest_seed_kpi(session: dict[str, Any]) -> dict[str, Any]:
-    files = " ".join(session.get("detected_files", {}).get("files", [])).lower()
-    if "paid" in files or "amount" in files:
-        return {
-            "name": "What is paid amount trend by key business dimensions?",
-            "description": "Seed KPI suggested from available amount-like data.",
-            "cuts": "time period, payer or line of business when available",
-            "metric": "sum(PaidAmount)",
-            "refinement_required": "Confirm owner, temporal anchor, filters, and acceptance tests.",
-            "source": "generated_from_workspace_data",
-        }
-    return {
-        "name": "What operational KPI should this dataset support?",
-        "description": "Seed KPI requiring product/business clarification.",
-        "cuts": "confirm grain and dimensions",
-        "metric": "confirm metric",
-        "refinement_required": "Confirm business question, owner, metric, grain, and tests.",
-        "source": "generated_from_workspace_data",
-    }
+    return quality_suggest_seed_kpi(session)
 
 
 def _looks_like_business_question(value: str) -> bool:
-    return bool(re.match(r"^\s*(what|how|which|where|when|why|is|are|do|does)\b", value, re.I))
+    return quality_looks_like_business_question(value)
 
 
 def _column_like_token_overlap(text: str, data_files: list[str]) -> bool:
-    tokens = {token for token in re.split(r"[^a-z0-9]+", text.lower()) if len(token) > 3}
-    if not tokens:
-        return False
-    file_tokens = {
-        token
-        for file in data_files
-        for token in re.split(r"[^a-z0-9]+", Path(file).stem.lower())
-        if len(token) > 3
-    }
-    common_aliases = {
-        "paid": {"paid", "amount", "payment"},
-        "payer": {"payer", "payor"},
-        "lob": {"line", "business"},
-        "claim": {"claim", "claims"},
-    }
-    expanded = set(tokens)
-    for token in tokens:
-        expanded.update(common_aliases.get(token, set()))
-    return bool(expanded.intersection(file_tokens))
+    return quality_column_like_token_overlap(text, data_files)
 
 
 def _resolve_option(panel: dict[str, Any], answer: str) -> dict[str, Any]:
@@ -1000,7 +890,7 @@ def _one(options: list[dict[str, Any]], predicate: Any, answer: str) -> dict[str
 
 
 def _unique_sorted(values: Any) -> list[str]:
-    return sorted({str(value) for value in values if str(value)})
+    return quality_unique_sorted(values)
 
 
 def _norm(value: str) -> str:
@@ -1019,47 +909,18 @@ def _rel(path: Path, root: Path) -> str:
 
 
 def prepare_main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Prepare the KPI generation route/interview panel.")
-    parser.add_argument("--workspace", required=True)
-    parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--context-file", action="append", default=[])
-    args = parser.parse_args(argv)
-    result = KPIGenerationWorkflow(args.repo_root, args.workspace).prepare(
-        context_files=args.context_file
-    )
-    print(json.dumps(result.summary(), indent=2))
-    return 0
+    from core.onboarding.kpi_generation_cli import prepare_main as cli_prepare_main
+
+    return cli_prepare_main(argv)
 
 
 def apply_main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Apply an answer to the current KPI generation panel.")
-    parser.add_argument("--workspace", required=True)
-    parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--answer", required=True)
-    parser.add_argument("--context-file", action="append", default=[])
-    parser.add_argument("--custom-note", default="")
-    args = parser.parse_args(argv)
-    result = KPIGenerationWorkflow(args.repo_root, args.workspace).apply_answer(
-        answer=args.answer,
-        context_files=args.context_file,
-        custom_note=args.custom_note,
-    )
-    print(json.dumps(result.summary(), indent=2))
-    return 0
+    from core.onboarding.kpi_generation_cli import apply_main as cli_apply_main
+
+    return cli_apply_main(argv)
 
 
 def finalize_main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Finalize approved KPI generation draft.")
-    parser.add_argument("--workspace", required=True)
-    parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--approve-final-preview", action="store_true")
-    parser.add_argument("--output-registry", default="")
-    parser.add_argument("--replace-existing", action="store_true")
-    args = parser.parse_args(argv)
-    result = KPIGenerationWorkflow(args.repo_root, args.workspace).finalize(
-        approve_final_preview=args.approve_final_preview,
-        output_registry=args.output_registry,
-        replace_existing=args.replace_existing,
-    )
-    print(json.dumps(result.summary(), indent=2))
-    return 0
+    from core.onboarding.kpi_generation_cli import finalize_main as cli_finalize_main
+
+    return cli_finalize_main(argv)

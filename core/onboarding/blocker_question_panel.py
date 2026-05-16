@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from core.storage.workspace_layout import WorkspaceLayout
+from core.wiki import WikiLayout, read_feature_note
 
 
 PANEL_VERSION = 1
@@ -160,7 +161,9 @@ def _question_for_cluster(
     applies_to = [str(item["kpi"].get("kpi_id") or "") for item in items]
     evidence_files = _evidence_files(items, repo_root)
     base = {
+        "artifact_type": "blocker_question_panel/current.json",
         "version": PANEL_VERSION,
+        "generated_by": "blocker-question-panel",
         "workspace": _rel(workspace, repo_root),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "question_id": f"workspace_{_slug(feature)}",
@@ -172,6 +175,9 @@ def _question_for_cluster(
         "source_mapping": _rel(workspace / "interns" / "generated" / "contracts" / "kpi_feature_mapping.json", repo_root),
         "evidence_files": evidence_files,
     }
+    prior = _prior_wiki_decision(workspace, repo_root, feature)
+    if prior:
+        base["prior_decision_wiki"] = prior
     if derived_options:
         return {
             **base,
@@ -251,6 +257,20 @@ def _question_for_cluster(
             },
             _custom_rule_option(feature),
         ],
+    }
+
+
+def _prior_wiki_decision(workspace: Path, repo_root: Path, feature: str) -> dict[str, Any] | None:
+    note = read_feature_note(WikiLayout(project_root=workspace), feature)
+    if note is None:
+        return None
+    fm = note.frontmatter or {}
+    return {
+        "path": _rel(note.path, repo_root),
+        "summary": fm.get("summary") or "",
+        "updated": fm.get("updated") or "",
+        "user_why": note.why,
+        "has_user_why": note.has_user_why,
     }
 
 
@@ -375,7 +395,9 @@ def _evidence_files(items: list[dict[str, Any]], repo_root: Path) -> list[str]:
 
 def _empty_panel(mapping: dict[str, Any], workspace: Path, repo_root: Path) -> dict[str, Any]:
     return {
+        "artifact_type": "blocker_question_panel/current.json",
         "version": PANEL_VERSION,
+        "generated_by": "blocker-question-panel",
         "workspace": _rel(workspace, repo_root),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "question_id": "none",
@@ -400,6 +422,22 @@ def _render_markdown(panel: dict[str, Any]) -> str:
         f"- Reuse scope: `{panel.get('reuse_scope', 'none')}`",
         f"- Answer type: `{panel.get('answer_type', '')}`",
         "",
+    ]
+    prior = panel.get("prior_decision_wiki") or {}
+    if prior:
+        lines.extend(
+            [
+                "## Prior Decision (from wiki)",
+                "",
+                f"- Note: `{prior.get('path', '')}`",
+                f"- Summary: {prior.get('summary', '')}",
+                f"- Last updated: {prior.get('updated', '')}",
+                "",
+            ]
+        )
+        if prior.get("has_user_why") and prior.get("user_why"):
+            lines.extend(["### User-recorded *why*", "", str(prior.get("user_why")), ""])
+    lines += [
         "## Blocker",
         "",
         str(panel.get("blocker", "")),

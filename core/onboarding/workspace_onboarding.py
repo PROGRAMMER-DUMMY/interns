@@ -15,6 +15,14 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from core.onboarding.kpi_text_parser import (
+    cell_at,
+    clean_cell,
+    first_existing,
+    first_index,
+    infer_metric_and_cuts,
+    is_template_kpi_row,
+)
 from core.profiling.data_model_profiler import DataModelProfiler
 from core.storage.metadata_store import MetadataStore, build_metadata_store
 from core.storage.workspace_layout import WorkspaceLayout
@@ -105,6 +113,7 @@ class WorkspaceOnboarder:
             "kpi_registry": self._write_json(
                 self.layout.contracts_dir / "kpi_registry.json",
                 {
+                    "artifact_type": "kpi_registry.json",
                     "version": 1,
                     "generated_by": "onboard-workspace",
                     "workspace": _rel(self.workspace, self.repo_root),
@@ -129,7 +138,13 @@ class WorkspaceOnboarder:
         }
         profile_index = self._write_json(
             self.layout.profiles_dir / "profile_index.json",
-            {"profiles": profiles},
+            {
+                "artifact_type": "profile_index.json",
+                "version": 1,
+                "generated_by": "onboard-workspace",
+                "workspace": _rel(self.workspace, self.repo_root),
+                "profiles": profiles,
+            },
         )
         artifacts["profile_index"] = profile_index
 
@@ -152,7 +167,7 @@ class WorkspaceOnboarder:
         if datasets_dir.exists():
             data_files = sorted(
                 path for path in datasets_dir.rglob("*")
-                if path.is_file() and path.suffix.lower() in DATA_SUFFIXES
+                if path.is_file() and path.suffix.lower() in DATA_SUFFIXES and self.layout.is_dataset_allowed(path)
             )
 
         docs_dir = self.workspace / "docs"
@@ -230,6 +245,9 @@ class WorkspaceOnboarder:
         profiles: list[dict[str, Any]],
     ) -> dict[str, Any]:
         return {
+            "artifact_type": "domain_model.json",
+            "version": 1,
+            "generated_by": "onboard-workspace",
             "workspace": inputs.workspace,
             "data_models": inputs.data_models,
             "datasets": [
@@ -686,74 +704,27 @@ def _read_markdown_kpis(path: Path, repo_root: Path) -> list[KpiDefinition]:
 
 
 def _first_existing(lowered: dict[str, str], candidates: list[str]) -> str | None:
-    for candidate in candidates:
-        if candidate in lowered:
-            return lowered[candidate]
-    return None
+    return first_existing(lowered, candidates)
 
 
 def _is_template_kpi_row(name: str) -> bool:
-    normalized = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
-    template_markers = (
-        "which key business question is the kpi metric feature meant to answer",
-        "key business question",
-        "short description of the kpi metric feature",
-    )
-    return any(marker in normalized for marker in template_markers)
+    return is_template_kpi_row(name)
 
 
 def _infer_metric_and_cuts(name: str, description: str = "") -> tuple[str, str]:
-    text = f"{name} {description}".lower()
-    metric = ""
-    cuts: list[str] = []
-    if "amount paid" in text or "paid amount" in text:
-        metric = "amount paid"
-    elif "percentage share of lives" in text or "share of lives" in text:
-        metric = "percentage share of lives"
-    elif "lives count" in text:
-        metric = "lives count"
-
-    if "lob" in text or "line of business" in text:
-        if "medicare" in text:
-            cuts.append("LOB = Medicare")
-        elif "commercial" in text:
-            cuts.append("LOB = Commercial")
-        else:
-            cuts.append("LOB")
-    if "gender" in text:
-        cuts.append("Gender")
-    if "payer" in text or "payor" in text:
-        cuts.append("Payer")
-    if "above 50" in text or "over 50" in text:
-        cuts.append("Age > 50")
-    elif re.search(r"\bage\b", text):
-        cuts.append("Age")
-    if "visit type" in text:
-        cuts.append("VisitType")
-    if "department" in text:
-        cuts.append("Department")
-    if "top 10" in text and "Payer" not in cuts:
-        cuts.append("Payer top 10")
-    return metric, ", ".join(dict.fromkeys(cuts))
+    return infer_metric_and_cuts(name, description)
 
 
 def _first_index(index: dict[str, int], candidates: list[str]) -> int | None:
-    for candidate in candidates:
-        if candidate in index:
-            return index[candidate]
-    return None
+    return first_index(index, candidates)
 
 
 def _cell_at(row: list[str], idx: int | None) -> str:
-    if idx is None or idx >= len(row):
-        return ""
-    return row[idx].strip()
+    return cell_at(row, idx)
 
 
 def _clean_cell(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value).strip()
+    return clean_cell(value)
 
 
 def _rel(path: Path, root: Path) -> str:

@@ -40,15 +40,26 @@ class RelationshipContractBuilder:
         self.layout.ensure_runtime_dirs()
         profiles = self._profile_index()
         data_model_docs = self._data_model_docs()
+        finalized_model_relationships = _relationships_from_finalized_model(
+            self.layout,
+            profiles,
+            self.repo_root,
+        )
         doc_relationships = _parse_relationships_from_docs(data_model_docs, profiles)
         profile_relationships = _profile_relationship_candidates(profiles)
         profile_relationships = _promote_profile_relationships_with_doc_context(
             profile_relationships,
             data_model_docs,
         )
-        relationships = _merge_relationships(doc_relationships, profile_relationships)
+        relationships = _merge_relationships(
+            doc_relationships,
+            profile_relationships,
+            finalized_model_relationships,
+        )
         contract = {
+            "artifact_type": "relationship_contracts.json",
             "version": RELATIONSHIP_VERSION,
+            "generated_by": "build-relationship-contracts",
             "workspace": _rel(self.workspace, self.repo_root),
             "generated_at": _now(),
             "evidence_order": [
@@ -131,6 +142,11 @@ def load_relationship_contracts(
     if not path.exists():
         return []
     data = json.loads(path.read_text(encoding="utf-8"))
+    from core.onboarding.artifact_contracts import RELATIONSHIP_CONTRACTS_CONTRACT
+
+    error = RELATIONSHIP_CONTRACTS_CONTRACT.validate(data)
+    if error:
+        raise ValueError(f"{_rel(path, root)}: {error}")
     return data.get("relationships", [])
 
 
@@ -392,16 +408,76 @@ def _relationship(
     }
 
 
-def _merge_relationships(
-    doc_relationships: list[dict[str, Any]],
-    profile_relationships: list[dict[str, Any]],
+def _relationships_from_finalized_model(
+    layout: WorkspaceLayout,
+    profiles: dict[str, dict[str, Any]],
+    repo_root: Path,
 ) -> list[dict[str, Any]]:
+    path = layout.contracts_dir / "data_model_contract.json"
+    if not path.exists():
+        return []
+    try:
+        contract = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    if contract.get("status") != "finalized":
+        return []
+    by_table = {
+        str(table.get("name") or ""): _repo_path(str(table.get("source_dataset") or ""), repo_root)
+        for table in contract.get("tables", [])
+    }
+    relationships = []
+    for item in contract.get("relationships", []):
+        approval = item.get("approval") or {}
+        if approval.get("state") != "approved":
+            continue
+        left_dataset = _repo_path(
+            str(item.get("from_dataset") or by_table.get(str(item.get("from_table") or ""), "")),
+            repo_root,
+        )
+        right_dataset = _repo_path(
+            str(item.get("to_dataset") or by_table.get(str(item.get("to_table") or ""), "")),
+            repo_root,
+        )
+        if not left_dataset or not right_dataset:
+            continue
+        if left_dataset not in profiles or right_dataset not in profiles:
+            continue
+        left_column = _resolve_column(str(item.get("from_column") or ""), profiles[left_dataset])
+        right_column = _resolve_column(str(item.get("to_column") or ""), profiles[right_dataset])
+        if not left_column or not right_column:
+            continue
+        state = "proven_data_model" if item.get("state") == "proven_data_model" else "user_confirmed"
+        relationships.append(
+            _relationship(
+                left_dataset=left_dataset,
+                left_column=left_column,
+                right_dataset=right_dataset,
+                right_column=right_column,
+                state=state,
+                confidence=float(item.get("confidence") or 0.9),
+                evidence_sources=[
+                    {
+                        "type": "finalized_data_model_contract",
+                        "path": _rel(path, repo_root),
+                        "relationship_id": item.get("relationship_id", ""),
+                        "approval_source": approval.get("approval_source", ""),
+                    },
+                    *item.get("evidence_sources", []),
+                ],
+            )
+        )
+    return relationships
+
+
+def _merge_relationships(*relationship_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
-    for relationship in [*profile_relationships, *doc_relationships]:
-        key = _canonical_key(relationship)
-        current = merged.get(key)
-        if not current or _state_rank(relationship["state"]) > _state_rank(current["state"]):
-            merged[key] = relationship
+    for group in relationship_groups:
+        for relationship in group:
+            key = _canonical_key(relationship)
+            current = merged.get(key)
+            if not current or _state_rank(relationship["state"]) > _state_rank(current["state"]):
+                merged[key] = relationship
     return sorted(merged.values(), key=lambda item: item["relationship_id"])
 
 

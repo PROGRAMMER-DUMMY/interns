@@ -34,10 +34,12 @@ dependencies = [
     "mlflow>=3.0",
     "tabulate>=0.10.0",
     "pdfplumber>=0.11.9",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]
 loop      = "core.orchestration.loop:main"
+cli-inspect = "core.agents.cli_inspector:main"
 onboard-workspace = "core.onboarding.workspace_onboarding:main"
 kickstart-workspace = "core.onboarding.kickstart_workspace:main"
 resolve-kpi-features = "core.onboarding.kpi_feature_resolver:main"
@@ -46,18 +48,25 @@ cleanup-workspace-references = "core.onboarding.workspace_cleanup:main"
 derived-feature-markdown = "core.onboarding.derived_feature_markdown:main"
 blocker-question-panel = "core.onboarding.blocker_question_panel:main"
 validate-workspace-artifacts = "core.onboarding.workspace_artifact_validator:main"
-prepare-kpi-blocker-panel = "core.onboarding.kpi_blocker_workflow:prepare_main"
-apply-kpi-panel-answer = "core.onboarding.kpi_blocker_workflow:apply_main"
+prepare-kpi-blocker-panel = "core.onboarding.kpi_blocker_cli:prepare_main"
+apply-kpi-panel-answer = "core.onboarding.kpi_blocker_cli:apply_main"
 plan-source-to-target = "core.onboarding.source_to_target_planner:main"
 build-relationship-contracts = "core.onboarding.relationship_contracts:main"
-prepare-kpi-generation = "core.onboarding.kpi_generation_workflow:prepare_main"
-apply-kpi-generation-answer = "core.onboarding.kpi_generation_workflow:apply_main"
-finalize-kpi-generation = "core.onboarding.kpi_generation_workflow:finalize_main"
+prepare-kpi-generation = "core.onboarding.kpi_generation_cli:prepare_main"
+apply-kpi-generation-answer = "core.onboarding.kpi_generation_cli:apply_main"
+finalize-kpi-generation = "core.onboarding.kpi_generation_cli:finalize_main"
+prepare-data-model-generation = "core.onboarding.data_model_generation_cli:prepare_main"
+apply-data-model-answer = "core.onboarding.data_model_generation_cli:apply_main"
+finalize-data-model-generation = "core.onboarding.data_model_generation_cli:finalize_main"
 prepare-databricks-assets = "core.onboarding.databricks_assets:main"
 prepare-genie-workspace = "core.onboarding.genie_workspace:main"
 deploy-databricks-workspace = "core.onboarding.databricks_workspace_deployer:main"
 generate-skill-adapters = "core.skills.adapter_generator:main"
 list-workspace-files = "tools.list_workspace_files:main"
+design-medallion = "core.medallion.design_cli:main"
+build-medallion = "core.medallion.build_cli:main"
+medallion-lineage = "core.medallion.lineage_cli:main"
+medallion-init-salt = "core.medallion.salt_store:_init_salt_cli"
 prepare   = "prepare:main"
 
 [build-system]

@@ -78,16 +78,44 @@ class DuckDBKPISQLGenerator:
             relationships,
         )
         select_items = []
+        # Load sensitive columns from semantic contract
+        contract_path = self.layout.contracts_dir / "semantic_contract.json"
+        sensitive_cols = set()
+        if contract_path.exists():
+            try:
+                contract_data = json.loads(contract_path.read_text(encoding="utf-8"))
+                columns = contract_data.get("columns", {})
+                for col_name, col_meta in columns.items():
+                    if col_meta.get("is_sensitive"):
+                        sensitive_cols.add(col_name.lower())
+            except Exception:
+                pass
+
         for feature in kpi.get("features", []):
             column = self._feature_expression(feature, source_aliases, profile_map)
             if column:
                 res_type = feature.get("resolution_type")
+                feat_name = feature['feature']
+                
+                # Apply masking if column is sensitive
+                expr = column
+                if feat_name.lower() in sensitive_cols or column.split('.')[-1].strip('"').lower() in sensitive_cols:
+                    if self.dialect == "duckdb":
+                        expr = f"hash({column})" # Simple hash for DuckDB
+                    elif self.dialect == "databricks":
+                        expr = f"sha2({column}, 256)"
+
                 if res_type == "derived_formula":
                     select_items.append(
-                        f"    {column} AS {self.quote_ident(feature['feature'])}"
+                        f"    {expr} AS {self.quote_ident(feat_name)}"
                     )
                 else:
-                    select_items.append(f"    {column} AS {self.quote_ident(feature['feature'])}")
+                    select_items.append(f"    {expr} AS {self.quote_ident(feat_name)}")
+        
+        # Include analytical anchors if available in the primary fact source
+        if "s0" in source_aliases:
+            select_items.append('    s0."ServiceDate" AS "ServiceDate"')
+            select_items.append('    s0."DeptID" AS "DeptID"')
         if not select_items:
             select_items.append("    1 AS ready_marker")
 

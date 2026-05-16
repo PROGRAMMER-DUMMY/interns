@@ -1,19 +1,20 @@
 """Deterministic KPI blocker panel workflow wrappers."""
 from __future__ import annotations
 
-import argparse
 import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.failures import WorkflowBlockedError, validation_blocker
 from core.onboarding.blocker_question_panel import BlockerQuestionPanelBuilder
 from core.onboarding.derived_feature_markdown import DerivedFeatureMarkdownConverter
 from core.onboarding.kpi_feature_resolver import KPIFeatureResolver, apply_workspace_definition
 from core.onboarding.workspace_artifact_validator import WorkspaceArtifactValidator
 from core.onboarding.workspace_onboarding import WorkspaceOnboarder
 from core.storage.workspace_layout import WorkspaceLayout
+from core.wiki import WikiLayout, build_feature_scaffold, upsert_feature_note
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,13 @@ def prepare_kpi_blocker_panel(
     panel_result = BlockerQuestionPanelBuilder(root, _rel(workspace_path, root)).run()
     validation = WorkspaceArtifactValidator(root, _rel(workspace_path, root)).run()
     if not validation.ok:
-        raise ValueError("workspace artifact validation failed:\n" + "\n".join(validation.errors))
+        raise WorkflowBlockedError(
+            validation_blocker(
+                "prepare_kpi_blocker_panel.validation",
+                "workspace artifact validation failed:\n" + "\n".join(validation.errors),
+                next_command=f"uv run validate-workspace-artifacts --workspace {_rel(workspace_path, root)}",
+            )
+        )
     return PreparedPanelResult(
         workspace=_rel(workspace_path, root),
         onboarded=onboarded,
@@ -120,13 +127,28 @@ def apply_kpi_panel_answer(
         raise FileNotFoundError(f"question panel not found: {_rel(panel_path, root)}")
     validation = WorkspaceArtifactValidator(root, _rel(workspace_path, root)).run()
     if not validation.ok:
-        raise ValueError("workspace artifact validation failed:\n" + "\n".join(validation.errors))
+        raise WorkflowBlockedError(
+            validation_blocker(
+                "apply_kpi_panel_answer.validation",
+                "workspace artifact validation failed:\n" + "\n".join(validation.errors),
+                next_command=f"uv run validate-workspace-artifacts --workspace {_rel(workspace_path, root)}",
+            )
+        )
     panel = json.loads(panel_path.read_text(encoding="utf-8"))
     option = _resolve_answer(panel, answer)
     feature = str(panel.get("feature") or "")
     apply_summary = _apply_option(
         root,
         _rel(workspace_path, root),
+        feature=feature,
+        option=option,
+        panel=panel,
+        custom_definition=custom_definition,
+        evidence_note=evidence_note,
+    )
+    _write_feature_wiki_note(
+        root,
+        workspace_path,
         feature=feature,
         option=option,
         panel=panel,
@@ -147,6 +169,33 @@ def apply_kpi_panel_answer(
         apply_summary=apply_summary,
         prepared_panel=prepared.summary(),
     )
+
+
+def _write_feature_wiki_note(
+    root: Path,
+    workspace_path: Path,
+    *,
+    feature: str,
+    option: dict[str, Any],
+    panel: dict[str, Any],
+    custom_definition: str,
+    evidence_note: str,
+) -> None:
+    if not feature:
+        return
+    contract_ref = (
+        f"{_rel(workspace_path, root)}/interns/generated/contracts/"
+        f"workspace_feature_definitions.json#{feature}"
+    )
+    scaffold = build_feature_scaffold(
+        feature=feature,
+        option=option,
+        panel=panel,
+        custom_definition=custom_definition,
+        evidence_note=evidence_note,
+        contract_ref=contract_ref,
+    )
+    upsert_feature_note(WikiLayout(project_root=workspace_path), feature, scaffold)
 
 
 def _apply_option(
@@ -297,40 +346,12 @@ def _rel(path: Path, root: Path) -> str:
 
 
 def prepare_main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Prepare a validated KPI blocker question panel.")
-    parser.add_argument("--workspace", required=True)
-    parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--domain", default="healthcare")
-    parser.add_argument("--force-onboard", action="store_true")
-    parser.add_argument("--no-onboard-if-missing", action="store_true")
-    args = parser.parse_args(argv)
-    result = prepare_kpi_blocker_panel(
-        args.repo_root,
-        args.workspace,
-        domain=args.domain,
-        onboard_if_missing=not args.no_onboard_if_missing,
-        force_onboard=args.force_onboard,
-    )
-    print(json.dumps(result.summary(), indent=2))
-    return 0
+    from core.onboarding.kpi_blocker_cli import prepare_main as cli_prepare_main
+
+    return cli_prepare_main(argv)
 
 
 def apply_main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Apply an answer from the current KPI blocker panel.")
-    parser.add_argument("--workspace", required=True)
-    parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--domain", default="healthcare")
-    parser.add_argument("--answer", required=True, help="Option id, exact label, or unambiguous friendly answer.")
-    parser.add_argument("--custom-definition", default="")
-    parser.add_argument("--evidence-note", default="")
-    args = parser.parse_args(argv)
-    result = apply_kpi_panel_answer(
-        args.repo_root,
-        args.workspace,
-        answer=args.answer,
-        domain=args.domain,
-        custom_definition=args.custom_definition,
-        evidence_note=args.evidence_note,
-    )
-    print(json.dumps(result.summary(), indent=2))
-    return 0
+    from core.onboarding.kpi_blocker_cli import apply_main as cli_apply_main
+
+    return cli_apply_main(argv)

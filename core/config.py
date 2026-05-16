@@ -85,6 +85,10 @@ class Config:
 
     # main agent driving the loop
     main_agent: str = "claude-code"  # claude-code | gemini-cli | codex | api
+    main_agent_timeout_sec: int = 300
+    max_editable_file_kb: int = 50
+    prior_output_max_chars: int = 1800
+    intern_retry_backoff_s: int = 5
 
     # limits
     max_token_count: int = 800
@@ -155,6 +159,10 @@ def load() -> Config:
         primary_backend=back["primary"],
         force_cli=back["force_cli"],
         main_agent=lock.get("agent", {}).get("main_agent", "claude-code"),
+        main_agent_timeout_sec=lock.get("agent", {}).get("main_agent_timeout_sec", 300),
+        max_editable_file_kb=lock.get("agent", {}).get("max_editable_file_kb", 50),
+        prior_output_max_chars=lock.get("agent", {}).get("prior_output_max_chars", 1800),
+        intern_retry_backoff_s=lock.get("agent", {}).get("intern_retry_backoff_s", 5),
         max_token_count=lim["max_token_count"],
         max_run_seconds=lim["max_run_seconds"],
         hard_timeout_seconds=lim["hard_timeout_seconds"],

@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from core.onboarding.kpi_feature_resolver import READY_STATES
+from core.onboarding.artifact_contracts import (
+    DOMAIN_MODEL_CONTRACT,
+    KPI_FEATURE_MAPPING_CONTRACT,
+    PROFILE_INDEX_CONTRACT,
+)
 from core.onboarding.relationship_contracts import (
     find_executable_relationship,
     load_relationship_contracts,
@@ -59,7 +64,9 @@ class SourceToTargetPlanner:
             _rel(self.workspace, self.repo_root),
         )
         plan = {
+            "artifact_type": "source_to_target_plan.json",
             "version": 1,
+            "generated_by": "plan-source-to-target",
             "workspace": _rel(self.workspace, self.repo_root),
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "target_engine": self.target_engine,
@@ -258,7 +265,18 @@ class SourceToTargetPlanner:
             if required:
                 raise FileNotFoundError(f"required artifact not found: {path}")
             return {}
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        contracts = {
+            "kpi_feature_mapping.json": KPI_FEATURE_MAPPING_CONTRACT,
+            "domain_model.json": DOMAIN_MODEL_CONTRACT,
+            "profile_index.json": PROFILE_INDEX_CONTRACT,
+        }
+        contract = contracts.get(path.name)
+        if contract:
+            error = contract.validate(data)
+            if error:
+                raise ValueError(f"{_rel(path, self.repo_root)}: {error}")
+        return data
 
     def _validate_workspace(self) -> None:
         if not self.workspace.exists():

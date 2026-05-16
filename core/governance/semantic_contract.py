@@ -75,6 +75,16 @@ class SemanticContract:
                         source=str(path),
                     )
                 )
+            
+            if detail.get("is_sensitive"):
+                self.rules.append(
+                    ContractRule(
+                        rule_id=f"sensitive_column_{column}",
+                        kind="security_masking",
+                        description=f"{column} is marked as sensitive and must be masked or hashed in outputs.",
+                        source=str(path),
+                    )
+                )
 
     def merge_kpi_registry(self, path: Path) -> None:
         if not path.exists():

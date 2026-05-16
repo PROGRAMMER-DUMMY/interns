@@ -110,6 +110,43 @@ writes the user-facing KPI registry, production-readiness proof, workspace memor
 preference memory. Without `--approve-final-preview`, it must fail. Existing registry outputs require
 `--replace-existing`.
 
+### prepare-data-model-generation
+
+Command:
+
+```powershell
+uv run prepare-data-model-generation --workspace workspaces/<project>
+```
+
+Use after onboarding/profiling when data model docs are missing, weak, image-only, or need to be
+converted into governed relationship proof. It writes a route panel under
+`interns/reports/data_model_generation/` and does not finalize user-facing docs.
+
+### apply-data-model-answer
+
+Command:
+
+```powershell
+uv run apply-data-model-answer --workspace workspaces/<project> --answer option_b
+```
+
+Use after the user answers the current data-model panel. It writes a draft core model pack under
+`interns/generated/requirements/` and readable draft reports under
+`interns/reports/data_model_generation/`.
+
+### finalize-data-model-generation
+
+Command:
+
+```powershell
+uv run finalize-data-model-generation --workspace workspaces/<project> --approve-final-preview
+```
+
+Use only after the draft data model preview is reviewed and explicitly approved. It writes
+user-facing `docs/data-model.md`, `docs/erd.md`, `docs/relationships.md`, and finalized
+`interns/generated/contracts/data_model_contract.json`. Approved relationships can then be promoted
+by `build-relationship-contracts` for executable SQL planning.
+
 ### resolve-kpi-features
 
 Command:

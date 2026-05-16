@@ -57,6 +57,27 @@
       "safety": "requires_explicit_final_preview_approval"
     },
     {
+      "name": "prepare-data-model-generation",
+      "command": "uv run prepare-data-model-generation --workspace <workspace>",
+      "use_when": ["data model docs are missing, weak, or image-only", "workspace needs governed data model creation or parsing", "relationship proof should be reviewed before executable SQL"],
+      "outputs": ["interns/reports/data_model_generation/current.json", "interns/reports/data_model_generation/current.md"],
+      "safety": "local_safe"
+    },
+    {
+      "name": "apply-data-model-answer",
+      "command": "uv run apply-data-model-answer --workspace <workspace> --answer <option_id_or_label>",
+      "use_when": ["user answered the current data-model generation panel", "draft data-model artifacts should be produced under interns"],
+      "outputs": ["interns/generated/requirements/data_model_draft.json", "interns/reports/data_model_generation"],
+      "safety": "local_safe_validated_write"
+    },
+    {
+      "name": "finalize-data-model-generation",
+      "command": "uv run finalize-data-model-generation --workspace <workspace> --approve-final-preview",
+      "use_when": ["draft data model preview was shown and explicitly approved", "write user-facing data model docs and finalized model contract"],
+      "outputs": ["docs/data-model.md", "docs/erd.md", "docs/relationships.md", "interns/generated/contracts/data_model_contract.json"],
+      "safety": "requires_explicit_final_preview_approval"
+    },
+    {
       "name": "resolve-kpi-features",
       "command": "uv run resolve-kpi-features --workspace <workspace> --domain <domain> --include-candidates",
       "use_when": ["KPI features need mapping", "blockers need clustering", "accepted definitions need applying"],
