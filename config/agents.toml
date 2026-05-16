@@ -3,7 +3,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [interns.healthcare]
-active = ["code_reviewer", "insights", "methodology_analyst"]
+active = ["code_reviewer", "insights", "methodology_analyst", "sql_specialist", "data_engineer", "validation", "medallion_architect"]
 
 [interns.limits]
 max_calls_per_session = 50

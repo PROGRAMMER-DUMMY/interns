@@ -14,7 +14,17 @@ import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Type
-from urllib.parse import urlparse
+
+from tools.profiler_utils import (
+    clamp_score as util_clamp_score,
+    human_size as util_human_size,
+    is_numeric_dtype as util_is_numeric_dtype,
+    mean_safe as util_mean_safe,
+    parse_column_list as util_parse_column_list,
+    pct_label as util_pct_label,
+    safe_filename_part as util_safe_filename_part,
+    unique_preserve_order as util_unique_preserve_order,
+)
 
 # Configure rich logging if available
 try:
@@ -82,36 +92,29 @@ except ImportError:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def human_size(n_bytes: int) -> str:
-    if not n_bytes: return "Unknown Size"
-    for unit in ["B", "KB", "MB", "GB", "TB", "PB"]:
-        if n_bytes < 1024: return f"{n_bytes:.2f} {unit}"
-        n_bytes /= 1024
-    return f"{n_bytes:.2f} EB"
+    return util_human_size(n_bytes)
 
 def pct_label(pct: float) -> str:
     """Return a stable filesystem-safe label for sample percentages."""
-    return f"{pct:g}".replace(".", "p").replace("-", "neg")
+    return util_pct_label(pct)
 
 def is_numeric_dtype(dtype: Any) -> bool:
-    return bool(getattr(dtype, "is_numeric", lambda: False)())
+    return util_is_numeric_dtype(dtype)
 
 def safe_filename_part(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("_") or "column"
+    return util_safe_filename_part(value)
 
 def parse_column_list(value: Optional[str]) -> List[str]:
-    if not value:
-        return []
-    return [item.strip() for item in value.split(",") if item.strip()]
+    return util_parse_column_list(value)
 
 def clamp_score(value: float) -> float:
-    return round(max(0.0, min(100.0, value)), 3)
+    return util_clamp_score(value)
 
 def mean_safe(values: List[float], default: float = 0.0) -> float:
-    clean = [v for v in values if v is not None]
-    return sum(clean) / len(clean) if clean else default
+    return util_mean_safe(values, default)
 
 def unique_preserve_order(values: List[str]) -> List[str]:
-    return list(dict.fromkeys([v for v in values if v]))
+    return util_unique_preserve_order(values)
 
 ID_PATTERN = re.compile(r"^(id|.*_id|.*_key|uuid|guid|npi|.*_npi)$", re.IGNORECASE)
 ZIP_PATTERN = re.compile(r"^\d{5}(-\d{4})?$")
@@ -290,7 +293,8 @@ class AbstractDataEngine(ABC):
 
 class PolarsEngine(AbstractDataEngine):
     def __init__(self, uri: str, schema_overrides: Optional[Dict[str, Any]] = None):
-        if not pl: raise ImportError("Polars is not installed.")
+        if not pl:
+            raise ImportError("Polars is not installed.")
         self.uri = uri
         self.schema_overrides = schema_overrides or {}
         self.lf, self.fmt, self.size = self._init_lazy_frame(uri)
@@ -306,7 +310,7 @@ class PolarsEngine(AbstractDataEngine):
             schema = self.lf.collect_schema()
             try:
                 n_rows = self.lf.select(pl.len()).collect().item()
-            except:
+            except Exception:
                 n_rows = None
             return {"file_size": self.size, "n_rows": n_rows, "n_cols": len(schema), "schema": schema}
         return await asyncio.to_thread(_fetch)
@@ -460,9 +464,12 @@ class PolarsEngine(AbstractDataEngine):
             out = Path(out_dir)
             out.mkdir(parents=True, exist_ok=True)
             path = out / f"sample_{pct_label(pct)}pct.{fmt}"
-            if fmt == "parquet": sample_df.write_parquet(path)
-            elif fmt == "csv": sample_df.write_csv(path)
-            elif fmt == "delta": sample_df.write_delta(path)
+            if fmt == "parquet":
+                sample_df.write_parquet(path)
+            elif fmt == "csv":
+                sample_df.write_csv(path)
+            elif fmt == "delta":
+                sample_df.write_delta(path)
             profile["full"].write_csv(out / "full_profile.csv")
             logger.info(f"Polars output saved to {path}")
         await asyncio.to_thread(_save)
@@ -914,7 +921,8 @@ class PolarsEngine(AbstractDataEngine):
         for feature in features:
             if is_numeric_dtype(schema[feature]):
                 fill_value = sample_eval.get_column(feature).median()
-                if fill_value is None: fill_value = 0.0
+                if fill_value is None:
+                    fill_value = 0.0
                 sample_exprs.append(pl.col(feature).fill_null(fill_value))
                 full_exprs.append(pl.col(feature).fill_null(fill_value))
             elif schema[feature] == pl.Boolean:
@@ -1050,7 +1058,8 @@ class SparkEngine(AbstractDataEngine):
                     "column": col, "is_categorical": is_cat,
                     "fill_pct": 100.0, "n_unique": 2, "unique_ratio": 0.01 # Mocked for quick strat selection
                 })
-            if pl: return pl.DataFrame(records)
+            if pl:
+                return pl.DataFrame(records)
             return records
         return await asyncio.to_thread(_profile)
 
@@ -1113,7 +1122,8 @@ class SparkEngine(AbstractDataEngine):
                     "n_unique": stats[f"{c}_unq"], "above_threshold": fill_pct >= top_fill_threshold
                 })
 
-            if pl: return {"full": pl.DataFrame(records), "high_fill": pl.DataFrame(records).filter(pl.col("above_threshold"))}
+            if pl:
+                return {"full": pl.DataFrame(records), "high_fill": pl.DataFrame(records).filter(pl.col("above_threshold"))}
             return {"full": records}
         return await asyncio.to_thread(_full)
 
@@ -1133,7 +1143,8 @@ class SparkEngine(AbstractDataEngine):
 
 class SQLEngine(AbstractDataEngine):
     def __init__(self, uri: str, table_name: str):
-        if not sa: raise ImportError("SQLAlchemy is not installed.")
+        if not sa:
+            raise ImportError("SQLAlchemy is not installed.")
         self.uri = uri
         self.table_name = table_name
         self.engine = sa.create_engine(uri)
@@ -1235,10 +1246,14 @@ async def run_pipeline(
 
     # 1. Dispatcher
     EngineClass = None
-    if engine_choice == "auto": EngineClass = auto_detect_engine(uri)
-    elif engine_choice == "polars": EngineClass = PolarsEngine
-    elif engine_choice == "spark": EngineClass = SparkEngine
-    elif engine_choice == "sql": EngineClass = SQLEngine
+    if engine_choice == "auto":
+        EngineClass = auto_detect_engine(uri)
+    elif engine_choice == "polars":
+        EngineClass = PolarsEngine
+    elif engine_choice == "spark":
+        EngineClass = SparkEngine
+    elif engine_choice == "sql":
+        EngineClass = SQLEngine
 
     logger.info(f"[Step 1] Initializing Engine: {EngineClass.__name__}")
 
@@ -1265,7 +1280,7 @@ async def run_pipeline(
         q_prof = await engine.quick_profile()
         if pl and isinstance(q_prof, pl.DataFrame) and q_prof.height > 0:
             strat_candidates = q_prof.filter(
-                (pl.col("is_categorical") == True) &
+                pl.col("is_categorical") &
                 (pl.col("n_unique") >= 2) &
                 (pl.col("n_unique") <= 250) &
                 (pl.col("unique_ratio") <= 0.05)

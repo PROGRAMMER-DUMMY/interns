@@ -25,6 +25,7 @@ from core.onboarding.kpi_feature_resolver import (
 )
 from core.onboarding.kpi_blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
 from core.onboarding.kpi_generation_workflow import KPIGenerationWorkflow
+from core.onboarding.data_model_generation_workflow import DataModelGenerationWorkflow
 from core.onboarding.relationship_contracts import RelationshipContractBuilder
 from core.onboarding.source_to_target_planner import SourceToTargetPlanner
 from core.onboarding.kpi_sql_generator import DuckDBKPISQLGenerator
@@ -917,6 +918,16 @@ diff --git a/model.sql b/model.sql
             self.assertFalse(invalid.ok)
             self.assertTrue(any("generated_by" in error for error in invalid.errors))
 
+            mapping_path = workspace / "interns" / "generated" / "contracts" / "kpi_feature_mapping.json"
+            mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+            mapping["version"] = 999
+            mapping_path.write_text(json.dumps(mapping, indent=2), encoding="utf-8")
+
+            invalid_version = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+
+            self.assertFalse(invalid_version.ok)
+            self.assertTrue(any("version=999 is not supported" in error for error in invalid_version.errors))
+
     def test_kpi_feature_resolver_proves_structural_aliases_and_prioritizes_blockers(self):
         try:
             import polars  # noqa: F401
@@ -1168,6 +1179,62 @@ diff --git a/model.sql b/model.sql
             self.assertEqual(relationship["state"], "profile_validated")
             self.assertFalse(
                 relationship["executable_usage_policy"]["allowed_in_sql_generation"]
+            )
+
+    def test_data_model_generation_finalize_promotes_relationship_contracts(self):
+        try:
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            (workspace / "datasets").mkdir(parents=True)
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets" / "transactions.csv").write_text(
+                "TransactionID,PatientID,PaidAmount\nT1,P1,10.50\n",
+                encoding="utf-8",
+            )
+            (workspace / "datasets" / "patients.csv").write_text(
+                "PatientID,Gender\nP1,F\n",
+                encoding="utf-8",
+            )
+            (workspace / "docs" / "DataModel.png").write_text("not an actual image", encoding="utf-8")
+
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            first_contract = RelationshipContractBuilder(root, "workspaces/demo").build()
+            self.assertEqual(first_contract.executable_relationship_count, 0)
+
+            workflow = DataModelGenerationWorkflow(root, "workspaces/demo")
+            prepared = workflow.prepare()
+            self.assertEqual(prepared.stage, "route_selection")
+            panel = json.loads((root / prepared.current_json_path).read_text(encoding="utf-8"))
+            self.assertEqual(panel["recommended_option_id"], "option_c")
+
+            applied = workflow.apply_answer(answer="option_b")
+            self.assertEqual(applied.stage, "final_preview")
+            draft = json.loads(
+                (root / "workspaces/demo/interns/generated/requirements/data_model_draft.json")
+                .read_text(encoding="utf-8")
+            )
+            self.assertGreaterEqual(draft["summary"]["relationship_count"], 1)
+            self.assertEqual(draft["image_model_policy"]["state"], "review_gated")
+
+            finalized = workflow.finalize(approve_final_preview=True)
+            self.assertTrue((root / finalized.data_model_markdown_path).exists())
+            self.assertTrue((root / finalized.erd_markdown_path).exists())
+            self.assertTrue((root / finalized.relationships_markdown_path).exists())
+
+            result = RelationshipContractBuilder(root, "workspaces/demo").build()
+            self.assertGreaterEqual(result.executable_relationship_count, 1)
+            contract = json.loads((root / result.json_path).read_text(encoding="utf-8"))
+            self.assertTrue(
+                any(
+                    rel["state"] == "user_confirmed"
+                    and rel["executable_usage_policy"]["allowed_in_sql_generation"]
+                    for rel in contract["relationships"]
+                )
             )
 
     def test_source_to_target_planner_writes_data_model_backed_plan(self):

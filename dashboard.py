@@ -1,1351 +1,1607 @@
 """
-Autoresearch Dashboard
-Run: python dashboard.py  (or: uv run python dashboard.py)
-
-Reads from state/workspace.db (SQLite) when available,
-falls back to state/*.tsv / state/*.json / state/*.jsonl flat files.
+Autoresearch Control Plane  —  dashboard.py v3
+Run: uv run python dashboard.py [--port 8050]
 """
+from __future__ import annotations
+
 import json
 import os
+import re
 import sqlite3
+import signal
 import subprocess
-from datetime import datetime
+import sys
+import time
 from pathlib import Path
+from typing import Any
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import dash_table, dcc, html
-from dash.dependencies import Input, Output
+from dash import Input, Output, State, callback_context, dash_table, dcc, html, no_update
 import plotly.graph_objs as go
 
-ROOT = Path(__file__).parent
-STATE_DIR = ROOT / "state"
-DB_PATH = STATE_DIR / "workspace.db"
-RESULTS_TSV = STATE_DIR / "results.tsv"
-LOOP_STATUS_JSON = STATE_DIR / "loop_status.json"
-INTERN_LOG_JSONL = STATE_DIR / "intern_log.jsonl"
-IDEAS_MD = STATE_DIR / "ideas.md"
+from core.dashboard_services import (
+    BuildControlService,
+    DashboardPaths,
+    GitHistoryService,
+    WorkspaceCommandService,
+    read_json,
+    tail_file,
+)
+
+# ── Root ──────────────────────────────────────────────────────────────────────
+ROOT         = Path(__file__).parent
+WORKSPACES   = ROOT / "workspaces"
+GLOBAL_STATE = ROOT / "state"
+AGENTS_STATE = ROOT / "core" / "agents" / "state"
 CONFIG_TASKS = ROOT / "config" / "tasks.json"
-TOOLS_REGISTRY = ROOT / ".agents" / "tools.json"
+PATHS = DashboardPaths(ROOT)
+GIT_HISTORY = GitHistoryService(ROOT)
+BUILD_CONTROL = BuildControlService(PATHS)
+WORKSPACE_COMMANDS = WorkspaceCommandService(ROOT)
 
-STATUS_COLORS = {
-    "keep": "#28a745",
-    "review": "#58a6ff",
-    "discard": "#fd7e14",
-    "crash": "#dc3545",
-}
-REFRESH_MS = 5_000
+# ── Colour system ─────────────────────────────────────────────────────────────
+C = dict(
+    bg       = "#07111c",   # page background
+    card     = "#0c1a27",   # card body
+    card2    = "#0f2030",   # table row alt
+    sidebar  = "#050e18",   # sidebar
+    border   = "#1a2d3f",   # borders
+    dim      = "#1e3045",   # thin dividers
+    text     = "#cdd9e5",   # primary text
+    muted    = "#768a9a",   # secondary text
+    faint    = "#3a5168",   # very muted
+    blue     = "#4f9cf9",   # accent
+    green    = "#3dcb6a",   # success
+    orange   = "#f5983a",   # warning
+    red      = "#f25454",   # error
+    purple   = "#b07ef5",   # purple
+    yellow   = "#f5c430",   # gold
+    teal     = "#35c8b4",   # teal
+    hdr      = "#060f1a",   # card header bg
+)
 
+# Code type colour map
+LANG_C = dict(SQL=C["blue"], Polars=C["purple"], PySpark=C["orange"],
+              Python=C["teal"], Combined=C["yellow"])
 
-def _read_json(path: Path, default):
-    try:
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    return default
+FAST_MS = 2_000
+SLOW_MS = 15_000
+PAGE_IDS = ["workspace","build","medallion","lineage","blockers","diffs","budget","govern"]
+NAV_ITEMS = [
+    ("workspace", "Workspace"),
+    ("build",     "Build"),
+    ("medallion", "Medallion"),
+    ("lineage",   "Lineage"),
+    ("blockers",  "KPI Blockers"),
+    ("diffs",     "Code Diffs"),
+    ("budget",    "Budget & Tiers"),
+    ("govern",    "Govern"),
+]
 
-# ─── Data loading ─────────────────────────────────────────────────────────────
+# ── Path helpers ──────────────────────────────────────────────────────────────
+
+def _ws(n: str) -> Path:            return WORKSPACES / n
+def _med_state(n: str) -> Path:     return _ws(n) / "interns" / "state" / "medallion"
+def _runs_dir(n: str) -> Path:      return _med_state(n) / "runs"
+def _med_gen(n: str) -> Path:       return _ws(n) / "interns" / "generated" / "medallion"
+def _reports(n: str) -> Path:       return _ws(n) / "interns" / "reports"
+def _lock_path(n: str) -> Path:     return _med_state(n) / ".lock"
+def _live_log(n: str) -> Path:      return _med_state(n) / "build_live.log"
+def _pid_file(n: str) -> Path:      return _med_state(n) / "build.pid"
+
+# ── Data helpers ──────────────────────────────────────────────────────────────
+
+def _jread(p: Path, default=None) -> Any:
+    return read_json(p, default)
+
+def _workspaces() -> list[str]:
+    if not WORKSPACES.exists():
+        return []
+    return sorted(p.name for p in WORKSPACES.iterdir() if p.is_dir() and not p.name.startswith("."))
+
+def _runs(ws: str) -> list[dict]:
+    rd = _runs_dir(ws)
+    if not rd.exists():
+        return []
+    out = []
+    for d in sorted(rd.iterdir(), reverse=True):
+        rj = d / "run.json"
+        if rj.exists():
+            data = _jread(rj, {})
+            data["_dir"] = str(d)
+            out.append(data)
+    return out[:60]
+
+def _lineage(ws: str) -> dict:
+    return _jread(_med_gen(ws) / "lineage.json", {"nodes": [], "edges": []})
+
+def _blocker_panel(ws: str) -> dict:
+    return _jread(_reports(ws) / "blocker_question_panel" / "current.json")
+
+def _budget_state() -> dict:
+    return _jread(AGENTS_STATE / "budget_state.json", {"spent": 0.0, "max_usd": 0.0, "history": []})
+
+def _model_cache() -> dict:
+    return _jread(AGENTS_STATE / "model_classification_cache.json", {})
 
 def _active_task() -> dict:
     try:
         data = json.loads(CONFIG_TASKS.read_text())
-        active_id = data.get("active_task", "")
-        for t in data.get("tasks", []):
-            if t["id"] == active_id:
-                return t
+        aid  = data.get("active_task", "")
+        return next((t for t in data.get("tasks", []) if t["id"] == aid), {})
     except Exception:
-        pass
-    return {}
+        return {}
 
+def _all_tasks() -> list[dict]:
+    try:
+        return json.loads(CONFIG_TASKS.read_text()).get("tasks", [])
+    except Exception:
+        return []
 
-def _task_workspace(task: dict) -> Path | None:
-    workspace = task.get("workspace")
-    if not workspace:
+def _ws_artifacts(ws: str) -> dict:
+    base = _ws(ws) / "interns"
+    return {
+        "mapping":  _jread(base / "generated" / "contracts" / "kpi_feature_mapping.json"),
+        "profiles": _jread(base / "generated" / "profiles" / "profile_index.json", {"profiles": []}),
+        "panel":    _jread(base / "reports" / "blocker_question_panel" / "current.json"),
+    }
+
+def _tail(p: Path, lines: int = 300) -> str:
+    return tail_file(p, lines)
+    if not p or not p.exists():
+        return "(no log yet — trigger a build to see output)"
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+        ll   = text.splitlines()
+        return "\n".join(ll[-lines:])
+    except Exception as e:
+        return f"(error reading log: {e})"
+
+def _safe_float(v) -> float | None:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
         return None
-    path = ROOT / workspace
-    return path if path.exists() else None
 
-
-def _artifact_path(task: dict, *keys: str, fallback: Path | None = None) -> Path | None:
-    value = task
-    for key in keys:
-        if not isinstance(value, dict):
-            return fallback
-        value = value.get(key)
-    if value:
-        return ROOT / str(value)
-    return fallback
-
-
-def _git_hygiene() -> dict:
+def _ts_fmt(ts: str) -> str:
+    if not ts:
+        return ""
     try:
-        proc = subprocess.run(
-            ["git", "status", "--short"],
-            capture_output=True,
-            text=True,
-            cwd=str(ROOT),
-            timeout=5,
-        )
-    except Exception as exc:
-        return {"status": "unavailable", "error": str(exc), "items": []}
-    lines = [line for line in proc.stdout.splitlines() if line.strip()]
-    changed = [line for line in lines if not line.startswith("??")]
-    untracked = [line for line in lines if line.startswith("??")]
-    return {
-        "status": "clean" if not lines else "dirty",
-        "count": len(lines),
-        "changed": len(changed),
-        "untracked": len(untracked),
-        "items": lines[:30],
-    }
+        from datetime import datetime
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        return dt.strftime("%m-%d %H:%M")
+    except Exception:
+        return ts[:16]
 
+# ── Experiment / code helpers ─────────────────────────────────────────────────
 
-def load_command_center(task: dict) -> dict:
-    workspace = _task_workspace(task)
-    tools = _read_json(TOOLS_REGISTRY, {"tools": [], "evidence_policy": {}})
-    git = _git_hygiene()
-    if not workspace:
-        return {
-            "workspace": "",
-            "tools": tools,
-            "mapping": {},
-            "definitions": {"definitions": []},
-            "profiles": {"profiles": []},
-            "question_panel": {},
-            "kpi_generation": {},
-            "open_questions": "",
-            "git": git,
-        }
+def _detect_lang(path: Path, content: str) -> str:
+    """Classify experiment code: SQL | Polars | PySpark | Python | Combined."""
+    if path.suffix == ".sql":
+        return "SQL"
+    has_sql     = bool(re.search(r"\b(SELECT|INSERT|UPDATE|CREATE)\b", content, re.I))
+    has_polars  = "import polars" in content or " pl." in content or "pl.read" in content
+    has_pyspark = ("from pyspark" in content or "SparkSession" in content
+                   or "spark.read" in content or ".toPandas()" in content)
+    has_duckdb  = "import duckdb" in content or "duckdb.connect" in content
+    kinds = []
+    if has_sql or has_duckdb:
+        kinds.append("SQL")
+    if has_polars:
+        kinds.append("Polars")
+    if has_pyspark:
+        kinds.append("PySpark")
+    if not kinds:
+        return "Python"
+    return "+".join(kinds) if len(kinds) > 1 else kinds[0]
 
-    mapping_path = _artifact_path(
-        task,
-        "semantic_contract",
-        "feature_mapping",
-        fallback=workspace / "interns" / "generated" / "contracts" / "kpi_feature_mapping.json",
-    )
-    definitions_path = workspace / "interns" / "generated" / "contracts" / "workspace_feature_definitions.json"
-    profiles_path = workspace / "interns" / "generated" / "profiles" / "profile_index.json"
-    question_panel_path = workspace / "interns" / "reports" / "blocker_question_panel" / "current.json"
-    kpi_generation_session_path = (
-        workspace / "interns" / "generated" / "requirements" / "kpi_generation_session.json"
-    )
-    kpi_generation_panel_path = workspace / "interns" / "reports" / "kpi_generation" / "current.json"
-    kpi_generation_draft_path = (
-        workspace / "interns" / "generated" / "requirements" / "kpi_registry_draft.json"
-    )
-    kpi_generation_proof_path = (
-        workspace / "interns" / "generated" / "requirements" / "kpi_generation_production_proof.json"
-    )
-    open_questions_path = _artifact_path(
-        task,
-        "enterprise_artifacts",
-        "open_questions",
-        fallback=workspace / "interns" / "reports" / "open_questions.md",
-    )
-    open_questions = ""
-    if open_questions_path and open_questions_path.exists():
-        try:
-            open_questions = open_questions_path.read_text(encoding="utf-8")
-        except Exception:
-            open_questions = ""
-    return {
-        "workspace": str(workspace.relative_to(ROOT)).replace("\\", "/"),
-        "tools": tools,
-        "mapping": _read_json(mapping_path, {}) if mapping_path else {},
-        "definitions": _read_json(definitions_path, {"definitions": []}),
-        "profiles": _read_json(profiles_path, {"profiles": []}),
-        "question_panel": _read_json(question_panel_path, {}),
-        "kpi_generation": {
-            "session": _read_json(kpi_generation_session_path, {}),
-            "current_panel": _read_json(kpi_generation_panel_path, {}),
-            "draft": _read_json(kpi_generation_draft_path, {}),
-            "production_proof": _read_json(kpi_generation_proof_path, {}),
-        },
-        "open_questions": open_questions,
-        "git": git,
-    }
-
-
-def load_data():
-    """Return dashboard state from SQLite or flat-file fallback."""
-    results, intern_logs, loop_status, ideas = [], [], {}, ""
-    governance, alerts = [], []
-
-    if DB_PATH.exists():
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.row_factory = sqlite3.Row
-
-        cur = conn.execute("SELECT * FROM experiments ORDER BY id ASC")
-        for i, row in enumerate(cur.fetchall(), 1):
-            raw = row["metrics"]
-            try:
-                metric = float(raw)
-            except (TypeError, ValueError):
-                metric = None
-            results.append({
-                "id": i,
-                "commit": (row["run_id"] or "")[:8],
-                "metric": metric,
-                "status": row["status"] or "unknown",
-                "description": (row["results"] or "")[:120],
-                "timestamp": row["timestamp"] or "",
-            })
-
-        cur = conn.execute(
-            "SELECT * FROM intern_activity ORDER BY id DESC LIMIT 50"
-        )
-        for row in cur.fetchall():
-            details = {}
-            try:
-                details = json.loads(row["details"] or "{}")
-            except Exception:
-                pass
-            intern_logs.append({
-                "intern": row["intern_name"] or "",
-                "activity": row["activity"] or "",
-                "elapsed_s": details.get("elapsed_s", ""),
-                "timestamp": row["timestamp"] or "",
-                "snippet": str(details.get("response", ""))[:200],
-            })
-
-        cur = conn.execute(
-            "SELECT content FROM logs WHERE log_type='loop_status' ORDER BY id DESC LIMIT 1"
-        )
-        row = cur.fetchone()
-        if row and row["content"]:
-            loop_status = json.loads(row["content"])
-
-        cur = conn.execute(
-            "SELECT content FROM logs WHERE log_type='ideas' ORDER BY id DESC LIMIT 1"
-        )
-        row = cur.fetchone()
-        if row and row["content"]:
-            ideas = row["content"]
-
-        try:
-            cur = conn.execute(
-                "SELECT * FROM governance_decisions ORDER BY id DESC LIMIT 20"
-            )
-            for row in cur.fetchall():
-                try:
-                    gates = json.loads(row["gates"] or "[]")
-                except Exception:
-                    gates = []
-                governance.append({
-                    "run_id": row["run_id"] or "",
-                    "task_id": row["task_id"] or "",
-                    "decision": row["decision"] or "",
-                    "approval_state": row["approval_state"] or "",
-                    "promotion_allowed": bool(row["promotion_allowed"]),
-                    "rationale": row["rationale"] or "",
-                    "failed_gates": ", ".join(
-                        gate.get("gate_id", "")
-                        for gate in gates
-                        if not gate.get("passed", False) and gate.get("severity") == "error"
-                    ),
-                    "timestamp": row["timestamp"] or "",
-                })
-        except sqlite3.OperationalError:
-            governance = []
-
-        try:
-            cur = conn.execute("SELECT * FROM alerts ORDER BY id DESC LIMIT 30")
-            for row in cur.fetchall():
-                alerts.append({
-                    "severity": row["severity"] or "",
-                    "title": row["title"] or "",
-                    "message": row["message"] or "",
-                    "run_id": row["run_id"] or "",
-                    "requires_human": bool(row["requires_human"]),
-                    "timestamp": row["timestamp"] or "",
-                })
-        except sqlite3.OperationalError:
-            alerts = []
-
-        conn.close()
-
-    else:
-        # Flat-file fallback
-        if RESULTS_TSV.exists():
-            lines = RESULTS_TSV.read_text().splitlines()
-            for i, line in enumerate(lines[1:], 1):
-                parts = line.split("\t")
-                if len(parts) < 3:
-                    continue
-                try:
-                    metric = float(parts[1])
-                except (ValueError, IndexError):
-                    metric = None
-                results.append({
-                    "id": i,
-                    "commit": parts[0][:8],
-                    "metric": metric,
-                    "status": parts[3] if len(parts) > 3 else "unknown",
-                    "description": (parts[4] if len(parts) > 4 else "")[:120],
-                    "timestamp": "",
-                })
-
-        if LOOP_STATUS_JSON.exists():
-            loop_status = json.loads(LOOP_STATUS_JSON.read_text())
-
-        if INTERN_LOG_JSONL.exists():
-            raw_lines = INTERN_LOG_JSONL.read_text().splitlines()
-            for line in reversed(raw_lines[-50:]):
-                try:
-                    entry = json.loads(line)
-                    intern_logs.append({
-                        "intern": entry.get("intern", ""),
-                        "activity": entry.get("request", "")[:80],
-                        "elapsed_s": entry.get("elapsed_s", ""),
-                        "timestamp": entry.get("ts", ""),
-                        "snippet": str(entry.get("response", ""))[:200],
-                    })
-                except Exception:
-                    pass
-
-        if IDEAS_MD.exists():
-            ideas = IDEAS_MD.read_text()
-
-    return results, intern_logs, loop_status, ideas, governance, alerts
-
-
-def get_git_diff() -> str:
-    task = _active_task()
-    editable = task.get("editable_file", "")
-    if not editable:
-        return "No editable file configured."
+def _git_log_file(filepath: str, n: int = 20) -> list[dict]:
+    """Return git log entries for a specific file."""
+    return GIT_HISTORY.log_file(filepath, n)
+    if not filepath:
+        return []
     try:
-        log = subprocess.run(
-            ["git", "log", "--oneline", "-15"],
+        r = subprocess.run(
+            ["git", "log", "--oneline", "--follow", f"-{n}", "--", filepath],
             capture_output=True, text=True, cwd=str(ROOT), timeout=5
         )
-        return log.stdout or "No git log available."
-    except Exception as e:
-        return f"Git unavailable: {e}"
+        entries = []
+        for line in r.stdout.splitlines():
+            parts = line.split(" ", 1)
+            if len(parts) == 2:
+                entries.append({"hash": parts[0], "message": parts[1]})
+        return entries
+    except Exception:
+        return []
 
-
-def get_editable_file_content() -> str:
-    task = _active_task()
-    editable = task.get("editable_file", "")
-    if not editable:
+def _git_show_file(hash_: str, filepath: str) -> str:
+    """Return file content at a given git commit."""
+    return GIT_HISTORY.show_file(hash_, filepath)
+    if not hash_ or not filepath:
         return ""
-    path = ROOT / editable
-    if path.exists():
-        return path.read_text()
-    # Try workspace dir
-    ws = ROOT / "workspaces" / task.get("domain", "") / Path(editable).name
-    if ws.exists():
-        return ws.read_text()
-    return f"File not found: {editable}"
+    try:
+        r = subprocess.run(
+            ["git", "show", f"{hash_}:{filepath}"],
+            capture_output=True, text=True, cwd=str(ROOT), timeout=5
+        )
+        return r.stdout
+    except Exception:
+        return ""
 
+def _git_diff_file(hash_a: str, hash_b: str, filepath: str) -> str:
+    """git diff of a specific file between two commits."""
+    return GIT_HISTORY.diff_file(hash_a, hash_b, filepath)
+    if not hash_a or not hash_b or not filepath:
+        return "Select two revisions to compare."
+    if hash_a == hash_b:
+        return "Same commit — no diff."
+    try:
+        r = subprocess.run(
+            ["git", "diff", hash_a, hash_b, "--", filepath],
+            capture_output=True, text=True, cwd=str(ROOT), timeout=10
+        )
+        return r.stdout or f"No changes to {filepath} between {hash_a[:8]} and {hash_b[:8]}."
+    except Exception as e:
+        return f"git diff failed: {e}"
 
-# ─── App setup ────────────────────────────────────────────────────────────────
+def _git_log_text(n: int = 20) -> str:
+    return GIT_HISTORY.log_text(n)
+    try:
+        r = subprocess.run(["git", "log", "--oneline", f"-{n}"],
+                           capture_output=True, text=True, cwd=str(ROOT), timeout=5)
+        return r.stdout or "No commits."
+    except Exception as e:
+        return f"git unavailable: {e}"
+
+def _git_commit_at(ts: str) -> str:
+    return GIT_HISTORY.commit_at(ts)
+    if not ts:
+        return ""
+    try:
+        r = subprocess.run(
+            ["git", "log", f"--before={ts}", "-1", "--format=%H"],
+            capture_output=True, text=True, cwd=str(ROOT), timeout=5
+        )
+        return r.stdout.strip()
+    except Exception:
+        return ""
+
+def _load_global_db() -> dict:
+    db  = GLOBAL_STATE / "workspace.db"
+    out: dict = {"results": [], "intern_logs": [], "governance": [], "alerts": [], "ideas": ""}
+    if not db.exists():
+        return out
+    try:
+        con = sqlite3.connect(str(db))
+        con.row_factory = sqlite3.Row
+        try:
+            cur = con.execute("SELECT * FROM experiments ORDER BY id ASC")
+            for i, row in enumerate(cur.fetchall(), 1):
+                out["results"].append({
+                    "id": i, "commit": (row["run_id"] or "")[:8],
+                    "metric": _safe_float(row["metrics"]),
+                    "status": row["status"] or "unknown",
+                    "description": (row["results"] or "")[:120],
+                    "timestamp": row["timestamp"] or "",
+                })
+        except Exception:
+            pass
+        try:
+            cur = con.execute("SELECT * FROM intern_activity ORDER BY id DESC LIMIT 50")
+            for row in cur.fetchall():
+                try:
+                    det = json.loads(row["details"] or "{}")
+                except Exception:
+                    det = {}
+                out["intern_logs"].append({
+                    "intern": row["intern_name"] or "",
+                    "activity": row["activity"] or "",
+                    "elapsed_s": _safe_float(det.get("elapsed_s")),
+                    "timestamp": row["timestamp"] or "",
+                    "snippet": str(det.get("response", ""))[:200],
+                })
+        except Exception:
+            pass
+        for q, key, mapper in [
+            ("SELECT * FROM governance_decisions ORDER BY id DESC LIMIT 20", "governance",
+             lambda r: {"run_id": r["run_id"] or "", "decision": r["decision"] or "",
+                        "approval": r["approval_state"] or "", "rationale": r["rationale"] or "",
+                        "timestamp": r["timestamp"] or ""}),
+            ("SELECT * FROM alerts ORDER BY id DESC LIMIT 30", "alerts",
+             lambda r: {"severity": r["severity"] or "", "title": r["title"] or "",
+                        "message": r["message"] or "", "run_id": r["run_id"] or "",
+                        "timestamp": r["timestamp"] or ""}),
+        ]:
+            try:
+                cur = con.execute(q)
+                for row in cur.fetchall():
+                    out[key].append(mapper(row))
+            except Exception:
+                pass
+        try:
+            cur = con.execute(
+                "SELECT content FROM logs WHERE log_type='ideas' ORDER BY id DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+            if row:
+                out["ideas"] = row["content"] or ""
+        except Exception:
+            pass
+        con.close()
+    except Exception:
+        pass
+    return out
+
+# ── Build control ─────────────────────────────────────────────────────────────
+
+def _lock_state(ws: str) -> dict:
+    return BUILD_CONTROL.lock_state(ws)
+    lp = _lock_path(ws)
+    if not lp.exists():
+        return {"locked": False, "pid": 0, "age_s": 0}
+    try:
+        age  = time.time() - lp.stat().st_mtime
+        data = _jread(lp, {})
+        return {"locked": True, "pid": data.get("pid", 0), "age_s": int(age)}
+    except Exception:
+        return {"locked": True, "pid": 0, "age_s": 0}
+
+def _pid_alive(pid: int) -> bool:
+    return BUILD_CONTROL.pid_alive(pid)
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, PermissionError):
+        return False
+
+def _trigger_build(ws: str, target: str = "auto", layer: str = "", table: str = "") -> dict:
+    return BUILD_CONTROL.trigger_build(ws, target, layer, table)
+    sd = _med_state(ws)
+    sd.mkdir(parents=True, exist_ok=True)
+    cmd = ["uv", "run", "build-medallion", "--workspace", f"workspaces/{ws}"]
+    if target and target != "auto":
+        cmd += ["--target", target]
+    if layer:
+        cmd += ["--only-layer", layer]
+    if table:
+        cmd += ["--only-table", table]
+    try:
+        fh = open(_live_log(ws), "w", encoding="utf-8")
+        kw: dict[str, Any] = {"stdout": fh, "stderr": subprocess.STDOUT, "cwd": str(ROOT)}
+        if sys.platform == "win32":
+            kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        proc = subprocess.Popen(cmd, **kw)
+        _pid_file(ws).write_text(str(proc.pid), encoding="utf-8")
+        return {"ok": True, "pid": proc.pid}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def _kill_build(ws: str) -> dict:
+    return BUILD_CONTROL.kill_build(ws)
+    pp = _pid_file(ws)
+    if not pp.exists():
+        return {"ok": False, "error": "No PID file."}
+    try:
+        pid = int(pp.read_text().strip())
+        sig = signal.CTRL_BREAK_EVENT if sys.platform == "win32" else signal.SIGTERM
+        os.kill(pid, sig)
+        pp.unlink(missing_ok=True)
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def _run_cmd(ws: str, cmd_name: str, extra: list[str] | None = None) -> dict:
+    return WORKSPACE_COMMANDS.run(ws, cmd_name, extra)
+    cmd = ["uv", "run", cmd_name, "--workspace", f"workspaces/{ws}"] + (extra or [])
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT), timeout=300)
+        return {"ok": r.returncode == 0,
+                "stdout": r.stdout[-3000:], "stderr": r.stderr[-500:]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+# ── Design tokens ─────────────────────────────────────────────────────────────
+
+CARD_S = {
+    "background": C["card"],
+    "border": f"1px solid {C['border']}",
+    "borderRadius": "10px",
+    "marginBottom": "16px",
+    "boxShadow": "0 2px 12px rgba(0,0,0,.35)",
+}
+HDR_S = {
+    "background": C["hdr"],
+    "borderBottom": f"1px solid {C['border']}",
+    "borderTop": f"3px solid {C['blue']}",
+    "borderRadius": "10px 10px 0 0",
+    "padding": "10px 16px",
+    "display": "flex", "alignItems": "center", "gap": "8px",
+}
+HDR_TITLE = {
+    "color": C["text"], "fontWeight": "600", "fontSize": "0.82rem",
+    "letterSpacing": "0.04em", "textTransform": "uppercase", "margin": 0,
+}
+CELL = {
+    "background": C["card"], "color": C["text"],
+    "border": f"1px solid {C['dim']}", "fontSize": "0.76rem",
+    "fontFamily": "'JetBrains Mono', 'Fira Code', monospace",
+    "padding": "7px 10px", "textAlign": "left", "whiteSpace": "normal",
+}
+HCELL = {
+    "background": C["hdr"], "color": C["muted"], "fontWeight": "600",
+    "border": f"1px solid {C['dim']}", "fontSize": "0.7rem", "letterSpacing": "0.06em",
+    "textTransform": "uppercase",
+}
+PRE_S = {
+    "color": C["text"], "background": C["sidebar"],
+    "padding": "14px", "borderRadius": "6px", "fontSize": "0.74rem",
+    "lineHeight": "1.65", "overflowY": "auto", "maxHeight": "400px",
+    "margin": 0, "whiteSpace": "pre-wrap",
+    "fontFamily": "'JetBrains Mono', 'Fira Code', monospace",
+    "border": f"1px solid {C['dim']}",
+}
+INPUT_S = {
+    "background": C["sidebar"], "color": C["text"],
+    "border": f"1px solid {C['border']}", "borderRadius": "6px",
+    "padding": "7px 12px", "fontSize": "0.8rem", "width": "100%",
+    "outline": "none",
+}
+DDL_S = {"background": C["card"], "color": "#000"}
+PLOT_L = dict(
+    paper_bgcolor=C["card"], plot_bgcolor=C["card"],
+    font=dict(color=C["muted"], size=11),
+    margin=dict(l=8, r=8, t=28, b=8),
+    height=260,
+    xaxis=dict(gridcolor=C["dim"], showline=False, zeroline=False),
+    yaxis=dict(gridcolor=C["dim"], showline=False, zeroline=False),
+    legend=dict(font=dict(color=C["muted"], size=10), bgcolor="rgba(0,0,0,0)"),
+)
+
+# ── UI component helpers ──────────────────────────────────────────────────────
+
+def _card(title: str, accent: str = C["blue"]) -> dict:
+    """Return card + header styles with given accent."""
+    hdr = {**HDR_S, "borderTop": f"3px solid {accent}"}
+    return {"card": CARD_S, "hdr": hdr}
+
+def _mk_card(title: str, *children, accent: str = C["blue"], body_style: dict | None = None) -> dbc.Card:
+    return dbc.Card([
+        dbc.CardHeader(
+            html.Span(title, style=HDR_TITLE),
+            style={**HDR_S, "borderTop": f"3px solid {accent}"},
+        ),
+        dbc.CardBody(list(children),
+                     style={"padding": "14px 16px", **(body_style or {})}),
+    ], style=CARD_S)
+
+def _kv(label: str, value: Any, color: str = "") -> html.Div:
+    return html.Div([
+        html.Span(label, style={"color": C["muted"], "fontSize": "0.74rem"}),
+        html.Span(str(value if value is not None else "—"),
+                  style={"color": color or C["text"], "float": "right",
+                         "fontWeight": "600", "fontSize": "0.78rem"}),
+    ], style={"padding": "7px 0", "borderBottom": f"1px solid {C['dim']}"})
+
+def _badge(text: str, color: str) -> html.Span:
+    return html.Span(text, style={
+        "background": color + "18", "color": color,
+        "border": f"1px solid {color}40",
+        "borderRadius": "20px", "padding": "2px 10px",
+        "fontSize": "0.7rem", "fontWeight": "700",
+        "letterSpacing": "0.03em",
+    })
+
+def _lang_badge(lang: str) -> html.Span:
+    color = LANG_C.get(lang.split("+")[0], C["teal"])
+    return _badge(lang, color)
+
+def _status_badge(status: str) -> html.Span:
+    color = {"ok": C["green"], "failed": C["red"], "pending": C["faint"],
+             "running": C["blue"], "degraded": C["orange"]}.get(status, C["muted"])
+    return _badge(status, color)
+
+def _sh(label: str, color: str = C["blue"]) -> html.Div:
+    return html.Div(label, style={
+        "color": color, "fontSize": "0.69rem", "fontWeight": "700",
+        "textTransform": "uppercase", "letterSpacing": "0.07em",
+        "marginBottom": "8px", "marginTop": "6px",
+    })
+
+def _btn(label: str, bid: str, color: str = "primary", outline: bool = False, **kw) -> dbc.Button:
+    return dbc.Button(label, id=bid, color=color, size="sm", outline=outline,
+                      className="me-1 mb-1", **kw)
+
+def _dt(data: list[dict], cols: list[str], page: int = 10) -> dash_table.DataTable:
+    return dash_table.DataTable(
+        data=data, columns=[{"name": c, "id": c} for c in cols],
+        page_size=page, sort_action="native",
+        style_table={"overflowX": "auto"},
+        style_cell=CELL, style_header=HCELL,
+        style_data_conditional=[
+            {"if": {"row_index": "odd"},
+             "background": C["card2"]},
+        ],
+    )
+
+def _empty_chart(msg: str) -> dcc.Graph:
+    fig = go.Figure()
+    fig.add_annotation(text=msg, x=0.5, y=0.5, xref="paper", yref="paper",
+                       showarrow=False, font=dict(color=C["muted"], size=12))
+    fig.update_layout(**PLOT_L)
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+# ── Syntax highlighting ───────────────────────────────────────────────────────
+
+SQL_KW = {
+    "select","from","where","join","left","right","inner","outer","on","group","by",
+    "order","having","with","as","union","all","distinct","limit","offset","case",
+    "when","then","else","end","count","sum","avg","max","min","coalesce","cast",
+    "filter","partition","over","row_number","rank","dense_rank","create","table",
+    "view","insert","into","update","delete","drop","alter","if","not","in","is",
+    "null","exists","and","or","between","like","ilike","true","false",
+}
+
+def _colorize(code: str, lang: str) -> list:
+    """Return list of spans with line-level syntax colouring."""
+    spans = []
+    for line in (code or "").splitlines():
+        stripped = line.strip()
+        # Comment lines
+        if stripped.startswith("--") or stripped.startswith("#"):
+            color = C["faint"]
+        # String literals (basic heuristic — line is mostly a string)
+        elif stripped.startswith(("'", '"', '"""', "'''")):
+            color = C["green"]
+        # SQL keyword at start of (stripped) line
+        elif lang in ("SQL", "Python") and stripped.split(" ")[0].lower().rstrip("(") in SQL_KW:
+            color = C["blue"]
+        # Polars method chains
+        elif lang in ("Polars", "Combined") and re.match(r"\s*(pl\.|\.filter|\.select|\.with_columns|\.group_by)", line):
+            color = C["purple"]
+        # PySpark
+        elif lang in ("PySpark", "Combined") and re.match(r"\s*(spark\.|df\.|\.show|\.toPandas)", line):
+            color = C["orange"]
+        # Python def/class/import
+        elif re.match(r"\s*(def |class |import |from |@)", line):
+            color = C["teal"]
+        else:
+            color = C["text"]
+        spans.append(html.Span(line + "\n", style={"color": color}))
+    return spans
+
+def _colorize_diff(diff_text: str) -> list:
+    spans = []
+    for line in diff_text.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            color, weight = C["blue"], "600"
+        elif line.startswith("+"):
+            color, weight = C["green"], "400"
+        elif line.startswith("-"):
+            color, weight = C["red"], "400"
+        elif line.startswith("@@"):
+            color, weight = C["purple"], "600"
+        elif line.startswith(("diff ", "index ", "new file", "deleted file")):
+            color, weight = C["yellow"], "600"
+        else:
+            color, weight = C["text"], "400"
+        spans.append(html.Span(line + "\n", style={"color": color, "fontWeight": weight}))
+    return spans
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+
+def _sidebar() -> html.Div:
+    nav_links = []
+    for pid, label in NAV_ITEMS:
+        nav_links.append(
+            dcc.Link(label, href=f"/{pid}", id=f"nav-{pid}", style={
+                "display": "block", "padding": "9px 20px 9px 18px",
+                "color": C["muted"], "textDecoration": "none", "fontSize": "0.83rem",
+                "borderLeft": "3px solid transparent",
+                "borderRadius": "0 4px 4px 0",
+                "transition": "color 0.15s",
+            })
+        )
+    return html.Div([
+        html.Div([
+            html.Div("Autoresearch", style={
+                "color": C["blue"], "fontWeight": "700", "fontSize": "1.05rem",
+                "letterSpacing": "-0.02em",
+            }),
+            html.Div("Control Plane", style={
+                "color": C["faint"], "fontSize": "0.69rem", "marginTop": "1px",
+            }),
+        ], style={"padding": "20px 20px 16px"}),
+        html.Hr(style={"borderColor": C["dim"], "margin": "0"}),
+        html.Div(nav_links, style={"padding": "8px 0"}),
+        html.Hr(style={"borderColor": C["dim"], "margin": "0"}),
+        html.Div(id="sidebar-ws", style={
+            "padding": "10px 20px", "color": C["faint"], "fontSize": "0.72rem",
+            "fontFamily": "monospace",
+        }),
+    ], style={
+        "width": "195px", "minWidth": "195px", "background": C["sidebar"],
+        "height": "100vh", "position": "fixed", "top": 0, "left": 0,
+        "overflowY": "auto", "borderRight": f"1px solid {C['border']}",
+        "zIndex": 1000,
+    })
+
+# ── Page skeletons ────────────────────────────────────────────────────────────
+
+def _pg_workspace() -> html.Div:
+    return html.Div([
+        dbc.Row([
+            dbc.Col(_mk_card("Workspace",
+                dcc.Dropdown(id="ws-dropdown", placeholder="Select workspace…", style=DDL_S),
+                html.Div(id="ws-status-body", style={"marginTop": "10px"}),
+                accent=C["blue"]), md=5),
+            dbc.Col(_mk_card("KPI & Blocker Panel",
+                html.Div(id="ws-kpi-body"),
+                accent=C["purple"]), md=4),
+            dbc.Col(_mk_card("Actions",
+                _btn("Onboard Workspace", "btn-onboard"),
+                _btn("Validate Artifacts", "btn-validate"),
+                _btn("Generate KPI SQL", "btn-gen-kpi-sql"),
+                html.Hr(style={"borderColor": C["dim"], "margin": "8px 0"}),
+                html.Div(id="ws-action-out", style={
+                    **PRE_S, "maxHeight": "180px", "fontSize": "0.72rem", "marginTop": "0",
+                }),
+                accent=C["teal"]), md=3),
+        ], className="g-3"),
+        dbc.Row([
+            dbc.Col(_mk_card("Dataset Profiles", html.Div(id="ws-profiles-body")), md=12),
+        ], className="g-3"),
+    ])
+
+def _pg_build() -> html.Div:
+    return html.Div([
+        html.Div(id="build-lock-banner"),
+        dbc.Row([
+            dbc.Col(_mk_card("Trigger Build",
+                dbc.Row([
+                    dbc.Col(dcc.Dropdown(id="build-target",
+                        options=[{"label": t, "value": t} for t in ["auto","duckdb","databricks"]],
+                        value="auto", clearable=False, style=DDL_S), md=3),
+                    dbc.Col(dcc.Input(id="build-only-layer",
+                        placeholder="--only-layer (bronze|silver|gold)",
+                        style=INPUT_S), md=4),
+                    dbc.Col(dcc.Input(id="build-only-table",
+                        placeholder="--only-table name",
+                        style=INPUT_S), md=4),
+                    dbc.Col(html.Div([
+                        _btn("Run Build", "btn-run-build", color="success"),
+                        _btn("Kill", "btn-kill-build", color="danger", outline=True),
+                        _btn("Design", "btn-design", color="secondary", outline=True),
+                    ]), md=1),
+                ], className="g-2", align="end"),
+            ), md=12),
+        ], className="g-3"),
+        dbc.Row([
+            dbc.Col(_mk_card("Live Output", html.Pre(id="build-log", style=PRE_S),
+                             accent=C["green"]), md=12),
+        ], className="g-3"),
+        dbc.Row([
+            dbc.Col(_mk_card("Run History", html.Div(id="build-run-history")), md=12),
+        ], className="g-3"),
+    ])
+
+def _pg_medallion() -> html.Div:
+    return html.Div([
+        dbc.Row([
+            dbc.Col(_mk_card("Latest Run", html.Div(id="med-latest-run")), md=4),
+            dbc.Col(_mk_card("Table Status", html.Div(id="med-table-status")), md=8),
+        ], className="g-3"),
+        dbc.Row([
+            dbc.Col(_mk_card("Row Count Trends",   html.Div(id="med-row-chart"),  accent=C["blue"]),   md=6),
+            dbc.Col(_mk_card("Build Duration",       html.Div(id="med-dur-chart"),  accent=C["orange"]), md=6),
+        ], className="g-3"),
+        dbc.Row([
+            dbc.Col(_mk_card("KPI Metric Trends",    html.Div(id="med-kpi-chart"),    accent=C["purple"]), md=6),
+            dbc.Col(_mk_card("Assertion Heatmap",    html.Div(id="med-assert-chart"), accent=C["red"]),    md=6),
+        ], className="g-3"),
+    ])
+
+def _pg_lineage() -> html.Div:
+    return html.Div([
+        dbc.Row([
+            dbc.Col(_mk_card("Table Lineage — Sankey", html.Div(id="lin-sankey"),
+                             accent=C["teal"]), md=12),
+        ], className="g-3"),
+        dbc.Row([
+            dbc.Col(_mk_card("Column Drill-Down",
+                dcc.Dropdown(id="lin-table-select", placeholder="Select a table…",
+                             style={**DDL_S, "marginBottom": "10px"}),
+                html.Div(id="lin-column-body"),
+            ), md=12),
+        ], className="g-3"),
+    ])
+
+def _pg_blockers() -> html.Div:
+    return html.Div([
+        dbc.Row([
+            dbc.Col(_mk_card("Panel Actions",
+                _btn("Refresh Panel", "btn-blocker-refresh"),
+                _btn("Validate", "btn-blocker-validate"),
+                html.Div(id="blocker-action-out", style={
+                    **PRE_S, "maxHeight": "140px", "marginTop": "8px",
+                }),
+                accent=C["orange"]), md=3),
+            dbc.Col(_mk_card("Current Blocker Panel", html.Div(id="blocker-panel-body")), md=9),
+        ], className="g-3"),
+        dbc.Row([
+            dbc.Col(_mk_card("Apply Answer",
+                dbc.Row([
+                    dbc.Col(dcc.Dropdown(id="blocker-option-select",
+                        placeholder="Select option ID…", style=DDL_S), md=5),
+                    dbc.Col(dcc.Input(id="blocker-domain-input",
+                        placeholder="Domain (e.g. claims)", style=INPUT_S), md=4),
+                    dbc.Col(_btn("Apply", "btn-blocker-apply", color="success"), md=3),
+                ], className="g-2", align="end"),
+                html.Div(id="blocker-apply-out", style={
+                    **PRE_S, "maxHeight": "140px", "marginTop": "10px",
+                }),
+                accent=C["green"]), md=12),
+        ], className="g-3"),
+    ])
+
+def _pg_diffs() -> html.Div:
+    return html.Div([
+        # Task + file context bar
+        dbc.Row([
+            dbc.Col(_mk_card("Experiment Context",
+                dbc.Row([
+                    dbc.Col([
+                        _sh("Task"),
+                        dcc.Dropdown(id="diff-task-select", placeholder="Select task…",
+                                     style=DDL_S),
+                    ], md=4),
+                    dbc.Col(html.Div(id="diff-file-info", style={"paddingTop": "20px"}), md=8),
+                ], className="g-3"),
+                accent=C["yellow"]), md=12),
+        ], className="g-3"),
+        # Code viewer + revision history
+        dbc.Row([
+            dbc.Col(_mk_card("Current Code",
+                html.Div(id="diff-lang-badge", style={"marginBottom": "8px"}),
+                html.Pre(id="diff-code-view", style={**PRE_S, "maxHeight": "480px"}),
+                accent=C["blue"]), md=7),
+            dbc.Col(_mk_card("Revision History",
+                html.Div(id="diff-rev-history"),
+                accent=C["purple"]), md=5),
+        ], className="g-3"),
+        # Compare two revisions
+        dbc.Row([
+            dbc.Col(_mk_card("Compare Revisions",
+                dbc.Row([
+                    dbc.Col([
+                        _sh("Revision A (older)"),
+                        dcc.Dropdown(id="diff-rev-a", placeholder="Commit A…", style=DDL_S),
+                    ], md=5),
+                    dbc.Col(html.Div("→", style={
+                        "textAlign": "center", "color": C["muted"],
+                        "fontSize": "1.5rem", "paddingTop": "22px",
+                    }), md=1),
+                    dbc.Col([
+                        _sh("Revision B (newer)"),
+                        dcc.Dropdown(id="diff-rev-b", placeholder="Commit B…", style=DDL_S),
+                    ], md=5),
+                    dbc.Col(_btn("Diff", "btn-diff-go", color="primary"), md=1),
+                ], className="g-2", align="end"),
+                html.Pre(id="diff-output", style={**PRE_S, "maxHeight": "520px",
+                                                   "marginTop": "12px"}),
+                accent=C["red"]), md=12),
+        ], className="g-3"),
+    ])
+
+def _pg_budget() -> html.Div:
+    return html.Div([
+        dbc.Row([
+            dbc.Col(_mk_card("Budget Tracker",    html.Div(id="budget-tracker-body"), accent=C["orange"]), md=4),
+            dbc.Col(_mk_card("Model Tier Cache",  html.Div(id="budget-tiers-body"),   accent=C["purple"]), md=5),
+            dbc.Col(_mk_card("Cumulative Cost",   html.Div(id="budget-cost-chart"),   accent=C["yellow"]), md=3),
+        ], className="g-3"),
+    ])
+
+def _pg_govern() -> html.Div:
+    return html.Div([
+        dbc.Row([
+            dbc.Col(_mk_card("Intern Activity", html.Div(id="gov-intern-feed"),
+                             accent=C["blue"]), md=6),
+            dbc.Col(_mk_card("Git Log", html.Pre(id="gov-git-log", style=PRE_S),
+                             accent=C["faint"]), md=6),
+        ], className="g-3"),
+        dbc.Row([
+            dbc.Col(_mk_card("Governance Decisions", html.Div(id="gov-decisions"),
+                             accent=C["purple"]), md=7),
+            dbc.Col(_mk_card("Human Alerts", html.Div(id="gov-alerts"),
+                             accent=C["red"]), md=5),
+        ], className="g-3"),
+        dbc.Row([
+            dbc.Col(_mk_card("Experiment Results", html.Div(id="gov-results"),
+                             accent=C["green"]), md=8),
+            dbc.Col(_mk_card("Ideas & Hypotheses",
+                html.Pre(id="gov-ideas", style={**PRE_S, "maxHeight": "260px"}),
+                accent=C["teal"]), md=4),
+        ], className="g-3"),
+    ])
+
+# ── App setup ─────────────────────────────────────────────────────────────────
 
 app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.CYBORG],
-    title="Autoresearch Dashboard",
+    title="Autoresearch",
     update_title=None,
+    suppress_callback_exceptions=True,
 )
 
-# ─── Layout helpers ───────────────────────────────────────────────────────────
+_pages = html.Div([
+    html.Div(_pg_workspace(), id="page-workspace", style={"display": "none"}),
+    html.Div(_pg_build(),     id="page-build",     style={"display": "none"}),
+    html.Div(_pg_medallion(), id="page-medallion", style={"display": "none"}),
+    html.Div(_pg_lineage(),   id="page-lineage",   style={"display": "none"}),
+    html.Div(_pg_blockers(),  id="page-blockers",  style={"display": "none"}),
+    html.Div(_pg_diffs(),     id="page-diffs",     style={"display": "none"}),
+    html.Div(_pg_budget(),    id="page-budget",    style={"display": "none"}),
+    html.Div(_pg_govern(),    id="page-govern",    style={"display": "none"}),
+])
 
-def _card(title: str, body_id: str, color: str = "#1e2a3a") -> dbc.Card:
-    return dbc.Card(
-        [
-            dbc.CardHeader(
-                title,
-                style={
-                    "background": "#0d1b2a",
-                    "color": "#58a6ff",
-                    "fontWeight": "600",
-                    "fontSize": "0.85rem",
-                    "letterSpacing": "0.05em",
-                    "textTransform": "uppercase",
-                    "borderBottom": "1px solid #243447",
-                    "padding": "10px 16px",
-                },
-            ),
-            dbc.CardBody(id=body_id, style={"padding": "14px", "background": color}),
-        ],
-        style={"border": "1px solid #243447", "borderRadius": "8px", "marginBottom": "16px"},
-    )
+app.layout = html.Div([
+    dcc.Location(id="url"),
+    dcc.Store(id="ws-store",    data=""),
+    dcc.Store(id="task-store",  data=""),
+    dcc.Interval(id="fast-tick", interval=FAST_MS, n_intervals=0),
+    dcc.Interval(id="slow-tick", interval=SLOW_MS, n_intervals=0),
+    _sidebar(),
+    html.Div([
+        # Top strip
+        html.Div([
+            html.Span(id="page-title", style={
+                "color": C["text"], "fontWeight": "700", "fontSize": "0.95rem",
+                "letterSpacing": "-0.01em",
+            }),
+            html.Span(id="header-context", style={
+                "color": C["faint"], "fontSize": "0.78rem", "marginLeft": "12px",
+                "fontFamily": "monospace",
+            }),
+            html.Div(id="header-badges", style={"marginLeft": "auto", "display": "flex", "gap": "6px"}),
+        ], style={
+            "background": C["hdr"], "borderBottom": f"1px solid {C['border']}",
+            "padding": "11px 24px", "display": "flex", "alignItems": "center",
+        }),
+        html.Div(_pages, style={"padding": "20px 24px"}),
+    ], style={"marginLeft": "195px", "minHeight": "100vh", "background": C["bg"]}),
+], style={"background": C["bg"]})
 
-
-def _render_kpi_generation_panel(kpi_generation: dict) -> html.Div:
-    session = kpi_generation.get("session") or {}
-    current = kpi_generation.get("current_panel") or {}
-    draft = kpi_generation.get("draft") or {}
-    proof = kpi_generation.get("production_proof") or {}
-    if not any([session, current, draft, proof]):
-        return html.Div(
-            [
-                html.Div(
-                    "No KPI generation session found.",
-                    style={"color": "#c9d1d9", "fontWeight": "600", "marginBottom": "8px"},
-                ),
-                html.Code(
-                    "uv run prepare-kpi-generation --workspace <workspace>",
-                    style={
-                        "display": "block",
-                        "background": "#0d1b2a",
-                        "color": "#58a6ff",
-                        "padding": "10px",
-                        "borderRadius": "4px",
-                        "fontSize": "0.78rem",
-                    },
-                ),
-            ],
-            style={"padding": "22px", "textAlign": "center"},
-        )
-
-    quality = session.get("quality_score") or current.get("quality_score") or {}
-    options = current.get("options") or []
-    draft_kpis = draft.get("kpis") or current.get("draft_kpis") or session.get("draft_kpis") or []
-    draft_proofs = draft.get("proofs") or current.get("draft_proofs") or session.get("draft_proofs") or []
-    competitive = (
-        draft.get("competitive_review")
-        or current.get("competitive_review")
-        or session.get("competitive_review")
-        or {}
-    )
-    checks = proof.get("checks") or []
-
-    return html.Div(
-        [
-            dbc.Row(
-                [
-                    dbc.Col(
-                        [
-                            _subhead("Session"),
-                            _mini_kv("Workspace", session.get("workspace") or current.get("workspace") or ""),
-                            _mini_kv("Stage", current.get("stage") or session.get("current_stage", "")),
-                            _mini_kv("Status", session.get("status", "not started")),
-                            _mini_kv(
-                                "Recommended",
-                                current.get("recommended_option_id", ""),
-                                "#28a745",
-                            ),
-                        ],
-                        md=3,
-                    ),
-                    dbc.Col(
-                        [
-                            _subhead("Quality"),
-                            _score_row(
-                                "Implementation",
-                                quality.get("implementation_readiness", 0),
-                                "#58a6ff",
-                            ),
-                            _score_row("Business", quality.get("business_quality", 0), "#d2a8ff"),
-                            _score_row("Overall", quality.get("overall_score", 0), "#28a745"),
-                            html.Div(
-                                f"{quality.get('kpi_count', 0)} KPI(s) scored",
-                                style={"color": "#8b949e", "fontSize": "0.76rem", "marginTop": "8px"},
-                            ),
-                        ],
-                        md=3,
-                    ),
-                    dbc.Col(
-                        [
-                            _subhead("Current Question"),
-                            html.Div(
-                                current.get("question", "No active KPI generation question."),
-                                style={
-                                    "color": "#f0f6fc",
-                                    "fontWeight": "600",
-                                    "lineHeight": "1.4",
-                                    "marginBottom": "8px",
-                                },
-                            ),
-                            html.Div(
-                                current.get("why", ""),
-                                style={"color": "#8b949e", "fontSize": "0.76rem", "lineHeight": "1.45"},
-                            ),
-                        ],
-                        md=6,
-                    ),
-                ],
-                className="g-3",
-            ),
-            html.Hr(style={"borderColor": "#243447", "margin": "14px 0"}),
-            dbc.Row(
-                [
-                    dbc.Col(_option_list(options), md=4),
-                    dbc.Col(_draft_kpi_table(draft_kpis), md=5),
-                    dbc.Col(_proof_and_advisor_panel(draft_proofs, competitive, checks), md=3),
-                ],
-                className="g-3",
-            ),
-        ]
-    )
-
-
-def _subhead(label: str) -> html.Div:
-    return html.Div(
-        label,
-        style={
-            "color": "#58a6ff",
-            "fontSize": "0.72rem",
-            "fontWeight": "700",
-            "textTransform": "uppercase",
-            "marginBottom": "8px",
-        },
-    )
-
-
-def _mini_kv(label: str, value: object, color: str = "#f0f6fc") -> html.Div:
-    return html.Div(
-        [
-            html.Span(label, style={"color": "#8b949e", "fontSize": "0.74rem"}),
-            html.Span(
-                str(value or "-"),
-                style={"color": color, "float": "right", "fontWeight": "600", "fontSize": "0.76rem"},
-            ),
-        ],
-        style={"padding": "6px 0", "borderBottom": "1px solid #21262d"},
-    )
-
-
-def _score_row(label: str, value: object, color: str) -> html.Div:
-    try:
-        score = max(0, min(100, int(value)))
-    except (TypeError, ValueError):
-        score = 0
-    return html.Div(
-        [
-            html.Div(
-                [
-                    html.Span(label, style={"color": "#8b949e", "fontSize": "0.74rem"}),
-                    html.Span(
-                        f"{score}%",
-                        style={"color": color, "float": "right", "fontWeight": "700"},
-                    ),
-                ],
-                style={"marginBottom": "4px"},
-            ),
-            html.Div(
-                html.Div(style={"width": f"{score}%", "height": "6px", "background": color}),
-                style={"height": "6px", "background": "#0d1b2a", "borderRadius": "3px"},
-            ),
-        ],
-        style={"marginBottom": "9px"},
-    )
-
-
-def _option_list(options: list[dict]) -> html.Div:
-    rows = [_subhead("Options")]
-    if not options:
-        rows.append(html.Div("No active options.", style={"color": "#8b949e", "fontSize": "0.78rem"}))
-        return html.Div(rows)
-    for option in options[:4]:
-        rows.append(
-            html.Div(
-                [
-                    html.Div(
-                        [
-                            html.Span(
-                                option.get("option_id", ""),
-                                style={"color": "#58a6ff", "fontWeight": "700"},
-                            ),
-                            html.Span(
-                                option.get("value", ""),
-                                style={"color": "#8b949e", "float": "right", "fontSize": "0.72rem"},
-                            ),
-                        ]
-                    ),
-                    html.Div(
-                        option.get("label", ""),
-                        style={"color": "#f0f6fc", "fontWeight": "600", "fontSize": "0.82rem"},
-                    ),
-                    html.Div(
-                        option.get("description", ""),
-                        style={"color": "#8b949e", "fontSize": "0.74rem", "lineHeight": "1.35"},
-                    ),
-                ],
-                style={"padding": "8px 0", "borderBottom": "1px solid #21262d"},
-            )
-        )
-    return html.Div(rows, style={"maxHeight": "295px", "overflowY": "auto"})
-
-
-def _draft_kpi_table(draft_kpis: list[dict]) -> html.Div:
-    if not draft_kpis:
-        return html.Div(
-            [_subhead("Draft KPIs"), html.Div("No draft KPI registry yet.", style={"color": "#8b949e"})]
-        )
-    rows = [
-        {
-            "KPI": item.get("kpi_id", ""),
-            "Question": item.get("business_question", ""),
-            "Metric": item.get("metric", ""),
-            "Status": item.get("status", ""),
-        }
-        for item in draft_kpis
-    ]
-    return html.Div(
-        [
-            _subhead("Draft KPI Registry"),
-            dash_table.DataTable(
-                data=rows,
-                columns=[{"name": c, "id": c} for c in ["KPI", "Question", "Metric", "Status"]],
-                page_size=5,
-                style_table={"overflowX": "auto"},
-                style_cell={
-                    "background": "#0d1b2a",
-                    "color": "#c9d1d9",
-                    "border": "1px solid #21262d",
-                    "fontSize": "0.74rem",
-                    "fontFamily": "monospace",
-                    "padding": "6px 8px",
-                    "textAlign": "left",
-                    "whiteSpace": "normal",
-                    "height": "auto",
-                },
-                style_header={
-                    "background": "#161b22",
-                    "color": "#58a6ff",
-                    "fontWeight": "600",
-                    "border": "1px solid #21262d",
-                },
-            ),
-        ]
-    )
-
-
-def _proof_and_advisor_panel(
-    draft_proofs: list[dict],
-    competitive: dict,
-    checks: list[dict],
-) -> html.Div:
-    missing = competitive.get("missing_discussion_points") or []
-    suggestions = competitive.get("ranked_suggestions") or []
-    rows = [
-        _subhead("Proof & Advisor"),
-        _mini_kv("Draft proof", f"{len(draft_proofs)} KPI(s)", "#58a6ff"),
-        _mini_kv("Production checks", len(checks), "#d2a8ff"),
-        _mini_kv("Missing points", len(missing), "#fd7e14" if missing else "#28a745"),
-    ]
-    if missing:
-        rows.append(
-            html.Div(
-                ", ".join(missing[:8]),
-                style={"color": "#fd7e14", "fontSize": "0.74rem", "lineHeight": "1.4"},
-            )
-        )
-    if suggestions:
-        rows.append(html.Div("Advisor", style={"color": "#8b949e", "fontSize": "0.74rem", "marginTop": "8px"}))
-        rows.extend(
-            html.Div(
-                suggestion,
-                style={
-                    "color": "#c9d1d9",
-                    "fontSize": "0.74rem",
-                    "padding": "5px 0",
-                    "borderBottom": "1px solid #21262d",
-                },
-            )
-            for suggestion in suggestions[:3]
-        )
-    if checks:
-        rows.append(html.Div("Final Gate", style={"color": "#8b949e", "fontSize": "0.74rem", "marginTop": "8px"}))
-        rows.extend(
-            html.Div(
-                [
-                    html.Span(check.get("check", ""), style={"color": "#c9d1d9"}),
-                    html.Span(
-                        check.get("status", ""),
-                        style={"color": "#fd7e14", "float": "right", "fontSize": "0.72rem"},
-                    ),
-                ],
-                style={"fontSize": "0.72rem", "padding": "4px 0"},
-            )
-            for check in checks[:5]
-        )
-    return html.Div(rows, style={"maxHeight": "295px", "overflowY": "auto"})
-
-
-app.layout = dbc.Container(
-    fluid=True,
-    style={"background": "#0b1622", "minHeight": "100vh", "padding": "20px"},
-    children=[
-        dcc.Interval(id="tick", interval=REFRESH_MS, n_intervals=0),
-
-        # ── Header ────────────────────────────────────────────────────────────
-        dbc.Row(
-            dbc.Col(
-                html.Div(
-                    [
-                        html.H3(
-                            "Autoresearch",
-                            style={"color": "#58a6ff", "margin": 0, "fontWeight": "700"},
-                        ),
-                        html.Span(
-                            id="header-task-label",
-                            style={"color": "#8b949e", "fontSize": "0.85rem", "marginLeft": "16px"},
-                        ),
-                    ],
-                    style={"display": "flex", "alignItems": "baseline", "marginBottom": "16px"},
-                )
-            )
-        ),
-
-        # ── Status bar ────────────────────────────────────────────────────────
-        dbc.Row(id="status-bar", className="g-3 mb-2"),
-
-        dbc.Row(
-            [
-                dbc.Col(_card("Foundation Status", "foundation-panel"), md=4),
-                dbc.Col(_card("Top Blockers", "blocker-panel"), md=4),
-                dbc.Col(_card("Tool Registry", "tool-panel"), md=4),
-            ],
-            className="g-3",
-        ),
-
-        dbc.Row(
-            [
-                dbc.Col(_card("Question Panel", "question-panel"), md=12),
-            ],
-            className="g-3",
-        ),
-
-        dbc.Row(
-            [
-                dbc.Col(_card("KPI Generation", "kpi-generation-panel"), md=12),
-            ],
-            className="g-3",
-        ),
-
-        dbc.Row(
-            [
-                dbc.Col(_card("Workspace Evidence", "evidence-panel"), md=7),
-                dbc.Col(_card("Git Hygiene", "git-hygiene-panel"), md=5),
-            ],
-            className="g-3",
-        ),
-
-        # ── Metric chart + Status pie ─────────────────────────────────────────
-        dbc.Row(
-            [
-                dbc.Col(_card("Metric History", "metric-chart"), md=8),
-                dbc.Col(_card("Run Status Distribution", "status-pie"), md=4),
-            ],
-            className="g-3",
-        ),
-
-        # ── Intern feed + Git diff ─────────────────────────────────────────────
-        dbc.Row(
-            [
-                dbc.Col(_card("Intern Activity (last 20)", "intern-feed"), md=6),
-                dbc.Col(_card("Git Log (recent commits)", "git-log"), md=6),
-            ],
-            className="g-3",
-        ),
-
-        # ── Results table ─────────────────────────────────────────────────────
-        _card("Experiment Results", "results-table"),
-
-        dbc.Row(
-            [
-                dbc.Col(_card("Governance Decisions", "governance-panel"), md=7),
-                dbc.Col(_card("Human Alerts", "alerts-panel"), md=5),
-            ],
-            className="g-3",
-        ),
-
-        # ── Ideas ─────────────────────────────────────────────────────────────
-        _card("Ideas & Hypotheses", "ideas-panel"),
-    ],
-)
-
-# ─── Callbacks ────────────────────────────────────────────────────────────────
+# ── Routing ───────────────────────────────────────────────────────────────────
 
 @app.callback(
-    [
-        Output("header-task-label", "children"),
-        Output("status-bar", "children"),
-        Output("foundation-panel", "children"),
-        Output("blocker-panel", "children"),
-        Output("tool-panel", "children"),
-        Output("question-panel", "children"),
-        Output("kpi-generation-panel", "children"),
-        Output("evidence-panel", "children"),
-        Output("git-hygiene-panel", "children"),
-        Output("metric-chart", "children"),
-        Output("status-pie", "children"),
-        Output("intern-feed", "children"),
-        Output("git-log", "children"),
-        Output("results-table", "children"),
-        Output("governance-panel", "children"),
-        Output("alerts-panel", "children"),
-        Output("ideas-panel", "children"),
-    ],
-    Input("tick", "n_intervals"),
+    [Output(f"page-{pid}", "style") for pid in PAGE_IDS]
+    + [Output("page-title", "children"), Output("header-context", "children")],
+    [Input("url", "pathname"), Input("ws-store", "data")],
 )
-def refresh(_n):
-    results, intern_logs, loop_status, ideas, governance, alerts = load_data()
+def _route(pathname: str, ws: str):
+    page = (pathname or "/workspace").lstrip("/") or "workspace"
+    if page not in PAGE_IDS:
+        page = "workspace"
+    styles = [{"display": "block"} if pid == page else {"display": "none"} for pid in PAGE_IDS]
+    title  = dict(NAV_ITEMS).get(page, page.capitalize())
+    ctx    = f"// {ws}" if ws else ""
+    return styles + [title, ctx]
+
+# ── Workspace callbacks ───────────────────────────────────────────────────────
+
+@app.callback(
+    [Output("ws-dropdown", "options"), Output("ws-dropdown", "value")],
+    Input("url", "pathname"),
+)
+def _init_ws_dd(_):
+    wss  = _workspaces()
+    opts = [{"label": w, "value": w} for w in wss]
     task = _active_task()
-    command_center = load_command_center(task)
+    presel = (task.get("workspace") or "").replace("workspaces/", "").strip("/")
+    value  = presel if presel in wss else (wss[0] if wss else None)
+    return opts, value
 
-    # ── Header label ─────────────────────────────────────────────────────────
-    task_label = task.get("name", "No active task")
+@app.callback(Output("ws-store", "data"), Input("ws-dropdown", "value"), prevent_initial_call=True)
+def _set_ws(ws): return ws or ""
 
-    # ── Status bar KPI cards ──────────────────────────────────────────────────
-    exp_count = loop_status.get("experiment_count", len(results))
-    best_metric = loop_status.get("best_metric", None)
-    if best_metric is None and results:
-        valid = [r["metric"] for r in results if r["metric"] is not None]
-        best_metric = max(valid) if valid else None
+@app.callback(Output("sidebar-ws", "children"), Input("ws-store", "data"))
+def _sidebar_ws(ws): return ws or "—"
 
-    state = loop_status.get("state", loop_status.get("running", False))
-    if isinstance(state, bool):
-        state = "running" if state else "idle"
-    state_color = "#28a745" if state == "running" else "#8b949e"
+@app.callback(
+    [Output("ws-status-body", "children"), Output("ws-kpi-body", "children"),
+     Output("ws-profiles-body", "children")],
+    [Input("slow-tick", "n_intervals"), Input("ws-store", "data")],
+)
+def _ws_refresh(_n, ws):
+    none_msg = html.Div("Select a workspace.", style={"color": C["muted"], "padding": "16px"})
+    if not ws:
+        return none_msg, none_msg, none_msg
+    arts    = _ws_artifacts(ws)
+    summary = arts["mapping"].get("summary", {})
+    profiles= arts["profiles"].get("profiles", [])
+    panel   = arts["panel"]
+    opts    = panel.get("options") or []
+    lock    = _lock_state(ws)
 
-    last_updated = loop_status.get("last_updated", "")
-    if last_updated:
-        try:
-            dt = datetime.fromisoformat(last_updated.replace("Z", "+00:00"))
-            last_updated = dt.strftime("%H:%M:%S UTC")
-        except Exception:
-            pass
+    status = html.Div([
+        _kv("Path",      f"workspaces/{ws}"),
+        _kv("KPI ready", summary.get("ready_kpi_count", "—"),   C["green"]),
+        _kv("Blocked",   summary.get("blocked_kpi_count", "—"),  C["orange"]),
+        _kv("Unresolved",summary.get("unresolved_feature_count","—"), C["orange"]),
+        _kv("Profiles",  len(profiles), C["blue"]),
+        _kv("Design",    "present" if (_med_gen(ws) / "manifest.yaml").exists() else "absent",
+            C["green"] if (_med_gen(ws) / "manifest.yaml").exists() else C["muted"]),
+        _kv("Build lock",
+            f"active (PID {lock['pid']})" if lock["locked"] else "clear",
+            C["red"] if lock["locked"] else C["green"]),
+    ])
 
-    def _kpi(label, value, color="#f0f6fc"):
-        return dbc.Col(
-            dbc.Card(
-                dbc.CardBody(
-                    [
-                        html.Div(label, style={"color": "#8b949e", "fontSize": "0.7rem", "textTransform": "uppercase", "letterSpacing": "0.06em"}),
-                        html.Div(value, style={"color": color, "fontSize": "1.6rem", "fontWeight": "700", "marginTop": "4px"}),
-                    ],
-                    style={"padding": "12px 16px"},
-                ),
-                style={"background": "#0d1b2a", "border": "1px solid #243447", "borderRadius": "8px"},
-            ),
-            xs=6, sm=4, md=3, lg=2,
-        )
+    kpi_body = html.Div([
+        html.Div(panel.get("question") or "No active blocker panel.",
+                 style={"color": C["text"], "fontWeight": "600", "fontSize": "0.84rem",
+                        "marginBottom": "8px"}),
+        html.Div(panel.get("blocker") or "",
+                 style={"color": C["muted"], "fontSize": "0.76rem", "marginBottom": "10px"}),
+        *[html.Div([
+            html.Span(o.get("option_id",""), style={"color": C["blue"], "fontWeight":"700",
+                                                     "fontFamily":"monospace"}),
+            html.Span("  " + o.get("label",""),
+                      style={"color": C["text"], "fontSize":"0.78rem"}),
+          ], style={"padding":"5px 0", "borderBottom": f"1px solid {C['dim']}"})
+          for o in opts[:4]],
+    ], style={"maxHeight": "220px", "overflowY": "auto"}) if opts else \
+    html.Div("No blocker panel. Run Onboard Workspace first.",
+             style={"color": C["muted"], "fontSize": "0.8rem"})
 
-    status_bar = [
-        _kpi("Experiments", str(exp_count)),
-        _kpi("Best Metric", f"{best_metric:.4f}" if best_metric is not None else "—", "#58a6ff"),
-        _kpi("State", state.upper(), state_color),
-        _kpi("Last Updated", last_updated or "—"),
-        _kpi(
-            "Keep Rate",
-            f"{sum(1 for r in results if r['status']=='keep')}/{len(results)}" if results else "—",
-            "#28a745",
-        ),
-        _kpi(
-            "Max Possible",
-            str(loop_status.get("max_experiments", "100")),
-        ),
-    ]
-
-    # ── Metric history chart ──────────────────────────────────────────────────
-    mapping = command_center.get("mapping", {})
-    summary = mapping.get("summary", {})
-    blockers = mapping.get("blocker_clusters", [])
-    definitions = command_center.get("definitions", {}).get("definitions", [])
-    profiles = command_center.get("profiles", {}).get("profiles", [])
-    question_panel = command_center.get("question_panel", {})
-    kpi_generation = command_center.get("kpi_generation", {})
-    tools = command_center.get("tools", {}).get("tools", [])
-    evidence_policy = command_center.get("tools", {}).get("evidence_policy", {})
-    git = command_center.get("git", {})
-    open_question_count = sum(
-        1
-        for line in command_center.get("open_questions", "").splitlines()
-        if line.strip().startswith("- ")
-    )
-
-    def _kv(label, value, color="#f0f6fc"):
-        return html.Div(
-            [
-                html.Span(label, style={"color": "#8b949e", "fontSize": "0.75rem"}),
-                html.Span(str(value), style={"color": color, "float": "right", "fontWeight": "600"}),
-            ],
-            style={"padding": "6px 0", "borderBottom": "1px solid #21262d"},
-        )
-
-    foundation_panel = html.Div(
-        [
-            _kv("Workspace", command_center.get("workspace") or "none", "#58a6ff"),
-            _kv("KPI ready", summary.get("ready_kpi_count", 0), "#28a745"),
-            _kv("KPI blocked", summary.get("blocked_kpi_count", 0), "#fd7e14"),
-            _kv("Unresolved features", summary.get("unresolved_feature_count", 0), "#fd7e14"),
-            _kv("Workspace definitions", len(definitions), "#d2a8ff"),
-            _kv("Dataset profiles", len(profiles), "#58a6ff"),
-            _kv("Open questions", open_question_count, "#f0f6fc"),
-        ]
-    )
-
-    if blockers:
-        blocker_panel = html.Div(
-            [
-                html.Div(
-                    [
-                        html.Span(item.get("feature", ""), style={"color": "#f0f6fc", "fontWeight": "600"}),
-                        html.Span(f"{item.get('count', 0)} KPI(s)", style={"color": "#58a6ff", "float": "right"}),
-                        html.Div(item.get("risk", ""), style={"color": "#8b949e", "fontSize": "0.72rem", "marginTop": "2px"}),
-                    ],
-                    style={"padding": "8px 0", "borderBottom": "1px solid #21262d"},
-                )
-                for item in blockers[:8]
-            ],
-            style={"maxHeight": "285px", "overflowY": "auto"},
-        )
+    if profiles:
+        rows = [{"Dataset": Path(p.get("path","")).name,
+                 "Rows":    p.get("row_count",""),
+                 "Cols":    len(p.get("schema") or {}),
+                 "Source":  ", ".join(p.get("sources_used",[])),
+                 "Warnings":len(p.get("warnings",[])),
+                 } for p in profiles[:30]]
+        prof_body = _dt(rows, ["Dataset","Rows","Cols","Source","Warnings"], page=12)
     else:
-        blocker_panel = html.Div("No unresolved blocker clusters detected.", style={"color": "#8b949e", "textAlign": "center", "padding": "40px"})
+        prof_body = html.Div("No profiles yet.", style={"color": C["muted"]})
 
-    question_options = question_panel.get("options") or []
-    if question_panel:
-        question_panel_view = html.Div(
-            [
-                html.Div(
-                    [
-                        html.Span(
-                            question_panel.get("feature", "Current blocker"),
-                            style={"color": "#f0f6fc", "fontWeight": "700", "fontSize": "1rem"},
-                        ),
-                        html.Span(
-                            question_panel.get("reuse_scope", ""),
-                            style={"color": "#58a6ff", "float": "right", "fontSize": "0.78rem"},
-                        ),
-                    ],
-                    style={"marginBottom": "8px"},
-                ),
-                html.Div(question_panel.get("blocker", ""), style={"color": "#c9d1d9", "marginBottom": "8px"}),
-                html.Div(question_panel.get("question", ""), style={"color": "#f0f6fc", "fontWeight": "600", "marginBottom": "8px"}),
-                html.Div(
-                    [
-                        html.Span("Recommended: ", style={"color": "#8b949e"}),
-                        html.Span(question_panel.get("recommended_answer", ""), style={"color": "#28a745"}),
-                    ],
-                    style={"marginBottom": "6px"},
-                ),
-                html.Div(question_panel.get("why", ""), style={"color": "#8b949e", "fontSize": "0.78rem", "marginBottom": "10px"}),
-                html.Div(
-                    [
-                        html.Div(
-                            [
-                                html.Div(
-                                    [
-                                        html.Span(option.get("option_id", ""), style={"color": "#58a6ff", "fontWeight": "700"}),
-                                        html.Span(" JSON" if option.get("json_backed") else " Manual", style={"color": "#8b949e", "float": "right"}),
-                                    ]
-                                ),
-                                html.Div(option.get("label", ""), style={"color": "#f0f6fc", "fontWeight": "600"}),
-                                html.Div(option.get("business_summary", ""), style={"color": "#8b949e", "fontSize": "0.75rem"}),
-                                html.Code(
-                                    option.get("formula", ""),
-                                    style={
-                                        "display": "block" if option.get("formula") else "none",
-                                        "color": "#c9d1d9",
-                                        "background": "#0d1b2a",
-                                        "padding": "6px",
-                                        "marginTop": "6px",
-                                        "whiteSpace": "pre-wrap",
-                                    },
-                                ),
-                            ],
-                            style={"borderTop": "1px solid #21262d", "padding": "8px 0"},
-                        )
-                        for option in question_options[:4]
-                    ],
-                    style={"maxHeight": "260px", "overflowY": "auto"},
-                ),
-            ]
-        )
+    return status, kpi_body, prof_body
+
+@app.callback(
+    Output("ws-action-out", "children"),
+    [Input("btn-onboard","n_clicks"), Input("btn-validate","n_clicks"),
+     Input("btn-gen-kpi-sql","n_clicks")],
+    State("ws-store","data"), prevent_initial_call=True,
+)
+def _ws_action(ob, vb, gb, ws):
+    if not ws:
+        return "No workspace selected."
+    ctx = callback_context.triggered[0]["prop_id"].split(".")[0]
+    cmd = {"btn-onboard": "onboard-workspace",
+           "btn-validate": "validate-workspace-artifacts",
+           "btn-gen-kpi-sql": "generate-kpi-sql"}.get(ctx)
+    if not cmd:
+        return no_update
+    r = _run_cmd(ws, cmd)
+    return (r.get("stdout") or "") + (r.get("stderr") or "") + (r.get("error") or "")
+
+# ── Build callbacks ───────────────────────────────────────────────────────────
+
+@app.callback(
+    [Output("build-lock-banner","children"), Output("build-log","children")],
+    [Input("fast-tick","n_intervals"), Input("ws-store","data")],
+)
+def _build_fast(_n, ws):
+    if not ws:
+        return html.Div(), "(select a workspace)"
+    lock = _lock_state(ws)
+    log  = _tail(_live_log(ws))
+    if lock["locked"]:
+        age   = lock["age_s"]
+        pid   = lock["pid"]
+        alive = _pid_alive(pid)
+        banner = dbc.Alert([
+            html.Strong("Build running  "),
+            _badge(f"PID {pid}", C["blue"]),
+            html.Span(f"  {age//60}m {age%60}s elapsed",
+                      style={"color": C["muted"], "fontSize": "0.8rem", "marginLeft": "8px"}),
+            html.Span("  process alive" if alive else "  process gone",
+                      style={"color": C["green"] if alive else C["orange"],
+                             "marginLeft": "8px", "fontSize": "0.8rem"}),
+        ], color="dark",
+            style={"border": f"1px solid {C['orange']}", "borderLeft": f"4px solid {C['orange']}",
+                   "borderRadius": "6px", "marginBottom": "12px", "padding": "10px 16px"})
     else:
-        question_panel_view = html.Div(
-            "No blocker question panel found. Run uv run blocker-question-panel --workspace <workspace> after feature resolution.",
-            style={"color": "#8b949e", "textAlign": "center", "padding": "28px"},
-        )
+        banner = html.Div()
+    return banner, log
 
-    kpi_generation_panel = _render_kpi_generation_panel(kpi_generation)
+@app.callback(
+    Output("build-run-history","children"),
+    [Input("slow-tick","n_intervals"), Input("ws-store","data")],
+)
+def _run_history(_n, ws):
+    if not ws:
+        return html.Div("Select a workspace.", style={"color": C["muted"]})
+    runs = _runs(ws)
+    if not runs:
+        return html.Div("No runs yet.", style={"color": C["muted"], "padding": "20px"})
+    rows = []
+    for r in runs:
+        tst = r.get("per_table_status") or {}
+        ok  = sum(1 for v in tst.values() if v.get("status") == "ok")
+        fail= sum(1 for v in tst.values() if v.get("status") == "failed")
+        rows.append({
+            "Run ID":   r.get("run_id","")[:22],
+            "Started":  _ts_fmt(r.get("started_at","")),
+            "Target":   r.get("target_actual",""),
+            "OK":       ok,
+            "Failed":   fail,
+            "Rows":     f"{sum(v.get('row_count_after',0) for v in tst.values()):,}",
+            "Elapsed s":round(r.get("elapsed_seconds",0),1),
+            "Degraded": "yes" if r.get("degraded_run") else "",
+        })
+    return _dt(rows, ["Run ID","Started","Target","OK","Failed","Rows","Elapsed s","Degraded"], page=15)
 
-    tool_panel = html.Div(
-        [
-            _kv("Dataset evidence order", "profile -> bounded sample", "#58a6ff"),
-            _kv("Registry tools", len(tools), "#d2a8ff"),
-            *[
-                html.Div(
-                    [
-                        html.Div(tool.get("name", ""), style={"color": "#f0f6fc", "fontWeight": "600"}),
-                        html.Div(tool.get("safety", ""), style={"color": "#8b949e", "fontSize": "0.72rem"}),
-                    ],
-                    style={"padding": "7px 0", "borderBottom": "1px solid #21262d"},
-                )
-                for tool in tools[:6]
-            ],
-            html.Div(
-                f"Raw data rule: {evidence_policy.get('raw_dataset_rule', 'profile-first')}",
-                style={"color": "#8b949e", "fontSize": "0.74rem", "marginTop": "8px"},
-            ),
-        ],
-        style={"maxHeight": "285px", "overflowY": "auto"},
-    )
+@app.callback(
+    Output("build-lock-banner","style"),
+    Input("btn-run-build","n_clicks"),
+    [State("ws-store","data"), State("build-target","value"),
+     State("build-only-layer","value"), State("build-only-table","value")],
+    prevent_initial_call=True,
+)
+def _do_run(_n, ws, target, layer, table):
+    if ws:
+        _trigger_build(ws, target or "auto", layer or "", table or "")
+    return {}
 
-    evidence_rows = []
-    for profile in profiles[:20]:
-        schema = profile.get("schema") or {}
-        evidence_rows.append(
-            {
-                "Dataset": Path(profile.get("path", "")).name,
-                "Rows": profile.get("row_count", ""),
-                "Cols": len(schema),
-                "Mode": ", ".join(profile.get("sources_used", [])),
-                "Warnings": len(profile.get("warnings", [])),
-            }
-        )
-    if evidence_rows:
-        evidence_panel = dash_table.DataTable(
-            data=evidence_rows,
-            columns=[{"name": c, "id": c} for c in ["Dataset", "Rows", "Cols", "Mode", "Warnings"]],
-            page_size=8,
-            style_table={"overflowX": "auto"},
-            style_cell={
-                "background": "#0d1b2a",
-                "color": "#c9d1d9",
-                "border": "1px solid #21262d",
-                "fontSize": "0.76rem",
-                "fontFamily": "monospace",
-                "padding": "6px 8px",
-                "textAlign": "left",
-            },
-            style_header={
-                "background": "#161b22",
-                "color": "#58a6ff",
-                "fontWeight": "600",
-                "border": "1px solid #21262d",
-            },
-        )
-    else:
-        evidence_panel = html.Div("No profile index found.", style={"color": "#8b949e", "textAlign": "center", "padding": "40px"})
+@app.callback(Output("build-log","style"), Input("btn-kill-build","n_clicks"),
+              State("ws-store","data"), prevent_initial_call=True)
+def _do_kill(_n, ws):
+    if ws:
+        _kill_build(ws)
+    return PRE_S
 
-    git_items = git.get("items", [])
-    git_hygiene_panel = html.Div(
-        [
-            _kv("Status", git.get("status", "unknown"), "#28a745" if git.get("status") == "clean" else "#fd7e14"),
-            _kv("Changed files", git.get("changed", 0), "#f0f6fc"),
-            _kv("Untracked files", git.get("untracked", 0), "#f0f6fc"),
-            html.Pre(
-                "\n".join(git_items) if git_items else "clean",
-                style={
-                    "color": "#c9d1d9",
-                    "background": "#0d1b2a",
-                    "padding": "10px",
-                    "borderRadius": "4px",
-                    "fontSize": "0.72rem",
-                    "maxHeight": "190px",
-                    "overflowY": "auto",
-                    "whiteSpace": "pre-wrap",
-                    "marginTop": "10px",
-                },
-            ),
-        ]
-    )
+@app.callback(Output("ws-action-out","style"), Input("btn-design","n_clicks"),
+              State("ws-store","data"), prevent_initial_call=True)
+def _do_design(_n, ws):
+    if ws:
+        _run_cmd(ws, "design-medallion")
+    return {}
 
-    valid_results = [r for r in results if r["metric"] is not None]
-    if valid_results:
-        x = [r["id"] for r in valid_results]
-        y = [r["metric"] for r in valid_results]
-        colors = [STATUS_COLORS.get(r["status"], "#8b949e") for r in valid_results]
-        best_y = max(y) if y else 0
+# ── Medallion callbacks ───────────────────────────────────────────────────────
 
+@app.callback(
+    [Output("med-latest-run","children"), Output("med-table-status","children"),
+     Output("med-row-chart","children"),  Output("med-dur-chart","children"),
+     Output("med-kpi-chart","children"),  Output("med-assert-chart","children")],
+    [Input("slow-tick","n_intervals"), Input("ws-store","data")],
+)
+def _med_refresh(_n, ws):
+    none_msg = html.Div("Select a workspace.", style={"color": C["muted"]})
+    if not ws:
+        return [none_msg]*6
+    runs = _runs(ws)
+    if not runs:
+        no_r = html.Div("No runs yet. Trigger a build.", style={"color": C["muted"], "padding": "20px"})
+        return [no_r]*6
+
+    latest  = runs[0]
+    tst     = latest.get("per_table_status") or {}
+    ok_cnt  = sum(1 for v in tst.values() if v.get("status") == "ok")
+    fail_cnt= sum(1 for v in tst.values() if v.get("status") == "failed")
+
+    latest_body = html.Div([
+        _kv("Run ID",   latest.get("run_id","")[:20]),
+        _kv("Started",  _ts_fmt(latest.get("started_at",""))),
+        _kv("Target",   latest.get("target_actual",""), C["blue"]),
+        _kv("Elapsed",  f"{latest.get('elapsed_seconds',0):.1f}s"),
+        _kv("OK tables",ok_cnt, C["green"]),
+        _kv("Failed",   fail_cnt, C["red"] if fail_cnt else C["muted"]),
+        _kv("Degraded", "yes" if latest.get("degraded_run") else "no",
+            C["orange"] if latest.get("degraded_run") else C["green"]),
+    ])
+
+    tbl_rows = []
+    for tbl, s in sorted(tst.items()):
+        color = {"ok": C["green"], "failed": C["red"], "pending": C["faint"]}.get(
+            s.get("status","pending"), C["muted"])
+        tbl_rows.append(html.Div([
+            _badge(s.get("status","?"), color),
+            html.Span(tbl, style={"color": C["text"], "fontFamily": "monospace",
+                                   "fontSize": "0.79rem", "marginLeft": "8px"}),
+            html.Span(f"{s.get('row_count_after',0):,} rows",
+                      style={"color": C["muted"], "fontSize": "0.73rem", "marginLeft": "8px"}),
+            html.Span(f"  {s.get('elapsed_s',0):.1f}s",
+                      style={"color": C["faint"], "fontSize": "0.71rem"}),
+        ], style={"padding": "6px 0", "borderBottom": f"1px solid {C['dim']}",
+                  "display": "flex", "alignItems": "center", "gap": "4px", "flexWrap": "wrap"}))
+    table_status = html.Div(tbl_rows, style={"maxHeight": "240px", "overflowY": "auto"}) \
+        if tbl_rows else html.Div("No table data.", style={"color": C["muted"]})
+
+    # Collect table names across all runs
+    tbl_names: set[str] = set()
+    for r in runs:
+        tbl_names.update((r.get("per_table_status") or {}).keys())
+
+    def _run_ts_list(): return [r.get("started_at","") for r in reversed(runs)]
+
+    # Row count trend
+    if tbl_names and len(runs) > 1:
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=x, y=y, mode="lines",
-            line=dict(color="#243447", width=1.5),
-            showlegend=False, hoverinfo="skip",
-        ))
-        fig.add_trace(go.Scatter(
-            x=x, y=y, mode="markers",
-            marker=dict(color=colors, size=8, line=dict(color="#0b1622", width=1)),
-            text=[f"#{r['id']} {r['commit']}<br>{r['status']}<br>{r['metric']:.4f}" for r in valid_results],
-            hovertemplate="%{text}<extra></extra>",
-            name="Experiments",
-        ))
-        fig.add_hline(
-            y=best_y,
-            line_dash="dot",
-            line_color="#58a6ff",
-            annotation_text=f"Best: {best_y:.4f}",
-            annotation_position="top right",
-            annotation_font_color="#58a6ff",
-        )
-        fig.update_layout(
-            paper_bgcolor="#1e2a3a", plot_bgcolor="#1e2a3a",
-            font=dict(color="#8b949e", size=11),
-            xaxis=dict(title="Experiment #", gridcolor="#243447", showline=False),
-            yaxis=dict(title="Primary Metric", gridcolor="#243447", showline=False),
-            margin=dict(l=10, r=10, t=10, b=10),
-            showlegend=False,
-            height=280,
-        )
-        metric_chart = dcc.Graph(figure=fig, config={"displayModeBar": False})
+        for tbl in sorted(tbl_names):
+            ys = [(r.get("per_table_status") or {}).get(tbl, {}).get("row_count_after") for r in reversed(runs)]
+            fig.add_trace(go.Scatter(x=_run_ts_list(), y=ys, name=tbl, mode="lines+markers",
+                                     line=dict(width=1.5), marker=dict(size=4)))
+        fig.update_layout(**PLOT_L, showlegend=True)
+        row_chart = dcc.Graph(figure=fig, config={"displayModeBar": False})
     else:
-        metric_chart = html.Div("No metric data yet.", style={"color": "#8b949e", "textAlign": "center", "padding": "60px"})
+        row_chart = _empty_chart("Need 2+ runs for trend.")
 
-    # ── Status pie ────────────────────────────────────────────────────────────
+    # Duration breakdown
+    if tbl_names and len(runs) > 1:
+        xlabels = [r.get("run_id","")[:10] for r in reversed(runs)]
+        fig2 = go.Figure()
+        for tbl in sorted(tbl_names):
+            ys = [(r.get("per_table_status") or {}).get(tbl, {}).get("elapsed_s", 0) for r in reversed(runs)]
+            fig2.add_trace(go.Bar(x=xlabels, y=ys, name=tbl))
+        fig2.update_layout(**PLOT_L, barmode="stack", showlegend=True)
+        dur_chart = dcc.Graph(figure=fig2, config={"displayModeBar": False})
+    else:
+        dur_chart = _empty_chart("Need 2+ runs.")
+
+    # KPI metric trend
+    kpi_names: set[str] = set()
+    for r in runs:
+        kpi_names.update((r.get("kpi_diff") or {}).keys())
+    if kpi_names and len(runs) > 1:
+        fig3 = go.Figure()
+        for kpi in sorted(kpi_names):
+            ys = []
+            for r in reversed(runs):
+                diff = (r.get("kpi_diff") or {}).get(kpi, {})
+                ys.append(diff.get("after") or diff.get("value"))
+            fig3.add_trace(go.Scatter(x=_run_ts_list(), y=ys, name=kpi, mode="lines+markers",
+                                       line=dict(width=1.5)))
+        fig3.update_layout(**PLOT_L, showlegend=True)
+        kpi_chart = dcc.Graph(figure=fig3, config={"displayModeBar": False})
+    else:
+        kpi_chart = _empty_chart("No KPI diff data yet.")
+
+    # Assertion heatmap
+    recent = runs[:15]
+    if tbl_names and recent:
+        rlabels = [r.get("run_id","")[:10] for r in reversed(recent)]
+        all_tbls = sorted(tbl_names)
+        z = []
+        for tbl in all_tbls:
+            row = []
+            for r in reversed(recent):
+                st = (r.get("per_table_status") or {}).get(tbl, {}).get("status","pending")
+                row.append(0 if st == "ok" else (1 if st == "failed" else 0.5))
+            z.append(row)
+        fig4 = go.Figure(go.Heatmap(
+            z=z, x=rlabels, y=all_tbls,
+            colorscale=[[0, C["green"]], [0.5, C["orange"]], [1, C["red"]]],
+            showscale=False,
+        ))
+        fig4.update_layout(**PLOT_L, height=max(180, 28*len(all_tbls)), xaxis=dict(side="top"))
+        assert_chart = dcc.Graph(figure=fig4, config={"displayModeBar": False})
+    else:
+        assert_chart = _empty_chart("No assertion data.")
+
+    return latest_body, table_status, row_chart, dur_chart, kpi_chart, assert_chart
+
+# ── Lineage callbacks ─────────────────────────────────────────────────────────
+
+@app.callback(
+    [Output("lin-sankey","children"), Output("lin-table-select","options")],
+    [Input("slow-tick","n_intervals"), Input("ws-store","data")],
+)
+def _lin_refresh(_n, ws):
+    if not ws:
+        return _empty_chart("Select a workspace."), []
+    data  = _lineage(ws)
+    nodes = data.get("nodes") or []
+    edges = data.get("edges") or []
+    if not nodes:
+        return _empty_chart("No lineage. Run design-medallion first."), []
+
+    labels = [f"{n['layer']}.{n['table']}" for n in nodes]
+    idx    = {lbl: i for i, lbl in enumerate(labels)}
+    SRC, TGT, VAL, HTEXT = [], [], [], []
+    for e in edges:
+        fi = idx.get(e.get("from_node",""))
+        ti = idx.get(e.get("to_node",""))
+        if fi is not None and ti is not None:
+            nc = len(e.get("from_columns") or []) or 1
+            SRC.append(fi)
+            TGT.append(ti)
+            VAL.append(nc)
+            HTEXT.append(f"{e.get('transform_type','?')} ({nc} cols)")
+
+    lc = {"bronze": "#cd7f32", "silver": "#a8b8c8", "gold": "#f5c430"}
+    node_colors = [lc.get(n["layer"], C["blue"]) for n in nodes]
+    fig = go.Figure(go.Sankey(
+        node=dict(label=labels, color=node_colors, pad=14, thickness=18,
+                  hovertemplate="%{label}<extra></extra>"),
+        link=dict(source=SRC, target=TGT, value=VAL,
+                  customdata=HTEXT, hovertemplate="%{customdata}<extra></extra>",
+                  color="rgba(79,156,249,0.15)"),
+    ))
+    fig.update_layout(**PLOT_L, height=380)
+    opts = [{"label": lbl, "value": lbl} for lbl in labels]
+    return dcc.Graph(figure=fig, config={"displayModeBar": False}), opts
+
+@app.callback(
+    Output("lin-column-body","children"),
+    [Input("lin-table-select","value"), Input("ws-store","data")],
+)
+def _lin_cols(selected, ws):
+    if not ws or not selected:
+        return html.Div("Select a table above.", style={"color": C["muted"]})
+    edges = (_lineage(ws).get("edges") or [])
+    rows = []
+    for e in edges:
+        if e.get("from_node") == selected:
+            for fc, tc in zip(e.get("from_columns",[]), e.get("to_columns",[])):
+                rows.append({"Dir":"→", "From Col": fc, "To Table": e["to_node"],
+                             "To Col": tc, "Transform": e.get("transform_type","?")})
+        elif e.get("to_node") == selected:
+            for fc, tc in zip(e.get("from_columns",[]), e.get("to_columns",[])):
+                rows.append({"Dir":"←", "From Table": e["from_node"], "From Col": fc,
+                             "To Col": tc, "Transform": e.get("transform_type","?")})
+    if not rows:
+        return html.Div(f"No column edges for {selected}.", style={"color": C["muted"]})
+    return _dt(rows, ["Dir","From Table","From Col","To Table","To Col","Transform"], page=20)
+
+# ── Blocker callbacks ─────────────────────────────────────────────────────────
+
+@app.callback(
+    [Output("blocker-panel-body","children"), Output("blocker-option-select","options")],
+    [Input("slow-tick","n_intervals"), Input("ws-store","data"),
+     Input("blocker-action-out","children")],
+)
+def _blocker_refresh(_n, ws, _):
+    if not ws:
+        return html.Div("Select a workspace.", style={"color":C["muted"]}), []
+    panel = _blocker_panel(ws)
+    opts  = panel.get("options") or []
+    if not panel:
+        body = html.Div([
+            html.Div("No blocker panel.", style={"color": C["muted"], "marginBottom": "8px"}),
+            html.Code("uv run blocker-question-panel --workspace workspaces/<ws>",
+                      style={"color": C["blue"], "background": C["sidebar"],
+                             "padding": "8px 12px", "borderRadius":"4px",
+                             "display":"block", "fontSize":"0.76rem"}),
+        ])
+        return body, []
+
+    body = html.Div([
+        html.Div([
+            _badge(panel.get("feature","Blocker"), C["blue"]),
+            html.Span("  " + (panel.get("reuse_scope") or ""),
+                      style={"color": C["muted"], "fontSize": "0.74rem"}),
+        ], style={"marginBottom": "8px"}),
+        html.Div(panel.get("question",""), style={"color": C["text"], "fontWeight":"600",
+                                                   "fontSize":"0.88rem", "marginBottom":"6px"}),
+        html.Div(panel.get("blocker",""), style={"color": C["muted"], "fontSize":"0.76rem",
+                                                  "marginBottom":"8px"}),
+        html.Div([
+            html.Span("Recommended: ", style={"color":C["faint"]}),
+            html.Span(panel.get("recommended_answer","-"), style={"color":C["green"],"fontWeight":"600"}),
+        ], style={"marginBottom":"8px"}),
+        html.Div(panel.get("why",""), style={"color":C["muted"],"fontSize":"0.75rem","marginBottom":"10px"}),
+        html.Hr(style={"borderColor":C["dim"],"margin":"8px 0"}),
+        *[html.Div([
+            html.Div([
+                html.Span(o.get("option_id",""), style={"color":C["blue"],"fontWeight":"700",
+                                                         "fontFamily":"monospace","fontSize":"0.82rem"}),
+                _badge("JSON" if o.get("json_backed") else "manual",
+                       C["green"] if o.get("json_backed") else C["muted"]),
+            ], style={"display":"flex","gap":"8px","alignItems":"center","marginBottom":"4px"}),
+            html.Div(o.get("label",""), style={"color":C["text"],"fontWeight":"600","fontSize":"0.82rem"}),
+            html.Div(o.get("business_summary") or o.get("description") or "",
+                     style={"color":C["muted"],"fontSize":"0.74rem"}),
+            html.Code(o.get("formula","") or "", style={
+                "display":"block" if o.get("formula") else "none",
+                "background":C["sidebar"],"color":C["text"],"padding":"6px 10px",
+                "marginTop":"4px","borderRadius":"4px","whiteSpace":"pre-wrap","fontSize":"0.72rem",
+            }),
+          ], style={"padding":"8px 0","borderBottom":f"1px solid {C['dim']}"})
+          for o in opts[:6]],
+    ], style={"maxHeight":"440px","overflowY":"auto"})
+
+    dd_opts = [{"label": f"{o.get('option_id','')}  —  {o.get('label','')}",
+                "value": o.get("option_id","")} for o in opts]
+    return body, dd_opts
+
+@app.callback(
+    Output("blocker-action-out","children"),
+    [Input("btn-blocker-refresh","n_clicks"), Input("btn-blocker-validate","n_clicks")],
+    State("ws-store","data"), prevent_initial_call=True,
+)
+def _blocker_actions(rb, vb, ws):
+    if not ws:
+        return "No workspace."
+    ctx = callback_context.triggered[0]["prop_id"].split(".")[0]
+    cmd = "blocker-question-panel" if ctx=="btn-blocker-refresh" else "validate-workspace-artifacts"
+    r   = _run_cmd(ws, cmd)
+    return (r.get("stdout") or "")[-2000:] + (r.get("stderr") or "")
+
+@app.callback(
+    Output("blocker-apply-out","children"),
+    Input("btn-blocker-apply","n_clicks"),
+    [State("ws-store","data"), State("blocker-option-select","value"),
+     State("blocker-domain-input","value")],
+    prevent_initial_call=True,
+)
+def _apply_blocker(_n, ws, option_id, domain):
+    if not ws or not option_id:
+        return "Select workspace + option."
+    extra = ["--answer", option_id] + (["--domain", domain] if domain else [])
+    r = _run_cmd(ws, "apply-kpi-panel-answer", extra)
+    return (r.get("stdout") or "")[-2000:] + (r.get("stderr") or "")
+
+# ── Code Diffs callbacks ──────────────────────────────────────────────────────
+
+@app.callback(
+    Output("diff-task-select","options"),
+    Input("url","pathname"),
+)
+def _diff_task_opts(_):
+    tasks = _all_tasks()
+    active = _active_task().get("id","")
+    opts = []
+    for t in tasks:
+        label = t.get("name") or t.get("id","?")
+        if t.get("id") == active:
+            label += " ★"
+        opts.append({"label": label, "value": t.get("id","")})
+    if not opts:
+        opts = [{"label": "(no tasks configured)", "value": ""}]
+    return opts
+
+@app.callback(
+    Output("task-store","data"),
+    Input("diff-task-select","value"),
+    prevent_initial_call=True,
+)
+def _set_task(v): return v or ""
+
+@app.callback(
+    [Output("diff-file-info","children"), Output("diff-lang-badge","children"),
+     Output("diff-code-view","children"), Output("diff-rev-history","children"),
+     Output("diff-rev-a","options"),      Output("diff-rev-b","options")],
+    [Input("slow-tick","n_intervals"), Input("task-store","data")],
+)
+def _diffs_context(_n, task_id):
+    tasks = _all_tasks()
+    task  = next((t for t in tasks if t.get("id") == task_id), None)
+    if task is None:
+        task = _active_task()
+
+    editable = task.get("editable_file") or task.get("sql_file") or ""
+    if not editable:
+        empty = html.Div("No editable_file configured in this task.",
+                         style={"color": C["muted"], "padding": "12px"})
+        return empty, html.Div(), "(no file)", html.Div(), [], []
+
+    path = ROOT / editable
+    content = ""
+    if path.exists():
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            content = f"(could not read {editable})"
+
+    lang = _detect_lang(path, content)
+
+    # Execution backend indicator from task
+    exp_cmd  = task.get("experiment_cmd", "")
+    backend  = "Databricks Jobs" if "databricks" in str(exp_cmd).lower() else \
+               "Databricks Warehouse" if ".sql" in str(exp_cmd).lower() else \
+               "DuckDB (local)"
+
+    file_info = html.Div([
+        _kv("File",    editable),
+        _kv("Backend", backend, C["blue"]),
+        _kv("Task",    task.get("name") or task.get("id","—")),
+        _kv("Size",    f"{len(content):,} chars  ·  {content.count(chr(10))+1} lines"),
+    ])
+
+    lang_badge = html.Div([
+        _lang_badge(lang),
+        html.Span(f"  {lang} experiment", style={"color": C["muted"], "fontSize": "0.76rem",
+                                                   "marginLeft": "6px"}),
+    ])
+
+    # Code view with syntax colouring
+    code_view = _colorize(content, lang) if content else ["(empty file)"]
+
+    # Revision history for this specific file
+    log_entries = _git_log_file(editable)
+    if log_entries:
+        rev_rows = []
+        for e in log_entries:
+            rev_rows.append(html.Div([
+                html.Span(e["hash"], style={"color": C["blue"], "fontFamily": "monospace",
+                                             "fontSize": "0.76rem", "fontWeight": "600"}),
+                html.Span("  " + e["message"][:60], style={"color": C["text"], "fontSize": "0.78rem"}),
+            ], style={"padding": "6px 0", "borderBottom": f"1px solid {C['dim']}"}))
+        rev_history = html.Div(rev_rows, style={"maxHeight": "400px", "overflowY": "auto"})
+        rev_opts = [{"label": f"{e['hash']}  {e['message'][:45]}", "value": e["hash"]}
+                    for e in log_entries]
+    else:
+        rev_history = html.Div("No git history for this file yet.",
+                               style={"color": C["muted"]})
+        rev_opts = []
+
+    return file_info, lang_badge, code_view, rev_history, rev_opts, rev_opts
+
+@app.callback(
+    Output("diff-output","children"),
+    Input("btn-diff-go","n_clicks"),
+    [State("diff-rev-a","value"), State("diff-rev-b","value"),
+     State("task-store","data")],
+    prevent_initial_call=True,
+)
+def _show_diff(_n, rev_a, rev_b, task_id):
+    tasks    = _all_tasks()
+    task     = next((t for t in tasks if t.get("id") == task_id), _active_task())
+    editable = task.get("editable_file") or task.get("sql_file") or ""
+    diff_text = _git_diff_file(rev_a or "", rev_b or "", editable)
+    if not diff_text:
+        return ["Select Rev A and Rev B first."]
+    return _colorize_diff(diff_text)
+
+# ── Budget callbacks ──────────────────────────────────────────────────────────
+
+@app.callback(
+    [Output("budget-tracker-body","children"), Output("budget-tiers-body","children"),
+     Output("budget-cost-chart","children")],
+    Input("slow-tick","n_intervals"),
+)
+def _budget_refresh(_n):
+    b       = _budget_state()
+    cache   = _model_cache()
+    spent   = b.get("spent", 0.0)
+    cap     = b.get("max_usd", 0.0)
+    history = b.get("history") or []
+    pct     = (spent / cap * 100) if cap else 0
+    bar_col = C["red"] if pct > 90 else C["orange"] if pct > 70 else C["green"]
+
+    tracker = html.Div([
+        _kv("Spent",     f"${spent:.4f}", bar_col),
+        _kv("Cap",       f"${cap:.2f}"),
+        _kv("Remaining", f"${max(0,cap-spent):.4f}", C["green"]),
+        _kv("Burn %",    f"{pct:.1f}%", bar_col),
+        _kv("Charges",   len(history)),
+        html.Div(style={"height":"6px","background":C["dim"],"borderRadius":"3px","marginTop":"12px"}),
+        html.Div(style={"width":f"{min(100,pct):.1f}%","height":"6px",
+                        "background": bar_col,"borderRadius":"3px","marginTop":"-6px"}),
+    ])
+
+    if cache:
+        tier_rows = [{"Model": mid[:32], "Tier": info.get("tier","?"),
+                      "Context": str(info.get("context_window","?")),
+                      "Vision": "yes" if info.get("vision") else "",
+                      "Cached": _ts_fmt(info.get("cached_at",""))}
+                     for mid, info in list(cache.items())[:20]]
+        tiers = _dt(tier_rows, ["Model","Tier","Context","Vision","Cached"])
+    else:
+        tiers = html.Div("No model cache.", style={"color":C["muted"]})
+
+    if len(history) > 1:
+        ts_list = [h.get("ts") or h.get("timestamp","") for h in history]
+        cum, total = [], 0.0
+        for h in history:
+            total += h.get("usd",0)
+            cum.append(total)
+        fig = go.Figure(go.Scatter(x=ts_list, y=cum, mode="lines+markers",
+                                   line=dict(color=C["orange"],width=2),
+                                   marker=dict(size=4)))
+        fig.update_layout(**PLOT_L, yaxis=dict(**PLOT_L.get("yaxis",{}), title="USD"))
+        cost = dcc.Graph(figure=fig, config={"displayModeBar": False})
+    else:
+        cost = _empty_chart("No cost history.")
+
+    return tracker, tiers, cost
+
+# ── Govern callbacks ──────────────────────────────────────────────────────────
+
+@app.callback(
+    [Output("gov-intern-feed","children"), Output("gov-git-log","children"),
+     Output("gov-decisions","children"),   Output("gov-alerts","children"),
+     Output("gov-ideas","children"),       Output("gov-results","children")],
+    Input("slow-tick","n_intervals"),
+)
+def _govern_refresh(_n):
+    db = _load_global_db()
+
+    INTERN_C = {"prompt_engineer": C["blue"], "code_reviewer": C["green"],
+                "insights": C["purple"], "methodology_analyst": C["orange"],
+                "deep_research": C["red"]}
+
+    intern_rows = []
+    for e in (db["intern_logs"] or [])[:20]:
+        el  = e.get("elapsed_s")
+        els = f"{el:.1f}s" if isinstance(el, (int,float)) else ""
+        col = INTERN_C.get(e.get("intern",""), C["muted"])
+        intern_rows.append(html.Div([
+            html.Div([
+                html.Span(e.get("intern","?"), style={"color":col,"fontWeight":"600","fontSize":"0.79rem",
+                                                       "fontFamily":"monospace"}),
+                html.Span(f"  {els}", style={"color":C["muted"],"fontSize":"0.73rem","marginLeft":"4px"}),
+                html.Span(_ts_fmt(e.get("timestamp","")),
+                          style={"color":C["faint"],"float":"right","fontSize":"0.71rem"}),
+            ], style={"marginBottom":"3px"}),
+            html.Div(str(e.get("snippet") or e.get("activity") or "")[:140],
+                     style={"color":C["text"],"fontSize":"0.76rem","lineHeight":"1.4"}),
+        ], style={"padding":"7px 10px","borderBottom":f"1px solid {C['dim']}","fontFamily":"monospace"}))
+
+    intern_feed = html.Div(intern_rows, style={"maxHeight":"300px","overflowY":"auto"}) \
+        if intern_rows else html.Div("No intern activity.", style={"color":C["muted"],"padding":"20px"})
+
+    git_log = _git_log_text()
+
+    gov_rows = db.get("governance") or []
+    decisions = _dt([{"Run": r["run_id"][:12], "Decision": r["decision"],
+                       "Approval": r["approval"], "Rationale": r["rationale"][:70],
+                       "Time": _ts_fmt(r["timestamp"])} for r in gov_rows],
+                    ["Run","Decision","Approval","Rationale","Time"], page=10) \
+        if gov_rows else html.Div("No decisions.", style={"color":C["muted"]})
+
+    alert_divs = []
+    for a in (db.get("alerts") or [])[:15]:
+        sc = {"critical":C["red"],"warning":C["orange"]}.get(a["severity"],C["blue"])
+        alert_divs.append(html.Div([
+            html.Div([_badge(a["severity"],sc),
+                      html.Span(f"  {a.get('run_id','')[:12]}",
+                                style={"color":C["muted"],"fontSize":"0.73rem"}),
+                      html.Span(_ts_fmt(a.get("timestamp","")),
+                                style={"color":C["faint"],"float":"right","fontSize":"0.71rem"})],
+                     style={"marginBottom":"4px"}),
+            html.Div(a.get("title",""), style={"color":C["text"],"fontWeight":"600","fontSize":"0.8rem"}),
+            html.Div(a.get("message","")[:120], style={"color":C["muted"],"fontSize":"0.74rem"}),
+        ], style={"padding":"8px 0","borderBottom":f"1px solid {C['dim']}"}))
+    alerts_body = html.Div(alert_divs, style={"maxHeight":"300px","overflowY":"auto"}) \
+        if alert_divs else html.Div("No alerts.", style={"color":C["muted"]})
+
+    ideas = db.get("ideas") or "No ideas yet."
+
+    results = db.get("results") or []
+    STATUS_COL = {"keep": C["green"],"review": C["blue"],"discard": C["orange"],"crash": C["red"]}
     if results:
-        from collections import Counter
-        counts = Counter(r["status"] for r in results)
-        labels = list(counts.keys())
-        values = list(counts.values())
-        pie_colors = [STATUS_COLORS.get(label, "#8b949e") for label in labels]
-        pie_fig = go.Figure(go.Pie(
-            labels=labels, values=values,
-            marker=dict(colors=pie_colors, line=dict(color="#0b1622", width=2)),
-            textfont=dict(color="#f0f6fc"),
-            hole=0.45,
-        ))
-        pie_fig.update_layout(
-            paper_bgcolor="#1e2a3a", plot_bgcolor="#1e2a3a",
-            font=dict(color="#8b949e"),
-            margin=dict(l=10, r=10, t=10, b=10),
-            showlegend=True,
-            legend=dict(font=dict(color="#8b949e")),
-            height=280,
-        )
-        status_pie = dcc.Graph(figure=pie_fig, config={"displayModeBar": False})
-    else:
-        status_pie = html.Div("No runs yet.", style={"color": "#8b949e", "textAlign": "center", "padding": "60px"})
-
-    # ── Intern feed ───────────────────────────────────────────────────────────
-    INTERN_COLORS = {
-        "prompt_engineer": "#58a6ff",
-        "code_reviewer": "#3fb950",
-        "insights": "#d2a8ff",
-        "methodology_analyst": "#ffa657",
-        "deep_research": "#f78166",
-    }
-    if intern_logs:
-        rows = []
-        for entry in intern_logs[:20]:
-            elapsed = entry.get("elapsed_s", "")
-            elapsed_str = f"{elapsed:.1f}s" if isinstance(elapsed, (int, float)) else str(elapsed)
-            intern_name = entry.get("intern", "unknown")
-            color = INTERN_COLORS.get(intern_name, "#8b949e")
-            ts = entry.get("timestamp", "")
-            if ts:
-                try:
-                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                    ts = dt.strftime("%H:%M:%S")
-                except Exception:
-                    ts = ts[:19]
-
-            snippet = entry.get("snippet", "") or entry.get("activity", "")
-            snippet = snippet[:120].replace("\n", " ")
-
-            rows.append(
-                html.Div(
-                    [
-                        html.Div(
-                            [
-                                html.Span(intern_name, style={"color": color, "fontWeight": "600", "fontSize": "0.8rem"}),
-                                html.Span(f"  {elapsed_str}", style={"color": "#8b949e", "fontSize": "0.75rem", "marginLeft": "8px"}),
-                                html.Span(ts, style={"color": "#484f58", "fontSize": "0.72rem", "float": "right"}),
-                            ],
-                            style={"marginBottom": "3px"},
-                        ),
-                        html.Div(snippet, style={"color": "#c9d1d9", "fontSize": "0.78rem", "lineHeight": "1.4"}),
-                    ],
-                    style={
-                        "padding": "8px 10px",
-                        "borderBottom": "1px solid #21262d",
-                        "fontFamily": "monospace",
-                    },
-                )
-            )
-        intern_feed = html.Div(rows, style={"overflowY": "auto", "maxHeight": "320px"})
-    else:
-        intern_feed = html.Div("No intern activity yet.", style={"color": "#8b949e", "textAlign": "center", "padding": "60px"})
-
-    # ── Git log ───────────────────────────────────────────────────────────────
-    git_text = get_git_diff()
-    git_log = html.Pre(
-        git_text,
-        style={
-            "color": "#c9d1d9",
-            "background": "#0d1b2a",
-            "padding": "12px",
-            "borderRadius": "4px",
-            "fontSize": "0.75rem",
-            "lineHeight": "1.6",
-            "overflowY": "auto",
-            "maxHeight": "320px",
-            "margin": 0,
-            "whiteSpace": "pre-wrap",
-            "fontFamily": "monospace",
-        },
-    )
-
-    # ── Results table ─────────────────────────────────────────────────────────
-    if results:
-        table_data = []
-        for r in reversed(results):
-            table_data.append({
-                "#": r["id"],
-                "Commit": r["commit"],
-                "Metric": f"{r['metric']:.4f}" if r["metric"] is not None else "—",
-                "Status": r["status"],
-                "Description": r["description"],
-                "Time": r["timestamp"][:19] if r["timestamp"] else "",
-            })
-
-        results_table = dash_table.DataTable(
-            data=table_data,
-            columns=[{"name": c, "id": c} for c in ["#", "Commit", "Metric", "Status", "Description", "Time"]],
-            sort_action="native",
-            filter_action="native",
-            page_size=20,
-            style_table={"overflowX": "auto"},
-            style_cell={
-                "background": "#0d1b2a",
-                "color": "#c9d1d9",
-                "border": "1px solid #21262d",
-                "fontSize": "0.8rem",
-                "fontFamily": "monospace",
-                "padding": "6px 10px",
-                "textAlign": "left",
-                "whiteSpace": "normal",
-                "maxWidth": "300px",
-                "overflow": "hidden",
-                "textOverflow": "ellipsis",
-            },
-            style_header={
-                "background": "#161b22",
-                "color": "#58a6ff",
-                "fontWeight": "600",
-                "border": "1px solid #21262d",
-                "textTransform": "uppercase",
-                "fontSize": "0.72rem",
-                "letterSpacing": "0.05em",
-            },
+        rrows = [{"#": r["id"], "Commit": r["commit"],
+                  "Metric": f"{r['metric']:.4f}" if r["metric"] is not None else "—",
+                  "Status": r["status"], "Description": r["description"][:80],
+                  "Time": _ts_fmt(r.get("timestamp",""))}
+                 for r in reversed(results[-50:])]
+        results_body = dash_table.DataTable(
+            data=rrows, columns=[{"name": c, "id": c} for c in ["#","Commit","Metric","Status","Description","Time"]],
+            page_size=20, sort_action="native", filter_action="native",
+            style_table={"overflowX":"auto"},
+            style_cell=CELL, style_header=HCELL,
             style_data_conditional=[
-                {"if": {"filter_query": '{Status} = "keep"'}, "color": "#28a745"},
-                {"if": {"filter_query": '{Status} = "review"'}, "color": "#58a6ff"},
-                {"if": {"filter_query": '{Status} = "discard"'}, "color": "#fd7e14"},
-                {"if": {"filter_query": '{Status} = "crash"'}, "color": "#dc3545"},
-                {"if": {"row_index": "odd"}, "background": "#0b1622"},
-            ],
+                {"if": {"filter_query": f'{{Status}} = "{s}"'}, "color": col}
+                for s, col in STATUS_COL.items()
+            ] + [{"if": {"row_index": "odd"}, "background": C["card2"]}],
         )
     else:
-        results_table = html.Div("No experiment results yet.", style={"color": "#8b949e", "textAlign": "center", "padding": "40px"})
+        results_body = html.Div("No experiment results.", style={"color":C["muted"]})
 
-    # ── Ideas panel ───────────────────────────────────────────────────────────
-    if governance:
-        governance_table = dash_table.DataTable(
-            data=[
-                {
-                    "Run": row["run_id"],
-                    "Decision": row["decision"],
-                    "Approval": row["approval_state"],
-                    "Promote": "yes" if row["promotion_allowed"] else "no",
-                    "Failed Gates": row["failed_gates"],
-                    "Rationale": row["rationale"],
-                    "Time": row["timestamp"][:19],
-                }
-                for row in governance
-            ],
-            columns=[
-                {"name": c, "id": c}
-                for c in ["Run", "Decision", "Approval", "Promote", "Failed Gates", "Rationale", "Time"]
-            ],
-            page_size=10,
-            style_table={"overflowX": "auto"},
-            style_cell={
-                "background": "#0d1b2a",
-                "color": "#c9d1d9",
-                "border": "1px solid #21262d",
-                "fontSize": "0.76rem",
-                "fontFamily": "monospace",
-                "padding": "6px 8px",
-                "textAlign": "left",
-                "whiteSpace": "normal",
-            },
-            style_header={
-                "background": "#161b22",
-                "color": "#58a6ff",
-                "fontWeight": "600",
-                "border": "1px solid #21262d",
-                "fontSize": "0.72rem",
-            },
-            style_data_conditional=[
-                {"if": {"filter_query": '{Decision} = "approved"'}, "color": "#28a745"},
-                {"if": {"filter_query": '{Decision} = "needs_review"'}, "color": "#58a6ff"},
-                {"if": {"filter_query": '{Decision} = "rejected"'}, "color": "#dc3545"},
-            ],
-        )
-    else:
-        governance_table = html.Div("No governance decisions yet.", style={"color": "#8b949e", "textAlign": "center", "padding": "40px"})
+    return intern_feed, git_log, decisions, alerts_body, ideas, results_body
 
-    if alerts:
-        alert_rows = []
-        for alert in alerts[:12]:
-            color = "#dc3545" if alert["severity"] == "critical" else "#58a6ff"
-            alert_rows.append(
-                html.Div(
-                    [
-                        html.Div(
-                            [
-                                html.Span(alert["severity"], style={"color": color, "fontWeight": "700"}),
-                                html.Span(f"  {alert['run_id']}", style={"color": "#8b949e", "marginLeft": "8px"}),
-                                html.Span(alert["timestamp"][:19], style={"color": "#484f58", "float": "right"}),
-                            ],
-                            style={"fontSize": "0.75rem", "marginBottom": "4px"},
-                        ),
-                        html.Div(alert["title"], style={"color": "#f0f6fc", "fontWeight": "600", "fontSize": "0.8rem"}),
-                        html.Div(alert["message"], style={"color": "#c9d1d9", "fontSize": "0.76rem", "lineHeight": "1.4"}),
-                    ],
-                    style={"padding": "9px 10px", "borderBottom": "1px solid #21262d"},
-                )
-            )
-        alerts_panel = html.Div(alert_rows, style={"overflowY": "auto", "maxHeight": "320px"})
-    else:
-        alerts_panel = html.Div("No human alerts yet.", style={"color": "#8b949e", "textAlign": "center", "padding": "40px"})
-
-    if ideas:
-        ideas_panel = html.Pre(
-            ideas,
-            style={
-                "color": "#c9d1d9",
-                "fontSize": "0.8rem",
-                "lineHeight": "1.7",
-                "margin": 0,
-                "whiteSpace": "pre-wrap",
-                "fontFamily": "monospace",
-                "maxHeight": "260px",
-                "overflowY": "auto",
-            },
-        )
-    else:
-        ideas_panel = html.Div("No ideas generated yet.", style={"color": "#8b949e", "textAlign": "center", "padding": "40px"})
-
-    return (
-        task_label,
-        status_bar,
-        foundation_panel,
-        blocker_panel,
-        tool_panel,
-        question_panel_view,
-        kpi_generation_panel,
-        evidence_panel,
-        git_hygiene_panel,
-        metric_chart,
-        status_pie,
-        intern_feed,
-        git_log,
-        results_table,
-        governance_table,
-        alerts_panel,
-        ideas_panel,
-    )
-
+# ── main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    port = int(os.environ.get("DASH_PORT", 8050))
-    print(f"\n  Autoresearch Dashboard -> http://localhost:{port}\n")
-    app.run(debug=False, port=port)
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument("--port",  type=int, default=int(os.environ.get("DASH_PORT", 8050)))
+    p.add_argument("--debug", action="store_true")
+    a = p.parse_args()
+    print(f"\n  Autoresearch Control Plane  ->  http://localhost:{a.port}\n")
+    app.run(debug=a.debug, port=a.port)

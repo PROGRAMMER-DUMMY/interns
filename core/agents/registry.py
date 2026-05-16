@@ -11,6 +11,10 @@ _BUILTIN_INTERNS = {
     "insights":            "interns.insights.InsightsIntern",
     "code_reviewer":       "interns.code_reviewer.CodeReviewIntern",
     "methodology_analyst": "interns.methodology_analyst.MethodologyAnalystIntern",
+    "sql_specialist":      "interns.sql_specialist.SQLSpecialistIntern",
+    "data_engineer":       "interns.data_engineer.DataEngineerIntern",
+    "validation":          "interns.validation.ValidationIntern",
+    "medallion_architect": "interns.medallion_architect.MedallionArchitectIntern",
 }
 
 class InternRegistry:

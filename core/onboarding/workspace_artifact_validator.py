@@ -7,6 +7,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.onboarding.artifact_contracts import (
+    BLOCKER_QUESTION_PANEL_CONTRACT,
+    DOMAIN_MODEL_CONTRACT,
+    KPI_FEATURE_MAPPING_CONTRACT,
+    KPI_REGISTRY_CONTRACT,
+    PROFILE_INDEX_CONTRACT,
+    RELATIONSHIP_CONTRACTS_CONTRACT,
+    SOURCE_TO_TARGET_PLAN_CONTRACT,
+    WORKSPACE_FEATURE_DEFINITIONS_CONTRACT,
+)
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -62,11 +72,16 @@ class WorkspaceArtifactValidator:
         self._validate_workspace()
         self._validate_input_inventory()
         self._validate_profile_index()
+        self._validate_domain_model()
         self._validate_kpi_registry()
         mapping = self._validate_feature_mapping()
+        self._validate_workspace_definitions()
+        self._validate_relationship_contracts()
+        self._validate_source_to_target_plan()
         self._validate_open_questions()
         self._validate_question_panel(mapping)
         self._validate_derived_reviews(mapping)
+        self._validate_medallion_manifest()
         return self.result
 
     def _validate_workspace(self) -> None:
@@ -101,6 +116,7 @@ class WorkspaceArtifactValidator:
         if not data:
             self._warning("profile_index", "profile_index.json is missing; run onboard-workspace")
             return
+        self._validate_artifact_contract(path, data, PROFILE_INDEX_CONTRACT)
         profiles = data.get("profiles")
         if not isinstance(profiles, list):
             self._error(path, "profile_index.json `profiles` must be a list")
@@ -114,18 +130,25 @@ class WorkspaceArtifactValidator:
             if "columns" in profile and not isinstance(profile["columns"], list):
                 self._error(path, f"profile #{idx} `columns` must be a list")
 
+    def _validate_domain_model(self) -> None:
+        path = self.layout.contracts_dir / "domain_model.json"
+        data = self._load_json(path, required=False)
+        if not data:
+            self._warning("domain_model", "domain_model.json is missing; run onboard-workspace")
+            return
+        self._validate_artifact_contract(path, data, DOMAIN_MODEL_CONTRACT)
+        if not isinstance(data.get("datasets", []), list):
+            self._error(path, "domain_model.json `datasets` must be a list")
+        if not isinstance(data.get("data_models", []), list):
+            self._error(path, "domain_model.json `data_models` must be a list")
+
     def _validate_kpi_registry(self) -> None:
         path = self.layout.contracts_dir / "kpi_registry.json"
         data = self._load_json(path, required=False)
         if not data:
             self._warning("kpi_registry", "kpi_registry.json is missing; run onboard-workspace")
             return
-        if data.get("generated_by") != "onboard-workspace":
-            self._error(
-                path,
-                "kpi_registry.json missing `generated_by: onboard-workspace`; regenerate instead "
-                "of manually editing generated contracts",
-            )
+        self._validate_artifact_contract(path, data, KPI_REGISTRY_CONTRACT)
         kpis = data.get("kpis")
         if not isinstance(kpis, list):
             self._error(path, "kpi_registry.json `kpis` must be a list")
@@ -151,6 +174,7 @@ class WorkspaceArtifactValidator:
         for key in ("version", "workspace", "kpis", "summary", "blocker_clusters"):
             if key not in data:
                 self._error(path, f"kpi_feature_mapping.json missing `{key}`")
+        self._validate_artifact_contract(path, data, KPI_FEATURE_MAPPING_CONTRACT)
         if not isinstance(data.get("kpis", []), list):
             self._error(path, "kpi_feature_mapping.json `kpis` must be a list")
             return data
@@ -207,6 +231,7 @@ class WorkspaceArtifactValidator:
         data = self._load_json(json_path, required=blocked_count > 0)
         if not data:
             return
+        self._validate_artifact_contract(json_path, data, BLOCKER_QUESTION_PANEL_CONTRACT)
         for key in (
             "version",
             "workspace",
@@ -291,6 +316,36 @@ class WorkspaceArtifactValidator:
             return
         self._checked(index)
 
+    def _validate_workspace_definitions(self) -> None:
+        path = self.layout.contracts_dir / "workspace_feature_definitions.json"
+        data = self._load_json(path, required=False)
+        if data:
+            self._validate_artifact_contract(path, data, WORKSPACE_FEATURE_DEFINITIONS_CONTRACT)
+
+    def _validate_relationship_contracts(self) -> None:
+        path = self.layout.contracts_dir / "relationship_contracts.json"
+        data = self._load_json(path, required=False)
+        if not data:
+            return
+        self._validate_artifact_contract(path, data, RELATIONSHIP_CONTRACTS_CONTRACT)
+        if not isinstance(data.get("relationships", []), list):
+            self._error(path, "relationship_contracts.json `relationships` must be a list")
+        summary = data.get("summary") or {}
+        for key in ("relationship_count", "executable_relationship_count", "candidate_relationship_count"):
+            if key in summary and not isinstance(summary[key], int):
+                self._error(path, f"relationship summary `{key}` must be an integer")
+
+    def _validate_source_to_target_plan(self) -> None:
+        path = self.layout.contracts_dir / "source_to_target_plan.json"
+        data = self._load_json(path, required=False)
+        if not data:
+            return
+        self._validate_artifact_contract(path, data, SOURCE_TO_TARGET_PLAN_CONTRACT)
+        if not isinstance(data.get("kpis", []), list):
+            self._error(path, "source_to_target_plan.json `kpis` must be a list")
+        if data.get("target_engine") not in {"sql", "polars", "pyspark", "hybrid"}:
+            self._error(path, f"source_to_target_plan.json unsupported target_engine `{data.get('target_engine')}`")
+
     def _validate_derived_feature_option(self, path: Path, option: dict[str, Any]) -> None:
         required = [
             "derived_column_name",
@@ -330,6 +385,139 @@ class WorkspaceArtifactValidator:
                 self._error(path, f"derivation_reasoning missing `{key}`")
         if option.get("evidence_state") != "candidate_derivation_not_ground_truth":
             self._warning(path, "derived feature option evidence_state should remain candidate until accepted")
+
+    def _validate_artifact_contract(self, path: Path, data: dict[str, Any], contract) -> None:
+        error = contract.validate(data)
+        if error:
+            self._error(path, error)
+
+    def _validate_medallion_manifest(self) -> None:
+        """
+        Medallion checks (PRD Section 16, P0 scope: checks 1–4).
+
+        1. schema_version is known.
+        2. inputs_hash matches a freshly recomputed hash.
+        3. Every gold.derived_from references silver.* (PII-at-rest invariant).
+        4. Every Bronze table declares natural_key + pii_columns (the field
+           must be present, even if pii_columns is intentionally empty).
+        """
+        manifest_path = self.layout.generated_dir / "medallion" / "manifest.yaml"
+        if not manifest_path.exists():
+            return  # medallion is opt-in; only validate when present
+        self._checked(manifest_path)
+
+        try:
+            import yaml
+            manifest_dict = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            if not isinstance(manifest_dict, dict):
+                self._error(manifest_path, "medallion manifest must be a YAML mapping")
+                return
+        except Exception as exc:
+            self._error(manifest_path, f"could not parse medallion manifest: {exc}")
+            return
+
+        # check 1: schema_version known
+        from core.medallion.manifest import SCHEMA_VERSION
+        version = manifest_dict.get("schema_version")
+        if version is None:
+            self._error(manifest_path, "medallion manifest missing `schema_version`")
+        elif version != SCHEMA_VERSION:
+            self._error(
+                manifest_path,
+                f"medallion manifest schema_version={version} not recognized "
+                f"(known: {SCHEMA_VERSION}); regenerate via design-medallion",
+            )
+
+        # check 2: inputs_hash matches
+        from core.medallion.manifest import compute_inputs_hash
+        recorded = manifest_dict.get("inputs_hash", "")
+        candidates = [
+            self.layout.contracts_dir / "domain_model.json",
+            self.layout.contracts_dir / "kpi_registry.json",
+            self.layout.contracts_dir / "kpi_feature_mapping.json",
+            self.layout.contracts_dir / "semantic_contract.json",
+            self.layout.contracts_dir / "workspace_feature_definitions.json",
+            self.layout.profiles_dir / "profile_index.json",
+        ]
+        review_dir = self.layout.reports_dir / "derived_feature_reviews" / "json"
+        if review_dir.exists():
+            candidates.extend(sorted(review_dir.glob("*.json")))
+        recomputed = compute_inputs_hash(candidates)
+        if recorded != recomputed:
+            self._error(
+                manifest_path,
+                f"manifest inputs_hash ({recorded[:20]}...) does not match recomputed "
+                f"({recomputed[:20]}...); inputs have changed since last design-medallion run",
+            )
+
+        # check 3: gold.derived_from must reference silver.* only
+        layers = manifest_dict.get("layers", {}) or {}
+        for gold in layers.get("gold", []):
+            name = gold.get("name", "<unnamed>")
+            for src in gold.get("derived_from", []) or []:
+                if not str(src).startswith("silver."):
+                    self._error(
+                        manifest_path,
+                        f"gold.{name}.derived_from references `{src}`; Gold may only derive "
+                        "from Silver (HIPAA Gold-from-Silver-only invariant)",
+                    )
+
+        # check 4: every bronze table declares natural_key + pii_columns
+        for bronze in layers.get("bronze", []):
+            name = bronze.get("name", "<unnamed>")
+            if "natural_key" not in bronze:
+                self._error(manifest_path, f"bronze.{name} missing `natural_key` field")
+            elif not isinstance(bronze.get("natural_key"), list):
+                self._error(manifest_path, f"bronze.{name}.natural_key must be a list")
+            elif not bronze["natural_key"]:
+                self._warning(manifest_path, f"bronze.{name}.natural_key is empty")
+            if "pii_columns" not in bronze:
+                self._error(manifest_path, f"bronze.{name} missing `pii_columns` field (use [] if none)")
+            elif not isinstance(bronze.get("pii_columns"), list):
+                self._error(manifest_path, f"bronze.{name}.pii_columns must be a list")
+
+        # check 5 (P3): every Silver table has a silver_contract entry
+        silver_contract_path = self.layout.generated_dir / "medallion" / "silver_contract.json"
+        silver_contract: dict[str, Any] = {}
+        if layers.get("silver"):
+            if not silver_contract_path.exists():
+                self._error(manifest_path, "manifest declares Silver tables but silver_contract.json is missing")
+            else:
+                sc_data = self._load_json(silver_contract_path, required=False) or {}
+                silver_contract = sc_data.get("tables", sc_data)
+                for s in layers.get("silver", []):
+                    if s.get("name") not in silver_contract:
+                        self._error(silver_contract_path, f"silver.{s.get('name')} has no contract entry")
+
+        # check 6 (P3): every PII-marked column in semantic_contract appears in some silver pii_hash_columns
+        sc_path = self.layout.contracts_dir / "semantic_contract.json"
+        if sc_path.exists() and silver_contract:
+            sc = self._load_json(sc_path, required=False) or {}
+            pii_in_semantic = _collect_pii_columns_from_sc(sc)
+            pii_in_silver: set[str] = set()
+            for tname, tc in silver_contract.items():
+                if isinstance(tc, dict):
+                    for col in tc.get("pii_hash_columns", []) or []:
+                        pii_in_silver.add(str(col).lower())
+            missing_pii = [k for k in pii_in_semantic if k.split(".")[-1].lower() not in pii_in_silver]
+            for k in missing_pii:
+                self._error(silver_contract_path or sc_path,
+                            f"PII column `{k}` is not hashed in any Silver table")
+
+        # check 7 (P3): every fact table has a grain declaration
+        star_path = self.layout.generated_dir / "medallion" / "star_schema.json"
+        if star_path.exists():
+            star = self._load_json(star_path, required=False) or {}
+            for f in star.get("facts", []):
+                if not f.get("grain"):
+                    self._error(star_path, f"fact `{f.get('name', '?')}` has no grain declaration")
+
+        # check 8 (P3): gold.dim_* / gold.fact_* may not reference bronze.* (belt-and-suspenders)
+        for g in layers.get("gold", []):
+            for src in g.get("derived_from", []) or []:
+                if str(src).startswith("bronze."):
+                    self._error(manifest_path,
+                                f"gold.{g.get('name')} references {src} — Gold may only derive from Silver")
 
     def _load_json(self, path: Path, *, required: bool) -> dict[str, Any] | None:
         if not path.exists():
@@ -377,6 +565,19 @@ def _is_parser_artifact_feature(name: str) -> bool:
     normalized = "".join(ch if ch.isalnum() else " " for ch in name.lower())
     normalized = " ".join(normalized.split())
     return normalized in PARSER_ARTIFACT_FEATURES
+
+
+def _collect_pii_columns_from_sc(sc: dict[str, Any]) -> set[str]:
+    """Return a set of 'dataset.column' strings marked pii=True in semantic_contract."""
+    pii: set[str] = set()
+    for ds in sc.get("datasets", []) or []:
+        ds_name = ds.get("name", ds.get("path", "unknown"))
+        for col, meta in (ds.get("columns") or {}).items():
+            if isinstance(meta, dict) and meta.get("pii"):
+                pii.add(f"{ds_name}.{col}")
+        for col in ds.get("pii_columns", []) or []:
+            pii.add(f"{ds_name}.{col}")
+    return pii
 
 
 def _rel(path: Path, root: Path) -> str:

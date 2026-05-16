@@ -1,8 +1,13 @@
 """
-core/intern_bus.py — intern invocation, routing, and activity logging.
+core/intern_bus.py — intern invocation, routing, retry, and activity logging.
 
 Every intern call goes through this bus. Calls are logged to workspace.db
 and optionally traced via TelemetryBackend (MLflow 3 LLM Tracing).
+
+Retry policy: on failure (exception or empty/[ERROR]/None response), wait
+`cfg.intern_retry_backoff_s` seconds and retry once. If retry also fails,
+inject an `INTERN_FAILED: <reason>` placeholder that downstream interns can
+see in their chained context.
 """
 import time
 from datetime import datetime, timezone
@@ -18,6 +23,36 @@ if TYPE_CHECKING:
 
 ROOT = Path(__file__).resolve().parents[2]
 
+_FAILURE_PREFIX = "INTERN_FAILED:"
+
+
+def _is_failure(response: Optional[str]) -> bool:
+    """Treat None / empty / explicit [ERROR] prefix as a failure that should be retried."""
+    if not response:
+        return True
+    stripped = response.strip()
+    if not stripped:
+        return True
+    if stripped.startswith("[ERROR]"):
+        return True
+    return False
+
+
+def truncate_for_chain(text: str, max_chars: int) -> str:
+    """Truncate a prior intern report for injection into the next intern's context.
+
+    Strategy: keep the head (which usually contains the analysis summary +
+    recommendation) and drop the tail. Mark the cut explicitly so downstream
+    interns know content was removed.
+    """
+    if not text:
+        return ""
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    head = text[:max_chars]
+    return head + f"\n... [TRUNCATED {len(text) - max_chars} chars]"
+
 
 class InternBus:
     """Dispatch intern invocations, log all activity, and emit LLM traces."""
@@ -32,27 +67,25 @@ class InternBus:
     # ── Public ────────────────────────────────────────────────────────────────
 
     def invoke(self, intern_name: str, request: str, context: Optional[dict] = None) -> str:
-        """Invoke a named intern. Returns its markdown report. Always logs the call."""
+        """Invoke a named intern. Returns its markdown report. Retries once on failure.
+        Always logs the call (both the first and the retry attempt)."""
         context = context or {}
-        start = time.time()
-        print(f"\n[intern_bus] >> {intern_name}", flush=True)
+        backoff_s = max(0, int(getattr(self.cfg, "intern_retry_backoff_s", 5)))
 
-        try:
-            response = self._dispatch(intern_name, request, context)
-        except Exception as exc:
-            response = f"[ERROR] {intern_name} raised: {exc}"
-            print(f"[intern_bus] {intern_name} FAILED: {exc}", flush=True)
-
-        elapsed = round(time.time() - start, 2)
-        self._log(intern_name, request, response, elapsed, context)
-
-        if self.telemetry:
-            try:
-                self.telemetry.log_intern_trace(intern_name, request, response, elapsed)
-            except Exception as exc:
-                print(f"[intern_bus] telemetry trace failed (non-fatal): {exc}", flush=True)
-
-        print(f"[intern_bus] << {intern_name} ({elapsed}s)", flush=True)
+        response = self._invoke_once(intern_name, request, context, attempt=1)
+        if _is_failure(response):
+            if backoff_s:
+                print(
+                    f"[intern_bus] {intern_name} attempt 1 failed; "
+                    f"retrying in {backoff_s}s",
+                    flush=True,
+                )
+                time.sleep(backoff_s)
+            retry_response = self._invoke_once(intern_name, request, context, attempt=2)
+            if _is_failure(retry_response):
+                reason = (retry_response or response or "no response").strip().splitlines()[0]
+                return f"{_FAILURE_PREFIX} {intern_name} failed twice: {reason[:200]}"
+            return retry_response
         return response
 
     def list_active(self, domain: str = "prompt_optimisation") -> list[str]:
@@ -66,15 +99,38 @@ class InternBus:
 
     # ── Private ───────────────────────────────────────────────────────────────
 
+    def _invoke_once(self, intern_name: str, request: str, context: dict,
+                     attempt: int) -> str:
+        start = time.time()
+        print(f"\n[intern_bus] >> {intern_name} (attempt {attempt})", flush=True)
+        try:
+            response = self._dispatch(intern_name, request, context)
+        except Exception as exc:
+            response = f"[ERROR] {intern_name} raised: {exc}"
+            print(f"[intern_bus] {intern_name} raised: {exc}", flush=True)
+
+        elapsed = round(time.time() - start, 2)
+        self._log(intern_name, request, response, elapsed, context, attempt)
+
+        if self.telemetry:
+            try:
+                self.telemetry.log_intern_trace(intern_name, request, response, elapsed)
+            except Exception as exc:
+                print(f"[intern_bus] telemetry trace failed (non-fatal): {exc}", flush=True)
+
+        print(f"[intern_bus] << {intern_name} ({elapsed}s, attempt {attempt})", flush=True)
+        return response or ""
+
     def _dispatch(self, name: str, request: str, context: dict) -> str:
         intern = self.registry.get_intern(name)
         return intern.run(request, context)
 
     def _log(self, name: str, request: str, response: str,
-             elapsed: float, context: dict) -> None:
+             elapsed: float, context: dict, attempt: int) -> None:
         entry = {
             "ts":          datetime.now(timezone.utc).isoformat(),
             "intern":      name,
+            "attempt":     attempt,
             "request":     request[:600],
             "response":    response[:3000],
             "elapsed_s":   elapsed,

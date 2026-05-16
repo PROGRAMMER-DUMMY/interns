@@ -7,6 +7,7 @@ root does not become cluttered.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,10 @@ class WorkspaceLayout:
     @property
     def workspace_db(self) -> Path:
         return self.state_dir / "workspace.db"
+
+    @property
+    def workspace_settings(self) -> Path:
+        return self.state_dir / "workspace_settings.json"
 
     @property
     def run_log(self) -> Path:
@@ -99,6 +104,30 @@ class WorkspaceLayout:
             self.reports_dir,
         ]:
             path.mkdir(parents=True, exist_ok=True)
+
+    def load_settings(self) -> dict[str, Any]:
+        if self.workspace_settings.exists():
+            try:
+                return json.loads(self.workspace_settings.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {}
+
+    def is_dataset_allowed(self, path: Path) -> bool:
+        settings = self.load_settings()
+        allowlist = settings.get("dataset_allowlist")
+        if not allowlist:
+            return True
+            
+        try:
+            rel_path = path.relative_to(self.project_root)
+        except ValueError:
+            return True # Not inside the project root, cannot be restricted by workspace-level allowlist
+            
+        rel_str = str(rel_path).replace("\\", "/")
+        
+        # A file is allowed if it's within any of the allowlisted directory prefixes
+        return any(rel_str.startswith(allowed.replace("\\", "/")) for allowed in allowlist)
 
     def summary(self) -> dict[str, str]:
         return {

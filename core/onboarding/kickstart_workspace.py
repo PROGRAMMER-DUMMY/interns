@@ -341,6 +341,8 @@ class WorkspaceKickstarter:
         for path in datasets_root.rglob("*"):
             if not _is_workspace_user_path(path, self.workspace):
                 continue
+            if not self.layout.is_dataset_allowed(path):
+                continue
             if path.is_dir() and (path / "_delta_log").exists():
                 candidates.append(path)
             elif path.is_file() and path.suffix.lower() in DATA_SUFFIXES:

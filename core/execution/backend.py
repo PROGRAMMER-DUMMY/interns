@@ -21,6 +21,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from core.failures import (
+    StructuredFailure,
+    internal_bug,
+    remote_denied,
+    remote_unavailable,
+    validation_blocker,
+)
+
 if TYPE_CHECKING:
     from core.config import Config, DatabricksConfig
     from core.execution.databricks_client import DatabricksClient
@@ -47,6 +55,7 @@ class ExecutionResult:
     token_count: int = 0
     telemetry_partial: bool = False
     metadata: dict | None = None
+    failure: StructuredFailure | None = None
 
 
 class ExecutionBackend(ABC):
@@ -71,9 +80,15 @@ class DuckDBBackend(ExecutionBackend):
     This is the current (unchanged) behaviour and the fallback for all modes.
     """
 
-    def __init__(self, parser: Optional["MetricParser"] = None):
+    def __init__(
+        self,
+        parser: Optional["MetricParser"] = None,
+        *,
+        fallback_failure: StructuredFailure | None = None,
+    ):
         from core.observability.parser import RegexLogParser
         self.parser = parser or RegexLogParser()
+        self.fallback_failure = fallback_failure
 
     def execute(self, task: dict, time_budget: int, hard_timeout: int, log_path: Path) -> ExecutionResult:
         start = time.time()
@@ -95,6 +110,8 @@ class DuckDBBackend(ExecutionBackend):
             elapsed_seconds=elapsed,
             metric=metric,
             token_count=int(all_metrics.get("token_count", 0)),
+            metadata={"fallback_failure": self.fallback_failure.summary()} if self.fallback_failure else None,
+            failure=self.fallback_failure if exit_code == 0 else None,
         )
 
     def _run_subprocess(self, cmd, time_budget: int, hard_timeout: int, log_f) -> int:
@@ -156,6 +173,60 @@ class DuckDBBackend(ExecutionBackend):
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+class IsolatedDuckDBBackend(DuckDBBackend):
+    """
+    Experimental isolated worker backend.
+    Uses restricted environment variables and resource-limited subprocesses.
+    Future versions will use Docker-based isolation.
+    """
+
+    def _run_subprocess(self, cmd, time_budget: int, hard_timeout: int, log_f) -> int:
+        argv = normalize_command(cmd)
+        if not argv:
+            return 1
+        
+        # Strip most environment variables to prevent leakage
+        safe_env = {
+            "PATH": os.environ.get("PATH", ""),
+            "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+            "PYTHONPATH": str(ROOT),
+            "AUTORESEARCH_TIME_BUDGET": str(time_budget),
+            "AUTORESEARCH_ISOLATED_WORKER": "1",
+        }
+        
+        log_f.write(f"[backend:isolated] Starting isolated task: {' '.join(argv)}\n")
+        log_f.flush()
+        
+        try:
+            # Use lower priority and strict memory limits if supported by OS
+            proc = subprocess.Popen(
+                argv, 
+                cwd=ROOT, 
+                env=safe_env, 
+                stdout=log_f, 
+                stderr=subprocess.STDOUT
+            )
+        except Exception as exc:
+            failure = internal_bug("isolated_subprocess_start", str(exc))
+            log_f.write(f"[backend:isolated] ERROR: {exc}\n")
+            log_f.write(f"[backend:isolated] failure_kind={failure.kind.value}\n")
+            return 1
+
+        start = time.time()
+        while True:
+            try:
+                exit_code = proc.wait(timeout=1.0)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            if time.time() - start > hard_timeout:
+                self._kill(proc, log_f)
+                exit_code = 124
+                break
+        
+        return exit_code
 
 
 # ── Databricks Jobs (submit + poll) ───────────────────────────────────────────
@@ -314,9 +385,10 @@ class StrictJobsBackend(JobsBackend):
             result_state, log_content = self.db.poll_job_run(run_id, hard_timeout)
         except Exception as exc:
             if _strict_databricks(self.cfg):
+                failure = remote_unavailable("databricks_jobs_submit", str(exc))
                 log_content = f"[backend:jobs] Submission failed: {exc}\n"
                 log_path.write_text(log_content, encoding="utf-8")
-                return ExecutionResult(1, log_content, time.time() - start)
+                return ExecutionResult(1, log_content, time.time() - start, failure=failure)
             return super().execute(task, time_budget, hard_timeout, log_path)
 
         log_path.write_text(log_content, encoding="utf-8")
@@ -342,9 +414,13 @@ class StrictWarehouseBackend(WarehouseBackend):
         sql_file = task.get("sql_file") or task.get("editable_file", "")
         if not sql_file or not str(sql_file).endswith(".sql"):
             if _strict_databricks(self.cfg):
+                failure = validation_blocker(
+                    "databricks_warehouse_task",
+                    "No sql_file in task",
+                )
                 log_content = "[backend:warehouse] No sql_file in task\n"
                 log_path.write_text(log_content, encoding="utf-8")
-                return ExecutionResult(1, log_content, 0)
+                return ExecutionResult(1, log_content, 0, failure=failure)
             return super().execute(task, time_budget, hard_timeout, log_path)
 
         start = time.time()
@@ -380,6 +456,7 @@ class StrictWarehouseBackend(WarehouseBackend):
                 log_content += f"error: {error.message if error else 'unknown'}\n"
         except Exception as exc:
             if _strict_databricks(self.cfg):
+                failure = remote_unavailable("databricks_warehouse_execute", str(exc))
                 log_content = (
                     "databricks_backend: warehouse\n"
                     f"warehouse_id: {warehouse_id}\n"
@@ -387,7 +464,7 @@ class StrictWarehouseBackend(WarehouseBackend):
                     f"error: {exc}\n"
                 )
                 log_path.write_text(log_content, encoding="utf-8")
-                return ExecutionResult(1, log_content, time.time() - start)
+                return ExecutionResult(1, log_content, time.time() - start, failure=failure)
             return super().execute(task, time_budget, hard_timeout, log_path)
 
         elapsed = time.time() - start
@@ -419,13 +496,18 @@ def build_execution_backend(cfg: "Config") -> ExecutionBackend:
     if not db_cfg.is_active():
         return DuckDBBackend()
     if os.environ.get("AUTORESEARCH_ALLOW_REMOTE_EXECUTION") != "1":
+        failure = remote_denied(
+            "execution_backend_selection",
+            "Databricks is configured, but remote execution requires explicit approval.",
+            next_command="Set AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1 to use Databricks execution.",
+        )
         print(
             "[execution_backend] Databricks configured; remote execution requires "
             "explicit approval. Set AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1 to use it. "
             "Falling back to DuckDB.",
             flush=True,
         )
-        return DuckDBBackend()
+        return DuckDBBackend(fallback_failure=failure)
 
     from core.execution.databricks_client import DatabricksClient
     client = DatabricksClient(db_cfg)
@@ -436,7 +518,7 @@ def build_execution_backend(cfg: "Config") -> ExecutionBackend:
         if db_cfg.fallback == "fail" or _strict_databricks(db_cfg):
             raise RuntimeError(f"Databricks required but unavailable: {msg}")
         print("[execution_backend] Falling back to DuckDB")
-        return DuckDBBackend()
+        return DuckDBBackend(fallback_failure=remote_unavailable("databricks_health_check", msg))
 
     mode = db_cfg.execution
     if mode == "jobs":

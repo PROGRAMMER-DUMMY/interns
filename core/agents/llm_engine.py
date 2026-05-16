@@ -38,10 +38,16 @@ class APIEngine(LLMEngine):
             return None
 
 # Maps main_agent name -> (executable, extra args before the prompt text)
+# These args put each CLI into non-interactive (headless) mode:
+#   gemini  -p   → reads prompt from arg, exits after one response
+#   claude  -p   → alias --print; prints response and exits
+#   codex   exec → subcommand for non-interactive single-shot run
+# Without these flags the subprocess launches an interactive TUI and hangs
+# until the loop's wall-clock timeout fires.
 _CLI_DISPATCH: dict[str, tuple[str, list[str]]] = {
-    "gemini-cli":  ("gemini", ["prompt"]),
+    "gemini-cli":  ("gemini", ["-p"]),
     "claude-code": ("claude", ["-p"]),
-    "codex":       ("codex",  []),
+    "codex":       ("codex",  ["exec"]),
 }
 
 class CLIEngine(LLMEngine):
