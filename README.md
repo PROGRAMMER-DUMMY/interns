@@ -172,8 +172,8 @@ remain in manifest/open-question form.
 
 ## CLI Workflow Reference
 
-For agent-led conversations on the two checked-in workspaces, including the RCM and Medicare
-fresh-start scenarios, see `docs/workspace_scenarios.md`.
+For agent-led conversations on the checked-in RCM workspace and fresh-start scenarios, see
+`workspace_scenarios.md`.
 
 ### 1. Workspace Selection
 

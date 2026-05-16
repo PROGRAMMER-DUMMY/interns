@@ -1,8 +1,8 @@
 # Workspace Conversation Scenarios
 
-This guide describes how agents should handle the two local workspaces currently used in this
-repo. It is conversation-oriented: the agent runs the local-safe commands, reads the generated
-panels, summarizes the result, and asks the user for the next business decision.
+This guide describes how agents should handle the local RCM workspace currently used in this repo.
+It is conversation-oriented: the agent runs the local-safe commands, reads the generated panels,
+summarizes the result, and asks the user for the next business decision.
 
 Agents should not ask the user to run commands manually unless tool access is unavailable.
 
@@ -132,81 +132,6 @@ Agent behavior:
 6. Generate executable logic only after blockers are resolved.
 
 The agent should not generate executable logic from column-name similarity alone.
-
-## Workspace: Medicare Part D Prescribers - by Provider
-
-Expected source inputs:
-
-```text
-workspaces/Medicare Part D Prescribers - by Provider/MUP_DPR_RY25_20250401_DD_PRV_508.pdf
-workspaces/Medicare Part D Prescribers - by Provider/MUP_DPR_RY25_20250401_Methodology_508.pdf
-workspaces/Medicare Part D Prescribers - by Provider/MUP_DPR_RY25_P04_V10_DY23_NPI.csv
-```
-
-This workspace starts differently from the RCM workspace. It has a CSV plus public documentation,
-but no obvious KPI registry and no explicit data model file.
-
-### Scenario F: User Selects The Medicare Workspace
-
-User intent examples:
-
-```text
-set Medicare Part D
-use the Medicare prescribers workspace
-start the provider workspace
-```
-
-Agent behavior:
-
-1. Run a bounded workspace listing.
-2. Summarize that the workspace has PDF methodology/data-dictionary inputs and one CSV dataset.
-3. State that no existing KPI registry or data model file was found.
-4. Ask for confirmation that this is the active file set.
-
-After confirmation, treat it as a fresh workspace that likely needs KPI generation and data-model
-generation rather than the usual existing-KPI workflow.
-
-### Scenario G: KPI Discovery From Methodology Docs
-
-Use when the user wants KPIs, measures, prompts, or analytical questions from the Medicare files.
-
-Agent behavior:
-
-1. Onboard the workspace.
-2. Validate artifacts.
-3. Prepare KPI generation with the methodology/data-dictionary PDFs as context when supported.
-4. Ask from the generated KPI generation panel.
-5. Apply answers through the KPI generation workflow.
-6. Finalize only after explicit final-preview approval.
-
-The expected conversation is exploratory: the user may need to choose business goals such as cost,
-prescribing behavior, provider comparison, drug utilization, geography, specialty, or outlier
-detection before executable KPI logic exists.
-
-### Scenario H: Data Model Discovery From CSV And PDF Dictionary
-
-Use when the user asks for schema, relationships, feature definitions, or governed modeling.
-
-Agent behavior:
-
-1. Prepare data-model generation.
-2. Ask from the generated data-model panel.
-3. Apply the selected answer.
-4. Finalize only after preview approval.
-
-Because this workspace appears to have a single primary CSV, relationship contracts may be simple or
-empty. The agent should still validate grain, identifiers, time period, provider identity, and any
-derived dimensions before generating SQL.
-
-### Scenario I: User Asks For Analysis Or SQL Immediately
-
-Agent behavior:
-
-1. Explain that the workspace lacks an accepted KPI registry and data model.
-2. Run the preparation workflow instead of writing SQL immediately.
-3. Ask the first generated business question.
-4. After accepted KPI/data-model decisions, plan source-to-target.
-5. Generate SQL only if the plan has no blockers.
 
 ## Fresh Cleanup Conversation
 
