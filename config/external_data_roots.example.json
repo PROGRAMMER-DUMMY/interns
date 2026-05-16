@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "default_policy": {
+    "discovery_mode": "bounded_listing_only",
+    "max_paths": 200,
+    "max_seconds": 30,
+    "allowed_without_confirmation": [
+      "top_level_metadata_listing"
+    ],
+    "blocked_without_allowlist": [
+      "recursive_full_scan",
+      "file_content_read",
+      "profiling",
+      "sampling",
+      "copy",
+      "move",
+      "delete",
+      "commit"
+    ]
+  },
+  "profiles": {
+    "cms_cold_storage": {
+      "description": "Huge external CMS data root. Keep raw files outside the repo and require a workspace allowlist before reads or profiling.",
+      "local_root_env": "CMS_COLD_STORAGE_ROOT",
+      "example_local_root": "D:/Cold_Storage",
+      "allowlist_storage": "workspaces/<project>/interns/state/workspace_settings.json",
+      "allowlist_entry_types": [
+        "workspace_relative",
+        "external_absolute"
+      ],
+      "notes": [
+        "Do not copy raw CMS data into this repository.",
+        "Do not recursively scan the external root by default.",
+        "Use bounded listing first, then ask the user to approve a narrow folder or file allowlist with a business reason."
+      ]
+    }
+  }
+}

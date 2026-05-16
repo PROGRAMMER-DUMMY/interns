@@ -27,6 +27,7 @@ workspaces/**/csv_profile/
 .env.*
 !.env.example
 secrets.toml
+config/external_data_roots.local.json
 *.pem
 *.key
 *.token

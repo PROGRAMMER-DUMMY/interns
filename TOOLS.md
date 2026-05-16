@@ -268,6 +268,19 @@ shape, KPI registry provenance, feature-mapping summary fields, strict derived-f
 profile-backed physical-column option evidence, and whether blocked KPIs have a current question
 panel. It is read-only and exits nonzero on schema/format errors.
 
+### validate-git-hygiene
+
+Command:
+
+```powershell
+uv run validate-git-hygiene
+```
+
+Use before commits. By default it checks staged files and blocks raw data extensions, oversized
+files, generated workspace output under `workspaces/**/interns/`, runtime state, logs, and local
+databases. Use `--all` for a broader tracked/untracked audit and `--max-mb` to override the default
+25 MB file-size threshold.
+
 ### generate-kpi-sql
 
 Command:

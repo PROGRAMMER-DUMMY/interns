@@ -157,6 +157,15 @@ Relationship contracts gate trusted multi-dataset generation. Profile-only join 
 advisory; SQL/Polars/PySpark/ETL generation should use only data-model-proven or user-confirmed
 relationships.
 
+Before committing generated work or workspace changes, run:
+
+```powershell
+uv run validate-git-hygiene
+```
+
+This blocks raw data, generated workspace output, runtime state, logs, local databases, and
+oversized files from being staged.
+
 Kickstart scans workspace inputs, runs local-safe onboarding, writes or updates
 the hybrid task entry in `config/tasks.json`, and records discovered enterprise
 documents, accepted defaults, and open questions under `workspaces/<project>/interns/`.

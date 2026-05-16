@@ -17,6 +17,39 @@ Agents should not ask the user to run commands manually unless tool access is un
 6. Validate generated artifacts after onboarding, blocker preparation, or generated artifact writes.
 7. Do not generate SQL, Polars, PySpark, ETL, or medallion logic until feature mappings,
    relationship contracts, grain, and source-to-target assumptions are proven or user-confirmed.
+8. Treat huge external data roots, such as CMS cold storage, as bounded-listing-only until the user
+   confirms a narrow folder or file allowlist with a business reason.
+9. Before committing, run `uv run validate-git-hygiene` to block raw data, generated workspace
+   outputs, state directories, logs, local databases, and oversized files.
+
+## Huge External Data Roots
+
+External roots such as `D:/Cold_Storage` are not workspaces and must not be copied into this repo.
+Use `config/external_data_roots.example.json` as the tracked policy template and keep actual
+machine-specific roots in ignored local config or environment variables.
+
+Default behavior for huge external roots:
+
+1. Allow only bounded metadata listing before user confirmation.
+2. Do not recursively scan the whole root.
+3. Do not read file contents, profile, sample, copy, move, delete, or commit raw files.
+4. Ask the user to approve a specific folder or file allowlist.
+5. Store workspace-approved dataset allowlists under
+   `workspaces/<project>/interns/state/workspace_settings.json`.
+
+Example workspace setting:
+
+```json
+{
+  "dataset_allowlist": [
+    {
+      "type": "external_absolute",
+      "path": "D:/Cold_Storage/<approved-folder>",
+      "reason": "Approved CMS source slice for the current KPI workflow"
+    }
+  ]
+}
+```
 
 ## Workspace: Healthcare-RCM-Data-Platform
 
