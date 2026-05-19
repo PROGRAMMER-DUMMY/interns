@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.context.router import ContextBudget, ContextRouter
 from core.onboarding.kpi_feature_resolver import READY_STATES
 from core.onboarding.artifact_contracts import (
     DOMAIN_MODEL_CONTRACT,
@@ -19,6 +20,8 @@ from core.onboarding.relationship_contracts import (
     find_executable_relationship,
     load_relationship_contracts,
 )
+from core.optimization.engine_evolution import EngineEvolutionMemory
+from core.resource.manager import ResourceManager
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -29,6 +32,8 @@ SUPPORTED_TARGET_ENGINES = {"sql", "polars", "pyspark", "hybrid"}
 class SourceToTargetPlanResult:
     json_path: str
     markdown_path: str
+    context_manifest_path: str
+    context_wiki_path: str
     kpi_count: int
     ready_kpi_count: int
     blocked_kpi_count: int
@@ -45,6 +50,7 @@ class SourceToTargetPlanner:
         workspace: str | Path,
         *,
         target_engine: str = "sql",
+        context_budget: str = "standard",
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
@@ -52,6 +58,7 @@ class SourceToTargetPlanner:
         if target_engine not in SUPPORTED_TARGET_ENGINES:
             raise ValueError(f"Unsupported target engine: {target_engine}")
         self.target_engine = target_engine
+        self.context_budget = context_budget
 
     def build(self) -> SourceToTargetPlanResult:
         self._validate_workspace()
@@ -59,6 +66,30 @@ class SourceToTargetPlanner:
         mapping = self._load_json(self.layout.contracts_dir / "kpi_feature_mapping.json")
         domain_model = self._load_json(self.layout.contracts_dir / "domain_model.json", required=False)
         profiles = self._profile_index()
+        estimated_bytes = _estimated_profile_bytes(profiles)
+        resource_manager = ResourceManager(self.workspace, repo_root=self.repo_root)
+        resource_artifacts = resource_manager.write_report(
+            estimated_bytes=estimated_bytes,
+            workload="transform",
+        )
+        transformation_settings = resource_manager.transformation_settings(
+            target_engine=self.target_engine,
+            estimated_bytes=estimated_bytes,
+        )
+        engine_memory = EngineEvolutionMemory(self.repo_root, _rel(self.workspace, self.repo_root))
+        engine_recommendation = engine_memory.recommendation_for(
+            stage="gold_kpi",
+            resource_mode=transformation_settings.mode,
+            target_engine=transformation_settings.target_engine_recommendation,
+        )
+        context_selection = ContextRouter(
+            self.repo_root,
+            _rel(self.workspace, self.repo_root),
+        ).build(
+            task="plan-source-to-target",
+            budget=ContextBudget.named(self.context_budget),
+            refresh="safe",
+        )
         relationships = load_relationship_contracts(
             self.repo_root,
             _rel(self.workspace, self.repo_root),
@@ -70,6 +101,13 @@ class SourceToTargetPlanner:
             "workspace": _rel(self.workspace, self.repo_root),
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "target_engine": self.target_engine,
+            "resource_mode": transformation_settings.mode,
+            "resource_transform_settings": transformation_settings.to_dict(),
+            "resource_artifacts": resource_artifacts,
+            "engine_evolution_recommendation": engine_recommendation,
+            "context_manifest": context_selection.manifest_path,
+            "context_wiki": context_selection.wiki_path,
+            "context_budget": context_selection.budget.to_dict(),
             "evidence_order": [
                 "kpi_feature_mapping",
                 "domain_model",
@@ -83,12 +121,20 @@ class SourceToTargetPlanner:
                 for kpi in mapping.get("kpis", [])
             ],
         }
+        for kpi_plan in plan["kpis"]:
+            kpi_plan["engine_evolution_recommendation"] = engine_recommendation
         ready = [kpi for kpi in plan["kpis"] if kpi["status"] == "ready_for_generation"]
         plan["summary"] = {
             "kpi_count": len(plan["kpis"]),
             "ready_kpi_count": len(ready),
             "blocked_kpi_count": len(plan["kpis"]) - len(ready),
             "target_engine": self.target_engine,
+            "resource_mode": transformation_settings.mode,
+            "resource_target_engine_recommendation": transformation_settings.target_engine_recommendation,
+            "engine_evolution_recommendation": engine_recommendation,
+            "local_execution_allowed": transformation_settings.local_execution_allowed,
+            "context_manifest": context_selection.manifest_path,
+            "context_selected_sections": context_selection.selected_sections,
         }
         json_path = self.layout.contracts_dir / "source_to_target_plan.json"
         markdown_path = self.layout.reports_dir / "source_to_target_plan.md"
@@ -97,6 +143,8 @@ class SourceToTargetPlanner:
         return SourceToTargetPlanResult(
             json_path=_rel(json_path, self.repo_root),
             markdown_path=_rel(markdown_path, self.repo_root),
+            context_manifest_path=context_selection.manifest_path,
+            context_wiki_path=context_selection.wiki_path,
             kpi_count=plan["summary"]["kpi_count"],
             ready_kpi_count=plan["summary"]["ready_kpi_count"],
             blocked_kpi_count=plan["summary"]["blocked_kpi_count"],
@@ -487,12 +535,22 @@ def _temporal_anchor(feature_plans: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _estimated_profile_bytes(profiles: dict[str, dict[str, Any]]) -> int:
+    return sum(int(profile.get("size_bytes") or 0) for profile in profiles.values())
+
+
 def _render_markdown(plan: dict[str, Any]) -> str:
     lines = [
         "# Source To Target Plan",
         "",
         f"- Workspace: `{plan.get('workspace', '')}`",
         f"- Target engine: `{plan.get('target_engine', '')}`",
+        f"- Resource mode: `{plan.get('resource_mode', '')}`",
+        f"- Recommended engine: `{plan.get('resource_transform_settings', {}).get('target_engine_recommendation', '')}`",
+        f"- Engine evolution: `{plan.get('engine_evolution_recommendation', {}).get('engine', '')}` "
+        f"({plan.get('engine_evolution_recommendation', {}).get('confidence', '')})",
+        f"- Context manifest: `{plan.get('context_manifest', '')}`",
+        f"- Context wiki: `{plan.get('context_wiki', '')}`",
         f"- KPI count: {plan.get('summary', {}).get('kpi_count', len(plan.get('kpis', [])))}",
         "",
     ]
@@ -574,11 +632,18 @@ def main(argv: list[str] | None = None) -> int:
         default="sql",
         help="Implementation target for the plan.",
     )
+    parser.add_argument(
+        "--context-budget",
+        choices=["small", "standard", "deep"],
+        default="standard",
+        help="Context pack budget for bounded artifact retrieval.",
+    )
     args = parser.parse_args(argv)
     result = SourceToTargetPlanner(
         args.repo_root,
         args.workspace,
         target_engine=args.target_engine,
+        context_budget=args.context_budget,
     ).build()
     print(json.dumps(result.summary(), indent=2))
     return 0

@@ -178,6 +178,58 @@ def _question_for_cluster(
     prior = _prior_wiki_decision(workspace, repo_root, feature)
     if prior:
         base["prior_decision_wiki"] = prior
+    if any(item["feature"].get("resolution_type") == "kpi_definition_required" for item in items):
+        return {
+            **base,
+            "blocker": (
+                "The current KPI registry contains a seed placeholder KPI, not a concrete "
+                "business metric that can be mapped to data."
+            ),
+            "question": (
+                "Which concrete KPI should replace the seed? Include the business question, "
+                "metric expression, grain/dimensions, owner, and acceptance tests."
+            ),
+            "answer_type": "kpi_definition_required",
+            "recommended_option_id": "option_a",
+            "recommended_answer": "Provide a concrete RCM KPI definition before mapping features.",
+            "why": (
+                "Executable KPI logic needs a proven metric and grain. Mapping placeholder words "
+                "such as confirm, metric, or grain to columns would create invalid evidence."
+            ),
+            "options": [
+                {
+                    "option_id": "option_a",
+                    "label": "Provide KPI definition",
+                    "business_summary": (
+                        "Replace the seed KPI with a concrete metric, for example a denial rate, "
+                        "paid amount trend, AR aging, or claim volume KPI with defined grain."
+                    ),
+                    "expected_answer_shape": {
+                        "business_question": "",
+                        "metric": "",
+                        "grain_or_cuts": "",
+                        "owner": "",
+                        "acceptance_tests": [],
+                        "evidence_source": "",
+                        "applies_to_kpis": applies_to,
+                    },
+                    "json_backed": False,
+                },
+                {
+                    "option_id": "custom",
+                    "label": "Restart KPI generation",
+                    "business_summary": (
+                        "Run KPI generation again with stakeholder context or a richer registry source."
+                    ),
+                    "expected_answer_shape": {
+                        "context_file": "",
+                        "generation_notes": "",
+                        "applies_to_kpis": applies_to,
+                    },
+                    "json_backed": False,
+                },
+            ],
+        }
     if derived_options:
         return {
             **base,

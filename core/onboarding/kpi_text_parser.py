@@ -4,6 +4,18 @@ import re
 from typing import Any
 
 
+KPI_CUTS_HEADERS = [
+    "cuts / grain hints",
+    "cuts",
+    "cuts with drg",
+    "cuts with drg consolidated",
+    "cuts with drg(consolidated)",
+    "drg consolidated",
+    "grain",
+    "dimensions",
+]
+
+
 def is_template_kpi_row(name: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
     template_markers = (
@@ -73,3 +85,58 @@ def clean_cell(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def extract_kpis_from_sql(text: str, source: str) -> list[dict[str, str]]:
+    kpis = []
+    current_objective = ""
+    current_question = []
+
+    def save_question():
+        nonlocal current_question
+        if current_question:
+            question_text = " ".join(current_question)
+            question_text = re.sub(r"^[a-z0-9]+\.\s+", "", question_text, flags=re.IGNORECASE).strip()
+            if question_text:
+                metric, cuts = infer_metric_and_cuts(question_text, current_objective)
+                kpis.append({
+                    "name": question_text,
+                    "description": current_objective.strip() or f"Extracted from {source}",
+                    "cuts": cuts,
+                    "metric": metric,
+                    "source": source
+                })
+            current_question = []
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("--"):
+            save_question()
+            continue
+
+        comment = line.lstrip("- ").strip()
+        if not comment:
+            save_question()
+            continue
+
+        if comment.isupper() and ("OBJECTIVE" in comment or "GOAL" in comment):
+            current_objective = comment
+            save_question()
+            continue
+
+        is_question_start = (
+            comment.endswith("?") or
+            re.match(r"^[a-z0-9]+\.\s+", comment, re.IGNORECASE) or
+            re.match(r"^(what|how|which|where|when|why|is|are|do|does)\b", comment, re.IGNORECASE)
+        )
+
+        if current_question:
+            current_question.append(comment)
+        elif is_question_start:
+            current_question.append(comment)
+        else:
+            if "query" in comment.lower() or "kpi" in comment.lower():
+                current_question.append(comment)
+
+    save_question()
+    return kpis

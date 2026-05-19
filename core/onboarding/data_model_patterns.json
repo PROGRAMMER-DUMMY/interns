@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "patterns": [
+    {
+      "pattern_id": "transaction_fact",
+      "label": "Transaction fact",
+      "use_when": [
+        "Rows represent discrete business events",
+        "Table contains additive numeric measures",
+        "A clear event grain can be documented"
+      ],
+      "required_decisions": ["grain", "primary_key", "temporal_anchor", "relationships"],
+      "evidence_requirements": ["profile_schema", "measure_columns", "identifier_columns"],
+      "default_checks": ["grain_declared", "date_or_timestamp_anchor_declared", "foreign_keys_reviewed"],
+      "anti_pattern_warnings": ["Do not update immutable facts except through correction rows"],
+      "downstream_unlocks": ["relationship_contracts", "source_to_target_plan", "ddl_generation"]
+    },
+    {
+      "pattern_id": "dimension_scd2",
+      "label": "SCD Type 2 dimension",
+      "use_when": [
+        "Rows describe business entities",
+        "Attribute history matters for point-in-time reporting",
+        "A stable natural key exists"
+      ],
+      "required_decisions": ["natural_key", "surrogate_key_policy", "tracked_attributes", "validity_columns"],
+      "evidence_requirements": ["identifier_columns", "descriptive_columns", "change_tracking_need"],
+      "default_checks": ["one_current_row_policy", "row_hash_policy", "unknown_member_policy"],
+      "anti_pattern_warnings": ["Do not join SCD2 facts to mutable natural keys for point-in-time analytics"],
+      "downstream_unlocks": ["relationship_contracts", "ddl_generation", "dbt_generation"]
+    },
+    {
+      "pattern_id": "date_dimension",
+      "label": "Date dimension",
+      "use_when": [
+        "Many models need shared calendar or fiscal attributes",
+        "Date filtering and reporting periods must be consistent"
+      ],
+      "required_decisions": ["date_key_policy", "calendar_range", "fiscal_calendar"],
+      "evidence_requirements": ["temporal_anchor_need"],
+      "default_checks": ["date_key_declared", "fiscal_rules_declared"],
+      "anti_pattern_warnings": ["Avoid recomputing common date attributes in every query"],
+      "downstream_unlocks": ["ddl_generation", "dbt_generation"]
+    },
+    {
+      "pattern_id": "bridge_table",
+      "label": "Bridge table",
+      "use_when": [
+        "A fact or entity relates to multiple dimension members",
+        "Many-to-many attribution or weighting is required"
+      ],
+      "required_decisions": ["left_key", "right_key", "weighting_policy", "cardinality"],
+      "evidence_requirements": ["relationship_evidence", "cardinality_review"],
+      "default_checks": ["duplicate_key_check", "weighting_sum_check"],
+      "anti_pattern_warnings": ["Do not duplicate fact measures through many-to-many joins without attribution rules"],
+      "downstream_unlocks": ["relationship_contracts", "source_to_target_plan"]
+    },
+    {
+      "pattern_id": "audit_event_log",
+      "label": "Audit/event log",
+      "use_when": [
+        "Rows capture state changes or operational events",
+        "Append-only lineage or compliance history is required"
+      ],
+      "required_decisions": ["event_time", "entity_key", "event_type", "payload_policy"],
+      "evidence_requirements": ["timestamp_columns", "event_or_action_columns"],
+      "default_checks": ["append_only_policy", "retention_policy", "correlation_id_review"],
+      "anti_pattern_warnings": ["Do not use an unpartitioned event table for high-volume time-series workloads"],
+      "downstream_unlocks": ["medallion_design", "ddl_generation"]
+    },
+    {
+      "pattern_id": "periodic_snapshot_fact",
+      "label": "Periodic snapshot fact",
+      "use_when": [
+        "Rows represent entity state at a regular interval",
+        "Missing activity still needs a row for reporting"
+      ],
+      "required_decisions": ["snapshot_grain", "snapshot_frequency", "entity_keys", "measure_policy"],
+      "evidence_requirements": ["date_columns", "entity_identifier_columns", "snapshot_state_columns"],
+      "default_checks": ["unique_snapshot_grain", "period_completeness_check"],
+      "anti_pattern_warnings": ["Do not confuse event transactions with periodic snapshots"],
+      "downstream_unlocks": ["source_to_target_plan", "ddl_generation"]
+    },
+    {
+      "pattern_id": "data_vault_hub_link_satellite",
+      "label": "Data Vault hub/link/satellite",
+      "use_when": [
+        "Multiple source systems require auditable integration",
+        "Business keys and relationship history must remain source-traceable"
+      ],
+      "required_decisions": ["business_keys", "hash_key_policy", "link_relationships", "satellite_history"],
+      "evidence_requirements": ["source_systems", "business_key_columns", "relationship_evidence"],
+      "default_checks": ["hash_diff_policy", "record_source_policy", "load_timestamp_policy"],
+      "anti_pattern_warnings": ["Do not model every descriptive attribute in hubs or links"],
+      "downstream_unlocks": ["ddl_generation", "dbt_generation"]
+    },
+    {
+      "pattern_id": "medallion_layered_model",
+      "label": "Medallion layered model",
+      "use_when": [
+        "Raw, conformed, and business-ready layers need separate contracts",
+        "Lineage and quality gates matter before KPI or BI consumption"
+      ],
+      "required_decisions": ["bronze_inputs", "silver_conformance", "gold_outputs", "quality_checks"],
+      "evidence_requirements": ["profile_schema", "semantic_contract", "kpi_or_output_requirements"],
+      "default_checks": ["bronze_natural_key", "silver_type_casts", "gold_from_silver_only"],
+      "anti_pattern_warnings": ["Gold outputs should not derive directly from raw Bronze sources"],
+      "downstream_unlocks": ["medallion_design", "build_medallion"]
+    },
+    {
+      "pattern_id": "semi_structured_json",
+      "label": "Semi-structured JSON payload",
+      "use_when": [
+        "Source schema varies by event type or source version",
+        "Sparse attributes should not become hundreds of nullable columns"
+      ],
+      "required_decisions": ["typed_core_columns", "payload_policy", "schema_version", "extraction_policy"],
+      "evidence_requirements": ["payload_column", "schema_variability_evidence"],
+      "default_checks": ["schema_version_policy", "typed_extraction_for_reporting_fields"],
+      "anti_pattern_warnings": ["Do not leave frequently queried measures only inside JSON payloads"],
+      "downstream_unlocks": ["ddl_generation", "dbt_generation"]
+    }
+  ]
+}

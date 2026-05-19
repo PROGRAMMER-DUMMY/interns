@@ -23,10 +23,18 @@ def apply_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--answer", required=True)
     parser.add_argument("--custom-note", default="")
+    parser.add_argument(
+        "--operation",
+        action="append",
+        default=[],
+        help="Structured JSON operation for add/remove/change decisions. May be repeated.",
+    )
     args = parser.parse_args(argv)
+    operations = [json.loads(item) for item in args.operation]
     result = DataModelGenerationWorkflow(Path(args.repo_root).resolve(), args.workspace).apply_answer(
         answer=args.answer,
         custom_note=args.custom_note,
+        operations=operations,
     )
     print(json.dumps(result.summary(), indent=2))
     return 0
@@ -42,6 +50,37 @@ def finalize_main(argv: list[str] | None = None) -> int:
     result = DataModelGenerationWorkflow(Path(args.repo_root).resolve(), args.workspace).finalize(
         approve_final_preview=args.approve_final_preview,
         replace_existing=not args.no_replace_existing,
+    )
+    print(json.dumps(result.summary(), indent=2))
+    return 0
+
+
+def prepare_blocker_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Prepare the next data model blocker panel.")
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=".")
+    args = parser.parse_args(argv)
+    result = DataModelGenerationWorkflow(
+        Path(args.repo_root).resolve(),
+        args.workspace,
+    ).prepare_blocker_panel()
+    print(json.dumps(result.summary(), indent=2))
+    return 0
+
+
+def apply_blocker_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Apply an answer to the current data model blocker panel.")
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--answer", required=True)
+    parser.add_argument("--custom-note", default="")
+    args = parser.parse_args(argv)
+    result = DataModelGenerationWorkflow(
+        Path(args.repo_root).resolve(),
+        args.workspace,
+    ).apply_blocker_answer(
+        answer=args.answer,
+        custom_note=args.custom_note,
     )
     print(json.dumps(result.summary(), indent=2))
     return 0

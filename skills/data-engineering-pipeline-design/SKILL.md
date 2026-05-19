@@ -9,6 +9,7 @@ description: >
 
 Use this skill when the user asks for:
 
+- external folder/source-root discovery and data lake intake;
 - SQL, Polars, or PySpark implementation choices;
 - ETL/ELT loading logic;
 - bronze/silver/gold or medallion architecture;
@@ -18,13 +19,38 @@ Use this skill when the user asks for:
 
 ## Required Evidence Order
 
-1. KPI/metric requirements and accepted workspace definitions.
-2. Data model docs, diagrams, contracts, dictionaries, and catalog metadata.
-3. Generated profile evidence under `workspaces/<project>/interns/generated/profiles/`.
-4. Existing generated contracts, especially `domain_model.json` and `kpi_feature_mapping.json`.
-5. Bounded samples only when profiles cannot answer a concrete mapping or quality question.
+1. Workspace/external-source discovery artifacts and source-selection approvals.
+2. KPI/metric requirements and accepted workspace definitions.
+3. Data model docs, diagrams, contracts, dictionaries, and catalog metadata.
+4. Generated profile evidence under `workspaces/<project>/interns/generated/profiles/`.
+5. Existing generated contracts, especially `domain_model.json` and `kpi_feature_mapping.json`.
+6. Bounded samples only when profiles cannot answer a concrete mapping or quality question.
 
 Do not infer source truth from column-name similarity alone.
+
+## External Source Intake
+
+When a user points to a folder such as `D:\Cold_Storage`, do not make that folder the workspace.
+Create or use a repo workspace such as `workspaces/cold-storage`, then run:
+
+```powershell
+uv run discover-external-sources --workspace workspaces/<project> --external-root <external-root>
+```
+
+Use the generated `external_source_discovery.json`, `external_source_discovery.md`, and
+`docs/source_selection.generated.json` to decide what to register, copy, ignore, or ask about.
+
+Default strategies:
+
+- Raw CSV/JSON/Parquet with dictionaries/methodology docs: register as bronze candidates, parse docs,
+  profile schemas, then design silver/gold only after relationships and grain are proven.
+- Raw CSV/JSON/Parquet without docs: register/profile only; ask for dictionaries, source ownership,
+  grain, and refresh cadence before silver/gold.
+- Delta tables: register external table paths, inspect metadata/schema, then decide whether they are
+  bronze source tables or already-silver/conformed tables.
+- DuckDB/SQLite files: inspect table metadata first; export selected tables only after approval.
+- Logs, sessions, `_delta_log`, system state, cache, and runtime files: exclude by default.
+- Specs and Markdown/PDF documents: use as requirement/context evidence, not as datasets.
 
 ## Design Rules
 

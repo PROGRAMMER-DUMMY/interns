@@ -52,6 +52,14 @@ from core.storage.workspace_layout import WorkspaceLayout
 
 GENERATOR_VERSION = 2
 DERIVED_FEATURE_EVIDENCE_VERSION = 1
+PLACEHOLDER_KPI_TERMS = {"confirm", "metric", "grain", "dimension", "dimensions"}
+PLACEHOLDER_KPI_PHRASES = (
+    "confirm metric",
+    "confirm grain",
+    "confirm grain and dimensions",
+    "confirm business question",
+    "what operational kpi should this dataset support",
+)
 
 
 @dataclass(frozen=True)
@@ -186,6 +194,20 @@ class KPIFeatureResolver:
         cuts = str(kpi.get("cuts", "") or "")
         expression_context = " ".join(value for value in [metric, cuts] if value)
         extracted = extract_expression(expression_context)
+        if _requires_kpi_definition(kpi, expression_context, extracted):
+            feature = _kpi_definition_feature(kpi)
+            return {
+                "kpi_id": f"kpi_{idx:03d}",
+                "name": kpi.get("name", ""),
+                "source": kpi.get("source", ""),
+                "metric": metric,
+                "cuts": cuts,
+                "status": "blocked_questions_pending",
+                "features": [feature],
+                "function_context": extracted.functions,
+                "join_candidates": [],
+                "open_questions": [feature["question"]],
+            }
         features = []
         for token in extracted.identifiers:
             norm = normalize_blocker(token)
@@ -354,6 +376,53 @@ def prioritize_blockers(mapping: dict[str, Any]) -> list[dict[str, Any]]:
 
 def infer_join_candidates(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return infer_feature_join_candidates(features)
+
+
+def _requires_kpi_definition(
+    kpi: dict[str, Any],
+    expression_context: str,
+    extracted: ExtractedExpression,
+) -> bool:
+    text = " ".join(
+        str(value or "")
+        for value in [
+            kpi.get("name"),
+            kpi.get("description"),
+            expression_context,
+            kpi.get("refinement_required"),
+        ]
+    ).lower()
+    has_placeholder_phrase = any(phrase in text for phrase in PLACEHOLDER_KPI_PHRASES)
+    if not has_placeholder_phrase:
+        return False
+    identifiers = {identifier.lower() for identifier in extracted.identifiers}
+    return not identifiers or identifiers.issubset(PLACEHOLDER_KPI_TERMS)
+
+
+def _kpi_definition_feature(kpi: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "feature": "KPI definition",
+        "state": "blocked_missing_evidence",
+        "resolution_type": "kpi_definition_required",
+        "source_columns": [],
+        "grain": "undefined",
+        "conflicts": [],
+        "decision_history": [],
+        "evidence": [
+            {
+                "type": "kpi_registry_placeholder",
+                "source": kpi.get("source", ""),
+                "refinement_required": kpi.get("refinement_required", ""),
+            }
+        ],
+        "candidate_patterns": [],
+        "derived_feature_options": [],
+        "candidates": [],
+        "question": (
+            "Which concrete business question, metric expression, grain/dimensions, owner, "
+            "and acceptance tests should replace this seed KPI?"
+        ),
+    }
 
 
 def apply_user_decision(

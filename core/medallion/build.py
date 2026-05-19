@@ -27,6 +27,7 @@ from core.medallion.run_state import (
 )
 from core.medallion.sql_lint import lint_sql
 from core.orchestration.governor import Governor, RoutingDecision
+from core.resource.manager import ResourceDecision
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -59,6 +60,7 @@ def build_medallion(
     only_table: Optional[str] = None,
     resume: Optional[str] = None,
     force_with_blockers: bool = False,
+    resource_decision: ResourceDecision | None = None,
 ) -> RunState:
     workspace = workspace.resolve()
     repo_root = repo_root.resolve()
@@ -73,6 +75,7 @@ def build_medallion(
                 workspace, repo_root, layout, paths, cfg=cfg,
                 only_layer=only_layer, only_table=only_table, resume=resume,
                 force_with_blockers=force_with_blockers,
+                resource_decision=resource_decision,
             )
     except WorkspaceBusy as exc:
         raise MedallionBuildExit(EXIT_WORKSPACE_BUSY, str(exc))
@@ -91,6 +94,7 @@ def _run_build(
     only_table: Optional[str],
     resume: Optional[str],
     force_with_blockers: bool,
+    resource_decision: ResourceDecision | None,
 ) -> RunState:
     # 2. Load and validate manifest
     manifest_path = paths["medallion"] / "manifest.yaml"
@@ -101,6 +105,15 @@ def _run_build(
             next_command=f"uv run design-medallion --workspace {workspace.name}",
         )
     manifest = _load_manifest(manifest_path)
+
+    if resource_decision and resource_decision.status == "blocked":
+        target_is_local = manifest.target in {"duckdb", "auto"}
+        if target_is_local:
+            raise MedallionBuildExit(
+                EXIT_MEDALLION_BUILD_FAIL,
+                "Local medallion build blocked by resource preflight; Databricks/remote execution is recommended.",
+                next_command=f"uv run resource-preflight --workspace {workspace.name}",
+            )
 
     # 3. Check for unresolved design decisions
     if not force_with_blockers:

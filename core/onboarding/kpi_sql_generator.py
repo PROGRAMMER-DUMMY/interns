@@ -66,6 +66,16 @@ class DuckDBKPISQLGenerator:
             raise ValueError(f"KPI {kpi_id} is not ready for SQL. Blocked features: {names}")
 
         profile_map = self._profile_map()
+        resource_settings = self._resource_transform_settings()
+        if (
+            self.dialect == "duckdb"
+            and resource_settings
+            and resource_settings.get("local_execution_allowed") is False
+        ):
+            raise ValueError(
+                "Local DuckDB SQL generation blocked by resource plan; "
+                "generate Databricks SQL or reduce local workload."
+            )
         relationships = load_relationship_contracts(
             self.repo_root,
             _rel(self.workspace, self.repo_root),
@@ -124,6 +134,8 @@ class DuckDBKPISQLGenerator:
                 "-- Authoritative KPI SQL generated only from ready feature mappings.",
                 f"-- Dialect: {self.dialect}",
                 f"-- KPI: {kpi.get('name', kpi_id)}",
+                f"-- Resource mode: {resource_settings.get('mode', 'unknown') if resource_settings else 'unknown'}",
+                f"-- SQL strategy: {resource_settings.get('sql_strategy', 'standard_local') if resource_settings else 'standard_local'}",
                 "",
                 staging_sql.rstrip(),
                 "",
@@ -156,6 +168,17 @@ class DuckDBKPISQLGenerator:
             for profile in data.get("profiles", [])
             if profile.get("path")
         }
+
+    def _resource_transform_settings(self) -> dict[str, Any]:
+        path = self.layout.contracts_dir / "source_to_target_plan.json"
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        settings = data.get("resource_transform_settings")
+        return settings if isinstance(settings, dict) else {}
 
     def _staging_views(
         self,

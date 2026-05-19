@@ -1,0 +1,57 @@
+{
+  "artifact_type": "source_catalog_templates.json",
+  "version": 1,
+  "templates": [
+    {
+      "id": "cms_dataset_api",
+      "type": "api",
+      "description": "Generic CMS data-api dataset endpoint with offset pagination.",
+      "method": "GET",
+      "target_kind": "dataset",
+      "extension": "json",
+      "response_mode": "rows",
+      "page_size": 5000,
+      "max_pages": 1,
+      "max_rows": 5000,
+      "max_bytes": 50000000,
+      "fetch_policy": {
+        "qps": 1.0,
+        "attempts": 4,
+        "timeout_seconds": 30,
+        "backoff_initial_seconds": 1,
+        "backoff_max_seconds": 30
+      },
+      "pagination": {
+        "style": "offset",
+        "size_param": "size",
+        "offset_param": "offset",
+        "rows_key": "data"
+      },
+      "processing_hint": {
+        "format": "json",
+        "recommended_next_step": "onboard-workspace"
+      }
+    },
+    {
+      "id": "local_file_copy",
+      "type": "local",
+      "description": "Copy an approved local file into the workspace datasets/docs tree.",
+      "mode": "copy",
+      "target_kind": "dataset",
+      "processing_hint": {
+        "format": "source_file",
+        "recommended_next_step": "onboard-workspace"
+      }
+    },
+    {
+      "id": "databricks_uc_table",
+      "type": "databricks_uc",
+      "description": "Databricks Unity Catalog table metadata source. Data movement remains separately approval-gated.",
+      "target_kind": "dataset",
+      "processing_hint": {
+        "format": "unity_catalog_table",
+        "recommended_next_step": "prepare-databricks-assets"
+      }
+    }
+  ]
+}

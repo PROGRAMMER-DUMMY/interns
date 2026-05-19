@@ -2,7 +2,9 @@ import json
 import os
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from core.execution.backend import normalize_command
 from core.execution.backend import DuckDBBackend, StrictWarehouseBackend, build_execution_backend
@@ -25,6 +27,7 @@ from core.onboarding.kpi_feature_resolver import (
 )
 from core.onboarding.kpi_blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
 from core.onboarding.kpi_generation_workflow import KPIGenerationWorkflow
+from core.onboarding.kpi_generation_quality import score_kpis as quality_score_kpis
 from core.onboarding.data_model_generation_workflow import DataModelGenerationWorkflow
 from core.onboarding.relationship_contracts import RelationshipContractBuilder
 from core.onboarding.source_to_target_planner import SourceToTargetPlanner
@@ -33,17 +36,25 @@ from core.onboarding.kickstart_workspace import WorkspaceKickstarter
 from core.onboarding.derived_feature_markdown import DerivedFeatureMarkdownConverter
 from core.onboarding.blocker_question_panel import BlockerQuestionPanelBuilder
 from core.onboarding.workspace_artifact_validator import WorkspaceArtifactValidator
+from core.onboarding.workspace_bug_detector import WorkspaceBugDetector
 from core.onboarding.workspace_cleanup import run_cleanup
+from core.onboarding.workspace_workflow import WorkspaceWorkflowOrchestrator
+from core.onboarding.wiki_memory import WorkspaceWikiMemoryBuilder
+from core.onboarding.agent_benchmark import AgentBenchmarkScorecardBuilder
 from core.skills.adapter_generator import SkillAdapterGenerator
 from tools.list_workspace_files import list_workspace_files
 from core.onboarding.workspace_onboarding import (
+    KpiDefinition,
     WorkspaceOnboarder,
     find_root_artifact_violations,
 )
+from core.optimization.engine_evolution import EngineEvolutionMemory, EngineEvolutionRecord
 from core.optimization.change_classifier import classify_diff
 from core.optimization.memory import OptimizationMemory, OptimizationMemoryRecord
 from core.optimization.planner import OptimizationPlanner
 from core.profiling.data_model_profiler import DataModelProfiler
+from core.presentation.exports import WorkspacePresentationExporter
+from core.resource.manager import HardwareProfile, ResourceBudget
 from core.storage.metadata_store import (
     DeltaMetadataStore,
     LocalMetadataStore,
@@ -55,6 +66,24 @@ from core.storage.workspace_layout import WorkspaceLayout
 
 
 class EnterpriseOptimizationTests(unittest.TestCase):
+    def _hardware(
+        self,
+        *,
+        free_disk: int = 10_000_000_000,
+        available_memory: int | None = 4_000_000_000,
+    ) -> HardwareProfile:
+        return HardwareProfile(
+            cpu_count=4,
+            total_memory_bytes=8_000_000_000,
+            available_memory_bytes=available_memory,
+            workspace_disk_free_bytes=free_disk,
+            workspace_disk_total_bytes=20_000_000_000,
+            temp_disk_free_bytes=free_disk,
+            temp_disk_total_bytes=20_000_000_000,
+            platform="test",
+            temp_dir="C:/tmp",
+        )
+
     def _create_demo_workspace(self, root: Path) -> Path:
         workspace = root / "workspaces" / "demo"
         (workspace / "datasets").mkdir(parents=True)
@@ -359,6 +388,33 @@ diff --git a/model.sql b/model.sql
             self.assertIn("kpi_baseline_manifest", baseline_sql)
             self.assertIn("What is paid amount by line of business?", baseline_sql)
 
+    def test_workspace_onboarding_applies_resource_profile_settings(self):
+        try:
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._create_demo_workspace(root)
+            hardware = self._hardware(available_memory=1)
+            budget = ResourceBudget(max_memory_fraction=0.5)
+
+            with (
+                patch("core.resource.manager.detect_hardware", return_value=hardware),
+                patch("core.resource.manager.ResourceBudget.from_env", return_value=budget),
+            ):
+                result = WorkspaceOnboarder(root, "workspaces/demo", sample_rows=100_000, exact_profile=True).run()
+
+            self.assertIn("resource_preflight", result.artifacts)
+            profile_index = json.loads(
+                (workspace / "interns" / "generated" / "profiles" / "profile_index.json").read_text(encoding="utf-8")
+            )
+            settings = profile_index["resource_profile_settings"]
+            self.assertEqual(settings["mode"], "local_streaming")
+            self.assertEqual(settings["sample_rows"], 25_000)
+            self.assertFalse(settings["exact_profile"])
+
     def test_workspace_onboarding_infers_question_only_kpi_rows(self):
         try:
             import polars  # noqa: F401
@@ -420,6 +476,91 @@ diff --git a/model.sql b/model.sql
             )
             self.assertEqual(listing.dataset_roots, ["workspaces/demo/datasets"])
             self.assertFalse((workspace / "interns").exists())
+
+    def test_list_workspace_files_treats_root_level_client_inputs_as_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "hospital"
+            workspace.mkdir(parents=True)
+            (workspace / "patients.csv").write_text("PatientID\nP1\n", encoding="utf-8")
+            (workspace / "data_dictionary.csv").write_text("column,meaning\nPatientID,key\n", encoding="utf-8")
+            (workspace / "hospital_analytics_questions.sql").write_text(
+                "-- How many encounters occurred each year?\nSELECT 1;\n",
+                encoding="utf-8",
+            )
+            (workspace / "create_hospital_db.sql").write_text("CREATE TABLE patients(id INT);", encoding="utf-8")
+
+            listing = list_workspace_files(root, "hospital")
+
+            self.assertIn("workspaces/hospital/patients.csv", listing.files)
+            self.assertIn("workspaces/hospital", listing.dataset_roots)
+            self.assertIn("workspaces/hospital/data_dictionary.csv", listing.docs)
+            self.assertIn("workspaces/hospital/hospital_analytics_questions.sql", listing.docs)
+            self.assertIn("workspaces/hospital/create_hospital_db.sql", listing.docs)
+            self.assertIn(
+                "workspaces/hospital/hospital_analytics_questions.sql",
+                listing.possible_kpi_files,
+            )
+            self.assertIn("workspaces/hospital/data_dictionary.csv", listing.possible_data_model_files)
+            self.assertIn("workspaces/hospital/create_hospital_db.sql", listing.possible_data_model_files)
+            classifications = {item["path"]: item for item in listing.classifications}
+            self.assertIn(
+                "kpi_input",
+                classifications["workspaces/hospital/hospital_analytics_questions.sql"]["roles"],
+            )
+            self.assertIn(
+                "data_model_input",
+                classifications["workspaces/hospital/data_dictionary.csv"]["roles"],
+            )
+            self.assertIn(
+                "context_doc",
+                classifications["workspaces/hospital/data_dictionary.csv"]["roles"],
+            )
+            self.assertEqual(
+                classifications["workspaces/hospital/create_hospital_db.sql"]["conflicts"],
+                [],
+            )
+            self.assertTrue(
+                any(
+                    "question" in reason
+                    for reason in classifications["workspaces/hospital/hospital_analytics_questions.sql"][
+                        "reasons"
+                    ]
+                )
+            )
+
+            score = quality_score_kpis(
+                [KpiDefinition(name="How many patients?", description="", cuts="", metric="", source="")],
+                listing.to_dict(),
+                [],
+            )
+            self.assertEqual(score["coverage"]["dataset_file_count"], 2)
+
+    def test_workspace_bug_detector_blocks_empty_onboarding_after_root_input_listing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "hospital"
+            workspace.mkdir(parents=True)
+            (workspace / "patients.csv").write_text("PatientID\nP1\n", encoding="utf-8")
+            (workspace / "hospital_analytics_questions.sql").write_text(
+                "-- How many encounters occurred each year?\nSELECT 1;\n",
+                encoding="utf-8",
+            )
+            (workspace / "create_hospital_db.sql").write_text("CREATE TABLE patients(id INT);", encoding="utf-8")
+
+            WorkspaceOnboarder(root, "workspaces/hospital", sample_rows=10).run()
+            detector = WorkspaceBugDetector(root, "workspaces/hospital")
+            report = detector.run()
+            artifacts = detector.write_report(report)
+
+            self.assertTrue(report.blocks_workflow)
+            self.assertEqual(report.blocking_bug_count, 1)
+            self.assertEqual(report.bugs[0].bug_id, "WS-BUG-001")
+            validation = WorkspaceArtifactValidator(root, "workspaces/hospital").run()
+            self.assertFalse(validation.ok)
+            self.assertTrue(any("WS-BUG-001" in error for error in validation.errors))
+            self.assertTrue((root / artifacts["json"]).exists())
+            self.assertTrue((root / artifacts["markdown"]).exists())
 
     def test_workspace_root_artifact_policy_flags_generated_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -576,6 +717,60 @@ diff --git a/model.sql b/model.sql
             self.assertEqual(by_feature["LineOfBusiness"]["state"], "proven_direct")
             self.assertGreaterEqual(mapping["summary"]["ready_kpi_count"], 1)
             self.assertTrue((workspace / "interns" / "reports" / "open_questions.md").exists())
+
+    def test_kpi_feature_resolver_blocks_placeholder_seed_kpi_as_definition_gap(self):
+        try:
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            (workspace / "datasets").mkdir(parents=True)
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets" / "transactions.csv").write_text(
+                "ClaimID,PaidAmount,LineOfBusiness\n"
+                "C1,10.50,Commercial\n",
+                encoding="utf-8",
+            )
+            (workspace / "docs" / "kpi_registry.generated.json").write_text(
+                json.dumps(
+                    {
+                        "kpis": [
+                            {
+                                "business_question": "What operational KPI should this dataset support?",
+                                "description": "Seed KPI requiring product/business clarification.",
+                                "cuts": "confirm grain and dimensions",
+                                "metric": "confirm metric",
+                                "refinement_required": (
+                                    "Confirm business question, owner, metric, grain, and tests."
+                                ),
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            result = KPIFeatureResolver(root, "workspaces/demo", domain="healthcare").run()
+
+            self.assertEqual(result.blocked_kpi_count, 1)
+            mapping = json.loads(
+                (workspace / "interns" / "generated" / "contracts" / "kpi_feature_mapping.json")
+                .read_text(encoding="utf-8")
+            )
+            feature = mapping["kpis"][0]["features"][0]
+            self.assertEqual(feature["feature"], "KPI definition")
+            self.assertEqual(feature["resolution_type"], "kpi_definition_required")
+            feature_names = {item["feature"] for item in mapping["kpis"][0]["features"]}
+            self.assertNotIn("confirm", feature_names)
+            self.assertNotIn("metric", feature_names)
+
+            current = json.loads((root / result.question_panel_path).read_text(encoding="utf-8"))
+            self.assertEqual(current["answer_type"], "kpi_definition_required")
+            self.assertIn("concrete KPI", current["question"])
 
     def test_kpi_feature_resolver_writes_strict_derived_feature_options(self):
         try:
@@ -1071,6 +1266,7 @@ diff --git a/model.sql b/model.sql
             sql = (root / result.path).read_text(encoding="utf-8")
             self.assertIn("CREATE OR REPLACE VIEW", sql)
             self.assertIn("all_workspace_rows", sql)
+            self.assertIn("-- Resource mode:", sql)
 
             (workspace / "docs" / "kpi_registry.csv").write_text(
                 "Key business question,Description,Cuts / grain hints,Metric,Data model refinement required\n"
@@ -1213,13 +1409,20 @@ diff --git a/model.sql b/model.sql
             self.assertEqual(panel["recommended_option_id"], "option_c")
 
             applied = workflow.apply_answer(answer="option_b")
-            self.assertEqual(applied.stage, "final_preview")
+            self.assertEqual(applied.stage, "entity_inventory")
             draft = json.loads(
                 (root / "workspaces/demo/interns/generated/requirements/data_model_draft.json")
                 .read_text(encoding="utf-8")
             )
             self.assertGreaterEqual(draft["summary"]["relationship_count"], 1)
             self.assertEqual(draft["image_model_policy"]["state"], "review_gated")
+            self.assertIn("readiness", draft)
+            self.assertIn("pattern_library", draft)
+
+            inventory = workflow.apply_answer(answer="option_a")
+            self.assertEqual(inventory.stage, "risk_review")
+            risk = workflow.apply_answer(answer="option_a")
+            self.assertEqual(risk.stage, "final_preview")
 
             finalized = workflow.finalize(approve_final_preview=True)
             self.assertTrue((root / finalized.data_model_markdown_path).exists())
@@ -1236,6 +1439,103 @@ diff --git a/model.sql b/model.sql
                     for rel in contract["relationships"]
                 )
             )
+
+    def test_data_model_generation_applies_structured_operations(self):
+        try:
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            (workspace / "datasets").mkdir(parents=True)
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets" / "transactions.csv").write_text(
+                "TransactionID,PatientName,PaidAmount,ServiceDate\nT1,Ada,10.50,2024-01-01\n",
+                encoding="utf-8",
+            )
+
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            workflow = DataModelGenerationWorkflow(root, "workspaces/demo")
+            workflow.prepare()
+            workflow.apply_answer(answer="option_b")
+            result = workflow.apply_answer(
+                answer="option_b",
+                operations=[
+                    {
+                        "operation": "rename_entity",
+                        "name": "transactions",
+                        "new_name": "fact_transactions",
+                    },
+                    {
+                        "operation": "set_grain",
+                        "name": "fact_transactions",
+                        "description": "one row per transaction",
+                    },
+                    {
+                        "operation": "set_primary_key",
+                        "name": "fact_transactions",
+                        "columns": ["TransactionID"],
+                    },
+                    {
+                        "operation": "mark_pii",
+                        "name": "fact_transactions",
+                        "columns": ["PatientName"],
+                    },
+                ],
+            )
+
+            self.assertEqual(result.stage, "risk_review")
+            draft = json.loads(
+                (workspace / "interns" / "generated" / "requirements" / "data_model_draft.json")
+                .read_text(encoding="utf-8")
+            )
+            table = draft["tables"][0]
+            self.assertEqual(table["name"], "fact_transactions")
+            self.assertEqual(table["grain"]["state"], "user_confirmed")
+            self.assertEqual(table["primary_key"], ["TransactionID"])
+            self.assertEqual(table["pii_columns"], ["PatientName"])
+
+    def test_data_model_blocker_panel_applies_highest_risk_answer(self):
+        try:
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            (workspace / "datasets").mkdir(parents=True)
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets" / "transactions.csv").write_text(
+                "TransactionID,PaidAmount,ServiceDate\nT1,10.50,2024-01-01\n",
+                encoding="utf-8",
+            )
+
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            workflow = DataModelGenerationWorkflow(root, "workspaces/demo")
+            workflow.prepare()
+            workflow.apply_answer(answer="option_b")
+
+            panel_result = workflow.prepare_blocker_panel()
+
+            self.assertEqual(panel_result.status, "needs_user_answer")
+            self.assertTrue((root / panel_result.current_json_path).exists())
+            panel = json.loads((root / panel_result.current_json_path).read_text(encoding="utf-8"))
+            self.assertEqual(panel["blocker_type"], "grain")
+            self.assertEqual(panel["recommended_option_id"], "option_a")
+            self.assertTrue(panel["options"][0]["json_backed"])
+
+            next_panel = workflow.apply_blocker_answer(answer="option_a")
+
+            draft = json.loads(
+                (workspace / "interns" / "generated" / "requirements" / "data_model_draft.json")
+                .read_text(encoding="utf-8")
+            )
+            table = draft["tables"][0]
+            self.assertEqual(table["grain"]["state"], "user_confirmed")
+            self.assertIn(next_panel.status, {"needs_user_answer", "no_blockers"})
 
     def test_source_to_target_planner_writes_data_model_backed_plan(self):
         try:
@@ -1257,6 +1557,12 @@ diff --git a/model.sql b/model.sql
             self.assertTrue((root / result.markdown_path).exists())
             plan = json.loads((root / result.json_path).read_text(encoding="utf-8"))
             kpi_plan = plan["kpis"][0]
+            self.assertEqual(plan["resource_mode"], "local_standard")
+            self.assertTrue(plan["resource_transform_settings"]["local_execution_allowed"])
+            self.assertIn("resource_preflight", plan["resource_artifacts"])
+            self.assertIn("context_manifest", plan)
+            self.assertTrue((root / plan["context_manifest"]).exists())
+            self.assertGreaterEqual(plan["summary"]["context_selected_sections"], 2)
             self.assertEqual(kpi_plan["target_engine"], "sql")
             self.assertEqual(kpi_plan["status"], "ready_for_generation")
             self.assertEqual(
@@ -1267,6 +1573,8 @@ diff --git a/model.sql b/model.sql
             self.assertIn("grain_matches_kpi_cuts", kpi_plan["validation_checks"])
             markdown = (root / result.markdown_path).read_text(encoding="utf-8")
             self.assertIn("Source To Target Plan", markdown)
+            self.assertIn("Resource mode", markdown)
+            self.assertIn("Context manifest", markdown)
             self.assertIn("workspaces/demo/datasets/transactions.csv", markdown)
 
     def test_source_to_target_planner_blocks_missing_join_proof(self):
@@ -1307,6 +1615,49 @@ diff --git a/model.sql b/model.sql
             blockers = plan["kpis"][0]["blockers"]
             self.assertTrue(any(blocker["type"] == "join_proof_missing" for blocker in blockers))
             self.assertEqual(plan["kpis"][0]["target_engine"], "pyspark")
+
+    def test_hybrid_source_to_target_planner_uses_engine_evolution_memory(self):
+        try:
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_demo_workspace(root)
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            KPIFeatureResolver(root, "workspaces/demo", domain="healthcare").run()
+            memory = EngineEvolutionMemory(root, "workspaces/demo")
+            memory.record(
+                EngineEvolutionRecord(
+                    stage="gold_kpi",
+                    engine="polars",
+                    workload_signature="csv_small_groupby",
+                    resource_mode="local_standard",
+                    input_rows=10,
+                    output_rows=2,
+                    input_bytes=1000,
+                    elapsed_seconds=0.1,
+                    status="success",
+                    validation_status="ok",
+                    workload_shape={
+                        "operation_type": "aggregation",
+                        "file_formats": ["csv"],
+                        "input_rows": 10,
+                        "group_by_count": 1,
+                    },
+                    decision_analysis={"chosen_reason": "Polars was fastest in local standard mode."},
+                    alternatives=[{"engine": "sql", "rejected_reason": "slower prior run"}],
+                )
+            )
+
+            result = SourceToTargetPlanner(root, "workspaces/demo", target_engine="hybrid").build()
+
+            plan = json.loads((root / result.json_path).read_text(encoding="utf-8"))
+            recommendation = plan["engine_evolution_recommendation"]
+            self.assertEqual(recommendation["engine"], "polars")
+            self.assertEqual(recommendation["lesson"]["workload_family"], "aggregation_small_csv_groupby1")
+            self.assertEqual(plan["kpis"][0]["engine_evolution_recommendation"]["engine"], "polars")
 
     def test_kpi_generation_prepare_writes_two_path_panel_and_quality_score(self):
         try:
@@ -1379,6 +1730,221 @@ diff --git a/model.sql b/model.sql
             self.assertEqual(proof["proof_level"], "production_readiness_proof")
             self.assertTrue(
                 any("source-to-target" in item for item in proof["required_before_publish"])
+            )
+
+    def test_kpi_generation_blocks_placeholder_only_finalization(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "empty"
+            workspace.mkdir(parents=True)
+
+            workflow = KPIGenerationWorkflow(root, "workspaces/empty")
+            workflow.prepare()
+            workflow.apply_answer(answer="option_a")
+            workflow.apply_answer(answer="option_b")
+            workflow.apply_answer(answer="option_c")
+            result = workflow.apply_answer(answer="option_b")
+
+            self.assertEqual(result.stage, "final_preview")
+            panel = json.loads((root / result.current_json_path).read_text(encoding="utf-8"))
+            self.assertEqual(panel["status"], "blocked_placeholder_seed")
+            self.assertEqual(panel["recommended_option_id"], "option_b")
+            option_ids = [option["option_id"] for option in panel["options"]]
+            self.assertNotIn("option_a", option_ids)
+            with self.assertRaises(PermissionError):
+                workflow.finalize(approve_final_preview=True)
+
+    def test_workspace_presentation_exports_svg_xlsx_and_manifest(self):
+        try:
+            import polars  # noqa: F401
+            import xlsxwriter  # noqa: F401
+        except ImportError:
+            self.skipTest("presentation export dependencies are not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_demo_workspace(root)
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+
+            data_model = DataModelGenerationWorkflow(root, "workspaces/demo")
+            data_model.prepare()
+            data_model.apply_answer(answer="option_b")
+            data_model.apply_answer(answer="option_a")
+            data_model.apply_answer(answer="option_a")
+            data_model.finalize(approve_final_preview=True)
+
+            kpi = KPIGenerationWorkflow(root, "workspaces/demo")
+            kpi.prepare()
+            kpi.apply_answer(answer="option_a")
+            kpi.apply_answer(answer="option_b")
+            kpi.apply_answer(answer="option_c")
+            kpi.apply_answer(answer="option_c")
+
+            result = WorkspacePresentationExporter(root, "workspaces/demo").export_workspace_presentation()
+
+            generated = {Path(path).name for path in result.generated_paths}
+            self.assertIn("data-model.svg", generated)
+            self.assertIn("data-model.mermaid.md", generated)
+            self.assertIn("kpi_registry.xlsx", generated)
+            manifest = json.loads((root / result.manifest_path).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["artifact_type"], "presentation_manifest.json")
+            self.assertIn("data_model=", manifest["source_state"])
+            svg = (
+                root
+                / "workspaces/demo/interns/reports/presentation/data-model.svg"
+            ).read_text(encoding="utf-8")
+            self.assertIn("<svg", svg)
+            self.assertIn("transactions", svg)
+            workbook = root / "workspaces/demo/interns/reports/presentation/kpi_registry.xlsx"
+            with zipfile.ZipFile(workbook) as zf:
+                names = set(zf.namelist())
+                self.assertIn("xl/workbook.xml", names)
+                self.assertIn("xl/worksheets/sheet1.xml", names)
+
+    def test_wiki_memory_writes_governed_reuse_cards_and_shared_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._create_demo_workspace(root)
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            finalized_kpi = {
+                "kpis": [
+                    {
+                        "kpi_id": "kpi_001",
+                        "business_question": "What is paid amount by line of business?",
+                        "description": "Approved paid amount definition.",
+                        "metric": "PaidAmount",
+                        "grain": "LineOfBusiness",
+                    }
+                ]
+            }
+            (workspace / "docs" / "kpi_registry.generated.json").write_text(
+                json.dumps(finalized_kpi),
+                encoding="utf-8",
+            )
+            result = WorkspaceWikiMemoryBuilder(
+                root,
+                "workspaces/demo",
+                domain="healthcare",
+            ).prepare()
+
+            self.assertGreaterEqual(result.card_count, 1)
+            self.assertTrue((root / result.shared_memory_path).exists())
+            self.assertTrue((root / result.current_markdown_path).exists())
+            report = json.loads((root / result.current_json_path).read_text(encoding="utf-8"))
+            self.assertEqual(report["artifact_type"], "wiki_memory/current.json")
+            self.assertIn("raw datasets", report["scan_scope"]["excluded"])
+            paid_cards = [card for card in report["cards"] if card["canonical_name"] == "PaidAmount"]
+            self.assertTrue(paid_cards)
+            self.assertEqual(paid_cards[0]["definition_type"], "kpi_metric")
+            shared = json.loads((root / result.shared_memory_path).read_text(encoding="utf-8"))
+            self.assertTrue(
+                any(item["canonical_name"] == "PaidAmount" for item in shared["definitions"])
+            )
+
+    def test_agent_benchmark_writes_scorecard_release_gates_and_routes(self):
+        try:
+            import polars  # noqa: F401
+            import xlsxwriter  # noqa: F401
+        except ImportError:
+            self.skipTest("benchmark dependencies are not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._create_demo_workspace(root)
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            KPIFeatureResolver(
+                root,
+                "workspaces/demo",
+                domain="healthcare",
+                include_candidates=True,
+            ).run()
+
+            data_model = DataModelGenerationWorkflow(root, "workspaces/demo")
+            data_model.prepare()
+            data_model.apply_answer(answer="option_b")
+            data_model.apply_answer(answer="option_a")
+
+            WorkspacePresentationExporter(root, "workspaces/demo").export_workspace_presentation()
+            WorkspaceWikiMemoryBuilder(root, "workspaces/demo", domain="healthcare").prepare()
+
+            result = AgentBenchmarkScorecardBuilder(
+                root,
+                "workspaces/demo",
+                domain="healthcare",
+            ).prepare()
+
+            self.assertTrue((root / result.scorecard_path).exists())
+            self.assertTrue((root / result.release_gate_path).exists())
+            self.assertTrue((root / result.current_markdown_path).exists())
+            scorecard = json.loads((root / result.scorecard_path).read_text(encoding="utf-8"))
+            self.assertEqual(scorecard["artifact_type"], "agent_benchmark_scorecard.json")
+            self.assertEqual(scorecard["external_benchmarks"]["status"], "not_executed_in_v1")
+            self.assertIn("core_readiness", scorecard["scores"])
+            self.assertIn("product_maturity", scorecard["scores"])
+            self.assertIn("kpi_readiness", scorecard["components"])
+            self.assertIn("wiki_reuse", scorecard["components"])
+            self.assertTrue(
+                any(route["blocker_type"] == "relationship_proof" for route in scorecard["blocker_routes"])
+            )
+            release_gate = json.loads((root / result.release_gate_path).read_text(encoding="utf-8"))
+            self.assertEqual(release_gate["artifact_type"], "release_gate_status.json")
+            self.assertTrue(
+                any(gate["gate"] == "executable_sql_generation" for gate in release_gate["gates"])
+            )
+            self.assertGreaterEqual(result.blocked_gate_count, 1)
+            report = (workspace / "interns" / "reports" / "benchmarks" / "current.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("Agent Benchmark Scorecard", report)
+            self.assertIn("Blocker Routes", report)
+
+    def test_prepare_workspace_workflow_writes_checkpoint_panel(self):
+        try:
+            import polars  # noqa: F401
+            import xlsxwriter  # noqa: F401
+        except ImportError:
+            self.skipTest("workflow dependencies are not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._create_demo_workspace(root)
+
+            result = WorkspaceWorkflowOrchestrator(
+                root,
+                "workspaces/demo",
+                domain="healthcare",
+                mode="local-safe",
+            ).prepare()
+
+            self.assertEqual(result.stage, "checkpoint")
+            self.assertEqual(result.status, "needs_user_choice")
+            current = json.loads((root / result.current_json_path).read_text(encoding="utf-8"))
+            self.assertEqual(current["artifact_type"], "workflow/current.json")
+            self.assertEqual(current["mode"], "local-safe")
+            option_labels = [option["label"] for option in current["options"]]
+            self.assertIn("Enter bounded autopilot", option_labels)
+            self.assertIn("remote execution", current["autopilot_boundaries"]["must_stop_before"])
+            self.assertTrue(
+                (workspace / "interns" / "reports" / "workflow" / "current.md").exists()
+            )
+            self.assertTrue(
+                (workspace / "interns" / "reports" / "presentation" / "presentation_manifest.json").exists()
+            )
+            self.assertTrue(
+                (workspace / "interns" / "reports" / "wiki_memory" / "current.json").exists()
+            )
+            self.assertIn("wiki_memory", current)
+
+            autopilot = WorkspaceWorkflowOrchestrator(
+                root,
+                "workspaces/demo",
+                domain="healthcare",
+                mode="autopilot",
+            ).prepare()
+            auto_panel = json.loads((root / autopilot.current_json_path).read_text(encoding="utf-8"))
+            self.assertEqual(auto_panel["mode"], "autopilot")
+            self.assertTrue(
+                any(action["stage"].endswith("autopilot") for action in auto_panel["actions"])
             )
 
     def test_kpi_sql_generator_emits_databricks_dialect(self):

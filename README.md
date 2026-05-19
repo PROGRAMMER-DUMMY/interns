@@ -24,6 +24,7 @@ The platform engine is organized by responsibility:
 - `core/execution/` owns local and Databricks execution.
 - `core/governance/` owns contracts, policies, approvals, and promotion gates.
 - `core/optimization/` owns planning, memory, diff classification, and decision strategy.
+- `core/context/` owns bounded context indexes, task manifests, and context wiki reports.
 - `core/profiling/` owns data model diagnostics.
 - `core/agents/` owns intern and LLM routing.
 - `core/observability/` owns metric parsing and telemetry.
@@ -87,7 +88,7 @@ workspaces/<project>/
   interns/
     state/        # workspace.db, run.log
     runs/         # per-run artifacts
-    generated/    # contracts, profiles, evidence, solutions, requirements, memory
+    generated/    # contracts, profiles, evidence, solutions, requirements, memory, context
     reports/      # human-readable reports
 ```
 
@@ -117,6 +118,102 @@ Enterprise kickstart for a new governed workspace:
 ```powershell
 uv run kickstart-workspace --workspace workspaces/<project>
 ```
+
+Local hardware/resource preflight:
+
+```powershell
+uv run resource-preflight --workspace workspaces/<project>
+```
+
+This writes CPU, memory, disk, budget, worker, and run-mode evidence under
+`workspaces/<project>/interns/generated/evidence/resource_preflight.json` and
+`workspaces/<project>/interns/reports/resource_preflight.md`. Heavy local workflows use this
+resource layer to choose safer defaults or block before exhausting disk/RAM. Onboarding uses the
+resource decision to reduce profiling sample rows and disable expensive checks under pressure.
+Medallion local builds use strict resource gating and recommend remote execution when the local run
+is unsafe. Source-to-target planning writes `resource_transform_settings` into
+`source_to_target_plan.json`; SQL generation includes the resource mode/strategy in generated SQL
+and blocks local DuckDB SQL when the plan says local execution is unsafe. Local execution backends
+also record resource decisions and stop before launching subprocesses when resource preflight blocks.
+SQL/Polars/PySpark stage outcomes can be recorded with `record-engine-evolution`; this writes
+structured `engine_evolution.json` plus a human-readable `evolution.md`, and hybrid source-to-target
+planning reads those lessons before recommending an engine. Engine records include workload shape,
+decision analysis, rejected alternatives, bottlenecks, validation, promotion state, and next
+experiment suggestions so the planner learns from detailed evidence rather than one shallow timing.
+
+Bounded context packs:
+
+```powershell
+uv run context-router build --workspace workspaces/<project> --task plan-source-to-target --budget standard
+```
+
+The context router builds a compact page index and task manifest from canonical workspace artifacts
+instead of flooding chat or prompts with whole files. It writes:
+
+```text
+workspaces/<project>/interns/generated/context/context_index.json
+workspaces/<project>/interns/generated/context/context_pages.jsonl
+workspaces/<project>/interns/generated/context/manifests/<task>_<budget>.json
+workspaces/<project>/interns/reports/context/<task>_<budget>.md
+```
+
+Budgets can be `small`, `standard`, or `deep`, with optional numeric caps for sections, bytes, and
+estimated tokens. `plan-source-to-target` now creates a context manifest automatically and records
+the manifest/wiki paths in `source_to_target_plan.json`.
+
+External source-root discovery:
+
+```powershell
+uv run prepare-external-source-intake --external-root D:\Cold_Storage --proposed-workspace workspaces/cms
+uv run apply-external-source-intake --external-root D:\Cold_Storage --proposed-workspace workspaces/cms --answer option_a
+uv run discover-external-sources --workspace workspaces/<project> --external-root D:\Cold_Storage
+```
+
+Use this when the user points to a large folder outside the repo. The intake workflow first asks
+whether to create a new workspace or attach to an existing one, saves repo-level routing defaults,
+asks for a reason when the user changes a saved default, then runs metadata-only discovery. The
+discovery command keeps generated output under the repo workspace, classifies the external root by
+paths and metadata only, groups raw data with nearby dictionaries/methodology docs, detects Delta
+tables, DuckDB/SQLite files, specs, logs, and system state, then drafts
+`docs/source_selection.generated.json` with review-gated local sources and medallion/ETL
+recommendations.
+
+Governed source catalog route for API, local/external, and Databricks Unity Catalog inputs:
+
+```powershell
+uv run source-catalog plan --workspace workspaces/<project>
+uv run source-catalog preflight --workspace workspaces/<project>
+uv run source-catalog api-fetch --workspace workspaces/<project> --source <source-id>
+uv run source-catalog local-stage --workspace workspaces/<project> --source <source-id>
+uv run source-catalog uc-inspect --workspace workspaces/<project> --source <source-id>
+uv run source-catalog discover-docs --workspace workspaces/<project>
+uv run source-catalog index-catalog --workspace workspaces/<project> --source <catalog-source-id>
+uv run source-catalog match-catalog --workspace workspaces/<project> --source <catalog-source-id> --keyword claims
+uv run source-catalog draft-selection --workspace workspaces/<project> --source <catalog-source-id>
+uv run source-catalog finalize-selection --workspace workspaces/<project> --source <catalog-source-id> --approve-final-preview
+uv run source-catalog process --workspace workspaces/<project>
+uv run source-catalog validate --workspace workspaces/<project> --strict
+```
+
+Compatibility wrappers:
+
+```powershell
+uv run prepare-source-catalog --workspace workspaces/<project>
+uv run ingest-source-catalog --workspace workspaces/<project>
+```
+
+Reusable source templates live under `config/source_catalogs/`. Workspace-approved selections live
+under `workspaces/<project>/docs/source_selection.json`. Ingestion writes only into the workspace
+and uses a concurrent API scheduler with shared per-host QPS throttling, retries, checkpoints,
+quarantine artifacts, and atomic materialization. Large JSON catalogs are indexed from JSONL/NDJSON
+or streamable JSON arrays without flooding the agent context; generated selections are promoted only
+with `finalize-selection --approve-final-preview`.
+`datasets/` or `docs/` trees and records provenance sidecars before normal onboarding. API sources
+use conservative defaults for QPS, retries, `Retry-After`, byte caps, checkpoints, and quarantine.
+Auth is bound by environment variable name only; secret values are not written to artifacts.
+Processing writes staged Parquet/profile/drift evidence under `interns/generated/evidence/`.
+Large source catalogs are indexed into compact JSONL, matched against workspace signals, and turned
+into review-only source-selection drafts instead of being pasted into prompts.
 
 Resolve KPI features after onboarding, optionally attaching reusable derivation candidates:
 

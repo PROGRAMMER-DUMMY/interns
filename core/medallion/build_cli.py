@@ -18,6 +18,7 @@ from core.medallion.build import (
     EXIT_SQL_LINT_FAIL,
     EXIT_DESIGN_BLOCKERS,
 )
+from core.resource.manager import ResourceManager
 
 
 _DESCRIPTION = (
@@ -111,6 +112,10 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
+    resource_manager = ResourceManager(workspace, repo_root=repo_root)
+    resource_artifacts = resource_manager.write_report(workload="medallion_build")
+    resource_decision = resource_manager.decide(workload="medallion_build")
+
     cfg = None
     try:
         import core.config as core_config
@@ -127,15 +132,19 @@ def main(argv: list[str] | None = None) -> int:
             only_table=args.only_table,
             resume=args.resume,
             force_with_blockers=args.force_with_blockers,
+            resource_decision=resource_decision,
         )
     except MedallionBuildExit as exc:
         _emit_exit(exc, json_mode=args.json)
         return _exit_code_for(exc.code)
 
     if args.json:
-        print(json.dumps(state.to_dict(), indent=2))
+        payload = state.to_dict()
+        payload["resource_artifacts"] = resource_artifacts
+        print(json.dumps(payload, indent=2))
     else:
         _emit_human(state, workspace, repo_root)
+        print(f"  resource_report: {resource_artifacts['report']}")
     return 0
 
 

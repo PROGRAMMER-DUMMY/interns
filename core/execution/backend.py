@@ -16,11 +16,13 @@ import signal
 import subprocess
 import shlex
 import hashlib
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from core.resource.manager import ResourceDecision, ResourceManager
 from core.failures import (
     StructuredFailure,
     internal_bug,
@@ -85,14 +87,38 @@ class DuckDBBackend(ExecutionBackend):
         parser: Optional["MetricParser"] = None,
         *,
         fallback_failure: StructuredFailure | None = None,
+        resource_decision: ResourceDecision | None = None,
     ):
         from core.observability.parser import RegexLogParser
         self.parser = parser or RegexLogParser()
         self.fallback_failure = fallback_failure
+        self.resource_decision = resource_decision
 
     def execute(self, task: dict, time_budget: int, hard_timeout: int, log_path: Path) -> ExecutionResult:
         start = time.time()
+        resource_decision = self.resource_decision or _resource_decision_for_task(task)
+        if resource_decision and resource_decision.status == "blocked":
+            log_content = (
+                "[backend:duckdb] Resource preflight blocked local execution\n"
+                f"resource_mode: {resource_decision.mode}\n"
+                f"resource_blockers: {resource_decision.blockers}\n"
+                "next: use remote/Databricks execution or reduce workload size\n"
+            )
+            log_path.write_text(log_content, encoding="utf-8")
+            failure = validation_blocker("local_resource_preflight", "Local execution blocked by resource budget.")
+            return ExecutionResult(
+                exit_code=1,
+                log_content=log_content,
+                elapsed_seconds=time.time() - start,
+                metadata={"resource_decision": resource_decision.to_dict()},
+                failure=failure,
+            )
         with open(log_path, "w", encoding="utf-8") as log_f:
+            if resource_decision:
+                log_f.write(
+                    f"[backend:duckdb] resource_mode={resource_decision.mode} "
+                    f"workers={resource_decision.recommended_workers}\n"
+                )
             exit_code = self._run_subprocess(
                 task["experiment_cmd"], time_budget, hard_timeout, log_f
             )
@@ -110,7 +136,7 @@ class DuckDBBackend(ExecutionBackend):
             elapsed_seconds=elapsed,
             metric=metric,
             token_count=int(all_metrics.get("token_count", 0)),
-            metadata={"fallback_failure": self.fallback_failure.summary()} if self.fallback_failure else None,
+            metadata=_execution_metadata(self.fallback_failure, resource_decision),
             failure=self.fallback_failure if exit_code == 0 else None,
         )
 
@@ -528,6 +554,58 @@ def build_execution_backend(cfg: "Config") -> ExecutionBackend:
     if mode == "connect":
         return ConnectBackend(db_cfg)
     return DuckDBBackend()
+
+
+def _resource_decision_for_task(task: dict) -> ResourceDecision | None:
+    workspace_value = task.get("workspace")
+    if not workspace_value:
+        editable = Path(str(task.get("editable_file") or ""))
+        parts = editable.parts
+        if len(parts) >= 2 and parts[0] == "workspaces":
+            workspace_value = str(Path(parts[0]) / parts[1])
+    if not workspace_value:
+        return None
+    workspace = (ROOT / str(workspace_value)).resolve()
+    if not workspace.exists() or not workspace.is_relative_to(ROOT):
+        return None
+    estimated_bytes = _task_estimated_bytes(task)
+    return ResourceManager(workspace, repo_root=ROOT).decide(
+        estimated_bytes=estimated_bytes,
+        workload="execution",
+    )
+
+
+def _task_estimated_bytes(task: dict) -> int:
+    total = 0
+    for key in ("editable_file", "sql_file"):
+        value = task.get(key)
+        if value:
+            path = (ROOT / str(value)).resolve()
+            if path.exists() and path.is_file():
+                total += path.stat().st_size
+    workspace = task.get("workspace")
+    if workspace:
+        profile_index = ROOT / str(workspace) / "interns" / "generated" / "profiles" / "profile_index.json"
+        if profile_index.exists():
+            try:
+                data = json.loads(profile_index.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+            for profile in data.get("profiles", []):
+                total += int(profile.get("size_bytes") or 0)
+    return total
+
+
+def _execution_metadata(
+    fallback_failure: StructuredFailure | None,
+    resource_decision: ResourceDecision | None,
+) -> dict | None:
+    metadata: dict = {}
+    if fallback_failure:
+        metadata["fallback_failure"] = fallback_failure.summary()
+    if resource_decision:
+        metadata["resource_decision"] = resource_decision.to_dict()
+    return metadata or None
 
 
 def _strict_databricks(cfg: "DatabricksConfig") -> bool:

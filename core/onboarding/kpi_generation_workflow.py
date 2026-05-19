@@ -165,9 +165,14 @@ class KPIGenerationWorkflow:
         session = self._read_session()
         if not approve_final_preview:
             raise PermissionError("--approve-final-preview is required before writing a KPI registry")
-        draft_kpis = session.get("draft_kpis") or _build_draft_kpis(session)
+        draft_kpis = session.get("draft_kpis") or _build_draft_kpis(session, self.repo_root)
         if not draft_kpis:
             raise ValueError("No draft KPIs are available to finalize")
+        if _is_placeholder_only_draft(draft_kpis):
+            raise PermissionError(
+                "Refusing to finalize a placeholder-only KPI draft. Add stakeholder context, "
+                "extract concrete KPI questions, or revise the draft before final approval."
+            )
 
         output_path = (
             (self.repo_root / output_registry).resolve()
@@ -249,7 +254,7 @@ class KPIGenerationWorkflow:
             return _format_panel(session)
         if stage == "format_selection":
             session["preferences"]["kpi_format"] = option.get("value", "simple_progressive")
-            session["draft_kpis"] = _build_draft_kpis(session)
+            session["draft_kpis"] = _build_draft_kpis(session, self.repo_root)
             session["draft_proofs"] = _draft_proofs(session)
             session["competitive_review"] = _competitive_review(session)
             session["current_stage"] = "final_preview"
@@ -531,34 +536,55 @@ def _format_panel(session: dict[str, Any]) -> dict[str, Any]:
 
 
 def _final_preview_panel(session: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "version": SESSION_VERSION,
-        "workspace": session["workspace"],
-        "stage": "final_preview",
-        "question": "Review the draft KPI registry and proof notes before finalizing.",
-        "options": [
+    draft_kpis = session.get("draft_kpis", [])
+    placeholder_only = _is_placeholder_only_draft(draft_kpis)
+    options = [
+        {
+            "option_id": "option_b",
+            "label": "Revise before saving",
+            "value": "revise",
+            "description": "Continue grilling or improve the draft before final approval.",
+        },
+    ]
+    if not placeholder_only:
+        options.insert(
+            0,
             {
                 "option_id": "option_a",
                 "label": "Finalize after review",
                 "value": "finalize",
                 "description": "Run finalize-kpi-generation with --approve-final-preview.",
             },
-            {
-                "option_id": "option_b",
-                "label": "Revise before saving",
-                "value": "revise",
-                "description": "Continue grilling or manually adjust the draft before final approval.",
-            },
-        ],
+        )
+    return {
+        "version": SESSION_VERSION,
+        "workspace": session["workspace"],
+        "stage": "final_preview",
+        "status": "blocked_placeholder_seed" if placeholder_only else "awaiting_final_preview_approval",
+        "question": (
+            "The draft contains only a placeholder seed KPI. Revise with concrete business "
+            "questions or context before finalizing."
+            if placeholder_only
+            else "Review the draft KPI registry and proof notes before finalizing."
+        ),
+        "options": options,
         "recommended_option_id": "option_b"
-        if session.get("competitive_review", {}).get("missing_discussion_points")
+        if placeholder_only or session.get("competitive_review", {}).get("missing_discussion_points")
         else "option_a",
-        "recommended_answer": "Revise if high-risk discussion points remain; otherwise finalize.",
+        "recommended_answer": (
+            "Revise before saving; placeholder-only KPI drafts cannot be finalized."
+            if placeholder_only
+            else "Revise if high-risk discussion points remain; otherwise finalize."
+        ),
         "why": "Drafts are saved safely, but the user-facing KPI registry requires explicit final approval.",
-        "draft_kpis": session.get("draft_kpis", []),
+        "draft_kpis": draft_kpis,
         "draft_proofs": session.get("draft_proofs", []),
         "competitive_review": session.get("competitive_review", {}),
-        "next_step": "Run finalize-kpi-generation --approve-final-preview after reviewing the draft.",
+        "next_step": (
+            "Add context or revise KPI requirements, then regenerate the draft preview."
+            if placeholder_only
+            else "Run finalize-kpi-generation --approve-final-preview after reviewing the draft."
+        ),
     }
 
 
@@ -601,14 +627,34 @@ def _score_kpis(
     return quality_score_kpis(kpis, listing, context_files)
 
 
-def _build_draft_kpis(session: dict[str, Any]) -> list[dict[str, Any]]:
+def _build_draft_kpis(session: dict[str, Any], repo_root: Path) -> list[dict[str, Any]]:
     existing = session.get("existing_kpis") or []
     quality_by_name = {
         item.get("business_question", ""): item
         for item in session.get("quality_score", {}).get("kpis", [])
     }
+    
     if not existing:
-        existing = [_suggest_seed_kpi(session)]
+        extracted = []
+        for rel_path in session.get("context_files", []):
+            path = repo_root / rel_path
+            if path.exists() and path.is_file() and path.suffix.lower() == ".sql":
+                from core.onboarding.kpi_text_parser import extract_kpis_from_sql
+                sql_kpis = extract_kpis_from_sql(path.read_text(encoding="utf-8"), str(rel_path))
+                for sql_kpi in sql_kpis:
+                    extracted.append({
+                        "name": sql_kpi["name"],
+                        "description": sql_kpi["description"],
+                        "cuts": sql_kpi["cuts"],
+                        "metric": sql_kpi["metric"],
+                        "refinement_required": "Confirm business question, owner, metric, grain, and tests.",
+                        "source": sql_kpi["source"],
+                    })
+        if extracted:
+            existing = extracted
+        else:
+            existing = [_suggest_seed_kpi(session)]
+
     drafts = []
     for idx, kpi in enumerate(existing, start=1):
         quality = quality_by_name.get(kpi.get("name", ""), {})
@@ -633,6 +679,20 @@ def _build_draft_kpis(session: dict[str, Any]) -> list[dict[str, Any]]:
     draft_path = Path(session["workspace"]) / "interns/generated/requirements/kpi_registry_draft.json"
     session["draft_registry_path"] = draft_path.as_posix()
     return drafts
+
+
+def _is_placeholder_only_draft(draft_kpis: list[dict[str, Any]]) -> bool:
+    if len(draft_kpis) != 1:
+        return False
+    kpi = draft_kpis[0]
+    question = str(kpi.get("business_question") or kpi.get("name") or "").strip().lower()
+    metric = str(kpi.get("metric") or "").strip().lower()
+    source = str(kpi.get("source") or "").strip().lower()
+    return (
+        question == "what operational kpi should this dataset support?"
+        and metric in {"confirm metric", ""}
+        and source == "generated_from_workspace_data"
+    )
 
 
 def _draft_proofs(session: dict[str, Any]) -> list[dict[str, Any]]:

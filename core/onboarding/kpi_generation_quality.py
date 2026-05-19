@@ -9,7 +9,9 @@ def score_kpis(kpis: list[Any], listing: dict[str, Any], context_files: list[str
     data_files = [
         file
         for file in listing.get("files", [])
-        if "/datasets/" in file and Path(file).suffix.lower() in {".csv", ".parquet", ".json"}
+        if "/interns/" not in file
+        and "/docs/" not in file
+        and Path(file).suffix.lower() in {".csv", ".parquet", ".json", ".jsonl"}
     ]
     has_data_model = bool(listing.get("possible_data_model_files"))
     has_context = bool(context_files)

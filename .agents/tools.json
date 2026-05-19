@@ -57,6 +57,48 @@
       "safety": "requires_explicit_final_preview_approval"
     },
     {
+      "name": "prepare-workspace-workflow",
+      "command": "uv run prepare-workspace-workflow --workspace <workspace> --mode <plan|local-safe|autopilot> --domain <domain>",
+      "use_when": ["workspace confirmation completed", "user wants one checkpoint for KPI, data-model, blocker, validation, and presentation workflow", "agent needs deterministic next commands and autopilot boundaries"],
+      "outputs": ["interns/reports/workflow/current.json", "interns/reports/workflow/current.md", "local-safe generated artifacts when mode is local-safe or autopilot"],
+      "safety": "local_safe_checkpoint_autopilot_stops_before_final_delete_remote_codegen"
+    },
+    {
+      "name": "prepare-wiki-memory",
+      "command": "uv run prepare-wiki-memory --workspace <workspace> --domain <domain>",
+      "use_when": ["repeated KPI terms or data-model decisions should be found", "shared team wiki memory should suggest safe reuse", "autopilot needs governed draft prefill candidates"],
+      "outputs": ["state/team_memory/wiki_memory_index.json", "interns/generated/memory/wiki_memory_candidates.json", "interns/reports/wiki_memory/current.json", "interns/reports/wiki_memory/current.md"],
+      "safety": "local_safe_structured_artifacts_only_draft_prefill_blocks_execution"
+    },
+    {
+      "name": "prepare-agent-benchmark",
+      "command": "uv run prepare-agent-benchmark --workspace <workspace> --domain <domain>",
+      "use_when": ["workspace needs a readiness proof", "release gates should be checked before SQL, ETL, medallion, autopilot, or production promotion", "owners need an artifact-backed benchmark scorecard"],
+      "outputs": ["interns/generated/contracts/agent_benchmark_scorecard.json", "interns/generated/contracts/release_gate_status.json", "interns/reports/benchmarks/current.json", "interns/reports/benchmarks/current.md"],
+      "safety": "local_safe_project_native_scorecard_no_external_benchmark_execution"
+    },
+    {
+      "name": "discover-external-sources",
+      "command": "uv run discover-external-sources --workspace <workspace> --external-root <external_root>",
+      "use_when": ["user points to a large external folder", "external source root needs dataset/doc/log/delta/database classification", "draft source selection from cold storage without making it the workspace"],
+      "outputs": ["interns/generated/requirements/external_source_discovery.json", "interns/reports/external_source_discovery.md", "docs/source_selection.generated.json"],
+      "safety": "local_safe_metadata_path_only_review_gated"
+    },
+    {
+      "name": "prepare-external-source-intake",
+      "command": "uv run prepare-external-source-intake --external-root <external_root> --proposed-workspace <workspace>",
+      "use_when": ["user provides an external path and has not chosen existing versus new workspace", "external-source route preference should be reused or challenged", "agent needs a deterministic panel instead of asking freehand"],
+      "outputs": ["interns/generated/requirements/external_source_intake_session.json", "interns/reports/external_source_intake/current.json", "interns/reports/external_source_intake/current.md"],
+      "safety": "local_safe_panel_write_no_source_reads"
+    },
+    {
+      "name": "apply-external-source-intake",
+      "command": "uv run apply-external-source-intake --external-root <external_root> --proposed-workspace <workspace> --answer <option>",
+      "use_when": ["user answered the external source intake panel", "metadata-only discovery should run after route selection", "saved external-source defaults or change reasons should be recorded"],
+      "outputs": ["external_source_intake_session.json", "external_source_discovery.json", "external_source_discovery.md", "docs/source_selection.generated.json", "state/team_memory/external_source_intake_preferences.json"],
+      "safety": "local_safe_metadata_only_until_review_gate"
+    },
+    {
       "name": "prepare-data-model-generation",
       "command": "uv run prepare-data-model-generation --workspace <workspace>",
       "use_when": ["data model docs are missing, weak, or image-only", "workspace needs governed data model creation or parsing", "relationship proof should be reviewed before executable SQL"],
@@ -76,6 +118,41 @@
       "use_when": ["draft data model preview was shown and explicitly approved", "write user-facing data model docs and finalized model contract"],
       "outputs": ["docs/data-model.md", "docs/erd.md", "docs/relationships.md", "interns/generated/contracts/data_model_contract.json"],
       "safety": "requires_explicit_final_preview_approval"
+    },
+    {
+      "name": "prepare-data-model-blocker-panel",
+      "command": "uv run prepare-data-model-blocker-panel --workspace <workspace>",
+      "use_when": ["data model draft exists", "agent needs the next JSON-backed data-model blocker question", "grain, primary key, relationship, temporal anchor, or SCD decisions need deterministic resolution"],
+      "outputs": ["interns/reports/data_model_blocker_panel/current.json", "interns/reports/data_model_blocker_panel/current.md", "updated data_model_generation_session.json"],
+      "safety": "local_safe"
+    },
+    {
+      "name": "apply-data-model-blocker-answer",
+      "command": "uv run apply-data-model-blocker-answer --workspace <workspace> --answer <option_id_or_label>",
+      "use_when": ["user answered the current data-model blocker panel", "accepted option should apply a structured data-model operation", "next blocker panel should be generated"],
+      "outputs": ["updated interns/generated/requirements/data_model_draft.json", "next interns/reports/data_model_blocker_panel/current.json", "next interns/reports/data_model_blocker_panel/current.md"],
+      "safety": "local_safe_validated_write"
+    },
+    {
+      "name": "export-data-model-diagram",
+      "command": "uv run export-data-model-diagram --workspace <workspace>",
+      "use_when": ["stakeholders need a presentable data model diagram", "finalized or draft data model should be rendered as static SVG", "Mermaid ERD should be exported for review"],
+      "outputs": ["interns/reports/presentation/data-model.svg", "interns/reports/presentation/data-model.mermaid.md", "interns/reports/presentation/presentation_manifest.json"],
+      "safety": "local_safe_presentation_export"
+    },
+    {
+      "name": "export-kpi-registry-excel",
+      "command": "uv run export-kpi-registry-excel --workspace <workspace>",
+      "use_when": ["stakeholders need a KPI Excel workbook", "draft or finalized KPI registry should be exported for review", "KPI blockers, evidence, and proof should be visible in spreadsheet form"],
+      "outputs": ["interns/reports/presentation/kpi_registry.xlsx", "interns/reports/presentation/presentation_manifest.json"],
+      "safety": "local_safe_presentation_export"
+    },
+    {
+      "name": "export-workspace-presentation",
+      "command": "uv run export-workspace-presentation --workspace <workspace>",
+      "use_when": ["workspace needs a stakeholder-ready presentation bundle", "data model diagram and KPI Excel should be generated together"],
+      "outputs": ["interns/reports/presentation/data-model.svg", "interns/reports/presentation/data-model.mermaid.md", "interns/reports/presentation/kpi_registry.xlsx", "interns/reports/presentation/presentation_manifest.json"],
+      "safety": "local_safe_presentation_export"
     },
     {
       "name": "resolve-kpi-features",
@@ -116,8 +193,15 @@
       "name": "plan-source-to-target",
       "command": "uv run plan-source-to-target --workspace <workspace> --target-engine <sql|polars|pyspark|hybrid>",
       "use_when": ["SQL, Polars, PySpark, ETL, or medallion implementation needs a data-model-backed source-to-target plan", "agent must verify source datasets, joins, grain, temporal anchors, and target layer before code generation"],
-      "outputs": ["interns/generated/contracts/source_to_target_plan.json", "interns/reports/source_to_target_plan.md"],
+      "outputs": ["interns/generated/contracts/source_to_target_plan.json", "interns/reports/source_to_target_plan.md", "interns/generated/context/manifests/plan-source-to-target_<budget>.json"],
       "safety": "local_safe"
+    },
+    {
+      "name": "context-router",
+      "command": "uv run context-router build --workspace <workspace> --task <task> --budget <small|standard|deep>",
+      "use_when": ["task needs bounded context instead of whole artifact loading", "agent needs context wiki/page index", "large workspace artifacts must be routed by budget"],
+      "outputs": ["interns/generated/context/context_index.json", "interns/generated/context/context_pages.jsonl", "interns/generated/context/manifests/<task>_<budget>.json", "interns/reports/context/<task>_<budget>.md"],
+      "safety": "local_safe_derived_context_only"
     },
     {
       "name": "build-relationship-contracts",
@@ -146,6 +230,13 @@
       "use_when": ["generated workspace artifacts need schema checks", "agent is about to rely on KPI registry, feature mapping, derived reviews, or blocker panel", "detect manual edits to generated contracts"],
       "outputs": ["validation summary JSON with checked_files, errors, and warnings"],
       "safety": "local_safe_read_only"
+    },
+    {
+      "name": "prepare-workspace-bug-report",
+      "command": "uv run prepare-workspace-bug-report --workspace <workspace>",
+      "use_when": ["workspace selection and onboarding evidence disagree", "fresh workspace flow generated empty artifacts", "blocking product bugs need a JSON and Markdown report"],
+      "outputs": ["interns/generated/evidence/bug_report.json", "interns/reports/bugs/current.md"],
+      "safety": "local_safe_governed_report_write"
     },
     {
       "name": "cleanup-workspace-references",

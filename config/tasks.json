@@ -1,4 +1,111 @@
 {
-  "active_task": "",
-  "tasks": []
+  "active_task": "Hospital_Patient_Records",
+  "tasks": [
+    {
+      "id": "Hospital_Patient_Records",
+      "name": "Hospital_Patient_Records KPI Optimization",
+      "domain": "healthcare",
+      "workspace": "workspaces/Hospital_Patient_Records",
+      "metric_key": "primary_metric",
+      "direction": "higher",
+      "optimization_policy": {
+        "execution": {
+          "production_mode": "bounded",
+          "allowed_modes": [
+            "sql",
+            "polars",
+            "sql_polars_hybrid",
+            "pyspark"
+          ],
+          "exploration_modes": [
+            "global_exploration"
+          ],
+          "default_mode": "sql",
+          "allow_global_promotion": false
+        },
+        "downcast": {
+          "integer": "lossless_minmax",
+          "float": "explicit_approval_required",
+          "decimal": "explicit_approval_required",
+          "require_exact_bounds": true
+        },
+        "failure": {
+          "correctness": "fail_closed",
+          "security": "fail_closed",
+          "semantic_contract": "fail_closed",
+          "downcast_proof": "fail_closed",
+          "telemetry": "fail_soft",
+          "optional_metadata": "fail_soft",
+          "state_persistence": "fail_closed"
+        },
+        "approval": {
+          "required_for_production": true,
+          "required_change_types": [
+            "join_rewrite",
+            "aggregation_rewrite",
+            "case_simplification",
+            "downcast_float",
+            "downcast_decimal",
+            "global_exploration"
+          ],
+          "auto_approve_safe_improvements": false
+        },
+        "sla": {
+          "max_runtime_seconds": null,
+          "max_cost_score": null,
+          "min_matching_score": 100.0,
+          "max_metric_regression_pct": 0.0
+        },
+        "bounds_source_order": [
+          "catalog_stats",
+          "delta_log_stats",
+          "parquet_row_group_stats",
+          "sample_profile",
+          "exact_scan"
+        ]
+      },
+      "editable_file": "workspaces/Hospital_Patient_Records/interns/generated/solutions/kpi_metrics.sql",
+      "sql_file": "workspaces/Hospital_Patient_Records/interns/generated/solutions/kpi_metrics.sql",
+      "experiment_cmd": [
+        "uv",
+        "run",
+        "python",
+        "workspaces/Hospital_Patient_Records/interns/evaluation/experiment.py"
+      ],
+      "evaluator_cmd": [
+        "uv",
+        "run",
+        "python",
+        "workspaces/Hospital_Patient_Records/interns/evaluation/evaluator.py"
+      ],
+      "semantic_contract": {
+        "methodology_json": "workspaces/Hospital_Patient_Records/interns/generated/contracts/semantic_contract.json",
+        "feature_mapping": "workspaces/Hospital_Patient_Records/interns/generated/contracts/kpi_feature_mapping.json",
+        "rules": []
+      },
+      "enterprise_artifacts": {
+        "policy_docs": [],
+        "sla_docs": [],
+        "data_contract_docs": [],
+        "data_dictionary_docs": [],
+        "data_model_docs": [],
+        "methodology_docs": [],
+        "discovery_json": "workspaces/Hospital_Patient_Records/interns/generated/requirements/enterprise_discovery.json",
+        "feature_mapping": "workspaces/Hospital_Patient_Records/interns/generated/contracts/kpi_feature_mapping.json",
+        "open_questions": "workspaces/Hospital_Patient_Records/interns/reports/open_questions.md"
+      },
+      "feature_resolution": {
+        "status": "ready_for_sql",
+        "mapping_path": "workspaces/Hospital_Patient_Records/interns/generated/contracts/kpi_feature_mapping.json",
+        "open_questions_path": "workspaces/Hospital_Patient_Records/interns/reports/open_questions.md",
+        "question_panel_path": "workspaces/Hospital_Patient_Records/interns/reports/blocker_question_panel/current.json",
+        "question_panel_markdown_path": "workspaces/Hospital_Patient_Records/interns/reports/blocker_question_panel/current.md",
+        "kpi_count": 0,
+        "ready_kpi_count": 0,
+        "blocked_kpi_count": 0,
+        "unresolved_feature_count": 0,
+        "next_step": "No blocker question panel review is required."
+      }
+    }
+  ]
 }
