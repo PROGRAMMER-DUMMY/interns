@@ -10,10 +10,10 @@ from core.config import Config, DatabricksConfig
 from core.execution.backend import DuckDBBackend, StrictWarehouseBackend, build_execution_backend
 from core.failures import FailureKind, WorkflowBlockedError, validation_blocker
 from core.medallion.design import _preflight
-from core.onboarding.kpi_blocker_workflow import prepare_kpi_blocker_panel
-from core.onboarding.relationship_contracts import load_relationship_contracts
-from core.onboarding.source_to_target_planner import SourceToTargetPlanner
-from core.onboarding.workspace_artifact_validator import WorkspaceArtifactValidator
+from core.onboarding.kpi.blocker_workflow import prepare_kpi_blocker_panel
+from core.onboarding.relationships.contracts import load_relationship_contracts
+from core.onboarding.relationships.source_to_target_planner import SourceToTargetPlanner
+from core.onboarding.workspace.validation import WorkspaceArtifactValidator
 from core.storage.workspace_layout import WorkspaceLayout
 
 

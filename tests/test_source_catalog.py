@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from core.onboarding.source_catalog import SourceCatalogManager, main
+from core.onboarding.sources.catalog import SourceCatalogManager, main
 from core.resource.manager import HardwareProfile, ResourceBudget
 
 
@@ -147,7 +147,7 @@ class SourceCatalogTests(unittest.TestCase):
             )
 
             fetch = AsyncMock(return_value=b'{"data":[{"id":1,"value":10}]}')
-            with patch("core.onboarding.source_catalog._fetch_bytes_with_retry", fetch):
+            with patch("core.onboarding.sources.catalog._fetch_bytes_with_retry", fetch):
                 result = SourceCatalogManager(repo, "workspaces/demo").ingest()
 
             action = result.actions[0]
@@ -192,7 +192,7 @@ class SourceCatalogTests(unittest.TestCase):
             )
 
             fetch = AsyncMock(side_effect=[b'{"data":[{"id":1}]}', b'{"data":[{"id":2}]}'])
-            with patch("core.onboarding.source_catalog._fetch_bytes_with_retry", fetch):
+            with patch("core.onboarding.sources.catalog._fetch_bytes_with_retry", fetch):
                 result = SourceCatalogManager(repo, "workspaces/demo").ingest()
 
             self.assertEqual([action["status"] for action in result.actions], ["fetched", "fetched"])
@@ -225,7 +225,7 @@ class SourceCatalogTests(unittest.TestCase):
                     RuntimeError("simulated page failure"),
                 ]
             )
-            with patch("core.onboarding.source_catalog._fetch_bytes_with_retry", fetch):
+            with patch("core.onboarding.sources.catalog._fetch_bytes_with_retry", fetch):
                 result = SourceCatalogManager(repo, "workspaces/demo").ingest()
 
             action = result.actions[0]
@@ -260,7 +260,7 @@ class SourceCatalogTests(unittest.TestCase):
             checkpoint.write_text(json.dumps({"pages_succeeded": 1}), encoding="utf-8")
 
             fetch = AsyncMock(return_value=b'{"data":[{"id":2,"value":20}]}')
-            with patch("core.onboarding.source_catalog._fetch_bytes_with_retry", fetch):
+            with patch("core.onboarding.sources.catalog._fetch_bytes_with_retry", fetch):
                 result = SourceCatalogManager(repo, "workspaces/demo").ingest()
 
             self.assertEqual(result.actions[0]["rows_written"], 2)
@@ -288,7 +288,7 @@ class SourceCatalogTests(unittest.TestCase):
             )
 
             fetch = AsyncMock(return_value=b'{"data":[{"id":1,"value":10}]}')
-            with patch("core.onboarding.source_catalog._fetch_bytes_with_retry", fetch):
+            with patch("core.onboarding.sources.catalog._fetch_bytes_with_retry", fetch):
                 result = SourceCatalogManager(repo, "workspaces/demo").ingest()
 
             action = result.actions[0]

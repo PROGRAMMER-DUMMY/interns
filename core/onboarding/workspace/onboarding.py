@@ -15,10 +15,11 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
-from core.onboarding.kpi_text_parser import (
+from core.onboarding.kpi.text_parser import (
     KPI_CUTS_HEADERS,
     cell_at,
     clean_cell,
+    extract_kpis_from_sql,
     first_existing,
     first_index,
     infer_metric_and_cuts,
@@ -37,8 +38,8 @@ except ImportError:  # pragma: no cover - optional at runtime
 
 
 DATA_SUFFIXES = {".csv", ".parquet", ".pq", ".json", ".ndjson"}
-REGISTRY_SUFFIXES = {".xlsx", ".xlsm", ".csv", ".json", ".md", ".yaml", ".yml", ".toml"}
-MODEL_SUFFIXES = {".md", ".png", ".jpg", ".jpeg", ".svg", ".json", ".yaml", ".yml"}
+REGISTRY_SUFFIXES = {".xlsx", ".xlsm", ".csv", ".json", ".md", ".sql", ".txt", ".yaml", ".yml", ".toml"}
+MODEL_SUFFIXES = {".csv", ".md", ".png", ".jpg", ".jpeg", ".svg", ".json", ".sql", ".txt", ".yaml", ".yml"}
 
 
 @dataclass(frozen=True)
@@ -169,6 +170,7 @@ class WorkspaceOnboarder:
                 },
             )
         artifacts["profile_index"] = profile_index
+        artifacts["generated_file_readability"] = self._write_generated_file_readability()
 
         return OnboardingResult(
             workspace=str(self.workspace),
@@ -181,38 +183,52 @@ class WorkspaceOnboarder:
         )
 
     def discover_inputs(self) -> WorkspaceInputs:
-        data_files: list[Path] = []
-        kpi_registries: list[Path] = []
-        data_models: list[Path] = []
-
-        datasets_dir = self.workspace / "datasets"
-        if datasets_dir.exists():
-            data_files = sorted(
-                path for path in datasets_dir.rglob("*")
-                if path.is_file() and path.suffix.lower() in DATA_SUFFIXES and self.layout.is_dataset_allowed(path)
-            )
+        classified = self._classified_workspace_inputs()
+        data_files: list[Path] = [
+            path
+            for path, roles in classified
+            if "dataset_evidence" in roles
+            and "kpi_input" not in roles
+            and "data_model_input" not in roles
+            and path.suffix.lower() in DATA_SUFFIXES
+            and self.layout.is_dataset_allowed(path)
+        ]
         data_files.extend(self._external_data_files())
 
-        docs_dir = self.workspace / "docs"
-        if docs_dir.exists():
-            for path in sorted(p for p in docs_dir.rglob("*") if p.is_file()):
-                lower_name = path.name.lower()
-                suffix = path.suffix.lower()
-                if suffix in REGISTRY_SUFFIXES and any(
-                    token in lower_name for token in ("kpi", "metric", "registry")
-                ):
-                    kpi_registries.append(path)
-                if suffix in MODEL_SUFFIXES and any(
-                    token in lower_name for token in ("model", "schema", "diagram")
-                ):
-                    data_models.append(path)
+        kpi_registries = [
+            path
+            for path, roles in classified
+            if "kpi_input" in roles and path.suffix.lower() in REGISTRY_SUFFIXES
+        ]
+        data_models = [
+            path
+            for path, roles in classified
+            if "data_model_input" in roles and path.suffix.lower() in MODEL_SUFFIXES
+        ]
 
         return WorkspaceInputs(
             workspace=str(self.workspace),
-            data_files=[_rel(path, self.repo_root) for path in data_files],
-            kpi_registries=[_rel(path, self.repo_root) for path in kpi_registries],
-            data_models=[_rel(path, self.repo_root) for path in data_models],
+            data_files=[_rel(path, self.repo_root) for path in sorted(set(data_files))],
+            kpi_registries=[_rel(path, self.repo_root) for path in sorted(set(kpi_registries))],
+            data_models=[_rel(path, self.repo_root) for path in sorted(set(data_models))],
         )
+
+    def _classified_workspace_inputs(self) -> list[tuple[Path, set[str]]]:
+        from tools.list_workspace_files import list_workspace_files
+
+        listing = list_workspace_files(self.repo_root, _rel(self.workspace, self.repo_root))
+        classified: list[tuple[Path, set[str]]] = []
+        for item in listing.classifications:
+            raw_path = item.get("path")
+            if not isinstance(raw_path, str):
+                continue
+            path = (self.repo_root / raw_path).resolve()
+            if not path.exists() or not path.is_file():
+                continue
+            roles = {str(role) for role in item.get("roles") or []}
+            if roles:
+                classified.append((path, roles))
+        return classified
 
     def load_kpis(self, registry_paths: list[str]) -> tuple[list[KpiDefinition], list[str]]:
         kpis: list[KpiDefinition] = []
@@ -228,6 +244,8 @@ class WorkspaceOnboarder:
                     kpis.extend(_read_json_kpis(path, self.repo_root))
                 elif path.suffix.lower() == ".md":
                     kpis.extend(_read_markdown_kpis(path, self.repo_root))
+                elif path.suffix.lower() == ".sql":
+                    kpis.extend(_read_sql_comment_kpis(path, self.repo_root))
                 else:
                     warnings.append(f"unsupported_registry_format:{_rel(path, self.repo_root)}")
             except Exception as exc:
@@ -534,6 +552,86 @@ if __name__ == "__main__":
         ]
         return self._write_text(self.layout.reports_dir / "onboarding_report.md", "\n".join(lines) + "\n")
 
+    def _write_generated_file_readability(self) -> str:
+        workspace = _rel(self.workspace, self.repo_root)
+        lines = [
+            "# Generated File Readability Map",
+            "",
+            f"This report classifies files for `{workspace}` by whether they are meant for human",
+            "review, machine/tool use, or runtime/cache storage. Paths are relative to the project root.",
+            "",
+            "## Human-Readable Files",
+            "",
+            "Human-readable files are mainly Markdown reports, SQL, Python scripts, CSV dictionaries,",
+            "and source docs.",
+            "",
+            "| Path | Readable by human? | What it is |",
+            "|---|---:|---|",
+            f"| `{workspace}/docs/*.md` | Yes | Workspace source documentation, if present |",
+            f"| `{workspace}/wiki/features/*.md` | Yes | Feature notes, if present |",
+            f"| `{workspace}/interns/generated/solutions/kpi_metrics.sql` | Yes | Baseline KPI SQL manifest/metadata |",
+            f"| `{workspace}/interns/generated/solutions/kpi_*.sql` | Yes | Generated KPI queries after SQL generation |",
+            f"| `{workspace}/interns/reports/onboarding_report.md` | Yes | Onboarding summary |",
+            f"| `{workspace}/interns/reports/open_questions.md` | Yes | Questions/blockers |",
+            f"| `{workspace}/interns/reports/relationship_contracts.md` | Yes | Join/relationship proof, when generated |",
+            f"| `{workspace}/interns/reports/source_to_target_plan.md` | Yes | KPI-to-source logic plan, when generated |",
+            f"| `{workspace}/interns/reports/blocker_question_panel/current.md` | Yes | Current blocker question, when generated |",
+            f"| `{workspace}/interns/reports/bugs/current.md` | Yes | Bug report, when generated |",
+            f"| `{workspace}/interns/reports/context/*.md` | Yes | Routed context summaries, when generated |",
+            f"| `{workspace}/interns/reports/data_model_generation/*.md` | Yes | Generated data-model review docs, when generated |",
+            f"| `{workspace}/interns/reports/derived_feature_reviews/**/*.md` | Yes | Derived feature review docs, when generated |",
+            f"| `{workspace}/interns/reports/kpi_generation/current.md` | Yes | KPI generation/review panel, when generated |",
+            f"| `{workspace}/interns/generated/memory/*.md` | Yes | Accepted decisions/history, when generated |",
+            f"| `{workspace}/interns/evaluation/evaluator.py` | Mostly | Evaluation code |",
+            f"| `{workspace}/interns/evaluation/experiment.py` | Mostly | Experiment runner code |",
+            "",
+            "## Machine-Readable But Inspectable",
+            "",
+            "These files are mostly for tools and agents, but a reviewer can inspect them when they",
+            "need exact structured evidence.",
+            "",
+            "| Path | Human-readable? | What it is |",
+            "|---|---:|---|",
+            f"| `{workspace}/interns/generated/contracts/*.json` | Partly | Core contracts for tools/agents |",
+            f"| `{workspace}/interns/generated/profiles/*.profile.json` | Partly | Dataset profiles/statistics |",
+            f"| `{workspace}/interns/generated/profiles/profile_index.json` | Partly | Index of profile files and profiled datasets |",
+            f"| `{workspace}/interns/generated/requirements/*.json` | Partly | Generated requirement/session state |",
+            f"| `{workspace}/interns/generated/context/*.json`, `.jsonl` | Partly | Bounded context index/pages |",
+            f"| `{workspace}/interns/reports/*/current.json` | Partly | UI/panel backing data |",
+            f"| `{workspace}/interns/generated/evidence/*.json` | Partly | Evidence/debug reports |",
+            "",
+            "## Runtime And Cache Files",
+            "",
+            "These files are not normal manual review targets. They support local execution,",
+            "metadata storage, or repeatable workflow state.",
+            "",
+            "| Path | Readable? | What it is |",
+            "|---|---:|---|",
+            f"| `{workspace}/interns/state/*.duckdb` | No | Local DuckDB databases |",
+            f"| `{workspace}/interns/state/*.db` | No | Local SQLite databases |",
+            f"| `{workspace}/interns/state/delta_metadata/**/*.parquet` | No | Metadata table data |",
+            f"| `{workspace}/interns/state/delta_metadata/**/_delta_log/*.json` | Low | Delta transaction log |",
+            f"| `{workspace}/interns/state/metadata_store/**/*.json` | Low | JSON fallback metadata cache |",
+            "",
+            "## Normal Review Starting Point",
+            "",
+            "For normal KPI review, start with these files:",
+            "",
+            "```text",
+            f"{workspace}/interns/reports/source_to_target_plan.md",
+            f"{workspace}/interns/reports/relationship_contracts.md",
+            f"{workspace}/interns/generated/solutions/kpi_001.sql",
+            f"{workspace}/interns/reports/open_questions.md",
+            "```",
+            "",
+            "Use the Markdown reports first, then inspect JSON contracts only when you need exact",
+            "machine-readable evidence.",
+        ]
+        return self._write_text(
+            self.layout.reports_dir / "generated_file_readability.md",
+            "\n".join(lines) + "\n",
+        )
+
     def _write_json(self, path: Path, payload: dict[str, Any]) -> str:
         collection = _metadata_collection_for_path(path)
         if collection:
@@ -588,6 +686,7 @@ if __name__ == "__main__":
             self.layout.evaluation_dir / "evaluator.py",
             self.layout.reports_dir / "open_questions.md",
             self.layout.reports_dir / "onboarding_report.md",
+            self.layout.reports_dir / "generated_file_readability.md",
         ]:
             if path.exists():
                 path.unlink()
@@ -735,12 +834,17 @@ def _read_json_kpis(path: Path, repo_root: Path) -> list[KpiDefinition]:
             continue
         name = _clean_cell(item.get("name") or item.get("kpi") or item.get("question") or item.get("kpi_name") or item.get("business_question"))
         if name:
+            description = _clean_cell(item.get("description") or item.get("definition"))
+            cuts = _clean_cell(item.get("cuts") or item.get("grain") or item.get("dimensions"))
+            metric = _clean_cell(item.get("metric") or item.get("formula"))
+            if not metric and not cuts:
+                metric, cuts = _infer_metric_and_cuts(name, description)
             kpis.append(
                 KpiDefinition(
                     name=name,
-                    description=_clean_cell(item.get("description") or item.get("definition")),
-                    cuts=_clean_cell(item.get("cuts") or item.get("grain") or item.get("dimensions")),
-                    metric=_clean_cell(item.get("metric") or item.get("formula")),
+                    description=description,
+                    cuts=cuts,
+                    metric=metric,
                     refinement_required=_clean_cell(item.get("refinement_required")),
                     source=_rel(path, repo_root),
                 )
@@ -762,6 +866,20 @@ def _read_markdown_kpis(path: Path, repo_root: Path) -> list[KpiDefinition]:
         elif re.match(r"^#{1,4}\s+", stripped) and "kpi" in stripped.lower():
             kpis.append(KpiDefinition(name=re.sub(r"^#{1,4}\s+", "", stripped), source=_rel(path, repo_root)))
     return kpis
+
+
+def _read_sql_comment_kpis(path: Path, repo_root: Path) -> list[KpiDefinition]:
+    return [
+        KpiDefinition(
+            name=_clean_cell(item.get("name")),
+            description=_clean_cell(item.get("description")),
+            cuts=_clean_cell(item.get("cuts")),
+            metric=_clean_cell(item.get("metric")),
+            source=_rel(path, repo_root),
+        )
+        for item in extract_kpis_from_sql(path.read_text(encoding="utf-8"), _rel(path, repo_root))
+        if _clean_cell(item.get("name"))
+    ]
 
 
 def _first_existing(lowered: dict[str, str], candidates: list[str]) -> str | None:

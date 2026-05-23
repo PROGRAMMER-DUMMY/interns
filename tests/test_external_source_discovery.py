@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.onboarding.external_source_discovery import ExternalSourceDiscoverer, main
+from core.onboarding.sources.external_discovery import ExternalSourceDiscoverer, main
 
 
 class ExternalSourceDiscoveryTests(unittest.TestCase):

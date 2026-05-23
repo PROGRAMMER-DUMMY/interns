@@ -8,7 +8,9 @@ run.log
 *.db
 
 # Local documentation drafts
-docs/
+docs/*
+!docs/data_workflow_medallion_reference.md
+!docs/session_snapshot.md
 
 # Local data dumps and generated warehouse artifacts
 dump/
@@ -61,6 +63,7 @@ env/
 .vscode/
 .ipynb_checkpoints/
 .claude/
+.agents/sessions/
 .memory/
 .code-review-graph/
 *.swp

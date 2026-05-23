@@ -151,3 +151,7 @@ If multiple JSON files match, list the available files and ask which one to show
 Do not use subagents, background agents, or multi-agent review for normal workspace onboarding,
 blocker preparation, or KPI feature resolution. Use subagents only when the user explicitly asks for
 parallel agent work, subagents, workers, or a review team.
+
+## Data Isolation Rule
+
+For any active workspace, always restrict dataset processing strictly to EMR data from Hospital A (datasets/EMR/trendytech-hospital-a). Ensure interns/state/workspace_settings.json is created or updated with a dataset_allowlist enforcing this path before running workspace commands like onboarding or profiling.

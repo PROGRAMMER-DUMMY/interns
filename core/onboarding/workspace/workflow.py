@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core.onboarding.data_model_generation_workflow import DataModelGenerationWorkflow
-from core.onboarding.kpi_blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
-from core.onboarding.kpi_generation_workflow import KPIGenerationWorkflow
-from core.onboarding.wiki_memory import WorkspaceWikiMemoryBuilder
+from core.onboarding.data_model.generation_workflow import DataModelGenerationWorkflow
+from core.onboarding.kpi.blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
+from core.onboarding.kpi.generation_workflow import KPIGenerationWorkflow
+from core.onboarding.memory.wiki_memory import WorkspaceWikiMemoryBuilder
 from core.onboarding.workspace.onboarding import WorkspaceOnboarder
 from core.onboarding.workspace.validation import WorkspaceArtifactValidator
 from core.presentation.exports import WorkspacePresentationExporter

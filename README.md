@@ -14,7 +14,7 @@ Autoresearch is a governed optimization control plane for scoreable data-enginee
 - Metadata-first data model profiling with sample/exact bounds and conservative downcast recommendations
 - Dataset profiling, representation checks, and guardrail scoring
 - Evidence-backed KPI feature discovery with unresolved mappings recorded as open questions
-- Dashboard for run history, intern activity, governance decisions, and human alerts
+- Dashboard for run history, reviewer proof, intern activity, governance decisions, and human alerts
 
 ## Core Layout
 
@@ -42,11 +42,27 @@ The CLI version is the canonical workflow interface. It is designed for data tea
 engineers, product leads, business analysts, and platform teams that need traceable KPI and
 data-engineering work.
 
+The fast-moving workflow source of truth is `AGENTS.md`, `TOOLS.md`, `.agents/tools.json`, and the
+current JSON/Markdown panels written under `workspaces/<project>/interns/reports/`. This README is
+an orientation document, not the policy authority for agent behavior.
+
 The operating model is:
 
 ```text
 workspace inputs -> governed artifacts -> validated executable outputs
 ```
+
+For agent-led sessions, prefer the quiet workflow front door:
+
+```powershell
+uv run workspace-flow start --workspace workspaces/<project> --intent kpi_generation --domain healthcare
+uv run workspace-flow answer --session <session-id> --answer option_a
+uv run workspace-flow results --session <session-id>
+```
+
+`workspace-flow` persists session state and returns compact questions/results while running the
+lower-level onboarding, blocker, planning, SQL generation, validation, and preview steps in the
+backend.
 
 The CLI is not a loose query generator. It is a governed control plane that:
 
@@ -59,6 +75,105 @@ The CLI is not a loose query generator. It is a governed control plane that:
 - builds source-to-target plans for SQL, Polars, PySpark, and medallion/ETL work;
 - generates executable artifacts only after evidence and approval gates pass;
 - stores decisions, memory, reports, and proof under the workspace.
+
+Current operator path for a fresh KPI/query workspace:
+
+```powershell
+uv run list-workspace-files --workspace workspaces/<project>
+uv run prepare-kpi-generation --workspace workspaces/<project>
+uv run apply-kpi-generation-answer --workspace workspaces/<project> --answer option_b
+uv run onboard-workspace --workspace workspaces/<project>
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain healthcare
+uv run validate-workspace-artifacts --workspace workspaces/<project>
+```
+
+Use the generated panel files for stakeholder questions. Do not hand-edit generated contracts such
+as `kpi_feature_mapping.json`, `workspace_feature_definitions.json`, or blocker panel JSON. Apply
+answers through the supported wrappers, especially `apply-kpi-generation-answer` and
+`apply-kpi-panel-answer`.
+
+For an all-KPI review packet before bulk approval or execution, run:
+
+```powershell
+uv run kpi-proof-packet --workspace workspaces/<project> --domain healthcare
+```
+
+The first version is read-only. It writes source-row traceability, mapping recommendations,
+readiness gates, generated SQL when present, output previews when present, and sample values under
+`workspaces/<project>/interns/reports/kpi_proof_packet/`.
+
+Dependency-free AI application tests can run from workspace-scoped JSONL datasets:
+
+```powershell
+uv run run-ai-app-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_harness/datasets/happy_path.jsonl
+```
+
+The default path is local and CI-safe. Cases can target `local_stub` or `http_ai`; HTTP cases are
+blocked unless `--allow-remote-ai` is passed. Store only non-secret config fields and env var names,
+using `config/ai_harness.example.json` as the template. KPI/SQL suites can assert feature mappings,
+SQL semantics, result-table shape, pinned metric values, and baseline result regressions. Example
+KPI suite rows are in `config/ai_harness.kpi_suite.example.jsonl`.
+
+Workflow guardrails can be checked with:
+
+```powershell
+uv run validate-workflow-guardrails --workspace workspaces/<project>
+```
+
+This catches workflow failures around the tools themselves: invented generic KPI features, blocker
+panels without source-backed provenance, raw dataset reads before profiles, non-portable shell
+commands, and failed commands that were not recovered with a safer project tool.
+
+Replayable workflow steps can be recorded with:
+
+```powershell
+uv run record-workspace-trajectory --workspace workspaces/<project> --event-type command --status ok --summary "Listed workspace."
+```
+
+The append-only trajectory is written to `interns/state/trajectory.jsonl` and summarized under
+`interns/reports/trajectory/`. `validate-workflow-guardrails` consumes it by default when present.
+Controlled tools such as `workspace-flow`, `prepare-kpi-blocker-panel`, and
+`apply-kpi-panel-answer` also record best-effort trajectory events automatically.
+
+`validate-project-harness` includes workflow guardrail health in the top-level project score, so
+agent process failures such as unsupported commands or unrecovered failed steps can block readiness
+even when static artifacts look valid.
+
+Build a local evidence graph when you need impact or traceability across artifacts:
+
+```powershell
+uv run build-workspace-evidence-graph --workspace workspaces/<project>
+uv run query-workspace-evidence-graph --workspace workspaces/<project> --term Payer
+```
+
+It writes `interns/generated/evidence_graph/graph.json` and
+`interns/reports/evidence_graph/current.md`, linking KPI terms, mappings, profile columns, SQL,
+trajectory events, and harness findings.
+
+The dashboard includes a `Review` page for the same proof trail. It reads the selected workspace's
+reliability suite, workflow guardrails, evidence graph, memory health, trajectory, blocker panel,
+project harness, and KPI proof packet artifacts without reading raw datasets. Run it locally with:
+
+```powershell
+uv run python dashboard.py
+```
+
+CLI agents can be regression-tested against the governed workflow with:
+
+```powershell
+uv run run-ai-cli-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl
+```
+
+Real subprocess execution of tools such as Claude, Gemini, or Codex is blocked unless
+`--allow-cli-exec` is passed. The default stub mode checks command transcripts, project-tool
+compliance, generated artifacts, JSON fields, and workflow guardrails without calling an external
+AI CLI.
+
+Bugfinder support is intentionally conservative. `prepare-workspace-bug-report` catches workflow
+contradictions such as selection/onboarding disagreement, blocker panels that ask about parser
+artifacts or operator fragments, and scoped workspace definitions that appear to overwrite one
+another. It is not a substitute for reviewer judgment on business semantics, relationship approval,
+or production readiness.
 
 ### Team Roles
 
@@ -164,9 +279,9 @@ the manifest/wiki paths in `source_to_target_plan.json`.
 External source-root discovery:
 
 ```powershell
-uv run prepare-external-source-intake --external-root D:\Cold_Storage --proposed-workspace workspaces/cms
-uv run apply-external-source-intake --external-root D:\Cold_Storage --proposed-workspace workspaces/cms --answer option_a
-uv run discover-external-sources --workspace workspaces/<project> --external-root D:\Cold_Storage
+uv run prepare-external-source-intake --external-root <external-source-root> --proposed-workspace workspaces/cms
+uv run apply-external-source-intake --external-root <external-source-root> --proposed-workspace workspaces/cms --answer option_a
+uv run discover-external-sources --workspace workspaces/<project> --external-root <external-source-root>
 ```
 
 Use this when the user points to a large folder outside the repo. The intake workflow first asks
@@ -395,6 +510,31 @@ workspaces/<project>/interns/
 ```
 
 The table below explains the important files, what is inside them, and who should inspect them.
+
+For quick review, use this split:
+
+| Artifact group | Human-readable? | Normal use |
+|---|---:|---|
+| `reports/*.md` | Yes | Reviewer and stakeholder summaries, plans, blockers, and proof. Start here before opening JSON. |
+| `reports/**/current.md` | Yes | Current stakeholder-facing panel or question. Use this in chat/CLI reviews. |
+| `generated/solutions/*.sql` | Yes | Generated executable KPI/query logic. Review before production use. |
+| `evaluation/*.py` | Mostly | Workspace-local runner/evaluator scaffolding for scoreable execution. |
+| `generated/contracts/*.json` | Partly | Machine-readable source of truth for KPI registry, mappings, relationships, and source-to-target plans. |
+| `generated/profiles/*.json` | Partly | Profile-first dataset evidence: schema, row counts, nulls, sample values, and warnings. |
+| `generated/requirements/*.json` | Partly | Workflow/session state for KPI generation, data-model generation, source intake, and production proof. |
+| `generated/context/*` | Partly | Bounded context packs that help agents avoid reading every artifact into prompts. |
+| `generated/evidence/*.json` | Partly | Preflight, bug, or audit evidence for debugging and governance. |
+| `generated/memory/*` | Partly | Accepted decisions, rejected assumptions, and reusable workspace preferences. |
+| `state/*.duckdb`, `state/*.db`, `state/delta_metadata/`, `state/metadata_store/` | No | Runtime databases and metadata caches. These are not normal reviewer documents. |
+
+For simple KPI/query review, the usual starting files are:
+
+```text
+workspaces/<project>/interns/reports/source_to_target_plan.md
+workspaces/<project>/interns/reports/relationship_contracts.md
+workspaces/<project>/interns/generated/solutions/kpi_001.sql
+workspaces/<project>/interns/reports/open_questions.md
+```
 
 ### Requirements Artifacts
 
@@ -801,6 +941,10 @@ runtime state under `state/databricks/deployments/` records the latest and recen
 Databricks deployment attempts across workspaces. This lets operators switch
 active projects without losing sight of platform connection and deployment
 status.
+
+For a team-oriented overview of ingestion patterns, Bronze/Silver/Gold responsibilities, data
+cleaning techniques, serving patterns, and modern data tooling, see
+`docs/data_workflow_medallion_reference.md`.
 
 ## Tool-Agnostic Skills
 

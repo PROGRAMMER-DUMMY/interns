@@ -14,36 +14,36 @@ from core.governance.contracts import OptimizationPolicy
 from core.governance.evaluator import GovernanceEvaluator
 from core.governance.mode_policy import ModePlanner
 from core.governance.semantic_contract import SemanticContract
-from core.onboarding.databricks_assets import DatabricksAssetManifestBuilder
-from core.onboarding.databricks_workspace_deployer import run_deployment
-from core.onboarding.derivation_search import DerivationPatternSearcher, DerivationSearchInput
-from core.onboarding.genie_workspace import GenieWorkspaceSpecBuilder
-from core.onboarding.auto_bootstrap import AutoBootstrap
-from core.onboarding.kpi_feature_resolver import (
+from core.onboarding.databricks.assets import DatabricksAssetManifestBuilder
+from core.onboarding.databricks.workspace_deployer import run_deployment
+from core.onboarding.features.derivation_search import DerivationPatternSearcher, DerivationSearchInput
+from core.onboarding.databricks.genie_workspace import GenieWorkspaceSpecBuilder
+from core.onboarding.workspace.bootstrap import AutoBootstrap
+from core.onboarding.kpi.feature_resolver import (
     KPIFeatureResolver,
     apply_user_decision,
     apply_workspace_definition,
     extract_expression,
 )
-from core.onboarding.kpi_blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
-from core.onboarding.kpi_generation_workflow import KPIGenerationWorkflow
-from core.onboarding.kpi_generation_quality import score_kpis as quality_score_kpis
-from core.onboarding.data_model_generation_workflow import DataModelGenerationWorkflow
-from core.onboarding.relationship_contracts import RelationshipContractBuilder
-from core.onboarding.source_to_target_planner import SourceToTargetPlanner
-from core.onboarding.kpi_sql_generator import DuckDBKPISQLGenerator
-from core.onboarding.kickstart_workspace import WorkspaceKickstarter
-from core.onboarding.derived_feature_markdown import DerivedFeatureMarkdownConverter
-from core.onboarding.blocker_question_panel import BlockerQuestionPanelBuilder
-from core.onboarding.workspace_artifact_validator import WorkspaceArtifactValidator
-from core.onboarding.workspace_bug_detector import WorkspaceBugDetector
-from core.onboarding.workspace_cleanup import run_cleanup
-from core.onboarding.workspace_workflow import WorkspaceWorkflowOrchestrator
-from core.onboarding.wiki_memory import WorkspaceWikiMemoryBuilder
-from core.onboarding.agent_benchmark import AgentBenchmarkScorecardBuilder
+from core.onboarding.kpi.blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
+from core.onboarding.kpi.generation_workflow import KPIGenerationWorkflow
+from core.onboarding.kpi.generation_quality import score_kpis as quality_score_kpis
+from core.onboarding.data_model.generation_workflow import DataModelGenerationWorkflow
+from core.onboarding.relationships.contracts import RelationshipContractBuilder
+from core.onboarding.relationships.source_to_target_planner import SourceToTargetPlanner
+from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator
+from core.onboarding.workspace.kickstart import WorkspaceKickstarter
+from core.onboarding.features.derived_markdown import DerivedFeatureMarkdownConverter
+from core.onboarding.kpi.blocker_question_panel import BlockerQuestionPanelBuilder
+from core.onboarding.workspace.validation import WorkspaceArtifactValidator
+from core.onboarding.workspace.bugs import WorkspaceBugDetector
+from core.onboarding.workspace.cleanup import run_cleanup
+from core.onboarding.workspace.workflow import WorkspaceWorkflowOrchestrator
+from core.onboarding.memory.wiki_memory import WorkspaceWikiMemoryBuilder
+from core.onboarding.benchmark.agent_benchmark import AgentBenchmarkScorecardBuilder
 from core.skills.adapter_generator import SkillAdapterGenerator
 from tools.list_workspace_files import list_workspace_files
-from core.onboarding.workspace_onboarding import (
+from core.onboarding.workspace.onboarding import (
     KpiDefinition,
     WorkspaceOnboarder,
     find_root_artifact_violations,
@@ -380,6 +380,12 @@ diff --git a/model.sql b/model.sql
             self.assertTrue((workspace / "interns" / "state" / "delta_metadata" / "contracts" / "_delta_log").exists())
             self.assertTrue((workspace / "interns" / "state" / "delta_metadata" / "profiles" / "_delta_log").exists())
             self.assertTrue((workspace / "interns" / "reports" / "open_questions.md").exists())
+            readability_report = workspace / "interns" / "reports" / "generated_file_readability.md"
+            self.assertTrue(readability_report.exists())
+            readability_text = readability_report.read_text(encoding="utf-8")
+            self.assertIn("Generated File Readability Map", readability_text)
+            self.assertIn("workspaces/demo/interns/generated/contracts/*.json", readability_text)
+            self.assertIn("workspaces/demo/interns/state/*.duckdb", readability_text)
             self.assertEqual(find_root_artifact_violations(workspace), [])
 
             baseline_sql = (
@@ -536,31 +542,167 @@ diff --git a/model.sql b/model.sql
             )
             self.assertEqual(score["coverage"]["dataset_file_count"], 2)
 
-    def test_workspace_bug_detector_blocks_empty_onboarding_after_root_input_listing(self):
+    def test_onboarding_uses_root_level_client_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             workspace = root / "workspaces" / "hospital"
             workspace.mkdir(parents=True)
             (workspace / "patients.csv").write_text("PatientID\nP1\n", encoding="utf-8")
+            (workspace / "data_dictionary.csv").write_text("column,meaning\nPatientID,key\n", encoding="utf-8")
             (workspace / "hospital_analytics_questions.sql").write_text(
                 "-- How many encounters occurred each year?\nSELECT 1;\n",
                 encoding="utf-8",
             )
             (workspace / "create_hospital_db.sql").write_text("CREATE TABLE patients(id INT);", encoding="utf-8")
 
-            WorkspaceOnboarder(root, "workspaces/hospital", sample_rows=10).run()
+            result = WorkspaceOnboarder(root, "workspaces/hospital", sample_rows=10).run()
             detector = WorkspaceBugDetector(root, "workspaces/hospital")
             report = detector.run()
-            artifacts = detector.write_report(report)
+            validation = WorkspaceArtifactValidator(root, "workspaces/hospital").run()
+            registry = json.loads(
+                (workspace / "interns" / "generated" / "contracts" / "kpi_registry.json")
+                .read_text(encoding="utf-8")
+            )
+
+            self.assertIn("workspaces/hospital/patients.csv", result.inputs.data_files)
+            self.assertIn("workspaces/hospital/hospital_analytics_questions.sql", result.inputs.kpi_registries)
+            self.assertIn("workspaces/hospital/data_dictionary.csv", result.inputs.data_models)
+            self.assertIn("workspaces/hospital/create_hospital_db.sql", result.inputs.data_models)
+            self.assertEqual(result.profile_count, 1)
+            self.assertEqual(result.kpi_count, 1)
+            self.assertEqual(registry["kpis"][0]["name"], "How many encounters occurred each year?")
+            self.assertFalse(report.blocks_workflow)
+            self.assertTrue(validation.ok)
+
+    def test_workspace_bug_detector_flags_operator_blocker_panel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "hospital"
+            panel_dir = workspace / "interns" / "reports" / "blocker_question_panel"
+            contracts_dir = workspace / "interns" / "generated" / "contracts"
+            panel_dir.mkdir(parents=True)
+            contracts_dir.mkdir(parents=True)
+            (contracts_dir / "kpi_feature_mapping.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "kpi_count": 3,
+                            "ready_kpi_count": 0,
+                            "blocked_kpi_count": 3,
+                            "unresolved_feature_count": 3,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (panel_dir / "current.json").write_text(
+                json.dumps(
+                    {
+                        "status": "needs_user_answer",
+                        "feature": "average",
+                        "applies_to_kpis": ["kpi_005", "kpi_006", "kpi_007"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = WorkspaceBugDetector(root, "workspaces/hospital").run()
 
             self.assertTrue(report.blocks_workflow)
-            self.assertEqual(report.blocking_bug_count, 1)
-            self.assertEqual(report.bugs[0].bug_id, "WS-BUG-001")
-            validation = WorkspaceArtifactValidator(root, "workspaces/hospital").run()
-            self.assertFalse(validation.ok)
-            self.assertTrue(any("WS-BUG-001" in error for error in validation.errors))
-            self.assertTrue((root / artifacts["json"]).exists())
-            self.assertTrue((root / artifacts["markdown"]).exists())
+            self.assertIn("WS-BUG-002", {bug.bug_id for bug in report.bugs})
+
+    def test_workspace_bug_detector_flags_scoped_definition_overwrite_risk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "hospital"
+            requirements_dir = workspace / "interns" / "generated" / "requirements"
+            contracts_dir = workspace / "interns" / "generated" / "contracts"
+            requirements_dir.mkdir(parents=True)
+            contracts_dir.mkdir(parents=True)
+            (requirements_dir / "requirements.json").write_text(
+                json.dumps(
+                    {
+                        "workspace_feature_definitions": [
+                            {
+                                "feature": "cost",
+                                "definition": "procedures.Base_Cost",
+                                "applies_to_kpis": ["kpi_005", "kpi_006"],
+                            },
+                            {
+                                "feature": "cost",
+                                "definition": "encounters.Total_Claim_Cost",
+                                "applies_to_kpis": ["kpi_007"],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (contracts_dir / "workspace_feature_definitions.json").write_text(
+                json.dumps(
+                    {
+                        "definitions": [
+                            {
+                                "feature": "cost",
+                                "definition": "encounters.Total_Claim_Cost",
+                                "applies_to_kpis": ["kpi_007"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = WorkspaceBugDetector(root, "workspaces/hospital").run()
+
+            self.assertTrue(report.blocks_workflow)
+            self.assertIn("WS-BUG-003", {bug.bug_id for bug in report.bugs})
+
+    def test_workspace_bug_detector_ignores_superseded_same_scope_definitions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "hospital"
+            requirements_dir = workspace / "interns" / "generated" / "requirements"
+            contracts_dir = workspace / "interns" / "generated" / "contracts"
+            requirements_dir.mkdir(parents=True)
+            contracts_dir.mkdir(parents=True)
+            (requirements_dir / "requirements.json").write_text(
+                json.dumps(
+                    {
+                        "workspace_feature_definitions": [
+                            {
+                                "feature": "readmission",
+                                "definition": "older wording",
+                                "applies_to_kpis": [],
+                            },
+                            {
+                                "feature": "readmission",
+                                "definition": "newer wording",
+                                "applies_to_kpis": [],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (contracts_dir / "workspace_feature_definitions.json").write_text(
+                json.dumps(
+                    {
+                        "definitions": [
+                            {
+                                "feature": "readmission",
+                                "definition": "newer wording",
+                                "applies_to_kpis": [],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = WorkspaceBugDetector(root, "workspaces/hospital").run()
+
+            self.assertNotIn("WS-BUG-003", {bug.bug_id for bug in report.bugs})
 
     def test_workspace_root_artifact_policy_flags_generated_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1324,6 +1466,8 @@ diff --git a/model.sql b/model.sql
 
             self.assertIn("LEFT JOIN", sql)
             self.assertIn('"PatientID" =', sql)
+            self.assertNotIn("ServiceDate", sql)
+            self.assertNotIn("DOB", sql)
             conn = duckdb.connect(":memory:")
             old_cwd = Path.cwd()
             try:

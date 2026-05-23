@@ -42,6 +42,42 @@ class SkillAdapterResult:
         }
 
 
+@dataclass(frozen=True)
+class ToolDefinition:
+    name: str
+    command: str
+    use_when: list[str]
+    outputs: list[str]
+    safety: str
+    recovery: str | None = None
+
+    def as_index_item(self) -> dict[str, Any]:
+        item: dict[str, Any] = {
+            "name": self.name,
+            "command": self.command,
+            "use_when": self.use_when,
+            "outputs": self.outputs,
+            "safety": self.safety,
+        }
+        if self.recovery:
+            item["recovery"] = self.recovery
+        return item
+
+
+@dataclass(frozen=True)
+class ToolRegistry:
+    source_path: str
+    tools: list[ToolDefinition]
+    evidence_policy: dict[str, Any]
+
+    def as_index_item(self) -> dict[str, Any]:
+        return {
+            "source": self.source_path,
+            "evidence_policy": self.evidence_policy,
+            "tools": [tool.as_index_item() for tool in self.tools],
+        }
+
+
 class SkillAdapterGenerator:
     """Generate tool-neutral skill indexes from canonical SKILL.md files."""
 
@@ -51,12 +87,14 @@ class SkillAdapterGenerator:
         *,
         skills_dir: str | Path = "skills",
         output_dir: str | Path = ".agents",
+        tools_registry_path: str | Path = ".agents/tools.json",
         tools: list[str] | tuple[str, ...] = DEFAULT_TOOLS,
         embed_full: bool = False,
     ):
         self.repo_root = Path(repo_root).resolve()
         self.skills_dir = (self.repo_root / skills_dir).resolve()
         self.output_dir = (self.repo_root / output_dir).resolve()
+        self.tools_registry_path = (self.repo_root / tools_registry_path).resolve()
         self.tools = tuple(_safe_tool_name(tool) for tool in tools)
         self.embed_full = embed_full
 
@@ -64,6 +102,7 @@ class SkillAdapterGenerator:
         skills = self.discover()
         if not skills:
             raise FileNotFoundError(f"No skills found under {self.skills_dir}")
+        tool_registry = self.load_tool_registry()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         index_path = self.output_dir / "skills_index.json"
         payload = {
@@ -83,6 +122,8 @@ class SkillAdapterGenerator:
                 for skill in skills
             ],
         }
+        if tool_registry:
+            payload["tool_registry"] = tool_registry.as_index_item()
         index_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
         tool_paths = []
@@ -90,7 +131,15 @@ class SkillAdapterGenerator:
             tool_dir = self.output_dir / tool
             tool_dir.mkdir(parents=True, exist_ok=True)
             path = tool_dir / "SKILLS.md"
-            path.write_text(_render_adapter(tool, skills, embed_full=self.embed_full), encoding="utf-8")
+            path.write_text(
+                _render_adapter(
+                    tool,
+                    skills,
+                    embed_full=self.embed_full,
+                    tool_registry=tool_registry,
+                ),
+                encoding="utf-8",
+            )
             tool_paths.append(_rel(path, self.repo_root))
 
         return SkillAdapterResult(
@@ -111,6 +160,11 @@ class SkillAdapterGenerator:
         if duplicates:
             raise ValueError(f"duplicate skill names: {', '.join(duplicates)}")
         return skills
+
+    def load_tool_registry(self) -> ToolRegistry | None:
+        if not self.tools_registry_path.exists():
+            return None
+        return _read_tool_registry(self.tools_registry_path, self.repo_root)
 
 
 def _read_skill(path: Path, repo_root: Path) -> SkillDefinition:
@@ -159,7 +213,93 @@ def _split_frontmatter(text: str, path: Path) -> tuple[dict[str, str], str]:
     return metadata, body
 
 
-def _render_adapter(tool: str, skills: list[SkillDefinition], *, embed_full: bool) -> str:
+def _read_tool_registry(path: Path, repo_root: Path) -> ToolRegistry:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"tool registry is invalid JSON: {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"tool registry must be a JSON object: {path}")
+    raw_tools = payload.get("tools")
+    if not isinstance(raw_tools, list) or not raw_tools:
+        raise ValueError(f"tool registry must define a non-empty tools list: {path}")
+
+    tools: list[ToolDefinition] = []
+    seen_names: set[str] = set()
+    for index, raw_tool in enumerate(raw_tools):
+        if not isinstance(raw_tool, dict):
+            raise ValueError(f"tool registry entry {index} must be an object: {path}")
+        tool = _read_tool_definition(raw_tool, index, path)
+        if tool.name in seen_names:
+            raise ValueError(f"tool registry has duplicate tool name: {tool.name}")
+        seen_names.add(tool.name)
+        tools.append(tool)
+
+    evidence_policy = payload.get("evidence_policy", {})
+    if evidence_policy and not isinstance(evidence_policy, dict):
+        raise ValueError(f"tool registry evidence_policy must be an object: {path}")
+    return ToolRegistry(
+        source_path=_rel(path, repo_root),
+        tools=tools,
+        evidence_policy=evidence_policy,
+    )
+
+
+def _read_tool_definition(raw_tool: dict[str, Any], index: int, path: Path) -> ToolDefinition:
+    name = _required_string_field(raw_tool, "name", index, path)
+    command = _required_string_field(raw_tool, "command", index, path)
+    use_when = _required_string_list(raw_tool, "use_when", index, path)
+    outputs = _required_string_list(raw_tool, "outputs", index, path)
+    safety = _required_string_field(raw_tool, "safety", index, path)
+    recovery = _optional_string_field(raw_tool, "recovery", index, path)
+    recovery = recovery or _optional_string_field(raw_tool, "recovery_guidance", index, path)
+    return ToolDefinition(
+        name=name,
+        command=command,
+        use_when=use_when,
+        outputs=outputs,
+        safety=safety,
+        recovery=recovery,
+    )
+
+
+def _required_string_field(raw_tool: dict[str, Any], field: str, index: int, path: Path) -> str:
+    value = raw_tool.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"tool registry entry {index} missing non-empty {field}: {path}")
+    return value.strip()
+
+
+def _optional_string_field(raw_tool: dict[str, Any], field: str, index: int, path: Path) -> str | None:
+    value = raw_tool.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"tool registry entry {index} has invalid {field}: {path}")
+    return value.strip()
+
+
+def _required_string_list(raw_tool: dict[str, Any], field: str, index: int, path: Path) -> list[str]:
+    value = raw_tool.get(field)
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"tool registry entry {index} missing non-empty {field}: {path}")
+    cleaned = []
+    for item_index, item in enumerate(value):
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(
+                f"tool registry entry {index} has invalid {field}[{item_index}]: {path}"
+            )
+        cleaned.append(item.strip())
+    return cleaned
+
+
+def _render_adapter(
+    tool: str,
+    skills: list[SkillDefinition],
+    *,
+    embed_full: bool,
+    tool_registry: ToolRegistry | None = None,
+) -> str:
     title = tool.title() if tool != "generic" else "Generic"
     lines = [
         f"# {title} Skill Adapter",
@@ -175,9 +315,10 @@ def _render_adapter(tool: str, skills: list[SkillDefinition], *, embed_full: boo
         "- If local file access is available, open the listed `SKILL.md` before applying a skill.",
         "- If local file access is unavailable, use embedded bodies only when this adapter was generated with full embedding.",
         "",
-        "## Available Skills",
-        "",
     ]
+    if tool_registry:
+        lines.extend(_render_tool_registry(tool_registry))
+    lines.extend(["## Available Skills", ""])
     for skill in skills:
         lines.extend(
             [
@@ -200,6 +341,41 @@ def _render_adapter(tool: str, skills: list[SkillDefinition], *, embed_full: boo
                 ]
             )
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_tool_registry(tool_registry: ToolRegistry) -> list[str]:
+    lines = [
+        "## Project Tool Registry",
+        "",
+        f"- Source: `{tool_registry.source_path}`",
+        "- Before using project tools, honor each registered command's `safety` guidance.",
+    ]
+    if tool_registry.evidence_policy:
+        secret_rule = tool_registry.evidence_policy.get("secret_display_rule")
+        raw_dataset_rule = tool_registry.evidence_policy.get("raw_dataset_rule")
+        if secret_rule:
+            lines.append(f"- Secret display safety: {secret_rule}")
+        if raw_dataset_rule:
+            lines.append(f"- Dataset access safety: {raw_dataset_rule}")
+    lines.extend(["", "### Registered Tools", ""])
+    for registered_tool in tool_registry.tools:
+        lines.extend(
+            [
+                f"- `{registered_tool.name}`",
+                f"  - Command: `{registered_tool.command}`",
+                f"  - Use when: {_join_items(registered_tool.use_when)}",
+                f"  - Outputs: {_join_items(registered_tool.outputs)}",
+                f"  - Safety: {registered_tool.safety}",
+            ]
+        )
+        if registered_tool.recovery:
+            lines.append(f"  - Recovery: {registered_tool.recovery}")
+    lines.append("")
+    return lines
+
+
+def _join_items(items: list[str]) -> str:
+    return "; ".join(items)
 
 
 def _safe_tool_name(value: str) -> str:

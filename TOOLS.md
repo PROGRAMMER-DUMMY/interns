@@ -37,6 +37,41 @@ dataset roots, docs, and `interns` state. The possible KPI/model groups are not 
 full `All files` section is the user confirmation boundary. It does not read file contents, parse
 Excel, profile datasets, onboard, delete, or write files.
 
+### session-snapshot
+
+Command:
+
+```powershell
+uv run session-snapshot start --name gemini-hospital --workspace workspaces/<project> --tool gemini
+uv run session-snapshot append --name gemini-hospital --role user --content "set working directory as patients record"
+uv run session-snapshot command --name gemini-hospital --command "uv run list-workspace-files --workspace workspaces/<project>" --status ok --summary "Workspace listed."
+uv run session-snapshot file-change --name gemini-hospital --path workspaces/<project>/interns/reports/current.md --action create --summary "Generated stakeholder report."
+uv run session-snapshot decision --name gemini-hospital --decision "User approved cleanup dry run." --status accepted
+uv run session-snapshot verify --name gemini-hospital
+uv run session-snapshot finish --name gemini-hospital
+```
+
+Use when an operator wants an exact end-user conversation snapshot across CLI tools. It writes a
+JSONL event log plus Markdown views under `.agents/sessions/current/` by default:
+
+```text
+.agents/sessions/<timestamp>-<name>/compact.md
+.agents/sessions/<timestamp>-<name>/intent_verification.md
+.agents/sessions/<timestamp>-<name>/intent_verification.json
+.agents/sessions/<timestamp>-<name>/events.jsonl
+.agents/sessions/<timestamp>-<name>/transcript.md
+.agents/sessions/<timestamp>-<name>/commands.md
+.agents/sessions/<timestamp>-<name>/file_changes.md
+.agents/sessions/<timestamp>-<name>/decisions.md
+.agents/sessions/<timestamp>-<name>/snapshot.json
+```
+
+The snapshot directory is ignored by git. The tool redacts common secret patterns before writing,
+but users should still avoid pasting credentials, tokens, connection strings, or `.env` content.
+Agents should read `compact.md` first and run `session-snapshot verify` at checkpoints such as
+after edits, after command failures, after deletes, after user corrections, and before final
+answers.
+
 ### onboard-workspace
 
 Command:
@@ -128,6 +163,34 @@ steps, and shows manual/local-safe/autopilot options. Modes:
   approval, deletes, remote execution, relationship approval, docs promotion, and executable
   DDL/dbt/SQL generation.
 
+### workspace-flow
+
+Command:
+
+```powershell
+uv run workspace-flow start --workspace workspaces/<project> --intent kpi_generation --domain healthcare
+uv run workspace-flow status --session <session-id>
+uv run workspace-flow answer --session <session-id> --answer option_a
+uv run workspace-flow results --session <session-id>
+```
+
+Use as the quiet front door for agent-led workspace workflows. It persists session state under
+`interns/state/workflow_sessions/<session-id>/`, runs existing governed tools in-process, hides
+lower-level command noise, and returns a compact current panel with instruction, question, options,
+suggested default, and artifact paths. `full_kpi_sql` runs the local-safe KPI path through
+onboarding, blocker preparation, relationship contracts, source-to-target planning, SQL generation,
+validation, and KPI result previews.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/state/workflow_sessions/<session-id>/session.json
+workspaces/<project>/interns/state/workflow_sessions/<session-id>/current.json
+workspaces/<project>/interns/state/workflow_sessions/<session-id>/current.md
+workspaces/<project>/interns/reports/kpi_results/current.md
+workspaces/<project>/interns/generated/evidence/kpi_results/current.json
+```
+
 ### prepare-wiki-memory
 
 Command:
@@ -152,6 +215,27 @@ workspaces/<project>/interns/reports/wiki_memory/current.md
 Automation policy: exact approved matches may be used as draft prefill candidates, but executable
 generation, final promotion, and relationship approval remain blocked until current-workspace
 evidence or user approval exists.
+
+### validate-memory-health
+
+Command:
+
+```powershell
+uv run validate-memory-health --workspace workspaces/<project>
+```
+
+Use when workspace or shared team memory needs confidence-scored lifecycle health. It scans
+`workspaces/<project>/interns/generated/memory/*.json` and, by default, `state/team_memory/*.json`,
+normalizes memory entries with status, confidence, last verification, expiration condition, and
+evidence fields when present, then writes:
+
+```text
+workspaces/<project>/interns/reports/memory_health/current.json
+workspaces/<project>/interns/reports/memory_health/current.md
+workspaces/<project>/interns/generated/evidence/memory_health/current.json
+```
+
+The command is local-safe and does not read raw datasets.
 
 ### prepare-agent-benchmark
 
@@ -180,6 +264,223 @@ source-to-target readiness, and validation. Product maturity tracks presentation
 workflow checkpoint status, and autopilot safety. Blockers route back to existing deterministic
 tools such as KPI blocker panels, data-model blocker panels, relationship contracts, source-to-target
 planning, validation, and wiki memory.
+
+### validate-project-harness
+
+Command:
+
+```powershell
+uv run validate-project-harness --workspace workspaces/<project> --domain <domain>
+```
+
+Use when a workspace needs one top-level local-safe score before completion is claimed. It runs
+artifact validation, the KPI execution harness, the project-native benchmark, workflow guardrails,
+and staged-file git hygiene, then writes one scoreable proof packet. Workflow guardrails include
+trajectory health when `interns/state/trajectory.jsonl` is present.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/evidence/project_harness.json
+workspaces/<project>/interns/reports/project_harness.md
+```
+
+### run-reliability-suite
+
+Command:
+
+```powershell
+uv run run-reliability-suite --workspace workspaces/<project> --domain <domain>
+uv run run-reliability-suite --workspace workspaces/<project> --project-harness skip
+uv run run-reliability-suite --workspace workspaces/<project> --project-harness run
+```
+
+Use for scheduled or local-safe reliability checks that should compose existing workspace harnesses
+without shelling out. It runs workflow guardrails, builds the evidence graph when available, and
+runs the project harness in `auto` mode only when the required generated artifacts exist. Use
+`--project-harness run` to force that check or `--project-harness skip` for fresh workspaces.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/reports/reliability_suite/current.json
+workspaces/<project>/interns/reports/reliability_suite/current.md
+workspaces/<project>/interns/generated/evidence/reliability_suite/current.json
+```
+
+### run-ai-app-harness
+
+Command:
+
+```powershell
+uv run run-ai-app-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_harness/datasets/happy_path.jsonl
+```
+
+Use when a workspace needs dependency-free AI application tests from JSONL cases. The harness
+supports `local_stub` and `http_ai` targets, exact-match/schema/keyword evaluators, KPI mapping
+assertions, SQL semantic assertions, result-table assertions, tag filtering, append-only run
+outputs, `current.json`/`current.md`, pass-threshold gating, reliability coverage reporting, and
+baseline regression checks. Result-table baselines compare columns, row count, and pinned metric
+values, so a case can fail even when the current assertions still pass. Remote HTTP AI cases are
+blocked unless `--allow-remote-ai` is passed. Config must store an env var name such as
+`api_key_env`, not an API key value.
+
+KPI/SQL-specific eval types:
+
+- `kpi_mapping`: output must be JSON with `mappings`, `mapping_rows`, `features`, or KPI-level
+  mapping rows. Configure `expected_mappings` with fields such as `feature`, `column`, `dataset`,
+  `state`, `join_key`, `grain`, and `filter`.
+- `sql_semantic`: output is SQL text checked for required clauses, tables, columns, joins, filters,
+  and forbidden patterns.
+- `result_table`: output must be JSON with `columns`, `rows`, and optional `row_count`; configure
+  expected columns, row bounds, and pinned values for metric regression.
+
+Example KPI suite rows live at `config/ai_harness.kpi_suite.example.jsonl`; copy those shapes into
+`workspaces/<project>/interns/ai_harness/datasets/` and replace the stub outputs with calls to the
+application boundary you want to test.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/ai_harness/runs/<run_id>/outputs.jsonl
+workspaces/<project>/interns/ai_harness/runs/<run_id>/report.json
+workspaces/<project>/interns/reports/ai_app_harness/current.json
+workspaces/<project>/interns/reports/ai_app_harness/current.md
+workspaces/<project>/interns/generated/evidence/ai_app_harness/current.json
+```
+
+### run-ai-cli-harness
+
+Command:
+
+```powershell
+uv run run-ai-cli-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl
+uv run run-ai-cli-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl --config config/ai_cli_harness.example.json --allow-cli-exec
+```
+
+Use when a CLI agent such as Claude, Gemini, Codex, or a custom CLI needs to be tested against the
+governed workflow. It is local-safe by default: real subprocess CLI execution is blocked unless
+`--allow-cli-exec` is passed. Stub mode validates command transcripts, project-tool usage,
+artifact existence, JSON artifact values, and workflow guardrail results without spending tokens.
+Config must not contain secret-bearing keys or tokens.
+
+Supported eval types:
+
+- `command_policy`: validates captured commands, required/forbidden command fragments, project-tool
+  use, raw-data read avoidance, and non-portable shell markers.
+- `artifact_exists`: asserts generated files exist.
+- `artifact_json_path`: checks JSON artifact fields such as `feature` or `status`.
+- `workflow_guard`: runs `validate-workflow-guardrails` against the case transcript.
+- `cli_text`: checks required keywords in final CLI output.
+
+Example CLI suite rows live at `config/ai_cli_harness.governed_suite.example.jsonl`.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/ai_cli_harness/runs/<run_id>/outputs.jsonl
+workspaces/<project>/interns/ai_cli_harness/runs/<run_id>/report.json
+workspaces/<project>/interns/reports/ai_cli_harness/current.json
+workspaces/<project>/interns/reports/ai_cli_harness/current.md
+workspaces/<project>/interns/generated/evidence/ai_cli_harness/current.json
+```
+
+### validate-workflow-guardrails
+
+Command:
+
+```powershell
+uv run validate-workflow-guardrails --workspace workspaces/<project>
+uv run validate-workflow-guardrails --workspace workspaces/<project> --command-log workspaces/<project>/interns/state/commands.jsonl
+```
+
+Use when the workflow itself needs a reliability gate. It checks for invented generic KPI features
+such as `created_at` when no matching profile column exists, blocker panels that ask about
+non-source-backed features, raw dataset reads that bypass generated profiles, non-portable shell
+commands such as `cat ... | head` on Windows, and failed commands that were not followed by an
+obvious retry or safer project tool.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/reports/workflow_guard_harness/current.json
+workspaces/<project>/interns/reports/workflow_guard_harness/current.md
+workspaces/<project>/interns/generated/evidence/workflow_guard_harness/current.json
+```
+
+### record-workspace-trajectory
+
+Command:
+
+```powershell
+uv run record-workspace-trajectory --workspace workspaces/<project> --event-type command --status ok --summary "Listed workspace." --command "uv run list-workspace-files --workspace workspaces/<project>"
+uv run record-workspace-trajectory --workspace workspaces/<project> --event-type validation --status ok --summary "Workspace artifacts validated." --validation validate-workspace-artifacts
+uv run record-workspace-trajectory --workspace workspaces/<project> --render-only
+```
+
+Use when an agent, CLI, or workflow wrapper needs a workspace-scoped replay log. It appends
+secret-redacted JSONL events to the active workspace and writes current JSON/Markdown summaries.
+`validate-workflow-guardrails` reads this trajectory by default when present, so unsupported
+commands, raw dataset reads, and failed steps without nearby recovery become scoreable findings.
+Controlled tools such as `workspace-flow`, `prepare-kpi-blocker-panel`, and
+`apply-kpi-panel-answer` record best-effort trajectory events automatically; this command remains
+available for external CLIs and manual transcript capture.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/state/trajectory.jsonl
+workspaces/<project>/interns/reports/trajectory/current.json
+workspaces/<project>/interns/reports/trajectory/current.md
+workspaces/<project>/interns/generated/evidence/trajectory/current.json
+```
+
+### build-workspace-evidence-graph
+
+Command:
+
+```powershell
+uv run build-workspace-evidence-graph --workspace workspaces/<project>
+uv run query-workspace-evidence-graph --workspace workspaces/<project> --term Payer
+uv run query-workspace-evidence-graph --workspace workspaces/<project> --impact-feature Payer
+```
+
+Use when a reviewer or agent needs one graph connecting KPI rows, terms, features, columns,
+datasets, profiles, mappings, blocker panels, generated SQL, trajectory events, and harness
+findings. The first version is local-safe and builds from existing generated artifacts only; it does
+not run onboarding, read raw datasets, or execute SQL.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/evidence_graph/graph.json
+workspaces/<project>/interns/reports/evidence_graph/current.md
+```
+
+The query command reads the graph, rebuilding it first if needed, and returns JSON for term lookup,
+feature impact, or column impact.
+
+### kpi-proof-packet
+
+Command:
+
+```powershell
+uv run kpi-proof-packet --workspace workspaces/<project> --domain <domain>
+```
+
+Use when stakeholders or operators need a read-only all-KPI recommendation and proof packet before
+bulk approval or execution. The first version supports `recommend` mode only. It does not apply
+mapping decisions or run SQL. It summarizes the source KPI row, normalized engine fields, current
+mapping recommendations, reliability gates, generated SQL when present, execution output previews
+when present, profile-backed sample values, and the next deterministic command for each KPI.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/reports/kpi_proof_packet/current.md
+workspaces/<project>/interns/reports/kpi_proof_packet/current.json
+workspaces/<project>/interns/generated/evidence/kpi_proof_packet/current.json
+```
 
 ### prepare-data-model-generation
 

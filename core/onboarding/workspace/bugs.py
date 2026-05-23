@@ -12,6 +12,16 @@ from tools.list_workspace_files import list_workspace_files
 
 
 BLOCKING_SEVERITIES = {"critical", "high"}
+PANEL_ARTIFACT_FEATURES = {
+    "average",
+    "base",
+    "claim",
+    "count",
+    "maximum",
+    "minimum",
+    "sum",
+    "total",
+}
 
 
 @dataclass(frozen=True)
@@ -71,10 +81,20 @@ class WorkspaceBugDetector:
         inventory = _load_json(self.layout.requirements_dir / "input_inventory.json")
         profile_index = _load_json(self.layout.profiles_dir / "profile_index.json")
         kpi_registry = _load_json(self.layout.contracts_dir / "kpi_registry.json")
+        mapping = _load_json(self.layout.contracts_dir / "kpi_feature_mapping.json")
+        panel = _load_json(self.layout.reports_dir / "blocker_question_panel" / "current.json")
+        definitions = _load_json(self.layout.contracts_dir / "workspace_feature_definitions.json")
+        requirements = _load_json(self.layout.requirements_dir / "requirements.json")
         evidence = _evidence_summary(listing, inventory, profile_index, kpi_registry)
         bugs: list[WorkspaceBug] = []
 
         bug = self._detect_listing_onboarding_contradiction(evidence)
+        if bug:
+            bugs.append(bug)
+        bug = self._detect_panel_artifact_question(panel, mapping)
+        if bug:
+            bugs.append(bug)
+        bug = self._detect_scoped_definition_overwrite_risk(requirements, definitions)
         if bug:
             bugs.append(bug)
 
@@ -170,6 +190,146 @@ class WorkspaceBugDetector:
             ],
             evidence=evidence,
         )
+
+    def _detect_panel_artifact_question(
+        self,
+        panel: dict[str, Any] | None,
+        mapping: dict[str, Any] | None,
+    ) -> WorkspaceBug | None:
+        if not panel or panel.get("status") != "needs_user_answer":
+            return None
+        feature = str(panel.get("feature") or "")
+        normalized = _normalize_feature(feature)
+        if normalized not in PANEL_ARTIFACT_FEATURES:
+            return None
+        affected = panel.get("applies_to_kpis") or []
+        return WorkspaceBug(
+            bug_id="WS-BUG-002",
+            title="Blocker panel asks about parser artifact or operator term",
+            severity="high",
+            status="open",
+            finding=(
+                f"The current blocker panel asks the user to define `{feature}` as if it were "
+                "a source feature. This looks like an aggregation/operator fragment or metric "
+                "phrase fragment, not a durable business term."
+            ),
+            how_created=[
+                f"Run `uv run prepare-kpi-blocker-panel --workspace {self.workspace_rel} --domain <domain>`.",
+                "Inspect `interns/reports/blocker_question_panel/current.json`.",
+                "Check whether the panel feature is an operator or fragment such as average/base/total/claim.",
+            ],
+            expected_behavior=[
+                "Feature extraction should preserve meaningful metric phrases before blocker clustering.",
+                "Aggregation operators such as average should be represented as formulas over a measure, not physical source columns.",
+                "The blocker panel should ask for the measure and grain when an operator is ambiguous.",
+            ],
+            impact=(
+                "Agents can accept examples such as AVG() as standalone definitions, producing "
+                "invalid mappings and repeated blocker panels."
+            ),
+            suspected_cause=(
+                "KPI metric text is tokenized too literally before semantic grouping, so phrase "
+                "components are promoted into blocker features."
+            ),
+            fix_direction=(
+                "Improve KPI expression extraction to recognize metric phrases and operator/measure "
+                "pairs before generating blocker clusters."
+            ),
+            acceptance_criteria=[
+                "Questions do not ask users to map average/base/total/claim as standalone source columns.",
+                "Average-cost style KPIs ask for the measure column plus aggregation grain.",
+                "Validation or bug detection blocks parser-artifact blocker panels.",
+            ],
+            evidence={
+                "panel_feature": feature,
+                "applies_to_kpis": affected,
+                "mapping_summary": (mapping or {}).get("summary", {}),
+            },
+        )
+
+    def _detect_scoped_definition_overwrite_risk(
+        self,
+        requirements: dict[str, Any] | None,
+        definitions: dict[str, Any] | None,
+    ) -> WorkspaceBug | None:
+        history = (requirements or {}).get("workspace_feature_definitions") or []
+        if not isinstance(history, list):
+            return None
+        latest_by_feature_scope: dict[tuple[str, tuple[str, ...]], dict[str, Any]] = {}
+        for item in history:
+            if not isinstance(item, dict):
+                continue
+            feature = str(item.get("feature") or "")
+            if not feature:
+                continue
+            scope = tuple(sorted(str(kpi) for kpi in item.get("applies_to_kpis") or []))
+            latest_by_feature_scope[(_normalize_feature(feature), scope)] = item
+        by_feature: dict[str, list[dict[str, Any]]] = {}
+        for (feature, _scope), item in latest_by_feature_scope.items():
+            by_feature.setdefault(feature, []).append(item)
+        stored = (definitions or {}).get("definitions") or []
+        stored_counts: dict[str, int] = {}
+        if isinstance(stored, list):
+            for item in stored:
+                if isinstance(item, dict):
+                    stored_counts[_normalize_feature(str(item.get("feature") or ""))] = (
+                        stored_counts.get(_normalize_feature(str(item.get("feature") or "")), 0) + 1
+                    )
+        for feature, records in by_feature.items():
+            distinct_scoped_definitions = {
+                (
+                    str(record.get("definition") or ""),
+                    tuple(sorted(str(kpi) for kpi in record.get("applies_to_kpis") or [])),
+                )
+                for record in records
+            }
+            if len(distinct_scoped_definitions) <= 1:
+                continue
+            if stored_counts.get(feature, 0) >= len(distinct_scoped_definitions):
+                continue
+            return WorkspaceBug(
+                bug_id="WS-BUG-003",
+                title="Scoped workspace feature definitions can overwrite each other",
+                severity="high",
+                status="open",
+                finding=(
+                    f"Multiple distinct scoped definitions were recorded for `{feature}`, but "
+                    "the stored workspace definitions do not preserve all scoped alternatives."
+                ),
+                how_created=[
+                    "Answer a blocker with different definitions for the same feature across KPI subsets.",
+                    "Apply the decisions through workspace definition APIs or panel answers.",
+                    "Inspect `interns/generated/requirements/requirements.json` and `workspace_feature_definitions.json`.",
+                ],
+                expected_behavior=[
+                    "The same feature name may have multiple definitions when scoped to disjoint KPI sets.",
+                    "Definition storage should key by feature plus scope or preserve scoped alternatives.",
+                    "Applying one scoped definition must not erase another scoped definition for the same feature.",
+                ],
+                impact=(
+                    "Later blocker prep can re-open already answered questions or apply the wrong "
+                    "definition to a KPI."
+                ),
+                suspected_cause=(
+                    "`workspace_feature_definitions.json` upserts by normalized feature name only, "
+                    "ignoring `applies_to_kpis` when replacing records."
+                ),
+                fix_direction=(
+                    "Change workspace definition identity to include feature and scope, or store "
+                    "multiple scoped definitions under one feature."
+                ),
+                acceptance_criteria=[
+                    "Two definitions for the same feature with disjoint KPI scopes both persist.",
+                    "Re-running blocker prep applies the correct scoped definition to each KPI.",
+                    "Bugfinder reports no overwrite risk after scoped storage is fixed.",
+                ],
+                evidence={
+                    "feature": feature,
+                    "recorded_scoped_definition_count": len(distinct_scoped_definitions),
+                    "stored_definition_count": stored_counts.get(feature, 0),
+                },
+            )
+        return None
 
 
 def _evidence_summary(
@@ -282,6 +442,10 @@ def _normalize_workspace(workspace: str | Path) -> str:
     if value.startswith("workspaces/"):
         return value
     return f"workspaces/{value}"
+
+
+def _normalize_feature(value: str) -> str:
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
 
 
 def _rel(path: Path, repo_root: Path) -> str:

@@ -30,7 +30,7 @@ sys.path.insert(0, str(ROOT))
 from core.optimization.change_classifier import classify_diff, expected_reason
 from core.config import Config, load as load_config
 from core.governance.contracts import OptimizationPolicy
-from core.onboarding.auto_bootstrap import AutoBootstrap
+from core.onboarding.workspace.bootstrap import AutoBootstrap
 from core.execution.backend import ExecutionBackend, build_execution_backend
 from core.failures import StructuredFailure, internal_bug, validation_blocker
 from core.governance.evaluator import GovernanceEvaluator

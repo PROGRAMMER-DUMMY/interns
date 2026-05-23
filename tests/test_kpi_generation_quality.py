@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from core.onboarding.kpi_generation_quality import (
+from core.onboarding.kpi.generation_quality import (
     column_like_token_overlap,
     looks_like_business_question,
     missing_discussion_points,

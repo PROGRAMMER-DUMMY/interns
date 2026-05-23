@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.onboarding.external_source_intake_cli import apply_main, prepare_main
-from core.onboarding.external_source_intake_workflow import ExternalSourceIntakeWorkflow
+from core.onboarding.sources.external_intake_cli import apply_main, prepare_main
+from core.onboarding.sources.external_intake_workflow import ExternalSourceIntakeWorkflow
 
 
 class ExternalSourceIntakeWorkflowTests(unittest.TestCase):

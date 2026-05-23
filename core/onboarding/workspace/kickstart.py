@@ -16,7 +16,7 @@ from typing import Any
 from core.config import Config
 from core.governance.contracts import OptimizationPolicy
 from core.onboarding.workspace.bootstrap import AutoBootstrap
-from core.onboarding.kpi_feature_resolver import KPIFeatureResolver
+from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
 from core.onboarding.workspace.bugs import WorkspaceBugDetector
 from core.storage.metadata_store import build_metadata_store
 from core.storage.workspace_layout import WorkspaceLayout

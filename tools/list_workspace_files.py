@@ -25,7 +25,22 @@ DATA_MODEL_HINTS = (
     "create_hospital_db",
 )
 DATA_EXTENSIONS = {".csv", ".parquet", ".json", ".jsonl", ".xlsx", ".xls"}
-DOC_EXTENSIONS = {".md", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".xlsx", ".xls", ".sql", ".csv"}
+DOC_EXTENSIONS = {
+    ".csv",
+    ".json",
+    ".md",
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".sql",
+    ".toml",
+    ".txt",
+    ".xls",
+    ".xlsx",
+    ".yaml",
+    ".yml",
+}
 
 
 @dataclass
@@ -186,7 +201,7 @@ def _possible_kpi_files(files: list[str]) -> list[str]:
         file
         for file in files
         if "/interns/" not in file
-        and Path(file).suffix.lower() in {".xlsx", ".xls", ".csv", ".md", ".sql", ".txt"}
+        and Path(file).suffix.lower() in {".xlsx", ".xls", ".csv", ".json", ".md", ".sql", ".toml", ".txt", ".yaml", ".yml"}
         and _has_kpi_filename_signal(file)
     )
 
@@ -226,7 +241,7 @@ def _file_roles_and_reasons(file: str) -> tuple[list[str], list[str]]:
     suffix = Path(file).suffix.lower()
     normalized = _normalized_name(file)
 
-    if suffix in {".xlsx", ".xls", ".csv", ".md", ".sql", ".txt"} and _has_kpi_filename_signal(file):
+    if suffix in {".xlsx", ".xls", ".csv", ".json", ".md", ".sql", ".toml", ".txt", ".yaml", ".yml"} and _has_kpi_filename_signal(file):
         roles.append("kpi_input")
         reasons.append(_kpi_reason(normalized, suffix))
 

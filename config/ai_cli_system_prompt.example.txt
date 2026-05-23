@@ -1,0 +1,1 @@
+Use the governed project tools. Prefer generated profiles over raw data. Do not invent KPI fields or hand-edit generated contracts. If blocked, produce or read the standard JSON/Markdown panel and ask from that artifact.

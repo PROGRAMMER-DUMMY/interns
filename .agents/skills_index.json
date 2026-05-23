@@ -68,5 +68,719 @@
       "description": "Build, validate, and optimize query logic for any workspace that contains data, a KPI/metric registry, and a data model. Use for SQL, Polars, or hybrid KPI/query optimization tasks where generated outputs must live under workspaces/<project>/interns/.",
       "path": "skills/workspace-kpi-query-optimizer/SKILL.md"
     }
-  ]
+  ],
+  "tool_registry": {
+    "source": ".agents/tools.json",
+    "evidence_policy": {
+      "dataset_access_order": [
+        "workspace_profile_index",
+        "workspace_profile_json",
+        "bounded_sample",
+        "raw_dataset_exception"
+      ],
+      "profile_index_pattern": "workspaces/<project>/interns/generated/profiles/profile_index.json",
+      "profile_file_pattern": "workspaces/<project>/interns/generated/profiles/*.profile.json",
+      "raw_dataset_rule": "Do not read full raw datasets when profile artifacts or bounded samples are enough.",
+      "secret_display_rule": "Hard stop: never print env files, credential files, tokens, private keys, shell environment dumps, connection strings, bearer headers, cookies, or config/AST/tree dumps containing secret values. Report only existence/status or redacted key names."
+    },
+    "tools": [
+      {
+        "name": "list-workspace-files",
+        "command": "uv run list-workspace-files --workspace <workspace>",
+        "use_when": [
+          "workspace selection request",
+          "set current workspace",
+          "bounded startup file inventory"
+        ],
+        "outputs": [
+          "all file paths up to cap",
+          "possible KPI files",
+          "possible data model files",
+          "dataset roots",
+          "docs",
+          "interns state"
+        ],
+        "safety": "local_safe_file_paths_only_no_content_reads"
+      },
+      {
+        "name": "session-snapshot",
+        "command": "uv run session-snapshot <start|append|command|file-change|decision|verify|finish>",
+        "use_when": [
+          "operator wants exact end-user conversation transcript",
+          "cross-CLI session monitoring",
+          "audit conversation turns, commands, file changes, decisions, and intent verification"
+        ],
+        "outputs": [
+          ".agents/sessions/<session>/compact.md",
+          ".agents/sessions/<session>/intent_verification.md",
+          ".agents/sessions/<session>/intent_verification.json",
+          ".agents/sessions/<session>/events.jsonl",
+          ".agents/sessions/<session>/transcript.md",
+          ".agents/sessions/<session>/commands.md",
+          ".agents/sessions/<session>/file_changes.md",
+          ".agents/sessions/<session>/decisions.md",
+          ".agents/sessions/<session>/snapshot.json"
+        ],
+        "safety": "local_safe_redacts_common_secret_patterns_gitignored"
+      },
+      {
+        "name": "onboard-workspace",
+        "command": "uv run onboard-workspace --workspace <workspace>",
+        "use_when": [
+          "workspace artifacts are missing",
+          "profiles/contracts/evaluation scaffolding need refresh"
+        ],
+        "outputs": [
+          "interns/generated/profiles",
+          "interns/generated/contracts",
+          "interns/reports"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "kickstart-workspace",
+        "command": "uv run kickstart-workspace --workspace <workspace> --domain <domain>",
+        "use_when": [
+          "new governed workspace",
+          "enterprise discovery and task config need refresh"
+        ],
+        "outputs": [
+          "config/tasks.json",
+          "interns/generated/requirements",
+          "interns/generated/contracts"
+        ],
+        "safety": "local_safe_config_write"
+      },
+      {
+        "name": "prepare-kpi-generation",
+        "command": "uv run prepare-kpi-generation --workspace <workspace>",
+        "use_when": [
+          "workspace confirmation completed",
+          "user may create, revise, challenge, or score KPIs",
+          "show two-path KPI generation versus usual workflow prompt"
+        ],
+        "outputs": [
+          "interns/generated/requirements/kpi_generation_session.json",
+          "interns/reports/kpi_generation/current.json",
+          "interns/reports/kpi_generation/current.md",
+          "KPI quality/readiness score"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "apply-kpi-generation-answer",
+        "command": "uv run apply-kpi-generation-answer --workspace <workspace> --answer <option_id_or_label>",
+        "use_when": [
+          "user answered the current KPI generation panel",
+          "KPI generation interview needs to advance",
+          "draft KPI registry and evidence proof should be produced"
+        ],
+        "outputs": [
+          "updated kpi_generation_session.json",
+          "next kpi_generation/current.json",
+          "interns/generated/requirements/kpi_registry_draft.json"
+        ],
+        "safety": "local_safe_validated_write"
+      },
+      {
+        "name": "finalize-kpi-generation",
+        "command": "uv run finalize-kpi-generation --workspace <workspace> --approve-final-preview",
+        "use_when": [
+          "final KPI draft preview was shown and explicitly approved",
+          "write user-facing KPI registry after KPI generation"
+        ],
+        "outputs": [
+          "workspace docs KPI registry JSON",
+          "interns/generated/requirements/kpi_generation_production_proof.json",
+          "workspace and team memory"
+        ],
+        "safety": "requires_explicit_final_preview_approval"
+      },
+      {
+        "name": "prepare-workspace-workflow",
+        "command": "uv run prepare-workspace-workflow --workspace <workspace> --mode <plan|local-safe|autopilot> --domain <domain>",
+        "use_when": [
+          "workspace confirmation completed",
+          "user wants one checkpoint for KPI, data-model, blocker, validation, and presentation workflow",
+          "agent needs deterministic next commands and autopilot boundaries"
+        ],
+        "outputs": [
+          "interns/reports/workflow/current.json",
+          "interns/reports/workflow/current.md",
+          "local-safe generated artifacts when mode is local-safe or autopilot"
+        ],
+        "safety": "local_safe_checkpoint_autopilot_stops_before_final_delete_remote_codegen"
+      },
+      {
+        "name": "workspace-flow",
+        "command": "uv run workspace-flow <start|status|answer|results>",
+        "use_when": [
+          "agent-led workspace workflow should run quietly in the backend",
+          "user asks for KPI generation by interview",
+          "user asks to generate SQL and show KPI results",
+          "main chat should show only compact questions or results"
+        ],
+        "outputs": [
+          "interns/state/workflow_sessions/<session-id>/session.json",
+          "interns/state/workflow_sessions/<session-id>/current.json",
+          "interns/state/workflow_sessions/<session-id>/current.md",
+          "interns/reports/kpi_results/current.md",
+          "interns/generated/evidence/kpi_results/current.json"
+        ],
+        "safety": "local_safe_session_orchestrator_hides_lower_level_command_noise"
+      },
+      {
+        "name": "prepare-wiki-memory",
+        "command": "uv run prepare-wiki-memory --workspace <workspace> --domain <domain>",
+        "use_when": [
+          "repeated KPI terms or data-model decisions should be found",
+          "shared team wiki memory should suggest safe reuse",
+          "autopilot needs governed draft prefill candidates"
+        ],
+        "outputs": [
+          "state/team_memory/wiki_memory_index.json",
+          "interns/generated/memory/wiki_memory_candidates.json",
+          "interns/reports/wiki_memory/current.json",
+          "interns/reports/wiki_memory/current.md"
+        ],
+        "safety": "local_safe_structured_artifacts_only_draft_prefill_blocks_execution"
+      },
+      {
+        "name": "prepare-agent-benchmark",
+        "command": "uv run prepare-agent-benchmark --workspace <workspace> --domain <domain>",
+        "use_when": [
+          "workspace needs a readiness proof",
+          "release gates should be checked before SQL, ETL, medallion, autopilot, or production promotion",
+          "owners need an artifact-backed benchmark scorecard"
+        ],
+        "outputs": [
+          "interns/generated/contracts/agent_benchmark_scorecard.json",
+          "interns/generated/contracts/release_gate_status.json",
+          "interns/reports/benchmarks/current.json",
+          "interns/reports/benchmarks/current.md"
+        ],
+        "safety": "local_safe_project_native_scorecard_no_external_benchmark_execution"
+      },
+      {
+        "name": "validate-project-harness",
+        "command": "uv run validate-project-harness --workspace <workspace> --domain <domain>",
+        "use_when": [
+          "workspace needs one top-level score before completion is claimed",
+          "all local-safe harnesses should run together",
+          "release readiness needs artifact validation, workflow guardrails, trajectory health, KPI execution, benchmark, and git hygiene proof"
+        ],
+        "outputs": [
+          "interns/generated/evidence/project_harness.json",
+          "interns/reports/project_harness.md",
+          "score, blockers, warnings, and next commands"
+        ],
+        "safety": "local_safe_project_harness_no_remote_execution"
+      },
+      {
+        "name": "run-ai-app-harness",
+        "command": "uv run run-ai-app-harness --workspace <workspace> --dataset <workspace>/interns/ai_harness/datasets/<suite>.jsonl",
+        "use_when": [
+          "workspace needs dependency-free AI app tests",
+          "JSONL prompt cases should be evaluated with exact/schema/keyword or KPI/SQL-specific checks",
+          "KPI mapping, SQL semantic, result-table, or adversarial AI behavior should be regression tested",
+          "local stub or explicitly approved raw HTTP AI boundary should be tested",
+          "baseline per-case and result-signature regressions should block CI"
+        ],
+        "outputs": [
+          "interns/ai_harness/runs/<run_id>/outputs.jsonl",
+          "interns/ai_harness/runs/<run_id>/report.json",
+          "interns/reports/ai_app_harness/current.json",
+          "interns/reports/ai_app_harness/current.md",
+          "interns/generated/evidence/ai_app_harness/current.json"
+        ],
+        "safety": "local_safe_by_default_remote_ai_requires_allow_flag"
+      },
+      {
+        "name": "run-ai-cli-harness",
+        "command": "uv run run-ai-cli-harness --workspace <workspace> --dataset <workspace>/interns/ai_cli_harness/datasets/<suite>.jsonl",
+        "use_when": [
+          "CLI agents such as Claude, Gemini, Codex, or custom tools need governed workflow regression tests",
+          "command transcripts, project-tool usage, artifact outputs, JSON fields, and workflow guardrails should be evaluated",
+          "real CLI subprocess execution should remain blocked unless explicitly approved"
+        ],
+        "outputs": [
+          "interns/ai_cli_harness/runs/<run_id>/outputs.jsonl",
+          "interns/ai_cli_harness/runs/<run_id>/report.json",
+          "interns/reports/ai_cli_harness/current.json",
+          "interns/reports/ai_cli_harness/current.md",
+          "interns/generated/evidence/ai_cli_harness/current.json"
+        ],
+        "safety": "local_safe_stub_by_default_real_cli_requires_allow_flag"
+      },
+      {
+        "name": "validate-workflow-guardrails",
+        "command": "uv run validate-workflow-guardrails --workspace <workspace>",
+        "use_when": [
+          "workflow itself needs a reliability gate",
+          "blocker panels may contain invented or non-source-backed features",
+          "failed shell commands or raw-data reads should be audited",
+          "non-portable commands should be caught before retrying"
+        ],
+        "outputs": [
+          "interns/reports/workflow_guard_harness/current.json",
+          "interns/reports/workflow_guard_harness/current.md",
+          "interns/generated/evidence/workflow_guard_harness/current.json"
+        ],
+        "safety": "local_safe_read_only_validation_report"
+      },
+      {
+        "name": "record-workspace-trajectory",
+        "command": "uv run record-workspace-trajectory --workspace <workspace> --event-type <type> --status <status> --summary <summary>",
+        "use_when": [
+          "agent or CLI workflow steps should be replayable",
+          "commands, validations, decisions, retries, and artifacts need workspace-scoped audit events",
+          "workflow guardrails should validate the step-by-step trajectory"
+        ],
+        "outputs": [
+          "interns/state/trajectory.jsonl",
+          "interns/reports/trajectory/current.json",
+          "interns/reports/trajectory/current.md",
+          "interns/generated/evidence/trajectory/current.json"
+        ],
+        "safety": "local_safe_append_only_secret_redacted_workspace_log"
+      },
+      {
+        "name": "build-workspace-evidence-graph",
+        "command": "uv run build-workspace-evidence-graph --workspace <workspace>",
+        "use_when": [
+          "KPI, mapping, SQL, trajectory, and harness artifacts need one traceability graph",
+          "agent needs impact analysis before changing a feature mapping",
+          "reviewer asks where a term, column, blocker answer, or SQL dependency came from"
+        ],
+        "outputs": [
+          "interns/generated/evidence_graph/graph.json",
+          "interns/reports/evidence_graph/current.md"
+        ],
+        "safety": "local_safe_existing_artifacts_only_no_raw_data_reads"
+      },
+      {
+        "name": "kpi-proof-packet",
+        "command": "uv run kpi-proof-packet --workspace <workspace> --domain <domain>",
+        "use_when": [
+          "stakeholders need one all-KPI recommendation packet",
+          "operators need source row traceability, mapping recommendations, reliability gates, generated SQL, execution output previews, and sample values in one report",
+          "bulk KPI mapping review should happen before apply-safe or execution modes"
+        ],
+        "outputs": [
+          "interns/reports/kpi_proof_packet/current.md",
+          "interns/reports/kpi_proof_packet/current.json",
+          "interns/generated/evidence/kpi_proof_packet/current.json"
+        ],
+        "safety": "local_safe_read_only_recommend_mode"
+      },
+      {
+        "name": "discover-external-sources",
+        "command": "uv run discover-external-sources --workspace <workspace> --external-root <external_root>",
+        "use_when": [
+          "user points to a large external folder",
+          "external source root needs dataset/doc/log/delta/database classification",
+          "draft source selection from cold storage without making it the workspace"
+        ],
+        "outputs": [
+          "interns/generated/requirements/external_source_discovery.json",
+          "interns/reports/external_source_discovery.md",
+          "docs/source_selection.generated.json"
+        ],
+        "safety": "local_safe_metadata_path_only_review_gated"
+      },
+      {
+        "name": "prepare-external-source-intake",
+        "command": "uv run prepare-external-source-intake --external-root <external_root> --proposed-workspace <workspace>",
+        "use_when": [
+          "user provides an external path and has not chosen existing versus new workspace",
+          "external-source route preference should be reused or challenged",
+          "agent needs a deterministic panel instead of asking freehand"
+        ],
+        "outputs": [
+          "interns/generated/requirements/external_source_intake_session.json",
+          "interns/reports/external_source_intake/current.json",
+          "interns/reports/external_source_intake/current.md"
+        ],
+        "safety": "local_safe_panel_write_no_source_reads"
+      },
+      {
+        "name": "apply-external-source-intake",
+        "command": "uv run apply-external-source-intake --external-root <external_root> --proposed-workspace <workspace> --answer <option>",
+        "use_when": [
+          "user answered the external source intake panel",
+          "metadata-only discovery should run after route selection",
+          "saved external-source defaults or change reasons should be recorded"
+        ],
+        "outputs": [
+          "external_source_intake_session.json",
+          "external_source_discovery.json",
+          "external_source_discovery.md",
+          "docs/source_selection.generated.json",
+          "state/team_memory/external_source_intake_preferences.json"
+        ],
+        "safety": "local_safe_metadata_only_until_review_gate"
+      },
+      {
+        "name": "prepare-data-model-generation",
+        "command": "uv run prepare-data-model-generation --workspace <workspace>",
+        "use_when": [
+          "data model docs are missing, weak, or image-only",
+          "workspace needs governed data model creation or parsing",
+          "relationship proof should be reviewed before executable SQL"
+        ],
+        "outputs": [
+          "interns/reports/data_model_generation/current.json",
+          "interns/reports/data_model_generation/current.md"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "apply-data-model-answer",
+        "command": "uv run apply-data-model-answer --workspace <workspace> --answer <option_id_or_label>",
+        "use_when": [
+          "user answered the current data-model generation panel",
+          "draft data-model artifacts should be produced under interns"
+        ],
+        "outputs": [
+          "interns/generated/requirements/data_model_draft.json",
+          "interns/reports/data_model_generation"
+        ],
+        "safety": "local_safe_validated_write"
+      },
+      {
+        "name": "finalize-data-model-generation",
+        "command": "uv run finalize-data-model-generation --workspace <workspace> --approve-final-preview",
+        "use_when": [
+          "draft data model preview was shown and explicitly approved",
+          "write user-facing data model docs and finalized model contract"
+        ],
+        "outputs": [
+          "docs/data-model.md",
+          "docs/erd.md",
+          "docs/relationships.md",
+          "interns/generated/contracts/data_model_contract.json"
+        ],
+        "safety": "requires_explicit_final_preview_approval"
+      },
+      {
+        "name": "prepare-data-model-blocker-panel",
+        "command": "uv run prepare-data-model-blocker-panel --workspace <workspace>",
+        "use_when": [
+          "data model draft exists",
+          "agent needs the next JSON-backed data-model blocker question",
+          "grain, primary key, relationship, temporal anchor, or SCD decisions need deterministic resolution"
+        ],
+        "outputs": [
+          "interns/reports/data_model_blocker_panel/current.json",
+          "interns/reports/data_model_blocker_panel/current.md",
+          "updated data_model_generation_session.json"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "apply-data-model-blocker-answer",
+        "command": "uv run apply-data-model-blocker-answer --workspace <workspace> --answer <option_id_or_label>",
+        "use_when": [
+          "user answered the current data-model blocker panel",
+          "accepted option should apply a structured data-model operation",
+          "next blocker panel should be generated"
+        ],
+        "outputs": [
+          "updated interns/generated/requirements/data_model_draft.json",
+          "next interns/reports/data_model_blocker_panel/current.json",
+          "next interns/reports/data_model_blocker_panel/current.md"
+        ],
+        "safety": "local_safe_validated_write"
+      },
+      {
+        "name": "export-data-model-diagram",
+        "command": "uv run export-data-model-diagram --workspace <workspace>",
+        "use_when": [
+          "stakeholders need a presentable data model diagram",
+          "finalized or draft data model should be rendered as static SVG",
+          "Mermaid ERD should be exported for review"
+        ],
+        "outputs": [
+          "interns/reports/presentation/data-model.svg",
+          "interns/reports/presentation/data-model.mermaid.md",
+          "interns/reports/presentation/presentation_manifest.json"
+        ],
+        "safety": "local_safe_presentation_export"
+      },
+      {
+        "name": "export-kpi-registry-excel",
+        "command": "uv run export-kpi-registry-excel --workspace <workspace>",
+        "use_when": [
+          "stakeholders need a KPI Excel workbook",
+          "draft or finalized KPI registry should be exported for review",
+          "KPI blockers, evidence, and proof should be visible in spreadsheet form"
+        ],
+        "outputs": [
+          "interns/reports/presentation/kpi_registry.xlsx",
+          "interns/reports/presentation/presentation_manifest.json"
+        ],
+        "safety": "local_safe_presentation_export"
+      },
+      {
+        "name": "export-workspace-presentation",
+        "command": "uv run export-workspace-presentation --workspace <workspace>",
+        "use_when": [
+          "workspace needs a stakeholder-ready presentation bundle",
+          "data model diagram and KPI Excel should be generated together"
+        ],
+        "outputs": [
+          "interns/reports/presentation/data-model.svg",
+          "interns/reports/presentation/data-model.mermaid.md",
+          "interns/reports/presentation/kpi_registry.xlsx",
+          "interns/reports/presentation/presentation_manifest.json"
+        ],
+        "safety": "local_safe_presentation_export"
+      },
+      {
+        "name": "resolve-kpi-features",
+        "command": "uv run resolve-kpi-features --workspace <workspace> --domain <domain> --include-candidates",
+        "use_when": [
+          "KPI features need mapping",
+          "blockers need clustering",
+          "accepted definitions need applying"
+        ],
+        "outputs": [
+          "interns/generated/contracts/kpi_feature_mapping.json",
+          "strict derived_feature_options with formula/input/observed_values/value_profile/semantic_meaning_sources/reason/example/evidence_sources/derivation_reasoning/evidence_state/confidence; semantically mismatched candidates rejected",
+          "interns/reports/blocker_question_panel/current.json",
+          "interns/reports/blocker_question_panel/current.md",
+          "interns/reports/open_questions.md"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "apply-workspace-definition",
+        "command": "uv run resolve-kpi-features --workspace <workspace> --apply-workspace-definition --feature <feature> --definition <definition> --evidence-note <note>",
+        "use_when": [
+          "one accepted feature definition applies across multiple KPIs"
+        ],
+        "outputs": [
+          "interns/generated/contracts/workspace_feature_definitions.json",
+          "interns/generated/contracts/kpi_feature_mapping.json"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "prepare-kpi-blocker-panel",
+        "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
+        "use_when": [
+          "agent needs the next validated KPI blocker question",
+          "avoid hand-chaining onboarding, resolver, markdown, panel, and validation commands",
+          "fresh or existing KPI workspace needs deterministic blocker preparation"
+        ],
+        "outputs": [
+          "interns/generated/contracts/kpi_feature_mapping.json",
+          "interns/reports/derived_feature_reviews",
+          "interns/reports/blocker_question_panel/current.json",
+          "interns/reports/blocker_question_panel/current.md",
+          "validation summary"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "apply-kpi-panel-answer",
+        "command": "uv run apply-kpi-panel-answer --workspace <workspace> --domain <domain> --answer <option_id_or_label>",
+        "use_when": [
+          "user answered the current blocker question",
+          "accepted option should be applied without inventing unsupported resolver flags",
+          "friendly answer must be resolved against current.json"
+        ],
+        "outputs": [
+          "interns/generated/contracts/workspace_feature_definitions.json",
+          "updated kpi_feature_mapping.json",
+          "next validated blocker_question_panel/current.json"
+        ],
+        "safety": "local_safe_validated_write"
+      },
+      {
+        "name": "generate-kpi-sql",
+        "command": "uv run generate-kpi-sql --workspace <workspace> --kpi-id <kpi_id>",
+        "use_when": [
+          "KPI features are proven or user-confirmed"
+        ],
+        "outputs": [
+          "interns/generated/solutions"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "plan-source-to-target",
+        "command": "uv run plan-source-to-target --workspace <workspace> --target-engine <sql|polars|pyspark|hybrid>",
+        "use_when": [
+          "SQL, Polars, PySpark, ETL, or medallion implementation needs a data-model-backed source-to-target plan",
+          "agent must verify source datasets, joins, grain, temporal anchors, and target layer before code generation"
+        ],
+        "outputs": [
+          "interns/generated/contracts/source_to_target_plan.json",
+          "interns/reports/source_to_target_plan.md",
+          "interns/generated/context/manifests/plan-source-to-target_<budget>.json"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "context-router",
+        "command": "uv run context-router build --workspace <workspace> --task <task> --budget <small|standard|deep>",
+        "use_when": [
+          "task needs bounded context instead of whole artifact loading",
+          "agent needs context wiki/page index",
+          "large workspace artifacts must be routed by budget"
+        ],
+        "outputs": [
+          "interns/generated/context/context_index.json",
+          "interns/generated/context/context_pages.jsonl",
+          "interns/generated/context/manifests/<task>_<budget>.json",
+          "interns/reports/context/<task>_<budget>.md"
+        ],
+        "safety": "local_safe_derived_context_only"
+      },
+      {
+        "name": "build-relationship-contracts",
+        "command": "uv run build-relationship-contracts --workspace <workspace>",
+        "use_when": [
+          "multi-dataset executable generation needs FK/relationship proof",
+          "source-to-target joins need production-grade relationship contracts",
+          "profile-only joins need approval gating"
+        ],
+        "outputs": [
+          "interns/generated/contracts/relationship_contracts.json",
+          "interns/reports/relationship_contracts.md"
+        ],
+        "safety": "local_safe_governed_contract_write"
+      },
+      {
+        "name": "derived-feature-markdown",
+        "command": "uv run derived-feature-markdown --workspace <workspace>",
+        "use_when": [
+          "stakeholders need readable derived-feature blocker reviews",
+          "strict derived_feature_options JSON needs Markdown rendering"
+        ],
+        "outputs": [
+          "interns/reports/derived_feature_reviews/md/<kpi_id>_<feature>.md",
+          "interns/reports/derived_feature_reviews/json/<kpi_id>_<feature>.json",
+          "interns/reports/derived_feature_reviews/index.md"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "blocker-question-panel",
+        "command": "uv run blocker-question-panel --workspace <workspace>",
+        "use_when": [
+          "agent needs to ask any KPI blocker question",
+          "direct mapping or source-of-truth choice needs stakeholder answer",
+          "non-technical panel is preferred over terminal option UI"
+        ],
+        "outputs": [
+          "interns/reports/blocker_question_panel/current.json",
+          "interns/reports/blocker_question_panel/current.md",
+          "interns/reports/blocker_question_panel/index.json"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "validate-workspace-artifacts",
+        "command": "uv run validate-workspace-artifacts --workspace <workspace>",
+        "use_when": [
+          "generated workspace artifacts need schema checks",
+          "agent is about to rely on KPI registry, feature mapping, derived reviews, or blocker panel",
+          "detect manual edits to generated contracts"
+        ],
+        "outputs": [
+          "validation summary JSON with checked_files, errors, and warnings"
+        ],
+        "safety": "local_safe_read_only"
+      },
+      {
+        "name": "prepare-workspace-bug-report",
+        "command": "uv run prepare-workspace-bug-report --workspace <workspace>",
+        "use_when": [
+          "workspace selection and onboarding evidence disagree",
+          "fresh workspace flow generated empty artifacts",
+          "blocking product bugs need a JSON and Markdown report"
+        ],
+        "outputs": [
+          "interns/generated/evidence/bug_report.json",
+          "interns/reports/bugs/current.md"
+        ],
+        "safety": "local_safe_governed_report_write"
+      },
+      {
+        "name": "cleanup-workspace-references",
+        "command": "uv run cleanup-workspace-references --workspace <workspace> --all-references",
+        "use_when": [
+          "fresh workspace restart is requested",
+          "stale generated references need removal"
+        ],
+        "outputs": [
+          "dry-run cleanup plan",
+          "optional deletion of interns and repo runtime references with --apply --confirm-delete <workspace>"
+        ],
+        "safety": "hard_permission_block_for_any_delete"
+      },
+      {
+        "name": "profiler",
+        "command": "uv run python tools/profiler.py --input <path> --pct <pct> --engine auto --out <dir>",
+        "use_when": [
+          "profile artifacts are missing",
+          "bounded sample or representation evidence is required"
+        ],
+        "outputs": [
+          "profile CSVs",
+          "sample outputs",
+          "representation reports"
+        ],
+        "safety": "local_or_configured_data_access"
+      },
+      {
+        "name": "optimizer-finder",
+        "command": "uv run python tools/optimizer_finder.py --target <path> --mode auto",
+        "use_when": [
+          "SQL/Python artifact is slow",
+          "hotspot evidence is needed"
+        ],
+        "outputs": [
+          "state/hotspots.json"
+        ],
+        "safety": "local_safe"
+      },
+      {
+        "name": "methodology-parser",
+        "command": "uv run python tools/methodology_parser.py --doc <path> --out <schema.json>",
+        "use_when": [
+          "methodology, dictionary, or contract document needs semantic schema extraction"
+        ],
+        "outputs": [
+          "semantic schema JSON"
+        ],
+        "safety": "may_use_llm_intern"
+      },
+      {
+        "name": "databricks-setup",
+        "command": "uv run python tools/databricks_setup.py",
+        "use_when": [
+          "user explicitly asks to validate Databricks configuration"
+        ],
+        "outputs": [
+          "connection and capability report"
+        ],
+        "safety": "remote_sensitive_explicit_approval"
+      },
+      {
+        "name": "generate-skill-adapters",
+        "command": "uv run generate-skill-adapters",
+        "use_when": [
+          "skills or adapter routing changed"
+        ],
+        "outputs": [
+          ".agents/skills_index.json",
+          ".agents/<tool>/SKILLS.md"
+        ],
+        "safety": "local_safe"
+      }
+    ]
+  }
 }

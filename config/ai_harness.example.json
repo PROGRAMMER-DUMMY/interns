@@ -1,0 +1,11 @@
+{
+  "api_url": "https://api.example.com/v1/messages",
+  "api_key_env": "AI_APP_API_KEY",
+  "model": "example-model",
+  "max_tokens": 1000,
+  "timeout_seconds": 30,
+  "pass_threshold": 0.8,
+  "auth_header_name": "Authorization",
+  "auth_header_prefix": "Bearer ",
+  "extra_headers": {}
+}

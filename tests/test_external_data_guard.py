@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.onboarding.workspace_onboarding import WorkspaceOnboarder
+from core.onboarding.workspace.onboarding import WorkspaceOnboarder
 from core.storage.workspace_layout import WorkspaceLayout
 from tools.list_workspace_files import list_workspace_files
 

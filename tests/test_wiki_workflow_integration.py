@@ -14,8 +14,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from core.onboarding import blocker_question_panel as panel_mod
-from core.onboarding import kpi_blocker_workflow as workflow_mod
+from core.onboarding.kpi import blocker_question_panel as panel_mod
+from core.onboarding.kpi import blocker_workflow as workflow_mod
 from core.wiki import WikiLayout, read_feature_note
 
 

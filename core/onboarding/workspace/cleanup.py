@@ -83,6 +83,26 @@ class WorkspaceReferenceCleaner:
                         status="missing",
                     )
                 )
+            
+            wiki_dir = self.workspace_path / "wiki"
+            if wiki_dir.exists():
+                actions.append(
+                    CleanupAction(
+                        action="delete_tree",
+                        target=self._display_path(wiki_dir),
+                        reason="Remove generated workspace wiki notes.",
+                        status="planned",
+                    )
+                )
+            else:
+                actions.append(
+                    CleanupAction(
+                        action="delete_tree",
+                        target=self._display_path(wiki_dir),
+                        reason="Workspace wiki directory is already absent.",
+                        status="missing",
+                    )
+                )
 
         if self.remove_repo_state:
             actions.extend(self._repo_state_actions())
@@ -130,6 +150,8 @@ class WorkspaceReferenceCleaner:
                 self._rewrite_task_config(target)
             elif action.action == "rewrite_deployment_index":
                 self._rewrite_deployment_index(target)
+            elif action.action == "rewrite_wiki_memory_index":
+                self._rewrite_wiki_memory_index(target)
             else:
                 raise ValueError(f"Unsupported cleanup action: {action.action}")
 
@@ -206,6 +228,27 @@ class WorkspaceReferenceCleaner:
                 )
             )
 
+        team_memory_root = self.repo_root / "state" / "team_memory"
+        wiki_index = team_memory_root / "wiki_memory_index.json"
+        if self._file_contains_workspace(wiki_index):
+            actions.append(
+                CleanupAction(
+                    action="rewrite_wiki_memory_index",
+                    target=self._display_path(wiki_index),
+                    reason="Prune wiki memory index entries for this workspace.",
+                    status="planned",
+                )
+            )
+        else:
+            actions.append(
+                CleanupAction(
+                    action="rewrite_wiki_memory_index",
+                    target=self._display_path(wiki_index),
+                    reason="No wiki memory index entries reference this workspace.",
+                    status="missing",
+                )
+            )
+
         return actions
 
     def _rewrite_task_config(self, path: Path) -> None:
@@ -239,6 +282,25 @@ class WorkspaceReferenceCleaner:
             payload["latest"] = payload["deployments"][-1] if payload["deployments"] else None
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
+    def _rewrite_wiki_memory_index(self, path: Path) -> None:
+        if not path.exists():
+            return
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        definitions = payload.get("definitions", [])
+        kept_definitions = []
+        for definition in definitions:
+            workspaces = definition.get("workspaces", [])
+            kept_workspaces = [
+                ws for ws in workspaces
+                if not self._object_references_workspace(ws)
+            ]
+            if kept_workspaces:
+                definition["workspaces"] = kept_workspaces
+                definition["repeat_count"] = len(kept_workspaces)
+                kept_definitions.append(definition)
+        payload["definitions"] = kept_definitions
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
     def _task_config_has_workspace(self, path: Path) -> bool:
         if not path.exists():
             return False
@@ -270,9 +332,10 @@ class WorkspaceReferenceCleaner:
         path = path.resolve()
         state_root = (self.repo_root / "state").resolve()
         interns_dir = (self.workspace_path / "interns").resolve()
-        if path == interns_dir or self._is_relative_to(path, state_root):
+        wiki_dir = (self.workspace_path / "wiki").resolve()
+        if path in {interns_dir, wiki_dir} or self._is_relative_to(path, state_root):
             return
-        raise ValueError(f"Refusing to delete outside workspace interns or repo state: {path}")
+        raise ValueError(f"Refusing to delete outside workspace interns, wiki, or repo state: {path}")
 
     def _display_path(self, path: Path) -> str:
         try:

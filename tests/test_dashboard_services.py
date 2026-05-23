@@ -9,6 +9,7 @@ from core.dashboard_services import (
     BuildControlService,
     DashboardPaths,
     GitHistoryService,
+    ReviewerProofService,
     WorkspaceCommandService,
     read_json,
     tail_file,
@@ -127,6 +128,57 @@ class WorkspaceCommandServiceTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(len(result["stdout"]), 3000)
         self.assertEqual(len(result["stderr"]), 500)
+
+
+class ReviewerProofServiceTests(unittest.TestCase):
+    def test_load_summarizes_reviewer_artifacts_without_raw_data_reads(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ws = root / "workspaces" / "acme"
+            reports = ws / "interns" / "reports"
+            generated = ws / "interns" / "generated"
+            state = ws / "interns" / "state"
+            (reports / "reliability_suite").mkdir(parents=True)
+            (reports / "workflow_guard_harness").mkdir(parents=True)
+            (reports / "memory_health").mkdir(parents=True)
+            (reports / "trajectory").mkdir(parents=True)
+            (reports / "blocker_question_panel").mkdir(parents=True)
+            (generated / "evidence_graph").mkdir(parents=True)
+            state.mkdir(parents=True)
+
+            (reports / "reliability_suite" / "current.json").write_text(
+                '{"status":"passed","checks":[]}', encoding="utf-8"
+            )
+            (reports / "workflow_guard_harness" / "current.json").write_text(
+                '{"status":"passed","findings":[]}', encoding="utf-8"
+            )
+            (reports / "memory_health" / "current.json").write_text(
+                '{"status":"warning","summary":{"entry_count":2},"findings":[{"severity":"warning"}]}',
+                encoding="utf-8",
+            )
+            (reports / "trajectory" / "current.json").write_text(
+                '{"events":[{"event_type":"command","status":"ok","summary":"ran"}]}',
+                encoding="utf-8",
+            )
+            (reports / "blocker_question_panel" / "current.json").write_text(
+                '{"feature":"Payer","status":"needs_user_answer","applies_to_kpis":["kpi_001"]}',
+                encoding="utf-8",
+            )
+            (generated / "evidence_graph" / "graph.json").write_text(
+                '{"summary":{"node_count":3,"edge_count":2,"introduced_term_count":1},'
+                '"nodes":[{"kind":"kpi"},{"kind":"column"}],"edges":[{"type":"uses"}],'
+                '"queries":{"introduced_terms":[{"term":"Payer"}]}}',
+                encoding="utf-8",
+            )
+
+            proof = ReviewerProofService(DashboardPaths(root)).load("acme")
+
+            self.assertEqual(proof["status"], "incomplete")
+            self.assertEqual(proof["summary"]["graph_nodes"], 3)
+            self.assertEqual(proof["summary"]["trajectory_events"], 1)
+            self.assertEqual(proof["summary"]["active_blocker"], "Payer")
+            self.assertIn("Project harness", [a["artifact"] for a in proof["artifacts"]])
+            self.assertEqual(proof["graph"]["node_kinds"]["kpi"], 1)
 
 
 if __name__ == "__main__":

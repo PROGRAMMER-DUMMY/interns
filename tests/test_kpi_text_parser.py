@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from core.onboarding.kpi_text_parser import (
+from core.onboarding.kpi.text_parser import (
     KPI_CUTS_HEADERS,
     cell_at,
     clean_cell,
@@ -25,6 +25,23 @@ class KPITextParserTests(unittest.TestCase):
         self.assertIn("Payer", cuts)
         self.assertIn("Age > 50", cuts)
 
+    def test_infer_trend_does_not_invent_created_at(self):
+        _metric, cuts = infer_metric_and_cuts(
+            "What is trend for amount paid for medicare LOB across gender and payer"
+        )
+
+        self.assertIn("Time", cuts)
+        self.assertNotIn("created_at", cuts)
+
+    def test_infer_ecommerce_metric_and_cuts(self):
+        metric, cuts = infer_metric_and_cuts(
+            "What is the session-to-order conversion rate by traffic source and campaign?"
+        )
+
+        self.assertEqual(metric, "website_session_id, order_id")
+        self.assertIn("utm_source", cuts)
+        self.assertIn("utm_campaign", cuts)
+
     def test_small_cell_helpers(self):
         self.assertEqual(first_existing({"a": "A"}, ["b", "a"]), "A")
         self.assertEqual(cell_at(["x"], 3), "")
@@ -36,7 +53,7 @@ class KPITextParserTests(unittest.TestCase):
         self.assertEqual(first_existing(lowered, KPI_CUTS_HEADERS), "Cuts with DRG(Consolidated)")
 
     def test_extract_kpis_from_sql(self):
-        from core.onboarding.kpi_text_parser import extract_kpis_from_sql
+        from core.onboarding.kpi.text_parser import extract_kpis_from_sql
         sql_text = """-- Connect to database
 USE hospital_db;
 

@@ -22,6 +22,13 @@
       "safety": "local_safe_file_paths_only_no_content_reads"
     },
     {
+      "name": "session-snapshot",
+      "command": "uv run session-snapshot <start|append|command|file-change|decision|verify|finish>",
+      "use_when": ["operator wants exact end-user conversation transcript", "cross-CLI session monitoring", "audit conversation turns, commands, file changes, decisions, and intent verification"],
+      "outputs": [".agents/sessions/<session>/compact.md", ".agents/sessions/<session>/intent_verification.md", ".agents/sessions/<session>/intent_verification.json", ".agents/sessions/<session>/events.jsonl", ".agents/sessions/<session>/transcript.md", ".agents/sessions/<session>/commands.md", ".agents/sessions/<session>/file_changes.md", ".agents/sessions/<session>/decisions.md", ".agents/sessions/<session>/snapshot.json"],
+      "safety": "local_safe_redacts_common_secret_patterns_gitignored"
+    },
+    {
       "name": "onboard-workspace",
       "command": "uv run onboard-workspace --workspace <workspace>",
       "use_when": ["workspace artifacts are missing", "profiles/contracts/evaluation scaffolding need refresh"],
@@ -64,6 +71,13 @@
       "safety": "local_safe_checkpoint_autopilot_stops_before_final_delete_remote_codegen"
     },
     {
+      "name": "workspace-flow",
+      "command": "uv run workspace-flow <start|status|answer|results>",
+      "use_when": ["agent-led workspace workflow should run quietly in the backend", "user asks for KPI generation by interview", "user asks to generate SQL and show KPI results", "main chat should show only compact questions or results"],
+      "outputs": ["interns/state/workflow_sessions/<session-id>/session.json", "interns/state/workflow_sessions/<session-id>/current.json", "interns/state/workflow_sessions/<session-id>/current.md", "interns/reports/kpi_results/current.md", "interns/generated/evidence/kpi_results/current.json"],
+      "safety": "local_safe_session_orchestrator_hides_lower_level_command_noise"
+    },
+    {
       "name": "prepare-wiki-memory",
       "command": "uv run prepare-wiki-memory --workspace <workspace> --domain <domain>",
       "use_when": ["repeated KPI terms or data-model decisions should be found", "shared team wiki memory should suggest safe reuse", "autopilot needs governed draft prefill candidates"],
@@ -71,11 +85,81 @@
       "safety": "local_safe_structured_artifacts_only_draft_prefill_blocks_execution"
     },
     {
+      "name": "validate-memory-health",
+      "command": "uv run validate-memory-health --workspace <workspace>",
+      "use_when": ["workspace memory needs confidence-scored lifecycle health", "shared team memory should be checked before reuse", "memory entries need status, confidence, verification, expiration, and evidence normalization"],
+      "outputs": ["interns/reports/memory_health/current.json", "interns/reports/memory_health/current.md", "interns/generated/evidence/memory_health/current.json"],
+      "safety": "local_safe_memory_artifact_scan_no_raw_data_reads"
+    },
+    {
       "name": "prepare-agent-benchmark",
       "command": "uv run prepare-agent-benchmark --workspace <workspace> --domain <domain>",
       "use_when": ["workspace needs a readiness proof", "release gates should be checked before SQL, ETL, medallion, autopilot, or production promotion", "owners need an artifact-backed benchmark scorecard"],
       "outputs": ["interns/generated/contracts/agent_benchmark_scorecard.json", "interns/generated/contracts/release_gate_status.json", "interns/reports/benchmarks/current.json", "interns/reports/benchmarks/current.md"],
       "safety": "local_safe_project_native_scorecard_no_external_benchmark_execution"
+    },
+    {
+      "name": "validate-project-harness",
+      "command": "uv run validate-project-harness --workspace <workspace> --domain <domain>",
+      "use_when": ["workspace needs one top-level score before completion is claimed", "all local-safe harnesses should run together", "release readiness needs artifact validation, workflow guardrails, trajectory health, KPI execution, benchmark, and git hygiene proof"],
+      "outputs": ["interns/generated/evidence/project_harness.json", "interns/reports/project_harness.md", "score, blockers, warnings, and next commands"],
+      "safety": "local_safe_project_harness_no_remote_execution"
+    },
+    {
+      "name": "run-reliability-suite",
+      "command": "uv run run-reliability-suite --workspace <workspace> --domain <domain>",
+      "use_when": ["scheduled local-safe reliability checks should run", "workspace workflow guardrails and evidence graph should be refreshed together", "project harness should run only when required generated artifacts are available"],
+      "outputs": ["interns/reports/reliability_suite/current.json", "interns/reports/reliability_suite/current.md", "interns/generated/evidence/reliability_suite/current.json"],
+      "safety": "local_safe_reliability_runner_no_shell_execution"
+    },
+    {
+      "name": "run-ai-app-harness",
+      "command": "uv run run-ai-app-harness --workspace <workspace> --dataset <workspace>/interns/ai_harness/datasets/<suite>.jsonl",
+      "use_when": ["workspace needs dependency-free AI app tests", "JSONL prompt cases should be evaluated with exact/schema/keyword or KPI/SQL-specific checks", "KPI mapping, SQL semantic, result-table, or adversarial AI behavior should be regression tested", "local stub or explicitly approved raw HTTP AI boundary should be tested", "baseline per-case and result-signature regressions should block CI"],
+      "outputs": ["interns/ai_harness/runs/<run_id>/outputs.jsonl", "interns/ai_harness/runs/<run_id>/report.json", "interns/reports/ai_app_harness/current.json", "interns/reports/ai_app_harness/current.md", "interns/generated/evidence/ai_app_harness/current.json"],
+      "safety": "local_safe_by_default_remote_ai_requires_allow_flag"
+    },
+    {
+      "name": "run-ai-cli-harness",
+      "command": "uv run run-ai-cli-harness --workspace <workspace> --dataset <workspace>/interns/ai_cli_harness/datasets/<suite>.jsonl",
+      "use_when": ["CLI agents such as Claude, Gemini, Codex, or custom tools need governed workflow regression tests", "command transcripts, project-tool usage, artifact outputs, JSON fields, and workflow guardrails should be evaluated", "real CLI subprocess execution should remain blocked unless explicitly approved"],
+      "outputs": ["interns/ai_cli_harness/runs/<run_id>/outputs.jsonl", "interns/ai_cli_harness/runs/<run_id>/report.json", "interns/reports/ai_cli_harness/current.json", "interns/reports/ai_cli_harness/current.md", "interns/generated/evidence/ai_cli_harness/current.json"],
+      "safety": "local_safe_stub_by_default_real_cli_requires_allow_flag"
+    },
+    {
+      "name": "validate-workflow-guardrails",
+      "command": "uv run validate-workflow-guardrails --workspace <workspace>",
+      "use_when": ["workflow itself needs a reliability gate", "blocker panels may contain invented or non-source-backed features", "failed shell commands or raw-data reads should be audited", "non-portable commands should be caught before retrying"],
+      "outputs": ["interns/reports/workflow_guard_harness/current.json", "interns/reports/workflow_guard_harness/current.md", "interns/generated/evidence/workflow_guard_harness/current.json"],
+      "safety": "local_safe_read_only_validation_report"
+    },
+    {
+      "name": "record-workspace-trajectory",
+      "command": "uv run record-workspace-trajectory --workspace <workspace> --event-type <type> --status <status> --summary <summary>",
+      "use_when": ["agent or CLI workflow steps should be replayable", "commands, validations, decisions, retries, and artifacts need workspace-scoped audit events", "workflow guardrails should validate the step-by-step trajectory"],
+      "outputs": ["interns/state/trajectory.jsonl", "interns/reports/trajectory/current.json", "interns/reports/trajectory/current.md", "interns/generated/evidence/trajectory/current.json"],
+      "safety": "local_safe_append_only_secret_redacted_workspace_log"
+    },
+    {
+      "name": "build-workspace-evidence-graph",
+      "command": "uv run build-workspace-evidence-graph --workspace <workspace>",
+      "use_when": ["KPI, mapping, SQL, trajectory, and harness artifacts need one traceability graph", "agent needs impact analysis before changing a feature mapping", "reviewer asks where a term, column, blocker answer, or SQL dependency came from"],
+      "outputs": ["interns/generated/evidence_graph/graph.json", "interns/reports/evidence_graph/current.md"],
+      "safety": "local_safe_existing_artifacts_only_no_raw_data_reads"
+    },
+    {
+      "name": "query-workspace-evidence-graph",
+      "command": "uv run query-workspace-evidence-graph --workspace <workspace> --term <term>",
+      "use_when": ["agent or reviewer asks why a term exists", "feature or column impact needs to be listed from the evidence graph", "stale or invented term origin needs traceability"],
+      "outputs": ["JSON query result with matched nodes, introducers, users, and impact edges"],
+      "safety": "local_safe_existing_graph_or_rebuild_no_raw_data_reads"
+    },
+    {
+      "name": "kpi-proof-packet",
+      "command": "uv run kpi-proof-packet --workspace <workspace> --domain <domain>",
+      "use_when": ["stakeholders need one all-KPI recommendation packet", "operators need source row traceability, mapping recommendations, reliability gates, generated SQL, execution output previews, and sample values in one report", "bulk KPI mapping review should happen before apply-safe or execution modes"],
+      "outputs": ["interns/reports/kpi_proof_packet/current.md", "interns/reports/kpi_proof_packet/current.json", "interns/generated/evidence/kpi_proof_packet/current.json"],
+      "safety": "local_safe_read_only_recommend_mode"
     },
     {
       "name": "discover-external-sources",

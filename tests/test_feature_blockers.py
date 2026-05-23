@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from core.onboarding.feature_blockers import infer_join_candidates, prioritize_blockers, risk_class
+from core.onboarding.features.blockers import infer_join_candidates, prioritize_blockers, risk_class
 
 
 class FeatureBlockerTests(unittest.TestCase):

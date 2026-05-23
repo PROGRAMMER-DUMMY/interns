@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.onboarding.schema_alias_matching import (
+from core.onboarding.relationships.schema_alias_matching import (
     alias_index,
     candidate_labels,
     load_schema_index,
