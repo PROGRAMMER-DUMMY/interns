@@ -100,7 +100,32 @@
           "docs",
           "interns state"
         ],
-        "safety": "local_safe_file_paths_only_no_content_reads"
+        "safety": "local_safe_file_paths_only_no_content_reads",
+        "required_skills": [
+          "workspace-governance"
+        ]
+      },
+      {
+        "name": "prepare-workspace-selection",
+        "command": "uv run prepare-workspace-selection --workspace <workspace>",
+        "use_when": [
+          "workspace selection request",
+          "set current workspace",
+          "workspace may be empty or missing",
+          "external raw data should stay outside workspace"
+        ],
+        "outputs": [
+          "guarded workspace selection status",
+          "active workspace listing summary",
+          "available workspace choices",
+          "empty or missing workspace blocker",
+          "external dataset_allowlist setup template"
+        ],
+        "safety": "local_safe_file_paths_only_no_content_reads",
+        "required_skills": [
+          "workspace-governance",
+          "clarify-ambiguity"
+        ]
       },
       {
         "name": "session-snapshot",
@@ -121,7 +146,12 @@
           ".agents/sessions/<session>/decisions.md",
           ".agents/sessions/<session>/snapshot.json"
         ],
-        "safety": "local_safe_redacts_common_secret_patterns_gitignored"
+        "safety": "local_safe_redacts_common_secret_patterns_gitignored",
+        "required_skills": [
+          "workspace-governance",
+          "evolution",
+          "stakeholder-memory"
+        ]
       },
       {
         "name": "onboard-workspace",
@@ -135,7 +165,13 @@
           "interns/generated/contracts",
           "interns/reports"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "workspace-governance",
+          "task-onboarding",
+          "domain-model",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "kickstart-workspace",
@@ -149,7 +185,13 @@
           "interns/generated/requirements",
           "interns/generated/contracts"
         ],
-        "safety": "local_safe_config_write"
+        "safety": "local_safe_config_write",
+        "required_skills": [
+          "workspace-governance",
+          "task-onboarding",
+          "grill-requirements",
+          "domain-model"
+        ]
       },
       {
         "name": "prepare-kpi-generation",
@@ -165,7 +207,13 @@
           "interns/reports/kpi_generation/current.md",
           "KPI quality/readiness score"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "workspace-governance",
+          "grill-requirements",
+          "stakeholder-memory",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "apply-kpi-generation-answer",
@@ -180,7 +228,12 @@
           "next kpi_generation/current.json",
           "interns/generated/requirements/kpi_registry_draft.json"
         ],
-        "safety": "local_safe_validated_write"
+        "safety": "local_safe_validated_write",
+        "required_skills": [
+          "grill-requirements",
+          "stakeholder-memory",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "finalize-kpi-generation",
@@ -194,7 +247,13 @@
           "interns/generated/requirements/kpi_generation_production_proof.json",
           "workspace and team memory"
         ],
-        "safety": "requires_explicit_final_preview_approval"
+        "safety": "requires_explicit_final_preview_approval",
+        "required_skills": [
+          "workspace-governance",
+          "stakeholder-memory",
+          "to-solution-brief",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "prepare-workspace-workflow",
@@ -209,7 +268,33 @@
           "interns/reports/workflow/current.md",
           "local-safe generated artifacts when mode is local-safe or autopilot"
         ],
-        "safety": "local_safe_checkpoint_autopilot_stops_before_final_delete_remote_codegen"
+        "safety": "local_safe_checkpoint_autopilot_stops_before_final_delete_remote_codegen",
+        "required_skills": [
+          "workspace-governance",
+          "task-onboarding",
+          "data-engineering-pipeline-design",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "prepare-bronze-silver-standards",
+        "command": "uv run prepare-bronze-silver-standards --workspace <workspace> --domain <domain>",
+        "use_when": [
+          "Bronze/Silver production standards should be materialized",
+          "runtime-neutral transformation manifest is needed before SQL, Polars, or PySpark generation",
+          "workflow reroute policy should stop wrong-route actions and auto-reroute once"
+        ],
+        "outputs": [
+          "interns/generated/contracts/bronze_silver_standards.json",
+          "interns/generated/contracts/transformation_manifest.json",
+          "interns/generated/contracts/workflow_reroute_policy.json",
+          "interns/reports/bronze_silver_standards.md"
+        ],
+        "safety": "local_safe_contract_write_no_execution",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design"
+        ]
       },
       {
         "name": "workspace-flow",
@@ -227,7 +312,13 @@
           "interns/reports/kpi_results/current.md",
           "interns/generated/evidence/kpi_results/current.json"
         ],
-        "safety": "local_safe_session_orchestrator_hides_lower_level_command_noise"
+        "safety": "local_safe_session_orchestrator_hides_lower_level_command_noise",
+        "required_skills": [
+          "workspace-governance",
+          "task-onboarding",
+          "data-engineering-pipeline-design",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "prepare-wiki-memory",
@@ -243,7 +334,31 @@
           "interns/reports/wiki_memory/current.json",
           "interns/reports/wiki_memory/current.md"
         ],
-        "safety": "local_safe_structured_artifacts_only_draft_prefill_blocks_execution"
+        "safety": "local_safe_structured_artifacts_only_draft_prefill_blocks_execution",
+        "required_skills": [
+          "stakeholder-memory",
+          "evolution",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "validate-memory-health",
+        "command": "uv run validate-memory-health --workspace <workspace>",
+        "use_when": [
+          "workspace memory needs confidence-scored lifecycle health",
+          "shared team memory should be checked before reuse",
+          "memory entries need status, confidence, verification, expiration, and evidence normalization"
+        ],
+        "outputs": [
+          "interns/reports/memory_health/current.json",
+          "interns/reports/memory_health/current.md",
+          "interns/generated/evidence/memory_health/current.json"
+        ],
+        "safety": "local_safe_memory_artifact_scan_no_raw_data_reads",
+        "required_skills": [
+          "stakeholder-memory",
+          "evolution"
+        ]
       },
       {
         "name": "prepare-agent-benchmark",
@@ -259,7 +374,12 @@
           "interns/reports/benchmarks/current.json",
           "interns/reports/benchmarks/current.md"
         ],
-        "safety": "local_safe_project_native_scorecard_no_external_benchmark_execution"
+        "safety": "local_safe_project_native_scorecard_no_external_benchmark_execution",
+        "required_skills": [
+          "workspace-governance",
+          "workspace-kpi-query-optimizer",
+          "evolution"
+        ]
       },
       {
         "name": "validate-project-harness",
@@ -274,7 +394,32 @@
           "interns/reports/project_harness.md",
           "score, blockers, warnings, and next commands"
         ],
-        "safety": "local_safe_project_harness_no_remote_execution"
+        "safety": "local_safe_project_harness_no_remote_execution",
+        "required_skills": [
+          "workspace-governance",
+          "workspace-kpi-query-optimizer",
+          "evolution"
+        ]
+      },
+      {
+        "name": "run-reliability-suite",
+        "command": "uv run run-reliability-suite --workspace <workspace> --domain <domain>",
+        "use_when": [
+          "scheduled local-safe reliability checks should run",
+          "workspace workflow guardrails and evidence graph should be refreshed together",
+          "project harness should run only when required generated artifacts are available"
+        ],
+        "outputs": [
+          "interns/reports/reliability_suite/current.json",
+          "interns/reports/reliability_suite/current.md",
+          "interns/generated/evidence/reliability_suite/current.json"
+        ],
+        "safety": "local_safe_reliability_runner_no_shell_execution",
+        "required_skills": [
+          "workspace-governance",
+          "workspace-kpi-query-optimizer",
+          "evolution"
+        ]
       },
       {
         "name": "run-ai-app-harness",
@@ -293,7 +438,11 @@
           "interns/reports/ai_app_harness/current.md",
           "interns/generated/evidence/ai_app_harness/current.json"
         ],
-        "safety": "local_safe_by_default_remote_ai_requires_allow_flag"
+        "safety": "local_safe_by_default_remote_ai_requires_allow_flag",
+        "required_skills": [
+          "workspace-governance",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "run-ai-cli-harness",
@@ -310,7 +459,11 @@
           "interns/reports/ai_cli_harness/current.md",
           "interns/generated/evidence/ai_cli_harness/current.json"
         ],
-        "safety": "local_safe_stub_by_default_real_cli_requires_allow_flag"
+        "safety": "local_safe_stub_by_default_real_cli_requires_allow_flag",
+        "required_skills": [
+          "workspace-governance",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "validate-workflow-guardrails",
@@ -326,7 +479,110 @@
           "interns/reports/workflow_guard_harness/current.md",
           "interns/generated/evidence/workflow_guard_harness/current.json"
         ],
-        "safety": "local_safe_read_only_validation_report"
+        "safety": "local_safe_read_only_validation_report",
+        "required_skills": [
+          "workspace-governance",
+          "workspace-kpi-query-optimizer",
+          "evolution"
+        ]
+      },
+      {
+        "name": "run-layered-pipeline-harness",
+        "command": "uv run run-layered-pipeline-harness --workspace <workspace>",
+        "use_when": [
+          "catalog, route, and pipeline contracts need a layered data-engineering validation gate",
+          "ETL, ELT, medallion, existing-layer validation, or KPI-only pipeline plans should be checked before code generation or production proof",
+          "deduplication, grain, raw path, and remote mutation policies need enforcement"
+        ],
+        "outputs": [
+          "interns/reports/layered_pipeline_harness/current.json",
+          "interns/reports/layered_pipeline_harness/current.md",
+          "interns/generated/evidence/layered_pipeline_harness/current.json"
+        ],
+        "safety": "local_safe_read_only_contract_harness_no_raw_data_reads",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
+        "name": "run-pipeline-execution-harness",
+        "command": "uv run run-pipeline-execution-harness --workspace <workspace>",
+        "use_when": [
+          "generated pipeline_layers.sql should be executed locally before proof or promotion",
+          "bronze, silver, and gold layer views need row-count and column evidence",
+          "pipeline sample output must be redacted while preserving execution proof"
+        ],
+        "outputs": [
+          "interns/reports/pipeline_execution_harness/current.json",
+          "interns/reports/pipeline_execution_harness/current.md",
+          "interns/generated/evidence/pipeline_execution_harness/current.json"
+        ],
+        "safety": "local_safe_duckdb_execution_redacted_samples_no_remote_writes",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
+        "name": "run-data-quality-harness",
+        "command": "uv run run-data-quality-harness --workspace <workspace>",
+        "use_when": [
+          "profile, catalog, and pipeline contracts need a local-safe duplicate and data-quality review",
+          "bounded duplicate evidence should be prepared before stakeholder duplicate decisions",
+          "data quality findings must be written without automatic deduplication, quarantine SQL, or remote mutation"
+        ],
+        "outputs": [
+          "interns/generated/contracts/data_quality_contract.json",
+          "interns/generated/evidence/data_quality_harness/current.json",
+          "interns/reports/data_quality/current.json",
+          "interns/reports/data_quality/current.md"
+        ],
+        "safety": "local_safe_profile_catalog_pipeline_contract_driven_bounded_duplicate_evidence_redacted_samples_no_auto_dedup_or_quarantine_sql_mutation",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
+        "name": "prepare-duplicate-review-panel",
+        "command": "uv run prepare-duplicate-review-panel --workspace <workspace>",
+        "use_when": [
+          "duplicate evidence from the data quality harness needs stakeholder review",
+          "duplicate handling options should be generated from bounded profile/catalog/pipeline contract evidence",
+          "agent needs a JSON-backed duplicate review panel before applying any decision"
+        ],
+        "outputs": [
+          "interns/reports/duplicate_review/current.json",
+          "interns/reports/duplicate_review/current.md",
+          "interns/generated/contracts/data_quality_contract.json"
+        ],
+        "safety": "local_safe_profile_catalog_pipeline_contract_driven_bounded_duplicate_evidence_redacted_samples_no_auto_dedup_or_quarantine_sql_mutation",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "clarify-ambiguity"
+        ]
+      },
+      {
+        "name": "apply-duplicate-review-answer",
+        "command": "uv run apply-duplicate-review-answer --workspace <workspace> --answer <option_id_or_label>",
+        "use_when": [
+          "user answered the current duplicate review panel",
+          "accepted duplicate decision should be resolved against current.json",
+          "decision should be recorded without executing deduplication or quarantine SQL"
+        ],
+        "outputs": [
+          "interns/generated/contracts/duplicate_decisions.json",
+          "interns/reports/duplicate_review/current.json",
+          "interns/reports/duplicate_review/current.md"
+        ],
+        "safety": "local_safe_validated_decision_write_no_auto_dedup_or_quarantine_sql_mutation_milestone_1",
+        "required_skills": [
+          "workspace-governance",
+          "stakeholder-memory",
+          "data-engineering-pipeline-design"
+        ]
       },
       {
         "name": "record-workspace-trajectory",
@@ -342,7 +598,11 @@
           "interns/reports/trajectory/current.md",
           "interns/generated/evidence/trajectory/current.json"
         ],
-        "safety": "local_safe_append_only_secret_redacted_workspace_log"
+        "safety": "local_safe_append_only_secret_redacted_workspace_log",
+        "required_skills": [
+          "workspace-governance",
+          "evolution"
+        ]
       },
       {
         "name": "build-workspace-evidence-graph",
@@ -356,7 +616,30 @@
           "interns/generated/evidence_graph/graph.json",
           "interns/reports/evidence_graph/current.md"
         ],
-        "safety": "local_safe_existing_artifacts_only_no_raw_data_reads"
+        "safety": "local_safe_existing_artifacts_only_no_raw_data_reads",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "query-workspace-evidence-graph",
+        "command": "uv run query-workspace-evidence-graph --workspace <workspace> --term <term>",
+        "use_when": [
+          "agent or reviewer asks why a term exists",
+          "feature or column impact needs to be listed from the evidence graph",
+          "stale or invented term origin needs traceability"
+        ],
+        "outputs": [
+          "JSON query result with matched nodes, introducers, users, and impact edges"
+        ],
+        "safety": "local_safe_existing_graph_or_rebuild_no_raw_data_reads",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "kpi-proof-packet",
@@ -371,7 +654,13 @@
           "interns/reports/kpi_proof_packet/current.json",
           "interns/generated/evidence/kpi_proof_packet/current.json"
         ],
-        "safety": "local_safe_read_only_recommend_mode"
+        "safety": "local_safe_read_only_recommend_mode",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "workspace-kpi-query-optimizer",
+          "to-solution-brief"
+        ]
       },
       {
         "name": "discover-external-sources",
@@ -386,7 +675,12 @@
           "interns/reports/external_source_discovery.md",
           "docs/source_selection.generated.json"
         ],
-        "safety": "local_safe_metadata_path_only_review_gated"
+        "safety": "local_safe_metadata_path_only_review_gated",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "task-onboarding"
+        ]
       },
       {
         "name": "prepare-external-source-intake",
@@ -401,7 +695,12 @@
           "interns/reports/external_source_intake/current.json",
           "interns/reports/external_source_intake/current.md"
         ],
-        "safety": "local_safe_panel_write_no_source_reads"
+        "safety": "local_safe_panel_write_no_source_reads",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "grill-requirements"
+        ]
       },
       {
         "name": "apply-external-source-intake",
@@ -418,7 +717,12 @@
           "docs/source_selection.generated.json",
           "state/team_memory/external_source_intake_preferences.json"
         ],
-        "safety": "local_safe_metadata_only_until_review_gate"
+        "safety": "local_safe_metadata_only_until_review_gate",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "stakeholder-memory"
+        ]
       },
       {
         "name": "prepare-data-model-generation",
@@ -432,7 +736,12 @@
           "interns/reports/data_model_generation/current.json",
           "interns/reports/data_model_generation/current.md"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "grill-requirements"
+        ]
       },
       {
         "name": "apply-data-model-answer",
@@ -445,7 +754,12 @@
           "interns/generated/requirements/data_model_draft.json",
           "interns/reports/data_model_generation"
         ],
-        "safety": "local_safe_validated_write"
+        "safety": "local_safe_validated_write",
+        "required_skills": [
+          "domain-model",
+          "stakeholder-memory",
+          "grill-requirements"
+        ]
       },
       {
         "name": "finalize-data-model-generation",
@@ -460,7 +774,12 @@
           "docs/relationships.md",
           "interns/generated/contracts/data_model_contract.json"
         ],
-        "safety": "requires_explicit_final_preview_approval"
+        "safety": "requires_explicit_final_preview_approval",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "to-solution-brief"
+        ]
       },
       {
         "name": "prepare-data-model-blocker-panel",
@@ -475,7 +794,12 @@
           "interns/reports/data_model_blocker_panel/current.md",
           "updated data_model_generation_session.json"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "domain-model",
+          "clarify-ambiguity",
+          "grill-requirements"
+        ]
       },
       {
         "name": "apply-data-model-blocker-answer",
@@ -490,7 +814,12 @@
           "next interns/reports/data_model_blocker_panel/current.json",
           "next interns/reports/data_model_blocker_panel/current.md"
         ],
-        "safety": "local_safe_validated_write"
+        "safety": "local_safe_validated_write",
+        "required_skills": [
+          "domain-model",
+          "stakeholder-memory",
+          "grill-requirements"
+        ]
       },
       {
         "name": "export-data-model-diagram",
@@ -505,7 +834,11 @@
           "interns/reports/presentation/data-model.mermaid.md",
           "interns/reports/presentation/presentation_manifest.json"
         ],
-        "safety": "local_safe_presentation_export"
+        "safety": "local_safe_presentation_export",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model"
+        ]
       },
       {
         "name": "export-kpi-registry-excel",
@@ -519,7 +852,11 @@
           "interns/reports/presentation/kpi_registry.xlsx",
           "interns/reports/presentation/presentation_manifest.json"
         ],
-        "safety": "local_safe_presentation_export"
+        "safety": "local_safe_presentation_export",
+        "required_skills": [
+          "workspace-governance",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "export-workspace-presentation",
@@ -534,7 +871,12 @@
           "interns/reports/presentation/kpi_registry.xlsx",
           "interns/reports/presentation/presentation_manifest.json"
         ],
-        "safety": "local_safe_presentation_export"
+        "safety": "local_safe_presentation_export",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "resolve-kpi-features",
@@ -551,7 +893,13 @@
           "interns/reports/blocker_question_panel/current.md",
           "interns/reports/open_questions.md"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "domain-model",
+          "feature-derivation-library",
+          "workspace-kpi-query-optimizer",
+          "clarify-ambiguity"
+        ]
       },
       {
         "name": "apply-workspace-definition",
@@ -563,7 +911,12 @@
           "interns/generated/contracts/workspace_feature_definitions.json",
           "interns/generated/contracts/kpi_feature_mapping.json"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "domain-model",
+          "stakeholder-memory",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "prepare-kpi-blocker-panel",
@@ -580,7 +933,13 @@
           "interns/reports/blocker_question_panel/current.md",
           "validation summary"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "domain-model",
+          "feature-derivation-library",
+          "workspace-kpi-query-optimizer",
+          "clarify-ambiguity"
+        ]
       },
       {
         "name": "apply-kpi-panel-answer",
@@ -595,7 +954,12 @@
           "updated kpi_feature_mapping.json",
           "next validated blocker_question_panel/current.json"
         ],
-        "safety": "local_safe_validated_write"
+        "safety": "local_safe_validated_write",
+        "required_skills": [
+          "domain-model",
+          "stakeholder-memory",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "generate-kpi-sql",
@@ -606,7 +970,12 @@
         "outputs": [
           "interns/generated/solutions"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "domain-model",
+          "data-engineering-pipeline-design",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "plan-source-to-target",
@@ -620,7 +989,182 @@
           "interns/reports/source_to_target_plan.md",
           "interns/generated/context/manifests/plan-source-to-target_<budget>.json"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "domain-model",
+          "data-engineering-pipeline-design",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "build-catalog-contract",
+        "command": "uv run build-catalog-contract --workspace <workspace>",
+        "use_when": [
+          "profile-backed source datasets need a stable logical catalog interface",
+          "pipeline and KPI code generation must avoid direct raw path dependencies",
+          "route or pipeline planning needs catalog objects before executable work"
+        ],
+        "outputs": [
+          "interns/generated/contracts/catalog_contract.json",
+          "interns/reports/catalog_contract.md"
+        ],
+        "safety": "local_safe_profile_backed_contract_write_no_remote_mutation",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
+        "name": "build-source-family-contracts",
+        "command": "uv run build-source-family-contracts --workspace <workspace>",
+        "use_when": [
+          "external raw folder has repeated dated CSV releases",
+          "schema drift must be understood before ETL or medallion planning",
+          "workspace has profiles but no KPI registry or no KPI-first workflow",
+          "agent must group source files without reading raw datasets or duplicating full profile payloads"
+        ],
+        "outputs": [
+          "interns/generated/contracts/source_family_contracts.json",
+          "interns/reports/source_family_contracts.md"
+        ],
+        "safety": "local_safe_profile_index_only_no_raw_data_reads",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "domain-model"
+        ],
+        "recovery": "If an agent selected resolve-kpi-features for an external profiled no-KPI workspace, stop, reread .agents/tools.json or .agents/<tool>/SKILLS.md, then run build-source-family-contracts first."
+      },
+      {
+        "name": "prepare-data-engineering-route",
+        "command": "uv run prepare-data-engineering-route --workspace <workspace> --track <auto|kpi_only|etl|elt|medallion|oltp_ingestion|existing_gold_validation> --target-engine <sql|polars|pyspark|hybrid>",
+        "use_when": [
+          "workspace needs a governed route before pipeline planning",
+          "agent must choose between KPI-only, ETL, ELT, medallion, OLTP ingestion, or existing-gold validation",
+          "trusted existing layers and local-first remote policy should be recorded"
+        ],
+        "outputs": [
+          "interns/generated/contracts/data_engineering_route.json",
+          "interns/reports/data_engineering_route.md",
+          "interns/generated/contracts/catalog_contract.json"
+        ],
+        "safety": "local_safe_route_contract_write_no_execution",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "domain-model"
+        ]
+      },
+      {
+        "name": "prepare-pipeline-plan",
+        "command": "uv run prepare-pipeline-plan --workspace <workspace> --track <auto|kpi_only|etl|elt|medallion|oltp_ingestion|existing_gold_validation> --target-engine <sql|polars|pyspark|hybrid> --table-format <auto|delta|iceberg|local_parquet|warehouse_native|duckdb_view|csv>",
+        "use_when": [
+          "SQL, Polars, PySpark, ETL, ELT, medallion, or existing-layer validation needs a governed pipeline contract before code generation",
+          "layer definitions, quality gates, approval-gated transformations, and blockers must be recorded",
+          "source-to-target blockers should stop executable generation"
+        ],
+        "outputs": [
+          "interns/generated/contracts/pipeline_plan.json",
+          "interns/reports/pipeline_plan.md",
+          "interns/generated/contracts/data_engineering_route.json",
+          "interns/generated/contracts/catalog_contract.json"
+        ],
+        "safety": "local_safe_pipeline_plan_write_no_execution_remote_writes_approval_gated",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "domain-model"
+        ]
+      },
+      {
+        "name": "prepare-pipeline-format-panel",
+        "command": "uv run prepare-pipeline-format-panel --workspace <workspace>",
+        "use_when": [
+          "ETL, ELT, medallion, or ingestion pipeline needs target table/file format selection",
+          "agent must ask whether to store outputs as Delta, Parquet, Iceberg, CSV, warehouse-native, or another approved format",
+          "prepare-pipeline-plan is blocked by pipeline_table_format_unresolved"
+        ],
+        "outputs": [
+          "interns/reports/pipeline_format/current.json",
+          "interns/reports/pipeline_format/current.md"
+        ],
+        "safety": "local_safe_json_backed_user_choice_panel",
+        "required_skills": [
+          "data-engineering-pipeline-design",
+          "clarify-ambiguity"
+        ]
+      },
+      {
+        "name": "apply-pipeline-format-answer",
+        "command": "uv run apply-pipeline-format-answer --workspace <workspace> --answer <option_id_or_label_or_format>",
+        "use_when": [
+          "user answered the pipeline format panel",
+          "accepted storage format should be recorded before pipeline planning",
+          "medallion plan should use the approved table/file format"
+        ],
+        "outputs": [
+          "interns/generated/contracts/pipeline_decisions.json"
+        ],
+        "safety": "local_safe_validated_decision_write_requires_user_approval",
+        "required_skills": [
+          "data-engineering-pipeline-design",
+          "stakeholder-memory"
+        ]
+      },
+      {
+        "name": "prepare-pipeline-deployment-plan",
+        "command": "uv run prepare-pipeline-deployment-plan --workspace <workspace> --target <local|external|warehouse> --mode <dry-run|apply>",
+        "use_when": [
+          "generated pipeline outputs need a deployment dry-run contract",
+          "remote deployment target needs approval evidence before any external or warehouse apply",
+          "operators need proof that no remote mutation occurred"
+        ],
+        "outputs": [
+          "interns/generated/contracts/pipeline_deployment_plan.json",
+          "interns/reports/pipeline_deployment_plan.md"
+        ],
+        "safety": "dry_run_default_no_remote_mutation_external_and_warehouse_apply_require_AUTORESEARCH_ALLOW_REMOTE_EXECUTION",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "databricks-access-gates"
+        ]
+      },
+      {
+        "name": "apply-pipeline-decision",
+        "command": "uv run apply-pipeline-decision --workspace <workspace> --kpi-id <kpi_id> --percentage-denominator-scope <global_total|within_department|within_gender|within_visit_type|selected_population>",
+        "use_when": [
+          "user approved a percentage or ratio KPI denominator scope",
+          "pipeline_plan.json is blocked by percentage_denominator_scope_unresolved",
+          "approved pipeline decisions should be recorded before regenerating the plan"
+        ],
+        "outputs": [
+          "interns/generated/contracts/pipeline_decisions.json"
+        ],
+        "safety": "local_safe_validated_decision_write_requires_user_approval",
+        "required_skills": [
+          "data-engineering-pipeline-design",
+          "stakeholder-memory"
+        ]
+      },
+      {
+        "name": "generate-pipeline-sql",
+        "command": "uv run generate-pipeline-sql --workspace <workspace>",
+        "use_when": [
+          "catalog and pipeline contracts are ready",
+          "local DuckDB bronze/silver/gold layer SQL scaffold should be generated from pipeline_plan.json",
+          "raw paths must remain limited to catalog bootstrap"
+        ],
+        "outputs": [
+          "interns/generated/pipeline/pipeline_layers.sql"
+        ],
+        "safety": "local_safe_code_generation_no_execution_no_remote_writes",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "domain-model"
+        ]
       },
       {
         "name": "context-router",
@@ -636,7 +1180,11 @@
           "interns/generated/context/manifests/<task>_<budget>.json",
           "interns/reports/context/<task>_<budget>.md"
         ],
-        "safety": "local_safe_derived_context_only"
+        "safety": "local_safe_derived_context_only",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model"
+        ]
       },
       {
         "name": "build-relationship-contracts",
@@ -650,7 +1198,12 @@
           "interns/generated/contracts/relationship_contracts.json",
           "interns/reports/relationship_contracts.md"
         ],
-        "safety": "local_safe_governed_contract_write"
+        "safety": "local_safe_governed_contract_write",
+        "required_skills": [
+          "domain-model",
+          "data-engineering-pipeline-design",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "derived-feature-markdown",
@@ -664,7 +1217,11 @@
           "interns/reports/derived_feature_reviews/json/<kpi_id>_<feature>.json",
           "interns/reports/derived_feature_reviews/index.md"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "feature-derivation-library",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "blocker-question-panel",
@@ -679,7 +1236,12 @@
           "interns/reports/blocker_question_panel/current.md",
           "interns/reports/blocker_question_panel/index.json"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "clarify-ambiguity",
+          "grill-requirements",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "validate-workspace-artifacts",
@@ -692,7 +1254,11 @@
         "outputs": [
           "validation summary JSON with checked_files, errors, and warnings"
         ],
-        "safety": "local_safe_read_only"
+        "safety": "local_safe_read_only",
+        "required_skills": [
+          "workspace-governance",
+          "workspace-kpi-query-optimizer"
+        ]
       },
       {
         "name": "prepare-workspace-bug-report",
@@ -706,7 +1272,11 @@
           "interns/generated/evidence/bug_report.json",
           "interns/reports/bugs/current.md"
         ],
-        "safety": "local_safe_governed_report_write"
+        "safety": "local_safe_governed_report_write",
+        "required_skills": [
+          "workspace-governance",
+          "evolution"
+        ]
       },
       {
         "name": "cleanup-workspace-references",
@@ -719,7 +1289,10 @@
           "dry-run cleanup plan",
           "optional deletion of interns and repo runtime references with --apply --confirm-delete <workspace>"
         ],
-        "safety": "hard_permission_block_for_any_delete"
+        "safety": "hard_permission_block_for_any_delete",
+        "required_skills": [
+          "workspace-governance"
+        ]
       },
       {
         "name": "profiler",
@@ -733,7 +1306,12 @@
           "sample outputs",
           "representation reports"
         ],
-        "safety": "local_or_configured_data_access"
+        "safety": "local_or_configured_data_access",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "task-onboarding"
+        ]
       },
       {
         "name": "optimizer-finder",
@@ -745,7 +1323,11 @@
         "outputs": [
           "state/hotspots.json"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "workspace-kpi-query-optimizer",
+          "evolution"
+        ]
       },
       {
         "name": "methodology-parser",
@@ -756,7 +1338,11 @@
         "outputs": [
           "semantic schema JSON"
         ],
-        "safety": "may_use_llm_intern"
+        "safety": "may_use_llm_intern",
+        "required_skills": [
+          "domain-model",
+          "task-onboarding"
+        ]
       },
       {
         "name": "databricks-setup",
@@ -767,7 +1353,11 @@
         "outputs": [
           "connection and capability report"
         ],
-        "safety": "remote_sensitive_explicit_approval"
+        "safety": "remote_sensitive_explicit_approval",
+        "required_skills": [
+          "databricks-access-gates",
+          "workspace-governance"
+        ]
       },
       {
         "name": "generate-skill-adapters",
@@ -779,8 +1369,407 @@
           ".agents/skills_index.json",
           ".agents/<tool>/SKILLS.md"
         ],
-        "safety": "local_safe"
+        "safety": "local_safe",
+        "required_skills": [
+          "workspace-governance"
+        ]
       }
     ]
-  }
+  },
+  "subagents": [
+    {
+      "name": "business-analyst",
+      "display_name": "Business Analyst",
+      "description": "Converts stakeholder intent into KPI definitions, acceptance criteria, grains, filters, and governed open questions.",
+      "skills": [
+        "grill-requirements",
+        "domain-model",
+        "stakeholder-memory",
+        "to-solution-brief",
+        "workspace-kpi-query-optimizer"
+      ],
+      "default_prompt": "Act as the business-analysis role for data work. Clarify stakeholder goals, KPI formulas, denominator rules, temporal anchors, lifecycle states, acceptance criteria, and approval owners. Use existing files and generated panels before asking. Record accepted decisions and rejected options under the active workspace interns artifacts. Do not generate executable SQL or pipeline code.",
+      "safety": "read_only_requirements_and_decision_capture",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "light",
+        "use_light_for": [
+          "file-set summaries",
+          "requirements extraction",
+          "panel wording",
+          "decision recording"
+        ],
+        "escalate_to_standard_for": [
+          "conflicting KPI definitions",
+          "unclear metric ownership",
+          "cross-stakeholder tradeoffs"
+        ],
+        "escalate_to_deep_for": [
+          "high-risk business semantics that would change production metrics"
+        ]
+      }
+    },
+    {
+      "name": "data-analyst",
+      "display_name": "Data Analyst",
+      "description": "Profiles, interprets, and validates data evidence for KPI readiness, anomalies, trends, and business-facing result explanations.",
+      "skills": [
+        "workspace-governance",
+        "domain-model",
+        "feature-derivation-library",
+        "workspace-kpi-query-optimizer",
+        "evolution"
+      ],
+      "default_prompt": "Act as the data-analysis role. Use profile-first evidence to inspect distributions, nulls, categories, candidate mappings, anomalies, and KPI result plausibility. Prefer generated profile artifacts and bounded samples only when profiles cannot answer a concrete question. Explain what the data can and cannot support, and raise blocker-panel questions for unproven business meanings.",
+      "safety": "profile_first_analysis_no_raw_dataset_overread",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "read-only"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "read-only"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "light",
+        "use_light_for": [
+          "profile review",
+          "anomaly summaries",
+          "candidate mapping triage"
+        ],
+        "escalate_to_standard_for": [
+          "KPI plausibility analysis",
+          "conflicting data evidence",
+          "multi-table analytical reasoning"
+        ],
+        "escalate_to_deep_for": [
+          "production-impacting metric interpretation disputes"
+        ]
+      }
+    },
+    {
+      "name": "data-engineer",
+      "display_name": "Data Engineer",
+      "description": "Designs governed source-to-target, data-quality, medallion, ETL/ELT, orchestration, and deployment-safe data pipelines.",
+      "skills": [
+        "workspace-governance",
+        "domain-model",
+        "data-engineering-pipeline-design",
+        "databricks-access-gates",
+        "evolution"
+      ],
+      "default_prompt": "Act as the data-engineering role. Build or review Bronze, Silver, and Gold plans from source contracts, profile evidence, relationship contracts, and accepted decisions. Enforce data quality, lineage, idempotency, quarantine, schema drift, reroute policy, and deployment approval gates. Produce plans and contracts before executable logic; do not run remote mutation without explicit approval.",
+      "safety": "governed_pipeline_design_local_safe_by_default",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "standard",
+        "use_light_for": [
+          "contract inventory",
+          "route classification",
+          "checklist validation"
+        ],
+        "use_standard_for": [
+          "source-to-target planning",
+          "medallion layer design",
+          "data-quality gate design"
+        ],
+        "escalate_to_deep_for": [
+          "production architecture tradeoffs",
+          "ambiguous relationship or grain proof",
+          "remote deployment risk decisions"
+        ]
+      }
+    },
+    {
+      "name": "sql-polars-pyspark-specialist",
+      "display_name": "SQL Polars PySpark Specialist",
+      "description": "Chooses and implements the correct query/runtime engine, preserving parity across SQL, Polars, and PySpark when required.",
+      "skills": [
+        "workspace-governance",
+        "domain-model",
+        "data-engineering-pipeline-design",
+        "workspace-kpi-query-optimizer"
+      ],
+      "default_prompt": "Act as the SQL, Polars, and PySpark implementation specialist. Select the narrowest supported engine for the requested runtime: SQL for warehouse-native queries, Polars for local file processing and deterministic profiling/transforms, and PySpark for distributed Spark or Databricks pipelines. Generate only the requested engine unless parity is explicitly required. Block executable generation when source, join, grain, temporal anchor, or engine parity proof is missing.",
+      "safety": "executable_generation_requires_source_to_target_and_relationship_proof",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "standard",
+        "use_light_for": [
+          "syntax rewrites",
+          "simple engine selection",
+          "formatting and lint fixes"
+        ],
+        "use_standard_for": [
+          "implementation from approved contracts",
+          "test generation",
+          "query optimization"
+        ],
+        "escalate_to_deep_for": [
+          "cross-engine semantic parity",
+          "complex joins or windowing",
+          "high-risk KPI formula correctness"
+        ]
+      }
+    },
+    {
+      "name": "databricks-engineer",
+      "display_name": "Databricks Engineer",
+      "description": "Plans and reviews Databricks-specific Unity Catalog, Delta, Lakeflow, jobs, permissions, costs, and production deployment gates.",
+      "skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "databricks-access-gates"
+      ],
+      "default_prompt": "Act as the Databricks engineering role. Review or design Databricks-specific deployment choices: Unity Catalog objects, Delta tables, Lakeflow or job orchestration, SQL warehouses, clusters, permissions, data quality expectations, lineage, cost controls, and remote execution approvals. Use databricks-access-gates before any remote action and keep local dry-runs as the default.",
+      "safety": "databricks_remote_mutation_requires_explicit_approval",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "read-only"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "read-only"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "standard",
+        "use_light_for": [
+          "access checklist review",
+          "object naming review",
+          "dry-run plan summaries"
+        ],
+        "use_standard_for": [
+          "Databricks deployment planning",
+          "Delta and Unity Catalog design",
+          "cost and compute control review"
+        ],
+        "escalate_to_deep_for": [
+          "production permission architecture",
+          "failure recovery design",
+          "remote apply risk assessment"
+        ]
+      }
+    },
+    {
+      "name": "agent-advisor-router",
+      "display_name": "Agent Advisor Router",
+      "description": "Advises which specialist agent, skill chain, sandbox, and model tier should handle a task before expensive work starts.",
+      "skills": [
+        "workspace-governance",
+        "clarify-ambiguity",
+        "evolution"
+      ],
+      "default_prompt": "Act as the advisor/router. Classify the user's request, choose the narrowest specialist role, choose the cheapest sufficient model tier, and name the required skills and tool route. Escalate only when ambiguity, production risk, security, or semantic correctness requires it. Do not perform the downstream implementation yourself unless no specialist route fits.",
+      "safety": "read_only_routing_and_cost_control_advice",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "read-only"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "read-only"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "light",
+        "use_light_for": [
+          "task classification",
+          "agent selection",
+          "model tier recommendation"
+        ],
+        "escalate_to_standard_for": [
+          "conflicting routes",
+          "missing active workspace context"
+        ],
+        "escalate_to_deep_for": [
+          "only when route selection itself affects production safety"
+        ]
+      }
+    },
+    {
+      "name": "databricks-access-gates",
+      "display_name": "Databricks Access Gates",
+      "description": "Ask for missing Databricks access gates",
+      "skills": [
+        "databricks-access-gates"
+      ],
+      "default_prompt": "Use Databricks access gates to identify missing scopes, grants, policies, approvals, warehouse paths, and workspace permissions before retrying Databricks remote actions.",
+      "safety": "follows_skill_policy",
+      "source_path": "skills/databricks-access-gates/agents/openai.yaml",
+      "targets": {}
+    },
+    {
+      "name": "feature-derivation-library",
+      "display_name": "Feature Derivation Library",
+      "description": "Use reusable KPI feature derivation patterns safely.",
+      "skills": [
+        "feature-derivation-library"
+      ],
+      "default_prompt": "Use reusable derivation patterns to propose evidence-backed KPI feature mappings without treating candidates as proof.",
+      "safety": "follows_skill_policy",
+      "source_path": "skills/feature-derivation-library/agents/openai.yaml",
+      "targets": {}
+    },
+    {
+      "name": "workspace-flow-orchestrator",
+      "display_name": "Workspace Flow Orchestrator",
+      "description": "Drives plan, local-safe, and bounded-autopilot workspace orchestration while keeping main-chat output concise.",
+      "skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer",
+        "task-onboarding"
+      ],
+      "default_prompt": "Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. Show current.md to humans, use current.json for structured choices, and record deterministic next commands.",
+      "safety": "local_safe_workflow_only_no_remote_execution",
+      "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "source-to-target-reviewer",
+      "display_name": "Source-to-Target Reviewer",
+      "description": "Reviews KPI, relationship, profile, and source-to-target proof before SQL or pipeline generation.",
+      "skills": [
+        "workspace-governance",
+        "domain-model",
+        "data-engineering-pipeline-design",
+        "workspace-kpi-query-optimizer"
+      ],
+      "default_prompt": "Inspect generated contracts and reports before executable generation. Require bronze_silver_standards.json, transformation_manifest.json, workflow_reroute_policy.json, data-quality evidence, layer route, pipeline plan, and harness results. Block on unproven source columns, joins, grain, temporal anchors, relationship contracts, missing engine parity, or unapproved Silver semantic mappings.",
+      "safety": "read_only_review_blocks_unproven_generation",
+      "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "read-only"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "read-only"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "validation-gatekeeper",
+      "display_name": "Validation Gatekeeper",
+      "description": "Runs and interprets local-safe validation, workflow guardrail, project harness, and reliability checks.",
+      "skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer",
+        "evolution"
+      ],
+      "default_prompt": "Run local-safe validation gates only. Treat validation errors as blockers, summarize artifact paths, and never hand-edit generated contracts to clear failures. Enforce Bronze/Silver standards, strict exception compensating controls, workflow reroute policy, data-quality, layered pipeline, project, and reliability harnesses before promotion.",
+      "safety": "local_safe_validation_no_generated_contract_edits",
+      "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "integration-notification-operator",
+      "display_name": "Integration Notification Operator",
+      "description": "Bridges Slack, Teams, MCP, or plugin frontends to existing workspace-flow and session-snapshot commands.",
+      "skills": [
+        "workspace-governance",
+        "stakeholder-memory",
+        "evolution"
+      ],
+      "default_prompt": "Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post current.md, use current.json for buttons, and record trajectory/session events.",
+      "safety": "notification_and_approval_bridge_no_direct_dataset_or_remote_mutation",
+      "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      }
+    }
+  ]
 }

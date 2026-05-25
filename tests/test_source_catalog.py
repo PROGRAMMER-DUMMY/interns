@@ -512,6 +512,28 @@ class SourceCatalogTests(unittest.TestCase):
             self.assertTrue((workspace / "docs" / "source_selection.json").exists())
             self.assertIn("backup", result.artifacts)
 
+    def test_finalize_selection_infers_source_from_draft_or_workspace(self):
+        with tempfile.TemporaryDirectory() as repo_td:
+            repo = Path(repo_td)
+            workspace = self._workspace(repo)
+            draft_path = workspace / "docs" / "source_selection.generated.json"
+            draft_path.parent.mkdir(parents=True, exist_ok=True)
+            draft_path.write_text(
+                json.dumps(
+                    {
+                        "sources": [{"id": "external_file", "type": "local", "approval": "needs_approval"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            manager = SourceCatalogManager(repo, "workspaces/demo")
+
+            result = manager.finalize_selection(approve_final_preview=True)
+
+            final = json.loads((workspace / "docs" / "source_selection.json").read_text(encoding="utf-8"))
+            self.assertEqual(result.source_count, 1)
+            self.assertEqual(final["source_catalog_id"], "demo")
+
 
 if __name__ == "__main__":
     unittest.main()

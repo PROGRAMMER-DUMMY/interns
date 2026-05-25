@@ -99,22 +99,37 @@ def apply_workspace_definition(
 
 
 def _resolve_source_column(column_expr: str, layout: WorkspaceLayout) -> dict[str, str]:
-    table_name, column = _split_source_column_expr(column_expr)
-    if not table_name:
+    source_ref, column = _split_source_column_expr(column_expr)
+    if not source_ref:
         return {"dataset": "", "column": column, "source": "workspace_definition"}
 
-    workspace_files = list(layout.project_root.glob("*.csv")) + list(
-        layout.project_root.glob("*.parquet")
+    source_path = Path(source_ref)
+    if source_path.suffix.lower() in {".csv", ".parquet"}:
+        if source_path.is_absolute():
+            resolved = source_path
+        elif source_path.parts[:1] == ("workspaces",):
+            resolved = layout.project_root.parents[1] / source_path
+        else:
+            resolved = layout.project_root / source_path
+        return {
+            "dataset": _repo_relative_workspace_path(resolved),
+            "column": column,
+            "source": "workspace_definition",
+        }
+
+    table_name = Path(source_ref).stem
+    workspace_files = list(layout.project_root.rglob("*.csv")) + list(
+        layout.project_root.rglob("*.parquet")
     )
     for path in workspace_files:
-        if path.stem.lower() == table_name.lower():
+        if path.stem.lower() == table_name.lower() and layout.is_dataset_allowed(path):
             return {
                 "dataset": _repo_relative_workspace_path(path),
                 "column": column,
                 "source": "workspace_definition",
             }
 
-    return {"dataset": table_name, "column": column, "source": "workspace_definition"}
+    return {"dataset": source_ref, "column": column, "source": "workspace_definition"}
 
 
 def _split_source_column_expr(column_expr: str) -> tuple[str, str]:
@@ -126,11 +141,11 @@ def _split_source_column_expr(column_expr: str) -> tuple[str, str]:
             idx = normalized.lower().index(marker)
             dataset = normalized[: idx + len(marker) - 1]
             column = normalized[idx + len(marker):]
-            return Path(dataset).stem, column
+            return dataset, column
     if "." not in normalized:
         return "", normalized
     table_name, column = normalized.rsplit(".", 1)
-    return Path(table_name).stem, column
+    return table_name, column
 
 
 def _repo_relative_workspace_path(path: Path) -> str:

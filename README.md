@@ -946,6 +946,10 @@ For a team-oriented overview of ingestion patterns, Bronze/Silver/Gold responsib
 cleaning techniques, serving patterns, and modern data tooling, see
 `docs/data_workflow_medallion_reference.md`.
 
+For the current Databricks production practices reference, including Unity Catalog, Lakeflow,
+Auto Loader, Delta maintenance, SQL warehouses, CI/CD, security, cost, and observability guidance,
+see `docs/databricks_production_practices.md`.
+
 ## Tool-Agnostic Skills
 
 Repo skills live once under `skills/*/SKILL.md`. They can be exposed to Codex,

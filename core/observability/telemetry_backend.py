@@ -16,14 +16,15 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
+
+from core.paths import PROJECT_ROOT
 
 if TYPE_CHECKING:
     from core.config import DatabricksConfig
     from core.storage.workspace import Workspace
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = PROJECT_ROOT
 
 
 # ── Abstract interface ─────────────────────────────────────────────────────────

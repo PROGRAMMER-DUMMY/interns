@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.paths import PROJECT_ROOT
 from core.onboarding.sources.external_discovery import ExternalSourceDiscoverer
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -51,10 +52,16 @@ class ExternalSourceIntakeWorkflow:
             / "requirements"
             / "external_source_intake_session.json"
         )
-        # Some launchers pass the currently active workspace as --proposed-workspace.
-        # If it already exists, keep it only as an attach-existing candidate and
-        # derive the fresh workspace from the external source folder name.
-        if proposed_workspace and proposed_path.exists() and not proposed_session.exists() and not self.workspace_arg:
+        # Some launchers pass a populated active workspace as --proposed-workspace.
+        # Keep populated workspaces as attach-existing candidates. If the workspace
+        # is empty, honor it as the intended lightweight external-data workspace.
+        if (
+            proposed_workspace
+            and proposed_path.exists()
+            and _has_workspace_files(proposed_path)
+            and not proposed_session.exists()
+            and not self.workspace_arg
+        ):
             self.attach_existing_candidate = normalized_proposed
             self.proposed_workspace = _normalize_workspace(derived_workspace)
         else:
@@ -541,7 +548,7 @@ def _discovery_groups(session: dict[str, Any]) -> list[dict[str, Any]]:
         return []
     path = Path(discovery_path)
     if not path.is_absolute():
-        path = Path.cwd() / path
+        path = PROJECT_ROOT / path
     data = _read_json(path)
     return list(data.get("groups") or [])
 
@@ -664,6 +671,10 @@ def _normalize_workspace(value: str) -> str:
     if not normalized.startswith("workspaces/"):
         normalized = f"workspaces/{normalized}"
     return normalized
+
+
+def _has_workspace_files(path: Path) -> bool:
+    return any(item.is_file() for item in path.rglob("*"))
 
 
 def _safe_slug(value: str) -> str:

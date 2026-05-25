@@ -37,6 +37,20 @@ dataset roots, docs, and `interns` state. The possible KPI/model groups are not 
 full `All files` section is the user confirmation boundary. It does not read file contents, parse
 Excel, profile datasets, onboard, delete, or write files.
 
+### prepare-workspace-selection
+
+Command:
+
+```powershell
+uv run prepare-workspace-selection --workspace <workspace-name-or-path>
+```
+
+Use for `set workspace` flows when the target may be empty, missing, or backed by external raw
+data. It wraps the bounded workspace listing and returns a guarded selection panel. If the workspace
+has no files, it must stop with an empty-workspace blocker, list available workspaces, and offer the
+external `dataset_allowlist` setup pattern instead of scanning unrelated folders or borrowing files
+from another workspace.
+
 ### session-snapshot
 
 Command:
@@ -408,6 +422,114 @@ workspaces/<project>/interns/reports/workflow_guard_harness/current.md
 workspaces/<project>/interns/generated/evidence/workflow_guard_harness/current.json
 ```
 
+### run-layered-pipeline-harness
+
+Command:
+
+```powershell
+uv run run-layered-pipeline-harness --workspace workspaces/<project>
+```
+
+Use after `build-catalog-contract`, `prepare-data-engineering-route`, and
+`prepare-pipeline-plan` when catalog, route, and pipeline contracts need a layered
+data-engineering validation gate before code generation or production proof. The harness checks
+catalog object shape, route remote-mutation policy, pipeline quality gates, layer objects, grain,
+duplicate behavior, and approval-gated deduplication. It is read-only and does not read raw
+datasets.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/reports/layered_pipeline_harness/current.json
+workspaces/<project>/interns/reports/layered_pipeline_harness/current.md
+workspaces/<project>/interns/generated/evidence/layered_pipeline_harness/current.json
+```
+
+### run-pipeline-execution-harness
+
+Command:
+
+```powershell
+uv run run-pipeline-execution-harness --workspace workspaces/<project>
+```
+
+Use after `generate-pipeline-sql` to execute `pipeline_layers.sql` locally in DuckDB and verify
+the expected bronze, silver, and gold views. The harness writes row counts, columns, and bounded
+sample tables with sensitive healthcare identifiers redacted. It does not write remote tables.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/reports/pipeline_execution_harness/current.json
+workspaces/<project>/interns/reports/pipeline_execution_harness/current.md
+workspaces/<project>/interns/generated/evidence/pipeline_execution_harness/current.json
+```
+
+### run-data-quality-harness
+
+Command:
+
+```powershell
+uv run run-data-quality-harness --workspace workspaces/<project>
+```
+
+Use after catalog, profile, and pipeline contracts exist when a workspace needs a local-safe data
+quality review focused on duplicate evidence. The harness is profile/catalog/pipeline contract
+driven, uses bounded duplicate evidence, writes redacted samples only, and in milestone 1 does not
+perform automatic deduplication, quarantine SQL generation, quarantine SQL execution, or remote
+mutation.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/contracts/data_quality_contract.json
+workspaces/<project>/interns/generated/evidence/data_quality_harness/current.json
+workspaces/<project>/interns/reports/data_quality/current.json
+workspaces/<project>/interns/reports/data_quality/current.md
+```
+
+### prepare-duplicate-review-panel
+
+Command:
+
+```powershell
+uv run prepare-duplicate-review-panel --workspace workspaces/<project>
+```
+
+Use after `run-data-quality-harness` when duplicate findings need a JSON-backed stakeholder review
+panel. It prepares bounded, redacted duplicate evidence and options from profile/catalog/pipeline
+contracts. It does not apply a duplicate decision and does not generate or run deduplication or
+quarantine SQL in milestone 1.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/reports/duplicate_review/current.json
+workspaces/<project>/interns/reports/duplicate_review/current.md
+workspaces/<project>/interns/generated/contracts/data_quality_contract.json
+```
+
+### apply-duplicate-review-answer
+
+Command:
+
+```powershell
+uv run apply-duplicate-review-answer --workspace workspaces/<project> --answer option_a
+```
+
+Use only after the user answers the current duplicate review panel from
+`interns/reports/duplicate_review/current.json` or `current.md`. It resolves option ids or labels
+against the current panel and records the accepted duplicate handling decision. Milestone 1 remains
+decision-only: no automatic deduplication, quarantine SQL mutation, or remote mutation is performed.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/contracts/duplicate_decisions.json
+workspaces/<project>/interns/reports/duplicate_review/current.json
+workspaces/<project>/interns/reports/duplicate_review/current.md
+```
+
 ### record-workspace-trajectory
 
 Command:
@@ -671,6 +793,47 @@ workspace dataset/doc names and optional keywords, then `draft-selection` to cre
 loading the whole catalog. Draft selections use `approval: needs_approval`; promote a reviewed draft
 with `finalize-selection --approve-final-preview`, which writes a backup of the previous
 `docs/source_selection.json`.
+
+### build-catalog-contract
+
+Command:
+
+```powershell
+uv run build-catalog-contract --workspace workspaces/<project>
+```
+
+Use after onboarding/profile generation when downstream data-engineering plans need a stable
+logical source interface. It builds catalog objects from profile evidence, keeps raw physical paths
+limited to ingestion bootstrap and local smoke-test adapters, and does not fetch remote data or
+mutate external systems.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/contracts/catalog_contract.json
+workspaces/<project>/interns/reports/catalog_contract.md
+```
+
+### build-source-family-contracts
+
+Command:
+
+```powershell
+uv run build-source-family-contracts --workspace workspaces/<project>
+```
+
+Use after onboarding/profile generation for external raw folders that contain repeated dated CSV
+releases. It groups profile-backed files into logical source families, detects compact schema
+versions and drift, extracts release/year/quarter tokens from filenames, and writes bronze planning
+hints before medallion or ETL route planning. It reads generated profile metadata and approved
+source selection only; it does not read raw datasets or duplicate full profile payloads.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/contracts/source_family_contracts.json
+workspaces/<project>/interns/reports/source_family_contracts.md
+```
 
 ### discover-external-sources
 
@@ -992,6 +1155,132 @@ workspaces/<project>/interns/reports/context/plan-source-to-target_standard.md
 The plan records selected and rejected datasets, feature-to-column mappings, join candidates, grain,
 temporal anchors, medallion layers, validation checks, resource settings, context manifest, and
 blockers. Treat blockers as hard stops before executable code generation.
+
+### prepare-data-engineering-route
+
+Command:
+
+```powershell
+uv run prepare-data-engineering-route --workspace workspaces/<project> --track auto --target-engine sql
+```
+
+Use before pipeline planning when a workspace needs a governed route choice across KPI-only, ETL,
+ELT, medallion, OLTP ingestion, or existing-gold validation workflows. It ensures the catalog
+contract exists, inspects trusted local layer contracts, records a local-first remote policy, and
+writes the next deterministic `prepare-pipeline-plan` command. It is local-safe and does not execute
+pipeline code or remote mutations.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/contracts/data_engineering_route.json
+workspaces/<project>/interns/reports/data_engineering_route.md
+```
+
+### prepare-pipeline-plan
+
+Command:
+
+```powershell
+uv run prepare-pipeline-plan --workspace workspaces/<project> --track auto --target-engine sql --table-format auto
+```
+
+Use after `prepare-data-engineering-route` and source-to-target planning when executable SQL,
+Polars, PySpark, ETL/ELT, medallion, or existing-layer validation work needs a governed pipeline
+contract before code generation. It ensures the catalog contract exists, reuses the route contract,
+records layer definitions, quality gates, approval-gated transformations, source-to-target blockers,
+and remote-write approval policy. For ETL/ELT/medallion/ingestion tracks, `--table-format auto`
+blocks and writes the pipeline format panel until the user chooses a storage format. It is
+local-safe and writes planning artifacts only.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/contracts/pipeline_plan.json
+workspaces/<project>/interns/reports/pipeline_plan.md
+```
+
+### prepare-pipeline-format-panel
+
+Command:
+
+```powershell
+uv run prepare-pipeline-format-panel --workspace workspaces/<project>
+uv run apply-pipeline-format-answer --workspace workspaces/<project> --answer option_a
+```
+
+Use before `prepare-pipeline-plan` for ETL, ELT, medallion, or ingestion tracks when the target
+table/file format is not already approved. The panel asks whether outputs should be stored as Delta,
+local Parquet, Iceberg, CSV export, or a custom policy. The panel is JSON-backed; agents must read
+`interns/reports/pipeline_format/current.md` or `current.json` before asking the user and must apply
+answers through `apply-pipeline-format-answer`.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/reports/pipeline_format/current.json
+workspaces/<project>/interns/reports/pipeline_format/current.md
+workspaces/<project>/interns/generated/contracts/pipeline_decisions.json
+```
+
+### prepare-pipeline-deployment-plan
+
+Command:
+
+```powershell
+uv run prepare-pipeline-deployment-plan --workspace workspaces/<project> --target warehouse --mode dry-run
+```
+
+Use after `prepare-pipeline-plan` when generated pipeline outputs need a deployment dry-run or an
+approval-backed apply contract. The command reads `catalog_contract.json` and `pipeline_plan.json`,
+writes planning artifacts only, records `remote_writes_require_explicit_approval=true`, and never
+performs remote mutation. `--mode` defaults to `dry-run`; `--mode apply` fails for `external` and
+`warehouse` targets unless `AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1` is set.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/contracts/pipeline_deployment_plan.json
+workspaces/<project>/interns/reports/pipeline_deployment_plan.md
+```
+
+### apply-pipeline-decision
+
+Command:
+
+```powershell
+uv run apply-pipeline-decision --workspace workspaces/<project> --kpi-id kpi_002 --percentage-denominator-scope global_total
+```
+
+Use only after the user or source truth approves a percentage or ratio denominator scope. The
+command writes `pipeline_decisions.json`, which `prepare-pipeline-plan` uses to unblock denominator
+scope blockers. Supported scopes are `global_total`, `within_department`, `within_gender`,
+`within_visit_type`, and `selected_population`.
+
+Output:
+
+```text
+workspaces/<project>/interns/generated/contracts/pipeline_decisions.json
+```
+
+### generate-pipeline-sql
+
+Command:
+
+```powershell
+uv run generate-pipeline-sql --workspace workspaces/<project>
+```
+
+Use after catalog, route, and pipeline contracts are ready. It emits local DuckDB SQL for
+bronze/silver/gold layer scaffolds from `pipeline_plan.json`. Raw file paths are allowed only in
+the generated catalog bootstrap section; downstream layer logic reads catalog-bound views. The
+command generates code only and does not execute it or write remote tables.
+
+Output:
+
+```text
+workspaces/<project>/interns/generated/pipeline/pipeline_layers.sql
+```
 
 ### build-relationship-contracts
 

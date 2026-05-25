@@ -28,7 +28,13 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
+_BOOTSTRAP_ROOT = Path(__file__).resolve().parents[1]
+if str(_BOOTSTRAP_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BOOTSTRAP_ROOT))
+
+from core.paths import PROJECT_ROOT  # noqa: E402
+
+ROOT = PROJECT_ROOT
 
 DEFAULT_DB  = str(ROOT / "state" / "analytics.duckdb")
 DEFAULT_OUT = str(ROOT / "state" / "hotspots.json")

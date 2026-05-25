@@ -523,7 +523,8 @@ class DuckDBKPISQLGenerator:
             and (not required_source_set or path in required_source_set)
         ]
         for idx, (rel_path, _profile) in enumerate(csv_profiles, start=1):
-            view_name = f"stage_{idx:03d}_{_safe_name(Path(rel_path).stem)}"
+            stem = _safe_name(Path(rel_path).stem)
+            view_name = f"catalog_raw_{stem}" if self.dialect == "duckdb" else f"stage_{idx:03d}_{stem}"
             stage_views[rel_path] = view_name
             select_list = self._stage_select_list(rel_path, _profile, required_columns or {})
             if self.dialect == "databricks":
@@ -543,16 +544,21 @@ class DuckDBKPISQLGenerator:
         if not union_parts:
             return "", stage_views
         union_operator = "UNION ALL" if self.dialect == "databricks" else "UNION ALL BY NAME"
-        return (
-            "\n".join([
-                *view_lines,
+        lines = []
+        if self.dialect == "duckdb":
+            lines.append("-- BEGIN CATALOG BOOTSTRAP")
+        lines.extend(view_lines)
+        if self.dialect == "duckdb":
+            lines.append("-- END CATALOG BOOTSTRAP")
+        lines.extend(
+            [
                 "CREATE OR REPLACE TEMP VIEW all_workspace_rows AS"
                 if self.dialect == "databricks"
                 else "CREATE OR REPLACE VIEW all_workspace_rows AS",
                 f"\n{union_operator}\n".join(union_parts) + ";",
-            ]),
-            stage_views,
+            ]
         )
+        return ("\n".join(lines), stage_views)
 
     def _stage_select_list(
         self,

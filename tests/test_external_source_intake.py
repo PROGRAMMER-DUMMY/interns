@@ -59,7 +59,8 @@ class ExternalSourceIntakeWorkflowTests(unittest.TestCase):
             root = Path(tmp)
             external = self._external_root(root)
             existing = root / "workspaces" / "Healthcare-RCM-Data-Platform"
-            existing.mkdir(parents=True)
+            (existing / "docs").mkdir(parents=True)
+            (existing / "docs" / "Sample KPI.xlsx").write_text("placeholder", encoding="utf-8")
 
             prepared = ExternalSourceIntakeWorkflow(
                 root,
@@ -74,6 +75,24 @@ class ExternalSourceIntakeWorkflowTests(unittest.TestCase):
                 panel["options"][1]["label"],
                 "Attach to `workspaces/Healthcare-RCM-Data-Platform`",
             )
+
+    def test_empty_proposed_workspace_is_honored_as_external_data_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            external = self._external_root(root)
+            existing = root / "workspaces" / "CMS_Medical"
+            existing.mkdir(parents=True)
+
+            prepared = ExternalSourceIntakeWorkflow(
+                root,
+                external_root=external,
+                proposed_workspace="workspaces/CMS_Medical",
+            ).prepare()
+
+            panel = json.loads((root / prepared.current_json_path).read_text(encoding="utf-8"))
+            self.assertEqual(prepared.workspace, "workspaces/CMS_Medical")
+            self.assertEqual(panel["options"][0]["label"], "Create `workspaces/CMS_Medical`")
+            self.assertEqual(panel["options"][1]["label"], "Attach to existing workspace")
 
     def test_apply_outcome_then_group_policy_writes_workspace_memory(self):
         with tempfile.TemporaryDirectory() as tmp:

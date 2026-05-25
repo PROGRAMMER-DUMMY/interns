@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from core.paths import PROJECT_ROOT
 from core.onboarding.kpi.text_parser import (
     KPI_CUTS_HEADERS,
     cell_at,
@@ -69,6 +70,8 @@ class OnboardingResult:
     kpi_count: int
     profile_count: int
     artifacts: dict[str, str]
+    next_step: str
+    next_command: str
     warnings: list[str] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
@@ -79,6 +82,8 @@ class OnboardingResult:
             "kpi_count": self.kpi_count,
             "profile_count": self.profile_count,
             "artifacts": self.artifacts,
+            "next_step": self.next_step,
+            "next_command": self.next_command,
             "warnings": self.warnings,
         }
 
@@ -179,6 +184,8 @@ class WorkspaceOnboarder:
             kpi_count=len(kpis),
             profile_count=len(profiles),
             artifacts=artifacts,
+            next_step=_onboarding_next_step(inputs, kpis, profiles),
+            next_command=_onboarding_next_command(inputs, kpis, profiles),
             warnings=kpi_warnings + profile_warnings,
         )
 
@@ -207,7 +214,7 @@ class WorkspaceOnboarder:
         ]
 
         return WorkspaceInputs(
-            workspace=str(self.workspace),
+            workspace=_rel(self.workspace, self.repo_root),
             data_files=[_rel(path, self.repo_root) for path in sorted(set(data_files))],
             kpi_registries=[_rel(path, self.repo_root) for path in sorted(set(kpi_registries))],
             data_models=[_rel(path, self.repo_root) for path in sorted(set(data_models))],
@@ -535,20 +542,40 @@ if __name__ == "__main__":
         kpis: list[KpiDefinition],
         profiles: list[dict[str, Any]],
     ) -> str:
+        if not kpis and profiles:
+            baseline_status = (
+                "profile metadata generated; no KPI registry was provided, so the next step is "
+                "source-family/schema-drift planning before medallion or ETL design."
+            )
+            next_steps = [
+                "1. Review `open_questions.md` and source discovery reports.",
+                "2. Run `uv run build-source-family-contracts --workspace "
+                f"{inputs.workspace}`.",
+                "3. Review `interns/reports/source_family_contracts.md` for schema drift and bronze table strategy.",
+                "4. Run `uv run prepare-data-engineering-route --workspace "
+                f"{inputs.workspace} --track medallion --target-engine sql` after approving the source-family view.",
+            ]
+        else:
+            baseline_status = (
+                "manifest generated; executable KPI-specific SQL needs mapping approval."
+            )
+            next_steps = [
+                "1. Review `open_questions.md`.",
+                "2. Approve or refine KPI-to-column mappings.",
+                "3. Replace manifest rows with executable KPI SQL.",
+                "4. Run baseline evaluator before optimization.",
+            ]
         lines = [
             "# Workspace Onboarding Report",
             "",
             f"- Workspace: `{inputs.workspace}`",
             f"- KPI definitions: {len(kpis)}",
             f"- Profiled datasets: {len(profiles)}",
-            "- Baseline status: manifest generated; executable KPI-specific SQL needs mapping approval.",
+            f"- Baseline status: {baseline_status}",
             "",
             "## Next Steps",
             "",
-            "1. Review `open_questions.md`.",
-            "2. Approve or refine KPI-to-column mappings.",
-            "3. Replace manifest rows with executable KPI SQL.",
-            "4. Run baseline evaluator before optimization.",
+            *next_steps,
         ]
         return self._write_text(self.layout.reports_dir / "onboarding_report.md", "\n".join(lines) + "\n")
 
@@ -575,6 +602,7 @@ if __name__ == "__main__":
             f"| `{workspace}/interns/reports/open_questions.md` | Yes | Questions/blockers |",
             f"| `{workspace}/interns/reports/relationship_contracts.md` | Yes | Join/relationship proof, when generated |",
             f"| `{workspace}/interns/reports/source_to_target_plan.md` | Yes | KPI-to-source logic plan, when generated |",
+            f"| `{workspace}/interns/reports/source_family_contracts.md` | Yes | Source families, schema versions, and drift review for external raw files |",
             f"| `{workspace}/interns/reports/blocker_question_panel/current.md` | Yes | Current blocker question, when generated |",
             f"| `{workspace}/interns/reports/bugs/current.md` | Yes | Bug report, when generated |",
             f"| `{workspace}/interns/reports/context/*.md` | Yes | Routed context summaries, when generated |",
@@ -759,25 +787,61 @@ def _read_tabular_kpis(frame: Any, source: str) -> list[KpiDefinition]:
     )
     if not name_col:
         return []
+    rows = list(frame.iter_rows(named=True))
+    if not cuts_col or not metric_col:
+        detected_cuts_col, detected_metric_col = _detect_kpi_registry_detail_columns(rows, columns, name_col)
+        cuts_col = cuts_col or detected_cuts_col
+        metric_col = metric_col or detected_metric_col
+
     kpis = []
-    for row in frame.iter_rows(named=True):
-        name = _clean_cell(row.get(name_col))
-        if not name or _is_template_kpi_row(name):
-            continue
-        metric = _clean_cell(row.get(metric_col)) if metric_col else ""
-        cuts = _clean_cell(row.get(cuts_col)) if cuts_col else ""
-        if not metric and not cuts:
-            metric, cuts = _infer_metric_and_cuts(name, _clean_cell(row.get(desc_col)) if desc_col else "")
+    current: dict[str, str] | None = None
+
+    def flush_current() -> None:
+        nonlocal current
+        if not current:
+            return
+        name = current["name"]
+        description = current["description"]
+        metric = current["metric"]
+        cuts = current["cuts"]
+        inferred_metric, inferred_cuts = _infer_metric_and_cuts(name, description)
+        if not metric:
+            metric = inferred_metric
+        cuts = _merge_kpi_cuts(cuts, _source_truth_constraints(inferred_cuts)) if cuts else inferred_cuts
         kpis.append(
             KpiDefinition(
                 name=name,
-                description=_clean_cell(row.get(desc_col)) if desc_col else "",
+                description=description,
                 cuts=cuts,
                 metric=metric,
-                refinement_required=_clean_cell(row.get(refine_col)) if refine_col else "",
+                refinement_required=current["refinement_required"],
                 source=source,
             )
         )
+        current = None
+
+    for row in rows:
+        name = _clean_cell(row.get(name_col))
+        if not name or _is_template_kpi_row(name):
+            if current and not name:
+                current["cuts"] = _merge_kpi_cuts(
+                    current["cuts"],
+                    _clean_cell(row.get(cuts_col)) if cuts_col else "",
+                )
+                if not current["metric"] and metric_col:
+                    current["metric"] = _clean_cell(row.get(metric_col))
+            continue
+        metric = _clean_cell(row.get(metric_col)) if metric_col else ""
+        cuts = _clean_cell(row.get(cuts_col)) if cuts_col else ""
+        flush_current()
+        current = {
+            "name": name,
+            "description": _clean_cell(row.get(desc_col)) if desc_col else "",
+            "cuts": cuts,
+            "metric": metric,
+            "refinement_required": _clean_cell(row.get(refine_col)) if refine_col else "",
+        }
+    flush_current()
     return kpis
 
 
@@ -810,8 +874,10 @@ def _read_xlsx_xml_kpis(path: Path) -> list[KpiDefinition]:
             continue
         metric = _cell_at(row, metric_idx)
         cuts = _cell_at(row, cuts_idx)
-        if not metric and not cuts:
-            metric, cuts = _infer_metric_and_cuts(name, _cell_at(row, desc_idx))
+        inferred_metric, inferred_cuts = _infer_metric_and_cuts(name, _cell_at(row, desc_idx))
+        if not metric:
+            metric = inferred_metric
+        cuts = _merge_kpi_cuts(cuts, _source_truth_constraints(inferred_cuts)) if cuts else inferred_cuts
         kpis.append(
             KpiDefinition(
                 name=name,
@@ -886,6 +952,48 @@ def _first_existing(lowered: dict[str, str], candidates: list[str]) -> str | Non
     return first_existing(lowered, candidates)
 
 
+def _detect_kpi_registry_detail_columns(
+    rows: list[dict[str, Any]],
+    columns: list[str],
+    name_col: str,
+) -> tuple[str | None, str | None]:
+    """Detect spreadsheets where the cuts/metric labels appear in a subheader row."""
+    for row in rows[:5]:
+        if _clean_cell(row.get(name_col)):
+            continue
+        cuts_col = None
+        metric_col = None
+        for col in columns:
+            value = _clean_cell(row.get(col)).lower()
+            normalized = re.sub(r"[^a-z0-9]+", " ", value).strip()
+            if normalized in {"cuts with drg consolidated", "cuts", "dimensions", "grain"}:
+                cuts_col = col
+            elif normalized in {"metric", "formula", "expression"}:
+                metric_col = col
+        if cuts_col or metric_col:
+            return cuts_col, metric_col
+    return None, None
+
+
+def _merge_kpi_cuts(primary: str, extra: str) -> str:
+    values: list[str] = []
+    for source in (primary, extra):
+        for part in re.split(r"[,;\n]+", source or ""):
+            clean = _clean_cell(part)
+            if clean and clean.lower() not in {value.lower() for value in values}:
+                values.append(clean)
+    return ", ".join(values)
+
+
+def _source_truth_constraints(inferred_cuts: str) -> str:
+    constraints = []
+    for part in re.split(r"[,;\n]+", inferred_cuts or ""):
+        clean = _clean_cell(part)
+        if any(token in clean for token in ("=", ">", "<")) or "top 10" in clean.lower():
+            constraints.append(clean)
+    return ", ".join(constraints)
+
+
 def _is_template_kpi_row(name: str) -> bool:
     return is_template_kpi_row(name)
 
@@ -922,6 +1030,32 @@ def _total_existing_bytes(paths: list[str], repo_root: Path) -> int:
     return total
 
 
+def _onboarding_next_step(
+    inputs: WorkspaceInputs,
+    kpis: list[KpiDefinition],
+    profiles: list[dict[str, Any]],
+) -> str:
+    if not kpis and profiles:
+        return (
+            "Build source-family/schema-drift contracts before KPI generation, route selection, "
+            "or medallion planning."
+        )
+    return "Resolve KPI feature mappings or prepare the KPI blocker panel before SQL generation."
+
+
+def _onboarding_next_command(
+    inputs: WorkspaceInputs,
+    kpis: list[KpiDefinition],
+    profiles: list[dict[str, Any]],
+) -> str:
+    if not kpis and profiles:
+        return f"uv run build-source-family-contracts --workspace {inputs.workspace}"
+    return (
+        f"uv run resolve-kpi-features --workspace {inputs.workspace} "
+        "--domain <domain> --include-candidates"
+    )
+
+
 def _safe_stem(path: Path, root: Path) -> str:
     try:
         rel = str(path.resolve().relative_to(root.resolve())).replace("\\", "/")
@@ -953,7 +1087,11 @@ def _sql_escape(value: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Onboard a workspace into interns/ artifacts.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")
-    parser.add_argument("--repo-root", default=".", help="Repository root. Defaults to current directory.")
+    parser.add_argument(
+        "--repo-root",
+        default=str(PROJECT_ROOT),
+        help="Repository root. Defaults to detected project root.",
+    )
     parser.add_argument("--exact-profile", action="store_true", help="Run exact scans for profile bounds.")
     parser.add_argument("--sample-rows", type=int, default=100_000, help="Sample rows for profiling.")
     args = parser.parse_args(argv)

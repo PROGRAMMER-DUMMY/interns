@@ -5,13 +5,14 @@ import argparse
 import json
 from pathlib import Path
 
+from core.paths import PROJECT_ROOT
 from core.resource.manager import ResourceManager
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Write resource preflight evidence for a workspace.")
     parser.add_argument("--workspace", required=True, help="Workspace path, for example workspaces/demo")
-    parser.add_argument("--repo-root", default=".", help="Repository root.")
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT), help="Repository root.")
     parser.add_argument("--estimated-bytes", type=int, default=0)
     parser.add_argument("--workload", default="generic")
     parser.add_argument("--json", action="store_true", help="Print JSON.")

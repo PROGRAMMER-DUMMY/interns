@@ -7,6 +7,7 @@ from pathlib import Path
 
 from core.onboarding.relationships.contracts import RelationshipContractBuilder
 from core.onboarding.relationships.source_to_target_planner import _source_group
+from core.onboarding.workspace.validation import WorkspaceArtifactValidator
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -149,6 +150,45 @@ class RelationshipContractTests(unittest.TestCase):
             self.assertEqual(result.relationship_count, 1)
             self.assertEqual(result.executable_relationship_count, 1)
             self.assertEqual(result.candidate_relationship_count, 0)
+
+    def test_validator_rejects_stale_relationship_summary_after_manual_edit(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "workspaces" / "demo"
+            layout = WorkspaceLayout(project_root=workspace)
+            layout.ensure_runtime_dirs()
+            (layout.contracts_dir / "relationship_contracts.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "relationship_contracts.json",
+                        "version": 1,
+                        "generated_by": "build-relationship-contracts",
+                        "relationships": [
+                            {
+                                "relationship_id": "patients__patientid__transactions__patientid",
+                                "approval": "approved",
+                                "executable_usage_policy": {
+                                    "allowed_in_sql_generation": True,
+                                },
+                            }
+                        ],
+                        "summary": {
+                            "relationship_count": 1,
+                            "executable_relationship_count": 0,
+                            "candidate_relationship_count": 1,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+
+            self.assertFalse(result.ok)
+            self.assertTrue(
+                any("executable_relationship_count" in error for error in result.errors),
+                result.errors,
+            )
 
 
 if __name__ == "__main__":

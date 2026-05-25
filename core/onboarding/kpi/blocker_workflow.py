@@ -103,7 +103,8 @@ def prepare_kpi_blocker_panel(
         current_feature=panel_result.current_feature,
         validation=validation.summary(),
         next_step=(
-            f"Read {panel_result.current_markdown} and ask from {panel_result.current_json}."
+            f"Render {panel_result.current_markdown} as-is. Do not summarize it or write a "
+            f"second blocker prompt. Apply answers only from {panel_result.current_json}."
             if panel_result.current_feature
             else "No blocker question remains."
         ),
@@ -292,12 +293,12 @@ def _resolve_answer(panel: dict[str, Any], answer: str) -> dict[str, Any]:
             raise ValueError("panel has no recommended_option_id")
         return _one_option(options, lambda item: _norm(item.get("option_id", "")) == _norm(recommended), raw)
     if normalized == "yes":
-        concrete = [option for option in options if option.get("json_backed")]
-        if len(concrete) == 1:
-            return concrete[0]
         recommended = str(panel.get("recommended_option_id") or "")
         if recommended and len([option for option in options if option.get("option_id") == recommended]) == 1:
             return _one_option(options, lambda item: item.get("option_id") == recommended, raw)
+        concrete = [option for option in options if option.get("json_backed")]
+        if len(concrete) == 1:
+            return concrete[0]
         raise ValueError("`yes` is ambiguous for this panel; use an option id or label")
     option_letter = re.match(r"^option\s+([a-z])\b", raw, flags=re.IGNORECASE)
     if option_letter:

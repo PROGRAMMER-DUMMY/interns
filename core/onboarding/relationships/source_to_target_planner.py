@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.paths import PROJECT_ROOT
 from core.context.router import ContextBudget, ContextRouter
 from core.onboarding.kpi.feature_resolver import READY_STATES
 from core.onboarding.artifact_contracts import (
@@ -337,7 +338,7 @@ def _normalize_source_column(source: dict[str, Any], repo_root: Path) -> dict[st
     dataset = _repo_path(str(source.get("dataset") or ""), repo_root)
     column = str(source.get("column") or "")
     if not dataset and "." in column:
-        dataset, column = _split_dataset_column(column)
+        dataset, column = _split_dataset_column(column, repo_root)
     return {
         "dataset": dataset,
         "column": column,
@@ -348,14 +349,14 @@ def _normalize_source_column(source: dict[str, Any], repo_root: Path) -> dict[st
     }
 
 
-def _split_dataset_column(value: str) -> tuple[str, str]:
+def _split_dataset_column(value: str, repo_root: Path) -> tuple[str, str]:
     normalized = value.replace("\\", "/")
     if ".csv." in normalized:
         dataset, column = normalized.split(".csv.", 1)
-        return _repo_path(dataset + ".csv", Path.cwd()), column
+        return _repo_path(dataset + ".csv", repo_root), column
     if ".parquet." in normalized:
         dataset, column = normalized.split(".parquet.", 1)
-        return _repo_path(dataset + ".parquet", Path.cwd()), column
+        return _repo_path(dataset + ".parquet", repo_root), column
     parts = normalized.rsplit(".", 1)
     if len(parts) == 2:
         return parts[0], parts[1]
@@ -628,7 +629,11 @@ def _repo_path(value: str, root: Path) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build a KPI source-to-target implementation plan.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")
-    parser.add_argument("--repo-root", default=".", help="Repository root. Defaults to current directory.")
+    parser.add_argument(
+        "--repo-root",
+        default=str(PROJECT_ROOT),
+        help="Repository root. Defaults to detected project root.",
+    )
     parser.add_argument(
         "--target-engine",
         choices=sorted(SUPPORTED_TARGET_ENGINES),

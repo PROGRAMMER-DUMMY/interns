@@ -30,7 +30,7 @@ Do not infer source truth from column-name similarity alone.
 
 ## External Source Intake
 
-When a user points to a folder such as `D:\Cold_Storage`, do not make that folder the workspace.
+When a user points to a folder such as `<external-data-root>`, do not make that folder the workspace.
 Create or use a repo workspace such as `workspaces/cold-storage`, then run:
 
 ```powershell
@@ -57,10 +57,28 @@ Default strategies:
 - Treat KPI text as business intent, not as a complete implementation spec.
 - Use the data model to choose source datasets, join keys, valid grain, temporal anchors, filters,
   and target layer.
+- Before Bronze/Silver or medallion code generation, materialize the production standards contract:
+
+```powershell
+uv run prepare-bronze-silver-standards --workspace workspaces/<project> --domain <domain>
+```
+
+- Use `bronze_silver_standards.json` and `transformation_manifest.json` as the source of truth for
+  layer responsibilities, allowed transformations, approved enrichment, quarantine, lineage,
+  idempotency, exception handling, and engine parity.
+- If a workflow drifts, use `workflow_reroute_policy.json`: stop the wrong branch, record a
+  structured reroute event, run the replacement local-safe command once, and escalate if the same
+  rule fails again.
 - For medallion work, separate:
-  - bronze/raw: faithful ingestion and source metadata;
-  - silver/conformed: typed, deduplicated, joined, and quality-checked entities;
+  - bronze/raw: source-preserving ingestion plus technical quality evidence, schema drift detection,
+    duplicate evidence, and audit metadata, with no business mutation;
+  - silver/conformed: typed, normalized, semantically conformed, deterministically enriched,
+    quarantine-backed, lineage-complete, and quality-checked reusable entities;
   - gold/KPI: business aggregates, dimensions, and reporting outputs.
+- Do not apply deduplication in Bronze. Silver may quarantine or dedup only after an approved,
+  JSON-backed duplicate decision and must retain rejected-row lineage.
+- Keep KPI-specific filters, aggregations, and metric formulas out of default Silver. Put those in
+  Gold unless an explicit exception contract and passing compensating controls exist.
 - Match the engine to the target:
   - SQL for warehouse-native KPI queries and Databricks SQL;
   - Polars for local file processing, profiling, and small/medium deterministic transforms;
@@ -80,6 +98,7 @@ Stop and ask through the blocker-panel workflow when any of these are unproven:
 - null/default handling;
 - deduplication or slowly-changing-dimension policy;
 - target engine or deployment environment.
+- unsupported rule parity for the selected SQL, Polars, or PySpark generator.
 
 ## Output
 

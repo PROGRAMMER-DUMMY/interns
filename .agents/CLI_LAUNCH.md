@@ -46,13 +46,13 @@ claude --allow-dangerously-skip-permissions
 Preferred launch from outside the repo:
 
 ```powershell
-codex -C C:\Users\shubh\OneDrive\Desktop\interns
+codex -C <project-root>
 ```
 
 Safe default sandbox:
 
 ```powershell
-codex -C C:\Users\shubh\OneDrive\Desktop\interns --sandbox workspace-write
+codex -C <project-root> --sandbox workspace-write
 ```
 
 Avoid:

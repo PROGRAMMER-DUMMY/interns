@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.paths import PROJECT_ROOT
 from core.storage.external_data import (
     bounded_external_files,
     is_external_path,
@@ -375,7 +376,11 @@ def main() -> None:
         nargs="+",
         help="Workspace path or fuzzy workspace name. Multiple tokens are joined with spaces.",
     )
-    parser.add_argument("--repo-root", default=".", help="Repository root. Defaults to current directory.")
+    parser.add_argument(
+        "--repo-root",
+        default=str(PROJECT_ROOT),
+        help="Repository root. Defaults to detected project root.",
+    )
     parser.add_argument("--max-files", type=int, default=200, help="Maximum file paths to list.")
     parser.add_argument("--json", action="store_true", help="Print JSON instead of text.")
     args = parser.parse_args()

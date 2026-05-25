@@ -25,7 +25,11 @@ from core.onboarding.kpi.feature_resolver import (
     apply_workspace_definition,
     extract_expression,
 )
-from core.onboarding.kpi.blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
+from core.onboarding.kpi.blocker_workflow import (
+    _resolve_answer,
+    apply_kpi_panel_answer,
+    prepare_kpi_blocker_panel,
+)
 from core.onboarding.kpi.generation_workflow import KPIGenerationWorkflow
 from core.onboarding.kpi.generation_quality import score_kpis as quality_score_kpis
 from core.onboarding.data_model.generation_workflow import DataModelGenerationWorkflow
@@ -47,6 +51,7 @@ from core.onboarding.workspace.onboarding import (
     KpiDefinition,
     WorkspaceOnboarder,
     find_root_artifact_violations,
+    _read_tabular_kpis,
 )
 from core.optimization.engine_evolution import EngineEvolutionMemory, EngineEvolutionRecord
 from core.optimization.change_classifier import classify_diff
@@ -461,6 +466,73 @@ diff --git a/model.sql b/model.sql
             self.assertIn("LOB = Medicare", registry["kpis"][0]["cuts"])
             self.assertEqual(registry["kpis"][1]["metric"], "percentage share of lives")
             self.assertIn("VisitType", registry["kpis"][1]["cuts"])
+
+    def test_excel_kpi_reader_preserves_metric_and_continuation_cuts_as_truth(self):
+        try:
+            import polars as pl
+        except ImportError:
+            self.skipTest("polars is not installed")
+
+        frame = pl.DataFrame(
+            {
+                "Key business question": [
+                    None,
+                    "Which key business question is the KPI/metric/Feature meant to answer",
+                    "What is trend for amount paid for medicare LOB across gender and payer for patients above 50 years of age",
+                    None,
+                    None,
+                    None,
+                    None,
+                    "What are top 10 payers in Commercial LOB w.r.t. amount paid",
+                    None,
+                ],
+                "Description": [
+                    None,
+                    "Short description of the KPI/Metric/Feature",
+                    "Paid amount across LOB, Gender, Payer, Age",
+                    None,
+                    None,
+                    None,
+                    None,
+                    "Top 10 Payers for LOB w.r.t. Amount Paid",
+                    None,
+                ],
+                "__UNNAMED__2": [
+                    "Cuts with DRG(Consolidated)",
+                    None,
+                    "Month (ServiceDate)",
+                    "LineOfBusiness",
+                    "PayorID",
+                    "Gender",
+                    "Age(DOB)",
+                    "LineOfBusiness",
+                    "PayorID",
+                ],
+                "__UNNAMED__3": [
+                    "Metric",
+                    None,
+                    "sum(PaidAmount)",
+                    None,
+                    None,
+                    None,
+                    None,
+                    "sum(PaidAmount)",
+                    None,
+                ],
+            }
+        )
+
+        kpis = _read_tabular_kpis(frame, "demo.xlsx")
+
+        self.assertEqual(kpis[0].metric, "sum(PaidAmount)")
+        self.assertIn("Month (ServiceDate)", kpis[0].cuts)
+        self.assertIn("LineOfBusiness", kpis[0].cuts)
+        self.assertIn("PayorID", kpis[0].cuts)
+        self.assertIn("Age(DOB)", kpis[0].cuts)
+        self.assertIn("LOB = Medicare", kpis[0].cuts)
+        self.assertIn("Age > 50", kpis[0].cuts)
+        self.assertEqual(kpis[1].metric, "sum(PaidAmount)")
+        self.assertIn("LOB = Commercial", kpis[1].cuts)
 
     def test_list_workspace_files_reports_all_paths_without_generating_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1077,11 +1149,28 @@ diff --git a/model.sql b/model.sql
             self.assertEqual(result.current_feature, "Age")
             current = json.loads((root / result.current_json).read_text(encoding="utf-8"))
             self.assertEqual(current["answer_type"], "select_json_backed_option_or_custom_rule")
+            self.assertEqual(current["recommended_option_id"], "custom")
+            self.assertEqual(current["interaction_contract"]["display_mode"], "project_blocker_panel")
+            self.assertIs(current["interaction_contract"]["generic_answer_picker_allowed"], False)
+            self.assertEqual(_resolve_answer(current, "yes")["option_id"], "custom")
+            self.assertEqual(current["panel_contract"]["display_shape"], "full_kpi_truth_packet")
+            self.assertEqual(current["default_code_preference"], "sql")
+            self.assertEqual(current["kpi_source_truth"][0]["business_question"], "What is average patient age?")
             self.assertEqual(current["options"][0]["json_backed"], True)
             self.assertIn("derived_feature_option", current["options"][0])
+            self.assertIn("proof_packet", current["options"][0])
+            self.assertIn("query", current["options"][0])
+            self.assertIn("result_demo_table", current["options"][0])
             self.assertIn("derivation_reasoning", current["options"][0]["derived_feature_option"])
             markdown = (root / result.current_markdown).read_text(encoding="utf-8")
             self.assertIn("# Blocker Question Panel: Age", markdown)
+            self.assertIn("## KPI Source Truth", markdown)
+            self.assertIn("## Required User-Facing Ask", markdown)
+            self.assertIn("Recommended option id: `custom`", markdown)
+            self.assertIn("Do not state that another option is recommended", markdown)
+            self.assertIn("#### Option Proof Packet", markdown)
+            self.assertIn("Query for this option", markdown)
+            self.assertIn("Result demo shape", markdown)
             self.assertIn("```json", markdown)
 
     def test_blocker_question_panel_includes_physical_column_options_for_aliases(self):
@@ -1930,9 +2019,12 @@ diff --git a/model.sql b/model.sql
             self.assertIn("data-model.svg", generated)
             self.assertIn("data-model.mermaid.md", generated)
             self.assertIn("kpi_registry.xlsx", generated)
+            self.assertIn("kpi-proof-packet.md", generated)
+            self.assertIn("kpi-proof-packet.json", generated)
             manifest = json.loads((root / result.manifest_path).read_text(encoding="utf-8"))
             self.assertEqual(manifest["artifact_type"], "presentation_manifest.json")
             self.assertIn("data_model=", manifest["source_state"])
+            self.assertIn("kpi_proof_packet=generated", manifest["source_state"])
             svg = (
                 root
                 / "workspaces/demo/interns/reports/presentation/data-model.svg"

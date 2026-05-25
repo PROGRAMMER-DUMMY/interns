@@ -18,8 +18,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
+_BOOTSTRAP_ROOT = Path(__file__).resolve().parents[1]
+if str(_BOOTSTRAP_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BOOTSTRAP_ROOT))
+
+from core.paths import PROJECT_ROOT  # noqa: E402
+
+ROOT = PROJECT_ROOT
 
 
 REQUIRED_SCOPES = [

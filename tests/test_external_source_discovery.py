@@ -40,6 +40,7 @@ class ExternalSourceDiscoveryTests(unittest.TestCase):
             self.assertEqual(groups["warehouse/provider_delta"]["strategy"], "delta_external_table_inspection")
             self.assertEqual(groups["system/sessions.jsonl"]["strategy"], "exclude_system_state")
             draft = json.loads((repo / result.draft_selection_path).read_text(encoding="utf-8"))
+            self.assertEqual(draft["source_catalog_id"], "cold-storage")
             self.assertTrue(any(source["target_kind"] == "dataset" for source in draft["sources"]))
             self.assertTrue(any(source["target_kind"] == "doc" for source in draft["sources"]))
             self.assertTrue(

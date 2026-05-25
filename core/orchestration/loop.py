@@ -21,11 +21,13 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
+from core.paths import PROJECT_ROOT
+
+ROOT = PROJECT_ROOT
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from core.optimization.change_classifier import classify_diff, expected_reason
 from core.config import Config, load as load_config

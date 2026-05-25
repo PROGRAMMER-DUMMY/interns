@@ -1,0 +1,588 @@
+{
+  "version": 1,
+  "source": ".agents/tools.json",
+  "canonical_skills": "skills",
+  "policy": {
+    "tools_must_declare_required_skills": true,
+    "unknown_required_skills_are_invalid": true,
+    "agents_should_record_active_skills_in_trajectory": true
+  },
+  "routes": [
+    {
+      "tool": "list-workspace-files",
+      "command": "uv run list-workspace-files --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance"
+      ]
+    },
+    {
+      "tool": "prepare-workspace-selection",
+      "command": "uv run prepare-workspace-selection --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "clarify-ambiguity"
+      ]
+    },
+    {
+      "tool": "session-snapshot",
+      "command": "uv run session-snapshot <start|append|command|file-change|decision|verify|finish>",
+      "required_skills": [
+        "workspace-governance",
+        "evolution",
+        "stakeholder-memory"
+      ]
+    },
+    {
+      "tool": "onboard-workspace",
+      "command": "uv run onboard-workspace --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "task-onboarding",
+        "domain-model",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "kickstart-workspace",
+      "command": "uv run kickstart-workspace --workspace <workspace> --domain <domain>",
+      "required_skills": [
+        "workspace-governance",
+        "task-onboarding",
+        "grill-requirements",
+        "domain-model"
+      ]
+    },
+    {
+      "tool": "prepare-kpi-generation",
+      "command": "uv run prepare-kpi-generation --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "grill-requirements",
+        "stakeholder-memory",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "apply-kpi-generation-answer",
+      "command": "uv run apply-kpi-generation-answer --workspace <workspace> --answer <option_id_or_label>",
+      "required_skills": [
+        "grill-requirements",
+        "stakeholder-memory",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "finalize-kpi-generation",
+      "command": "uv run finalize-kpi-generation --workspace <workspace> --approve-final-preview",
+      "required_skills": [
+        "workspace-governance",
+        "stakeholder-memory",
+        "to-solution-brief",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "prepare-workspace-workflow",
+      "command": "uv run prepare-workspace-workflow --workspace <workspace> --mode <plan|local-safe|autopilot> --domain <domain>",
+      "required_skills": [
+        "workspace-governance",
+        "task-onboarding",
+        "data-engineering-pipeline-design",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "prepare-bronze-silver-standards",
+      "command": "uv run prepare-bronze-silver-standards --workspace <workspace> --domain <domain>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design"
+      ]
+    },
+    {
+      "tool": "workspace-flow",
+      "command": "uv run workspace-flow <start|status|answer|results>",
+      "required_skills": [
+        "workspace-governance",
+        "task-onboarding",
+        "data-engineering-pipeline-design",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "prepare-wiki-memory",
+      "command": "uv run prepare-wiki-memory --workspace <workspace> --domain <domain>",
+      "required_skills": [
+        "stakeholder-memory",
+        "evolution",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "validate-memory-health",
+      "command": "uv run validate-memory-health --workspace <workspace>",
+      "required_skills": [
+        "stakeholder-memory",
+        "evolution"
+      ]
+    },
+    {
+      "tool": "prepare-agent-benchmark",
+      "command": "uv run prepare-agent-benchmark --workspace <workspace> --domain <domain>",
+      "required_skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer",
+        "evolution"
+      ]
+    },
+    {
+      "tool": "validate-project-harness",
+      "command": "uv run validate-project-harness --workspace <workspace> --domain <domain>",
+      "required_skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer",
+        "evolution"
+      ]
+    },
+    {
+      "tool": "run-reliability-suite",
+      "command": "uv run run-reliability-suite --workspace <workspace> --domain <domain>",
+      "required_skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer",
+        "evolution"
+      ]
+    },
+    {
+      "tool": "run-ai-app-harness",
+      "command": "uv run run-ai-app-harness --workspace <workspace> --dataset <workspace>/interns/ai_harness/datasets/<suite>.jsonl",
+      "required_skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "run-ai-cli-harness",
+      "command": "uv run run-ai-cli-harness --workspace <workspace> --dataset <workspace>/interns/ai_cli_harness/datasets/<suite>.jsonl",
+      "required_skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "validate-workflow-guardrails",
+      "command": "uv run validate-workflow-guardrails --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer",
+        "evolution"
+      ]
+    },
+    {
+      "tool": "run-layered-pipeline-harness",
+      "command": "uv run run-layered-pipeline-harness --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design"
+      ]
+    },
+    {
+      "tool": "run-pipeline-execution-harness",
+      "command": "uv run run-pipeline-execution-harness --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design"
+      ]
+    },
+    {
+      "tool": "run-data-quality-harness",
+      "command": "uv run run-data-quality-harness --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design"
+      ]
+    },
+    {
+      "tool": "prepare-duplicate-review-panel",
+      "command": "uv run prepare-duplicate-review-panel --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "clarify-ambiguity"
+      ]
+    },
+    {
+      "tool": "apply-duplicate-review-answer",
+      "command": "uv run apply-duplicate-review-answer --workspace <workspace> --answer <option_id_or_label>",
+      "required_skills": [
+        "workspace-governance",
+        "stakeholder-memory",
+        "data-engineering-pipeline-design"
+      ]
+    },
+    {
+      "tool": "record-workspace-trajectory",
+      "command": "uv run record-workspace-trajectory --workspace <workspace> --event-type <type> --status <status> --summary <summary>",
+      "required_skills": [
+        "workspace-governance",
+        "evolution"
+      ]
+    },
+    {
+      "tool": "build-workspace-evidence-graph",
+      "command": "uv run build-workspace-evidence-graph --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "query-workspace-evidence-graph",
+      "command": "uv run query-workspace-evidence-graph --workspace <workspace> --term <term>",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "kpi-proof-packet",
+      "command": "uv run kpi-proof-packet --workspace <workspace> --domain <domain>",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model",
+        "workspace-kpi-query-optimizer",
+        "to-solution-brief"
+      ]
+    },
+    {
+      "tool": "discover-external-sources",
+      "command": "uv run discover-external-sources --workspace <workspace> --external-root <external_root>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "task-onboarding"
+      ]
+    },
+    {
+      "tool": "prepare-external-source-intake",
+      "command": "uv run prepare-external-source-intake --external-root <external_root> --proposed-workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "grill-requirements"
+      ]
+    },
+    {
+      "tool": "apply-external-source-intake",
+      "command": "uv run apply-external-source-intake --external-root <external_root> --proposed-workspace <workspace> --answer <option>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "stakeholder-memory"
+      ]
+    },
+    {
+      "tool": "prepare-data-model-generation",
+      "command": "uv run prepare-data-model-generation --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model",
+        "grill-requirements"
+      ]
+    },
+    {
+      "tool": "apply-data-model-answer",
+      "command": "uv run apply-data-model-answer --workspace <workspace> --answer <option_id_or_label>",
+      "required_skills": [
+        "domain-model",
+        "stakeholder-memory",
+        "grill-requirements"
+      ]
+    },
+    {
+      "tool": "finalize-data-model-generation",
+      "command": "uv run finalize-data-model-generation --workspace <workspace> --approve-final-preview",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model",
+        "to-solution-brief"
+      ]
+    },
+    {
+      "tool": "prepare-data-model-blocker-panel",
+      "command": "uv run prepare-data-model-blocker-panel --workspace <workspace>",
+      "required_skills": [
+        "domain-model",
+        "clarify-ambiguity",
+        "grill-requirements"
+      ]
+    },
+    {
+      "tool": "apply-data-model-blocker-answer",
+      "command": "uv run apply-data-model-blocker-answer --workspace <workspace> --answer <option_id_or_label>",
+      "required_skills": [
+        "domain-model",
+        "stakeholder-memory",
+        "grill-requirements"
+      ]
+    },
+    {
+      "tool": "export-data-model-diagram",
+      "command": "uv run export-data-model-diagram --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model"
+      ]
+    },
+    {
+      "tool": "export-kpi-registry-excel",
+      "command": "uv run export-kpi-registry-excel --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "export-workspace-presentation",
+      "command": "uv run export-workspace-presentation --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "resolve-kpi-features",
+      "command": "uv run resolve-kpi-features --workspace <workspace> --domain <domain> --include-candidates",
+      "required_skills": [
+        "domain-model",
+        "feature-derivation-library",
+        "workspace-kpi-query-optimizer",
+        "clarify-ambiguity"
+      ]
+    },
+    {
+      "tool": "apply-workspace-definition",
+      "command": "uv run resolve-kpi-features --workspace <workspace> --apply-workspace-definition --feature <feature> --definition <definition> --evidence-note <note>",
+      "required_skills": [
+        "domain-model",
+        "stakeholder-memory",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "prepare-kpi-blocker-panel",
+      "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
+      "required_skills": [
+        "domain-model",
+        "feature-derivation-library",
+        "workspace-kpi-query-optimizer",
+        "clarify-ambiguity"
+      ]
+    },
+    {
+      "tool": "apply-kpi-panel-answer",
+      "command": "uv run apply-kpi-panel-answer --workspace <workspace> --domain <domain> --answer <option_id_or_label>",
+      "required_skills": [
+        "domain-model",
+        "stakeholder-memory",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "generate-kpi-sql",
+      "command": "uv run generate-kpi-sql --workspace <workspace> --kpi-id <kpi_id>",
+      "required_skills": [
+        "domain-model",
+        "data-engineering-pipeline-design",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "plan-source-to-target",
+      "command": "uv run plan-source-to-target --workspace <workspace> --target-engine <sql|polars|pyspark|hybrid>",
+      "required_skills": [
+        "domain-model",
+        "data-engineering-pipeline-design",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "build-catalog-contract",
+      "command": "uv run build-catalog-contract --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model",
+        "data-engineering-pipeline-design"
+      ]
+    },
+    {
+      "tool": "build-source-family-contracts",
+      "command": "uv run build-source-family-contracts --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "domain-model"
+      ]
+    },
+    {
+      "tool": "prepare-data-engineering-route",
+      "command": "uv run prepare-data-engineering-route --workspace <workspace> --track <auto|kpi_only|etl|elt|medallion|oltp_ingestion|existing_gold_validation> --target-engine <sql|polars|pyspark|hybrid>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "domain-model"
+      ]
+    },
+    {
+      "tool": "prepare-pipeline-plan",
+      "command": "uv run prepare-pipeline-plan --workspace <workspace> --track <auto|kpi_only|etl|elt|medallion|oltp_ingestion|existing_gold_validation> --target-engine <sql|polars|pyspark|hybrid> --table-format <auto|delta|iceberg|local_parquet|warehouse_native|duckdb_view|csv>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "domain-model"
+      ]
+    },
+    {
+      "tool": "prepare-pipeline-format-panel",
+      "command": "uv run prepare-pipeline-format-panel --workspace <workspace>",
+      "required_skills": [
+        "data-engineering-pipeline-design",
+        "clarify-ambiguity"
+      ]
+    },
+    {
+      "tool": "apply-pipeline-format-answer",
+      "command": "uv run apply-pipeline-format-answer --workspace <workspace> --answer <option_id_or_label_or_format>",
+      "required_skills": [
+        "data-engineering-pipeline-design",
+        "stakeholder-memory"
+      ]
+    },
+    {
+      "tool": "prepare-pipeline-deployment-plan",
+      "command": "uv run prepare-pipeline-deployment-plan --workspace <workspace> --target <local|external|warehouse> --mode <dry-run|apply>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "databricks-access-gates"
+      ]
+    },
+    {
+      "tool": "apply-pipeline-decision",
+      "command": "uv run apply-pipeline-decision --workspace <workspace> --kpi-id <kpi_id> --percentage-denominator-scope <global_total|within_department|within_gender|within_visit_type|selected_population>",
+      "required_skills": [
+        "data-engineering-pipeline-design",
+        "stakeholder-memory"
+      ]
+    },
+    {
+      "tool": "generate-pipeline-sql",
+      "command": "uv run generate-pipeline-sql --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "domain-model"
+      ]
+    },
+    {
+      "tool": "context-router",
+      "command": "uv run context-router build --workspace <workspace> --task <task> --budget <small|standard|deep>",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model"
+      ]
+    },
+    {
+      "tool": "build-relationship-contracts",
+      "command": "uv run build-relationship-contracts --workspace <workspace>",
+      "required_skills": [
+        "domain-model",
+        "data-engineering-pipeline-design",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "derived-feature-markdown",
+      "command": "uv run derived-feature-markdown --workspace <workspace>",
+      "required_skills": [
+        "feature-derivation-library",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "blocker-question-panel",
+      "command": "uv run blocker-question-panel --workspace <workspace>",
+      "required_skills": [
+        "clarify-ambiguity",
+        "grill-requirements",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "validate-workspace-artifacts",
+      "command": "uv run validate-workspace-artifacts --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "prepare-workspace-bug-report",
+      "command": "uv run prepare-workspace-bug-report --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "evolution"
+      ]
+    },
+    {
+      "tool": "cleanup-workspace-references",
+      "command": "uv run cleanup-workspace-references --workspace <workspace> --all-references",
+      "required_skills": [
+        "workspace-governance"
+      ]
+    },
+    {
+      "tool": "profiler",
+      "command": "uv run python tools/profiler.py --input <path> --pct <pct> --engine auto --out <dir>",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model",
+        "task-onboarding"
+      ]
+    },
+    {
+      "tool": "optimizer-finder",
+      "command": "uv run python tools/optimizer_finder.py --target <path> --mode auto",
+      "required_skills": [
+        "workspace-kpi-query-optimizer",
+        "evolution"
+      ]
+    },
+    {
+      "tool": "methodology-parser",
+      "command": "uv run python tools/methodology_parser.py --doc <path> --out <schema.json>",
+      "required_skills": [
+        "domain-model",
+        "task-onboarding"
+      ]
+    },
+    {
+      "tool": "databricks-setup",
+      "command": "uv run python tools/databricks_setup.py",
+      "required_skills": [
+        "databricks-access-gates",
+        "workspace-governance"
+      ]
+    },
+    {
+      "tool": "generate-skill-adapters",
+      "command": "uv run generate-skill-adapters",
+      "required_skills": [
+        "workspace-governance"
+      ]
+    }
+  ]
+}

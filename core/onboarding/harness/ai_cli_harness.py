@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.paths import PROJECT_ROOT
 from core.onboarding.harness.workflow_guard_harness import WorkflowGuardHarness
 from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
@@ -198,7 +199,7 @@ class AICLIHarness:
             )
 
         start = time.time()
-        call = _call_stub(case) if target == "local_stub" else _call_cli(case, config)
+        call = _call_stub(case) if target == "local_stub" else _call_cli(case, config, self.repo_root)
         transcript = _transcript(case, call)
         transcript_path = run_dir / f"{case_id}.commands.jsonl"
         _write_transcript(transcript_path, transcript)
@@ -295,7 +296,7 @@ def _call_stub(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _call_cli(case: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+def _call_cli(case: dict[str, Any], config: dict[str, Any], repo_root: Path) -> dict[str, Any]:
     tool = str(config.get("cli_tool") or "")
     if not tool:
         return {"output": "", "commands": [], "error": "missing `cli_tool`"}
@@ -304,7 +305,7 @@ def _call_cli(case: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     try:
         result = subprocess.run(
             cmd,
-            cwd=Path.cwd(),
+            cwd=repo_root,
             capture_output=True,
             text=True,
             timeout=float(config.get("timeout_seconds") or 60),
@@ -545,7 +546,7 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
             continue
         data = json.loads(line)
         if not isinstance(data, dict):
-            raise ValueError(f"{_rel(path, Path.cwd())}:{idx} must be a JSON object")
+            raise ValueError(f"{_rel(path, PROJECT_ROOT)}:{idx} must be a JSON object")
         rows.append(data)
     return rows
 
@@ -570,7 +571,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the governed CLI-agent harness.")
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--dataset", required=True)
-    parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
     parser.add_argument("--config")
     parser.add_argument("--tags", default="")
     parser.add_argument("--allow-cli-exec", action="store_true")

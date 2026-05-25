@@ -30,9 +30,9 @@ dictionary evidence, or workspace business definition.
 Use the repo's machine-readable pattern/search implementation:
 
 ```text
-core/onboarding/derivation_patterns.json
-core/onboarding/derivation_search.py
-core/onboarding/kpi_feature_resolver.py
+core/onboarding/features/derivation_patterns.json
+core/onboarding/features/derivation_search.py
+core/onboarding/kpi/feature_resolver.py
 ```
 
 Use `resolve-kpi-features --include-candidates` to attach candidate patterns to unresolved KPI

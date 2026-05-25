@@ -25,6 +25,7 @@ class ProjectHarnessTests(unittest.TestCase):
             self.assertTrue(result.ok)
             self.assertGreaterEqual(result.score, 95)
             self.assertTrue(result.checks["workflow_guardrails"]["ok"])
+            self.assertEqual(result.checks["layered_pipeline"]["status"], "skipped")
             self.assertTrue(result.checks["evidence_graph"]["ok"])
             self.assertTrue((workspace / "interns" / "generated" / "evidence" / "project_harness.json").exists())
             self.assertTrue((workspace / "interns" / "reports" / "project_harness.md").exists())
@@ -60,6 +61,98 @@ class ProjectHarnessTests(unittest.TestCase):
                 result.next_commands,
             )
 
+    def test_project_harness_blocks_on_failed_pipeline_execution_harness_artifact(self):
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            _write_minimal_ready_workspace(workspace)
+            harness_dir = workspace / "interns" / "generated" / "evidence" / "pipeline_execution_harness"
+            harness_dir.mkdir(parents=True)
+            _write_json(
+                harness_dir / "current.json",
+                {
+                    "artifact_type": "pipeline_execution_harness/current.json",
+                    "ok": False,
+                    "status": "failed",
+                    "summary": {"passed_count": 3, "failed_count": 1},
+                },
+            )
+
+            result = ProjectHarness(root, "workspaces/demo", domain="healthcare").run()
+
+            self.assertFalse(result.ok)
+            check = result.checks["pipeline_execution_harness"]
+            self.assertEqual(check["status"], "failed")
+            self.assertFalse(check["ok"])
+            self.assertEqual(check["passed"], 3)
+            self.assertEqual(check["failed"], 1)
+            self.assertTrue(any("pipeline execution harness" in blocker for blocker in result.blockers))
+
+    def test_project_harness_blocks_when_required_pipeline_execution_harness_missing(self):
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            _write_minimal_ready_workspace(workspace)
+            contracts = workspace / "interns" / "generated" / "contracts"
+            _write_json(
+                contracts / "pipeline_plan.json",
+                {
+                    "artifact_type": "pipeline_plan.json",
+                    "status": "ready_for_generation",
+                    "selected_track": "medallion",
+                    "layers": [{"layer": "bronze", "objects": [{"target_object": "bronze.facts"}]}],
+                },
+            )
+
+            result = ProjectHarness(root, "workspaces/demo", domain="healthcare").run()
+
+            self.assertFalse(result.ok)
+            check = result.checks["pipeline_execution_harness"]
+            self.assertEqual(check["status"], "failed")
+            self.assertFalse(check["ok"])
+
+    def test_project_harness_blocks_on_failed_data_quality_harness_artifact(self):
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            _write_minimal_ready_workspace(workspace)
+            harness_dir = workspace / "interns" / "generated" / "evidence" / "data_quality_harness"
+            harness_dir.mkdir(parents=True)
+            _write_json(
+                harness_dir / "current.json",
+                {
+                    "artifact_type": "data_quality_harness/current.json",
+                    "ok": False,
+                    "status": "failed",
+                    "summary": {"passed_count": 5, "failed_count": 2},
+                },
+            )
+
+            result = ProjectHarness(root, "workspaces/demo", domain="healthcare").run()
+
+            self.assertFalse(result.ok)
+            check = result.checks["data_quality_harness"]
+            self.assertEqual(check["status"], "failed")
+            self.assertFalse(check["ok"])
+            self.assertEqual(check["passed"], 5)
+            self.assertEqual(check["failed"], 2)
+            self.assertTrue(any("data quality harness" in blocker for blocker in result.blockers))
+
     def test_validator_accepts_root_layout_when_inventory_proves_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -71,6 +164,67 @@ class ProjectHarnessTests(unittest.TestCase):
             self.assertTrue(result.ok)
             self.assertFalse(any("docs/ was not found" in warning for warning in result.warnings))
             self.assertFalse(any("datasets/ was not found" in warning for warning in result.warnings))
+
+    def test_validator_requires_pipeline_execution_and_data_quality_for_generated_pipeline_sql(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            _write_minimal_ready_workspace(workspace)
+            contracts = workspace / "interns" / "generated" / "contracts"
+            pipeline = workspace / "interns" / "generated" / "pipeline"
+            pipeline.mkdir(parents=True)
+            _write_json(
+                contracts / "catalog_contract.json",
+                {
+                    "artifact_type": "catalog_contract.json",
+                    "version": 1,
+                    "generated_by": "build-catalog-contract",
+                    "workspace": "workspaces/demo",
+                    "catalog": "local_workspace",
+                    "default_schema": "raw",
+                    "policy": {},
+                    "objects": [
+                        {
+                            "object_id": "raw__facts",
+                            "logical_name": "raw.facts",
+                            "layer": "raw",
+                            "dataset": "workspaces/demo/facts.csv",
+                            "columns": [{"name": "Id"}],
+                            "physical_bindings": [],
+                            "trust_state": "profile_backed",
+                        }
+                    ],
+                },
+            )
+            _write_json(
+                contracts / "pipeline_plan.json",
+                {
+                    "artifact_type": "pipeline_plan.json",
+                    "version": 1,
+                    "generated_by": "prepare-pipeline-plan",
+                    "workspace": "workspaces/demo",
+                    "selected_track": "medallion",
+                    "target_engine": "sql",
+                    "table_format": "local_parquet",
+                    "catalog_contract": "workspaces/demo/interns/generated/contracts/catalog_contract.json",
+                    "route_contract": "workspaces/demo/interns/generated/contracts/data_engineering_route.json",
+                    "policy": {},
+                    "layers": [{"layer": "bronze", "objects": [{"target_object": "bronze.facts"}]}],
+                    "quality_gates": [],
+                    "blockers": [],
+                    "status": "ready_for_generation",
+                },
+            )
+            (pipeline / "pipeline_layers.sql").write_text(
+                'CREATE OR REPLACE VIEW "bronze_facts" AS SELECT 1 AS Id;\n',
+                encoding="utf-8",
+            )
+
+            result = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+
+            self.assertFalse(result.ok)
+            self.assertTrue(any("pipeline_execution_harness" in error for error in result.errors))
+            self.assertTrue(any("data_quality_harness" in error for error in result.errors))
 
 
 def _write_minimal_ready_workspace(workspace: Path) -> None:

@@ -271,6 +271,10 @@ Before writing executable logic:
   or medallion layer is unproven;
 - record source-to-target assumptions for bronze/raw, silver/conformed, and gold/KPI outputs when
   ETL or medallion loading is requested;
+- ask the user which query/runtime language to use when it is not already specified. Acceptable
+  answers include `sql`, `polars`, `pyspark`, `sql+polars`, or another supported hybrid requested
+  by the user. Generate only the requested language/output, not parallel SQL, Polars, and PySpark
+  variants by default;
 - honor the requested target engine (`sql`, `polars`, `pyspark`, or hybrid) only when the repo has a
   supported generator or a reviewed solution brief for that target.
 
@@ -322,6 +326,17 @@ tools/
 Prefer existing project tools and generated artifacts over custom one-off scripts. Use the
 machine-readable registry in `.agents/tools.json` for routing, safety level, inputs, and expected
 outputs.
+
+Hard registry-read gate:
+
+- Before choosing any workflow route or next command, the active agent must have read
+  `.agents/tools.json`, `TOOLS.md`, or its generated adapter under `.agents/<tool>/SKILLS.md` in the
+  current session.
+- If the agent has not read the registry/adapter, it must stop, reread it, and restart route
+  selection instead of guessing from memory.
+- For an external profiled workspace with no KPI registry entries, do not run KPI feature
+  resolution first. Run `uv run build-source-family-contracts --workspace workspaces/<project>` and
+  review schema drift before `prepare-data-engineering-route` or medallion planning.
 
 For dataset questions, use profile-first evidence:
 

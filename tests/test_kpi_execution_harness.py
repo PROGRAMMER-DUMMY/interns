@@ -79,6 +79,64 @@ class KPIExecutionHarnessTests(unittest.TestCase):
             self.assertIn("conversion_rate_pct", sql)
             self.assertIn("workspaces/shop/orders.csv", sql)
 
+    def test_sql_generator_uses_workbook_sum_paidamount_semantics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            workspace.mkdir(parents=True)
+            generator = DuckDBKPISQLGenerator(root, "workspaces/demo")
+
+            sql = generator._result_view_sql(
+                {
+                    "name": "What is trend for amount paid for medicare LOB across gender and payer for patients above 50 years of age",
+                    "metric": "sum(PaidAmount)",
+                    "cuts": "Month (ServiceDate), LineOfBusiness, PayorID, Gender, Age(DOB), LOB = Medicare, Age > 50",
+                    "features": [
+                        {"feature": "paid", "source_columns": [{"column": "PaidAmount"}]},
+                        {"feature": "LOB", "source_columns": [{"column": "LineOfBusiness"}]},
+                        {"feature": "Payer", "source_columns": [{"column": "PayorID"}]},
+                        {"feature": "Gender", "source_columns": [{"column": "Gender"}]},
+                        {"feature": "Age"},
+                        {"feature": "Time", "source_columns": [{"column": "ServiceDate"}]},
+                    ],
+                },
+                "kpi_001",
+            )
+
+            self.assertIn('SUM("paid") AS paid_amount', sql)
+            self.assertIn("date_trunc('month'", sql)
+            self.assertIn("medicare", sql.lower())
+            self.assertIn('"Age" > 50', sql)
+            self.assertNotIn("encounter_count", sql)
+
+    def test_sql_generator_uses_department_name_when_workbook_requires_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            workspace.mkdir(parents=True)
+            generator = DuckDBKPISQLGenerator(root, "workspaces/demo")
+
+            sql = generator._result_view_sql(
+                {
+                    "name": "What is percentage share of lives by gender, age, visit type, department",
+                    "metric": "percentage of sum(distinct PatientID) / sum(distinct PatientID) for department",
+                    "cuts": "Department Name, VisitType, Gender, Age (DOB)",
+                    "features": [
+                        {"feature": "PatientID"},
+                        {"feature": "Department"},
+                        {"feature": "Name"},
+                        {"feature": "VisitType"},
+                        {"feature": "Gender"},
+                        {"feature": "Age"},
+                    ],
+                },
+                "kpi_002",
+            )
+
+            self.assertIn('"Name" AS department', sql)
+            self.assertIn('GROUP BY "Gender", "Age", "VisitType", "Name"', sql)
+            self.assertNotIn('"Department" AS department', sql)
+
     def test_harness_rejects_feature_view_without_final_result_view(self):
         try:
             import duckdb  # noqa: F401
@@ -118,6 +176,52 @@ class KPIExecutionHarnessTests(unittest.TestCase):
 
             self.assertFalse(result.ok)
             self.assertIn("placeholder", result.records[0].errors[0])
+
+    def test_harness_rejects_sql_that_ignores_workbook_metric_semantics(self):
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            solutions = workspace / "interns" / "generated" / "solutions"
+            contracts = workspace / "interns" / "generated" / "contracts"
+            solutions.mkdir(parents=True)
+            contracts.mkdir(parents=True)
+            (contracts / "kpi_registry.json").write_text(
+                json.dumps(
+                    {
+                        "kpis": [
+                            {
+                                "name": "What are top 10 payers in Commercial LOB w.r.t. amount paid",
+                                "description": "Top 10 Payers for LOB w.r.t. Amount Paid",
+                                "cuts": "LineOfBusiness, PayorID, LOB = Commercial",
+                                "metric": "sum(PaidAmount)",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (solutions / "kpi_001.sql").write_text(
+                "\n".join(
+                    [
+                        'CREATE OR REPLACE VIEW "kpi_001_results" AS',
+                        "SELECT 'PAYOR1' AS payer, COUNT(*) AS encounter_count;",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = KPIExecutionHarness(root, "workspaces/demo").run()
+
+            self.assertFalse(result.ok)
+            self.assertTrue(result.records[0].semantic_checks)
+            self.assertTrue(
+                any("sum(PaidAmount)" in error for error in result.records[0].errors)
+            )
 
     def test_validator_rejects_generated_sql_without_result_view(self):
         with tempfile.TemporaryDirectory() as tmp:

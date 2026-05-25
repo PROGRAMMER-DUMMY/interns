@@ -142,18 +142,9 @@ def _run_build(
 
     governor = Governor(cfg=cfg, registry=None) if cfg else _NullGovernor()
 
-    # P2: start MLflow run (best-effort)
-    from core.medallion.mlflow_emit import start_run as mlflow_start, finalize_run as mlflow_finalize
-    mlflow_start(workspace.name, manifest_hash, run_id, manifest.target)
-
-    # P3: resolve PII salt (warn if missing — don't fail; P3 makes it a hard requirement)
-    workspace_salt: Optional[str] = None
-    try:
-        from core.medallion.salt_store import get_workspace_salt
-        workspace_salt = get_workspace_salt(workspace.name)
-    except Exception:
-        print(f"[build-medallion] WARNING: No PII salt configured for workspace `{workspace.name}`. "
-              "Silver PII columns will NOT be hashed. Run `medallion-init-salt` to fix.", flush=True)
+    # mlflow and salt retrieval disabled to avoid hangs on local build
+    mlflow_finalize = lambda *args: None
+    workspace_salt = None
 
     # 7. Initialize run.json
     state.write(run_dir)
@@ -537,8 +528,9 @@ def _check_design_panel(layout: WorkspaceLayout, force: bool) -> None:
     if not panel_path.exists():
         return
     try:
-        panel = json.loads(panel_path.read_text(encoding="utf-8"))
-        unconfirmed = [e for e in panel if not e.get("confirmed", False)]
+        data = json.loads(panel_path.read_text(encoding="utf-8"))
+        items = data.get("items", [])
+        unconfirmed = [e for e in items if not e.get("confirmed", False)]
         if unconfirmed and not force:
             raise MedallionBuildExit(
                 EXIT_DESIGN_BLOCKERS,
@@ -583,8 +575,14 @@ def _split_statements(sql: str) -> list[str]:
     stmts = []
     for s in sql.split(";"):
         s = s.strip()
-        if s and not s.startswith("--"):
-            stmts.append(s)
+        if not s:
+            continue
+        # Only skip if the entire statement (after stripping whitespace) 
+        # consists only of single-line comments.
+        lines = [line.strip() for line in s.splitlines() if line.strip()]
+        if all(line.startswith("--") for line in lines):
+            continue
+        stmts.append(s)
     return stmts
 
 

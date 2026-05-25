@@ -8,9 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+_BOOTSTRAP_ROOT = Path(__file__).resolve().parents[1]
+if str(_BOOTSTRAP_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BOOTSTRAP_ROOT))
 
-DEFAULT_SESSION_DIR = Path(".agents") / "sessions" / "current"
-SESSION_ROOT = Path(".agents") / "sessions"
+from core.paths import PROJECT_ROOT  # noqa: E402
+
+SESSION_ROOT = PROJECT_ROOT / ".agents" / "sessions"
+DEFAULT_SESSION_DIR = SESSION_ROOT / "current"
 ALIAS_DIR = SESSION_ROOT / "_aliases"
 CURRENT_SESSION_POINTER = SESSION_ROOT / "current_session.txt"
 SECRET_PATTERNS = [
@@ -1055,7 +1060,10 @@ def _session_dir_arg(repo_root: Path, args: argparse.Namespace) -> Path:
     if getattr(args, "name", ""):
         return _resolve_named_session_dir(repo_root, args.name)
     value = getattr(args, "session_dir", "")
-    return Path(value) if value else DEFAULT_SESSION_DIR
+    if not value:
+        return DEFAULT_SESSION_DIR
+    path = Path(value).expanduser()
+    return path.resolve() if path.is_absolute() else (repo_root / path).resolve()
 
 
 def _add_session_name(parser: argparse.ArgumentParser) -> None:
@@ -1111,7 +1119,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     args = parser.parse_args(argv)
-    repo_root = Path.cwd().resolve()
+    repo_root = PROJECT_ROOT
 
     if args.action == "start":
         if args.name and not args.session_dir:

@@ -13,16 +13,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.paths import PROJECT_ROOT
+from core.onboarding.bronze_silver_standards import BronzeSilverStandardsBuilder
+from core.onboarding.data_quality import DataQualityHarness, DuplicateDecisionRecorder, DuplicateReviewPanel
 from core.onboarding.harness.trajectory_recorder import record_trajectory_event_safe
 from core.onboarding.kpi.blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
 from core.onboarding.kpi.execution_harness import KPIExecutionHarness
 from core.onboarding.kpi.generation_workflow import KPIGenerationWorkflow
 from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator
+from core.onboarding.pipeline_plan import DataEngineeringRoutePlanner
 from core.onboarding.relationships.contracts import RelationshipContractBuilder
 from core.onboarding.relationships.source_to_target_planner import SourceToTargetPlanner
 from core.onboarding.workspace.onboarding import WorkspaceOnboarder
 from core.onboarding.workspace.validation import WorkspaceArtifactValidator
-from core.presentation.console_tables import render_query_result_table
+from core.onboarding.workspace.workflow import MODES as ORCHESTRATION_MODES
+from core.onboarding.workspace.workflow import WorkspaceWorkflowOrchestrator
+from core.presentation.console_tables import render_markdown_table, render_query_result_table
 from core.storage.workspace_layout import WorkspaceLayout
 from tools.list_workspace_files import list_workspace_files
 
@@ -54,13 +60,17 @@ class WorkspaceFlow:
         *,
         domain: str = "healthcare",
         session_id: str = "",
+        orchestration_mode: str = "local-safe",
     ) -> None:
+        if orchestration_mode not in ORCHESTRATION_MODES:
+            raise ValueError(f"unsupported orchestration mode: {orchestration_mode}")
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
         self.workspace_rel = _rel(self.workspace, self.repo_root)
         self.layout = WorkspaceLayout(project_root=self.workspace)
         self.domain = domain
         self.session_id = session_id or _new_session_id()
+        self.orchestration_mode = orchestration_mode
 
     @classmethod
     def from_session(
@@ -75,17 +85,29 @@ class WorkspaceFlow:
             state["workspace"],
             domain=state.get("domain", "healthcare"),
             session_id=session_id,
+            orchestration_mode=state.get("orchestration_mode", "local-safe"),
         )
 
-    def start(self, *, intent: str = "kpi_generation") -> WorkspaceFlowResult:
+    def start(self, *, intent: str = "kpi_generation", mode: str | None = None) -> WorkspaceFlowResult:
         self._validate_workspace()
+        if mode is not None:
+            if mode not in ORCHESTRATION_MODES:
+                raise ValueError(f"unsupported orchestration mode: {mode}")
+            self.orchestration_mode = mode
         if intent not in INTENTS:
             raise ValueError(f"unsupported intent: {intent}")
         self.layout.ensure_runtime_dirs()
         state = self._base_state(intent)
-        self._record_event("workflow_start", "running", f"Started workspace-flow with intent `{intent}`.")
+        self._record_event(
+            "workflow_start",
+            "running",
+            f"Started workspace-flow with intent `{intent}` and mode `{self.orchestration_mode}`.",
+        )
         listing = list_workspace_files(self.repo_root, self.workspace_rel).to_dict()
         self._record_step(state, "list_workspace_files", "ok", {"file_count": len(listing.get("files", []))})
+
+        if intent != "kpi_generation" and self.orchestration_mode == "plan":
+            return self._workflow_checkpoint(state, mode="plan")
 
         if intent == "kpi_generation":
             result = KPIGenerationWorkflow(self.repo_root, self.workspace_rel).prepare()
@@ -152,6 +174,14 @@ class WorkspaceFlow:
             self._record_step(state, "apply_kpi_panel_answer", "ok", result.summary(), decision=answer)
             return self._advance_until_stop(state)
 
+        if source == "duplicate_review":
+            result = DuplicateDecisionRecorder(self.repo_root, self.workspace_rel).apply(
+                answer,
+                custom_rule=custom_definition or evidence_note,
+            )
+            self._record_step(state, "apply_duplicate_review_answer", "ok", result, decision=answer)
+            return self._advance_until_stop(state)
+
         raise ValueError("current workflow stage is not waiting for a supported answer")
 
     def status(self) -> WorkspaceFlowResult:
@@ -182,6 +212,47 @@ class WorkspaceFlow:
             onboarding = WorkspaceOnboarder(self.repo_root, self.workspace_rel).run()
             self._record_step(state, "onboard_workspace", "ok", onboarding.summary())
 
+        if self.orchestration_mode == "plan":
+            return self._workflow_checkpoint(state, mode="plan")
+
+        standards = BronzeSilverStandardsBuilder(self.repo_root, self.workspace_rel, domain=self.domain).build()
+        self._record_step(state, "prepare_bronze_silver_standards", "ok", standards.summary())
+        data_quality = self._run_data_quality_gate(state)
+        if data_quality.get("blocked"):
+            orchestration_context = self._prepare_layer_route(
+                state,
+                data_quality=data_quality.get("harness", {}),
+            )
+            orchestration_context["blocked_before"] = "kpi_blocker"
+            duplicate = data_quality["duplicate_review"]
+            panel = _read_json(self.repo_root / duplicate["current_json_path"])
+            if self.orchestration_mode == "autopilot" and _safe_duplicate_option(panel):
+                result = DuplicateDecisionRecorder(self.repo_root, self.workspace_rel).apply("option_a")
+                self._record_step(state, "apply_duplicate_review_answer", "ok", result, decision="option_a")
+                return self._advance_until_stop(state)
+            return self._save_panel(
+                state,
+                panel=_compact_panel(
+                    stage="data_quality_duplicate_review",
+                    status="needs_user_answer",
+                    source_panel=panel,
+                    instruction=(
+                        "Data quality runs immediately after onboarding. Resolve this duplicate/grain "
+                        "decision before KPI blocker resolution or executable generation continues."
+                    ),
+                    artifact_paths=[
+                        data_quality["harness"]["current_json_path"],
+                        data_quality["harness"]["current_markdown_path"],
+                        duplicate["current_json_path"],
+                        duplicate["current_markdown_path"],
+                    ],
+                    orchestration_context=orchestration_context,
+                ),
+                source="duplicate_review",
+            )
+
+        orchestration_context = self._prepare_layer_route(state, data_quality=data_quality.get("harness", {}))
+
         prepared = prepare_kpi_blocker_panel(
             self.repo_root,
             self.workspace_rel,
@@ -191,6 +262,7 @@ class WorkspaceFlow:
         self._record_step(state, "prepare_kpi_blocker_panel", "ok", prepared.summary())
         panel = _read_json(self.repo_root / prepared.question_panel_path)
         if panel.get("status") == "needs_user_answer":
+            resolution_review = _build_kpi_resolution_review(self.repo_root, self.workspace_rel)
             return self._save_panel(
                 state,
                 panel=_compact_panel(
@@ -199,6 +271,8 @@ class WorkspaceFlow:
                     source_panel=panel,
                     instruction=_panel_instruction(panel),
                     artifact_paths=[prepared.question_panel_path, prepared.question_panel_markdown_path],
+                    resolution_review=resolution_review,
+                    orchestration_context=orchestration_context,
                 ),
                 source="kpi_blocker",
             )
@@ -292,12 +366,85 @@ class WorkspaceFlow:
                 ],
                 "summary": {
                     "generated_kpi_count": len(generated),
+                    "orchestration": orchestration_context,
                     "validation": validation.summary(),
                     "results": preview,
                 },
             },
             source="complete",
         )
+
+    def _workflow_checkpoint(self, state: dict[str, Any], *, mode: str) -> WorkspaceFlowResult:
+        checkpoint = WorkspaceWorkflowOrchestrator(
+            self.repo_root,
+            self.workspace_rel,
+            domain=self.domain,
+            mode=mode,
+        ).prepare()
+        self._record_step(state, "prepare_workspace_workflow", "ok", checkpoint.summary())
+        panel = _read_json(self.repo_root / checkpoint.current_json_path)
+        return self._save_panel(
+            state,
+            panel={
+                "stage": "workflow_checkpoint",
+                "status": "needs_user_choice",
+                "instruction": "Choose advisory planning, local-safe orchestration, or bounded autopilot for this workspace.",
+                "question": "Which orchestration mode should run next?",
+                "options": panel.get("options", []),
+                "recommended_option_id": panel.get("recommended_option_id", ""),
+                "why": panel.get("recommended_answer", ""),
+                "artifact_paths": [checkpoint.current_json_path, checkpoint.current_markdown_path],
+                "summary": checkpoint.summary(),
+            },
+            source="workflow_checkpoint",
+        )
+
+    def _run_data_quality_gate(self, state: dict[str, Any]) -> dict[str, Any]:
+        harness = DataQualityHarness(self.repo_root, self.workspace_rel).run()
+        self._record_step(
+            state,
+            "run_data_quality_harness",
+            "ok" if harness.ok else "blocked",
+            harness.summary(),
+            validation="run-data-quality-harness",
+        )
+        result: dict[str, Any] = {"harness": harness.summary(), "blocked": not harness.ok}
+        if harness.ok:
+            return result
+        duplicate = DuplicateReviewPanel(self.repo_root, self.workspace_rel).prepare()
+        self._record_step(
+            state,
+            "prepare_duplicate_review_panel",
+            "ok",
+            duplicate.summary(),
+        )
+        result["duplicate_review"] = duplicate.summary()
+        result["orchestration_context"] = {
+            "mode": self.orchestration_mode,
+            "data_quality": harness.summary(),
+            "blocked_before": "kpi_blocker",
+        }
+        return result
+
+    def _prepare_layer_route(self, state: dict[str, Any], *, data_quality: dict[str, Any]) -> dict[str, Any]:
+        route = DataEngineeringRoutePlanner(
+            self.repo_root,
+            self.workspace_rel,
+            track="auto",
+            target_engine="sql",
+        ).build()
+        self._record_step(
+            state,
+            "prepare_data_engineering_route",
+            "ok",
+            route.summary(),
+        )
+        return {
+            "mode": self.orchestration_mode,
+            "data_quality": data_quality,
+            "layer_route": route.summary(),
+            "available_modes": sorted(ORCHESTRATION_MODES),
+        }
 
     def _write_result_preview(self, *, preview_rows: int) -> dict[str, Any]:
         import duckdb
@@ -371,6 +518,7 @@ class WorkspaceFlow:
             "workspace": self.workspace_rel,
             "domain": self.domain,
             "intent": intent,
+            "orchestration_mode": self.orchestration_mode,
             "created_at": _now(),
             "updated_at": _now(),
             "status": "running",
@@ -497,8 +645,10 @@ def _compact_panel(
     source_panel: dict[str, Any],
     instruction: str,
     artifact_paths: list[str],
+    resolution_review: dict[str, Any] | None = None,
+    orchestration_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    panel = {
         "stage": stage,
         "status": status,
         "instruction": instruction,
@@ -513,6 +663,12 @@ def _compact_panel(
             if key in source_panel
         },
     }
+    if orchestration_context:
+        panel["orchestration_context"] = orchestration_context
+    if resolution_review:
+        panel["resolution_review"] = resolution_review
+        panel["hidden_panel_harness"] = _build_hidden_panel_harness(panel, resolution_review)
+    return panel
 
 
 def _render_panel_markdown(panel: dict[str, Any]) -> str:
@@ -528,6 +684,22 @@ def _render_panel_markdown(panel: dict[str, Any]) -> str:
         str(panel.get("instruction", "")),
         "",
     ]
+    if panel.get("resolution_review"):
+        lines.extend(_render_resolution_review(panel["resolution_review"]))
+    if panel.get("orchestration_context"):
+        context = panel["orchestration_context"]
+        route = context.get("layer_route") or {}
+        data_quality = context.get("data_quality") or {}
+        lines.extend(
+            [
+                "## Orchestration Context",
+                "",
+                f"- Mode: `{context.get('mode', '')}`",
+                f"- Data quality status: `{data_quality.get('status', '')}`",
+                f"- Layer route: `{route.get('selected_track', '')}` from `{route.get('start_layer', '')}`",
+                "",
+            ]
+        )
     if panel.get("question"):
         lines.extend(["## Question", "", str(panel.get("question", "")), ""])
     if panel.get("options"):
@@ -548,6 +720,202 @@ def _render_panel_markdown(panel: dict[str, Any]) -> str:
         lines.extend(f"- `{path}`" for path in panel.get("artifact_paths", []))
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _build_kpi_resolution_review(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
+    workspace = repo_root / workspace_rel
+    mapping = _read_json(workspace / "interns" / "generated" / "contracts" / "kpi_feature_mapping.json")
+    registry = _read_json(workspace / "interns" / "generated" / "contracts" / "kpi_registry.json")
+    source_kpis = mapping.get("kpis") or registry.get("kpis") or []
+    kpis = []
+    for idx, kpi in enumerate(source_kpis, start=1):
+        kpi_id = str(kpi.get("kpi_id") or f"kpi_{idx:03d}")
+        metric = str(kpi.get("metric") or "")
+        cuts = str(kpi.get("cuts") or "")
+        filters = _extract_source_filters(kpi.get("name", ""), cuts)
+        features = kpi.get("features") or []
+        kpis.append(
+            {
+                "kpi_id": kpi_id,
+                "source_question": str(kpi.get("name") or kpi.get("business_question") or ""),
+                "source_description": str(kpi.get("description") or ""),
+                "metric": metric,
+                "cuts_and_grain": cuts,
+                "filters": filters,
+                "resolved_source_logic": _summarize_source_logic(features),
+                "status": str(kpi.get("status") or "unknown"),
+                "terms": _term_rows(features),
+            }
+        )
+    return {
+        "title": "KPI Resolution Review",
+        "source_of_truth": _source_of_truth(source_kpis),
+        "source_truth_rule": (
+            "KPI question, metric, filters, cuts, and grain from the source workbook/registry "
+            "are absolute truth. Do not rewrite or compact them during resolution."
+        ),
+        "required_visible_sections": [
+            "source question",
+            "metric",
+            "cuts and grain",
+            "filters",
+            "resolved source logic",
+            "status",
+            "blocker question",
+        ],
+        "kpis": kpis,
+    }
+
+
+def _render_resolution_review(review: dict[str, Any]) -> list[str]:
+    rows = [
+        [
+            item.get("kpi_id", ""),
+            item.get("source_question", ""),
+            item.get("metric", ""),
+            item.get("cuts_and_grain", ""),
+            ", ".join(item.get("filters") or []) or "None stated",
+            item.get("resolved_source_logic", ""),
+            item.get("status", ""),
+        ]
+        for item in review.get("kpis") or []
+    ]
+    lines = [
+        f"## {review.get('title', 'KPI Resolution Review')}",
+        "",
+        f"- Source of truth: `{review.get('source_of_truth', '')}`",
+        f"- Rule: {review.get('source_truth_rule', '')}",
+        "",
+        render_markdown_table(
+            [
+                "KPI",
+                "Workbook Question",
+                "Metric From Workbook",
+                "Cuts / Grain From Workbook",
+                "Filters",
+                "Resolved Source Logic",
+                "Status",
+            ],
+            rows,
+        ),
+        "",
+    ]
+    for item in review.get("kpis") or []:
+        if not item.get("terms"):
+            continue
+        lines.extend(
+            [
+                f"### {item.get('kpi_id', '')} Resolved Source Mapping",
+                "",
+                render_markdown_table(
+                    ["Business Term", "Resolved Column / Formula", "Source Dataset", "Proof Status"],
+                    [
+                        [
+                            term.get("feature", ""),
+                            term.get("resolved_as", ""),
+                            term.get("dataset", ""),
+                            term.get("proof_status", ""),
+                        ]
+                        for term in item.get("terms") or []
+                    ],
+                ),
+                "",
+            ]
+        )
+    return lines
+
+
+def _build_hidden_panel_harness(panel: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
+    checks = []
+    for kpi in review.get("kpis") or []:
+        checks.extend(
+            [
+                _panel_check(kpi, "source_question_visible", bool(kpi.get("source_question"))),
+                _panel_check(kpi, "metric_visible", bool(kpi.get("metric"))),
+                _panel_check(kpi, "cuts_or_grain_visible", bool(kpi.get("cuts_and_grain"))),
+                _panel_check(kpi, "resolved_source_logic_visible", bool(kpi.get("resolved_source_logic"))),
+                _panel_check(kpi, "status_visible", bool(kpi.get("status"))),
+            ]
+        )
+    checks.append(
+        {
+            "id": "not_compact_question_only",
+            "passed": bool(review.get("kpis")) and bool(panel.get("question")) and bool(panel.get("options")),
+            "requirement": "Panel keeps the answer picker but also includes a full KPI resolution review.",
+        }
+    )
+    return {
+        "hidden": True,
+        "purpose": "Detect CLI regressions that shrink KPI resolution to a one-line question/answer prompt.",
+        "passed": all(check["passed"] for check in checks),
+        "checks": checks,
+    }
+
+
+def _panel_check(kpi: dict[str, Any], check_id: str, passed: bool) -> dict[str, Any]:
+    return {
+        "id": f"{kpi.get('kpi_id', 'unknown')}_{check_id}",
+        "passed": passed,
+        "requirement": check_id.replace("_", " "),
+    }
+
+
+def _source_of_truth(kpis: list[dict[str, Any]]) -> str:
+    for kpi in kpis:
+        source = str(kpi.get("source") or "")
+        if source:
+            return source
+    return "kpi_registry.json"
+
+
+def _extract_source_filters(question: str, cuts: str) -> list[str]:
+    filters = []
+    for part in str(cuts).split(","):
+        cleaned = part.strip()
+        if any(token in cleaned for token in ("=", ">", "<")):
+            filters.append(cleaned)
+    lowered = str(question).lower()
+    if "medicare" in lowered and not any("medicare" in item.lower() for item in filters):
+        filters.append("LOB = Medicare")
+    if "commercial" in lowered and not any("commercial" in item.lower() for item in filters):
+        filters.append("LOB = Commercial")
+    if "above 50" in lowered and not any("age" in item.lower() and "50" in item for item in filters):
+        filters.append("Age > 50")
+    if "top 10" in lowered and not any("top 10" in item.lower() for item in filters):
+        filters.append("Top 10")
+    return filters
+
+
+def _summarize_source_logic(features: list[dict[str, Any]]) -> str:
+    pieces = []
+    for feature in features:
+        name = str(feature.get("feature") or "")
+        columns = feature.get("source_columns") or []
+        if not columns:
+            if feature.get("formula"):
+                pieces.append(f"{name} via formula")
+            continue
+        column = columns[0]
+        pieces.append(f"{name} -> {Path(str(column.get('dataset') or '')).name}.{column.get('column', '')}")
+    return "; ".join(pieces[:8])
+
+
+def _term_rows(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for feature in features:
+        columns = feature.get("source_columns") or []
+        column = columns[0] if columns else {}
+        dataset = Path(str(column.get("dataset") or column.get("source") or "")).name
+        resolved = str(column.get("column") or feature.get("formula") or feature.get("resolution_type") or "")
+        rows.append(
+            {
+                "feature": str(feature.get("feature") or ""),
+                "resolved_as": resolved,
+                "dataset": dataset,
+                "proof_status": str(feature.get("state") or feature.get("resolution_type") or ""),
+            }
+        )
+    return rows
 
 
 def _render_results_markdown(payload: dict[str, Any]) -> str:
@@ -608,6 +976,14 @@ def _panel_instruction(panel: dict[str, Any]) -> str:
     return str(panel.get("instruction") or panel.get("recommended_answer") or "Choose an option.")
 
 
+def _safe_duplicate_option(panel: dict[str, Any]) -> bool:
+    recommended = str(panel.get("recommended_option_id") or "")
+    for option in panel.get("options") or []:
+        if option.get("option_id") == recommended:
+            return option.get("action") == "preserve"
+    return False
+
+
 def _next_step(panel: dict[str, Any]) -> str:
     if panel.get("status") == "needs_user_answer":
         return "Answer this panel with `workspace-flow answer --session <id> --answer <option>`."
@@ -631,15 +1007,37 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
+    markdown_path = repo_root / result.current_markdown_path
+    if markdown_path.exists():
+        print(markdown_path.read_text(encoding="utf-8").rstrip())
+    else:
+        print(f"# Workspace Flow: {result.stage}")
+        print("")
+        print(f"- Workspace: `{result.workspace}`")
+        print(f"- Status: `{result.status}`")
+    print("")
+    print("## Next Step")
+    print("")
+    print(result.next_step)
+    print("")
+    print("## Panel Artifacts")
+    print("")
+    print(f"- JSON: `{result.current_panel_path}`")
+    print(f"- Markdown: `{result.current_markdown_path}`")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="workspace-flow")
-    parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
+    parser.add_argument("--json", action="store_true", help="Print the machine-readable result summary only.")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     start = sub.add_parser("start")
     start.add_argument("--workspace", required=True)
     start.add_argument("--domain", default="healthcare")
     start.add_argument("--intent", choices=sorted(INTENTS), default="kpi_generation")
+    start.add_argument("--mode", choices=sorted(ORCHESTRATION_MODES), default="local-safe")
 
     status = sub.add_parser("status")
     status.add_argument("--session", required=True)
@@ -660,6 +1058,7 @@ def main(argv: list[str] | None = None) -> int:
             args.repo_root,
             args.workspace,
             domain=args.domain,
+            orchestration_mode=args.mode,
         ).start(intent=args.intent)
     elif args.cmd == "status":
         result = WorkspaceFlow.from_session(args.repo_root, args.session).status()
@@ -675,7 +1074,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         raise SystemExit(2)
-    print(json.dumps(result.summary(), indent=2))
+    if args.json:
+        print(json.dumps(result.summary(), indent=2))
+    else:
+        _print_cli_panel(Path(args.repo_root).resolve(), result)
     return 0
 
 

@@ -10,12 +10,66 @@ from core.onboarding.memory.workspace_definitions import (
     apply_workspace_definitions_to_mapping,
     apply_workspace_definition_to_mapping,
     load_workspace_definitions,
+    _resolve_source_column,
     upsert_workspace_definition,
 )
 from core.storage.workspace_layout import WorkspaceLayout
 
 
 class WorkspaceDefinitionTests(unittest.TestCase):
+    def test_resolve_source_column_preserves_nested_csv_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            dataset_dir = workspace / "datasets" / "EMR" / "hospital-a"
+            dataset_dir.mkdir(parents=True)
+            dataset = dataset_dir / "transactions.csv"
+            dataset.write_text("LineOfBusiness\nMedicare\n", encoding="utf-8")
+            layout = WorkspaceLayout(project_root=workspace)
+
+            resolved = _resolve_source_column(
+                "workspaces/demo/datasets/EMR/hospital-a/transactions.csv.LineOfBusiness",
+                layout,
+            )
+
+            self.assertEqual(
+                resolved["dataset"],
+                "workspaces/demo/datasets/EMR/hospital-a/transactions.csv",
+            )
+            self.assertEqual(resolved["column"], "LineOfBusiness")
+
+    def test_resolve_source_column_finds_allowed_nested_table_shorthand(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            dataset_dir = workspace / "datasets" / "EMR" / "hospital-a"
+            dataset_dir.mkdir(parents=True)
+            (dataset_dir / "transactions.csv").write_text("LineOfBusiness\nMedicare\n", encoding="utf-8")
+            settings = workspace / "interns" / "state" / "workspace_settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text(
+                json.dumps(
+                    {
+                        "dataset_allowlist": [
+                            {
+                                "type": "workspace_relative",
+                                "path": "datasets/EMR/hospital-a",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            layout = WorkspaceLayout(project_root=workspace)
+
+            resolved = _resolve_source_column("transactions.LineOfBusiness", layout)
+
+            self.assertEqual(
+                resolved["dataset"],
+                "workspaces/demo/datasets/EMR/hospital-a/transactions.csv",
+            )
+            self.assertEqual(resolved["column"], "LineOfBusiness")
+
     def test_upsert_workspace_definition_replaces_by_normalized_feature(self):
         definitions = {
             "version": 1,

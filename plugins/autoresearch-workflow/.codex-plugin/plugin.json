@@ -1,0 +1,23 @@
+{
+  "name": "autoresearch-workflow",
+  "version": "0.1.0",
+  "description": "Governed workspace-flow skills for Autoresearch data-engineering workspaces.",
+  "author": {
+    "name": "Autoresearch"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Autoresearch Workflow",
+    "shortDescription": "Run governed workspace-flow sessions from Codex.",
+    "longDescription": "Packages the Autoresearch workflow operator guidance for workspace-flow, session snapshots, validation gates, and external chat approval bridges.",
+    "developerName": "Autoresearch",
+    "category": "Productivity",
+    "capabilities": [
+      "workspace-flow",
+      "session-snapshot",
+      "guardrail-validation"
+    ],
+    "defaultPrompt": "Use the Autoresearch workflow operator skill. Start with workspace selection, use workspace-flow as the canonical API, and keep external integrations as thin adapters."
+  },
+  "mcpServers": "./.mcp.json"
+}

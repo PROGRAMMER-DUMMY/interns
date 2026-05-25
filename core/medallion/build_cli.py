@@ -10,6 +10,8 @@ import json
 import sys
 from pathlib import Path
 
+from core.paths import PROJECT_ROOT
+
 from core.medallion.build import (
     build_medallion,
     MedallionBuildExit,
@@ -67,7 +69,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--repo-root", default=None,
-        help="Repository root. Defaults to current working directory.",
+        help="Repository root. Defaults to detected project root.",
     )
     parser.add_argument(
         "--target", default=None, choices=["duckdb", "delta", "auto"],
@@ -98,7 +100,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    repo_root = Path(args.repo_root).resolve() if args.repo_root else Path.cwd().resolve()
+    repo_root = Path(args.repo_root).resolve() if args.repo_root else PROJECT_ROOT
     workspace = (
         (repo_root / args.workspace).resolve()
         if not Path(args.workspace).is_absolute()

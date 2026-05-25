@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.paths import PROJECT_ROOT
 from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -310,7 +311,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--render-only", action="store_true")
     args = parser.parse_args(argv)
 
-    recorder = WorkspaceTrajectoryRecorder(Path.cwd(), args.workspace)
+    recorder = WorkspaceTrajectoryRecorder(PROJECT_ROOT, args.workspace)
     if args.render_only:
         result = recorder.render()
     else:

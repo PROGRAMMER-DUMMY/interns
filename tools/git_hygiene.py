@@ -4,9 +4,16 @@ from __future__ import annotations
 import argparse
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+_BOOTSTRAP_ROOT = Path(__file__).resolve().parents[1]
+if str(_BOOTSTRAP_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BOOTSTRAP_ROOT))
+
+from core.paths import PROJECT_ROOT  # noqa: E402
 
 DEFAULT_MAX_BYTES = 25 * 1024 * 1024
 
@@ -176,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    repo_root = Path.cwd().resolve()
+    repo_root = PROJECT_ROOT
     max_bytes = int(args.max_mb * 1024 * 1024)
     paths = collect_all_paths(repo_root) if args.all else collect_staged_paths(repo_root)
     issues = validate_paths(paths, repo_root=repo_root, max_bytes=max_bytes)

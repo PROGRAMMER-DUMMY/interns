@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.paths import PROJECT_ROOT
 from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -475,7 +476,7 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
             continue
         data = json.loads(line)
         if not isinstance(data, dict):
-            raise ValueError(f"{_rel(path, Path.cwd())}:{idx} must be a JSON object")
+            raise ValueError(f"{_rel(path, PROJECT_ROOT)}:{idx} must be a JSON object")
         cases.append(data)
     return cases
 
@@ -889,7 +890,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the dependency-free AI application harness.")
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--dataset", required=True)
-    parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
     parser.add_argument("--config")
     parser.add_argument("--tags", default="", help="Comma-separated tag filter.")
     parser.add_argument("--allow-remote-ai", action="store_true")

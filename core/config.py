@@ -11,6 +11,7 @@ from pathlib import Path
 
 import toml
 
+from core.paths import PROJECT_ROOT
 
 @dataclass
 class DatabricksConfig:
@@ -52,7 +53,7 @@ class DatabricksConfig:
             http_timeout_sec=block.get("http_timeout_sec", 60),
         )
 
-ROOT = Path(__file__).parent.parent
+ROOT = PROJECT_ROOT
 _LOCK_PATH = ROOT / "config" / "lock.toml"
 _AGENTS_PATH = ROOT / "config" / "agents.toml"
 

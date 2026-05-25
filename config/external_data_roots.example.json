@@ -22,7 +22,7 @@
     "cms_cold_storage": {
       "description": "Huge external CMS data root. Keep raw files outside the repo and require a workspace allowlist before reads or profiling.",
       "local_root_env": "CMS_COLD_STORAGE_ROOT",
-      "example_local_root": "D:/Cold_Storage",
+      "example_local_root": "<external-data-root>",
       "allowlist_storage": "workspaces/<project>/interns/state/workspace_settings.json",
       "allowlist_entry_types": [
         "workspace_relative",

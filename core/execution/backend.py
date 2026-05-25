@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from core.paths import PROJECT_ROOT
 from core.resource.manager import ResourceDecision, ResourceManager
 from core.failures import (
     StructuredFailure,
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
     from core.execution.databricks_client import DatabricksClient
     from core.observability.parser import MetricParser
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = PROJECT_ROOT
 
 
 def normalize_command(cmd) -> list[str]:

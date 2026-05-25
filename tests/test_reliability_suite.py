@@ -21,7 +21,7 @@ class ReliabilitySuiteTests(unittest.TestCase):
 
             self.assertTrue(result.ok)
             self.assertEqual(result.failed_count, 0)
-            self.assertEqual(result.skipped_count, 1)
+            self.assertEqual(result.skipped_count, 4)
             self.assertTrue((workspace / "interns" / "reports" / "reliability_suite" / "current.json").exists())
             self.assertTrue((workspace / "interns" / "reports" / "reliability_suite" / "current.md").exists())
             self.assertTrue((workspace / "interns" / "generated" / "evidence" / "reliability_suite" / "current.json").exists())
@@ -32,6 +32,9 @@ class ReliabilitySuiteTests(unittest.TestCase):
             )
             statuses = {check["name"]: check["status"] for check in report["checks"]}
             self.assertEqual(statuses["validate-workflow-guardrails"], "passed")
+            self.assertEqual(statuses["run-layered-pipeline-harness"], "skipped")
+            self.assertEqual(statuses["pipeline-execution-harness"], "skipped")
+            self.assertEqual(statuses["data-quality-harness"], "skipped")
             self.assertEqual(statuses["build-workspace-evidence-graph"], "passed")
             self.assertEqual(statuses["validate-project-harness"], "skipped")
 
@@ -65,6 +68,146 @@ class ReliabilitySuiteTests(unittest.TestCase):
             checks = {check["name"]: check for check in result.checks}
             self.assertEqual(checks["validate-workflow-guardrails"]["status"], "failed")
             self.assertIn("uv run validate-workflow-guardrails --workspace workspaces/demo", result.next_commands)
+
+    def test_failed_pipeline_execution_harness_artifact_blocks_suite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            harness_dir = workspace / "interns" / "generated" / "evidence" / "pipeline_execution_harness"
+            harness_dir.mkdir(parents=True)
+            (harness_dir / "current.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "pipeline_execution_harness/current.json",
+                        "pass": False,
+                        "status": "failed",
+                        "summary": {"passed_count": 4, "failed_count": 2},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = ReliabilitySuite(
+                root,
+                "workspaces/demo",
+                project_harness="skip",
+            ).run()
+
+            self.assertFalse(result.ok)
+            checks = {check["name"]: check for check in result.checks}
+            check = checks["pipeline-execution-harness"]
+            self.assertEqual(check["status"], "failed")
+            self.assertFalse(check["ok"])
+            self.assertEqual(check["details"]["passed"], 4)
+            self.assertEqual(check["details"]["failed"], 2)
+
+    def test_missing_required_pipeline_execution_harness_blocks_suite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            contracts = workspace / "interns" / "generated" / "contracts"
+            contracts.mkdir(parents=True)
+            (contracts / "pipeline_plan.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "pipeline_plan.json",
+                        "status": "ready_for_generation",
+                        "selected_track": "medallion",
+                        "layers": [{"layer": "bronze", "objects": [{"target_object": "bronze.transactions"}]}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = ReliabilitySuite(root, "workspaces/demo", project_harness="skip").run()
+
+            self.assertFalse(result.ok)
+            checks = {check["name"]: check for check in result.checks}
+            self.assertEqual(checks["pipeline-execution-harness"]["status"], "failed")
+            self.assertFalse(checks["pipeline-execution-harness"]["ok"])
+
+    def test_failed_data_quality_harness_artifact_blocks_suite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            harness_dir = workspace / "interns" / "generated" / "evidence" / "data_quality_harness"
+            harness_dir.mkdir(parents=True)
+            (harness_dir / "current.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "data_quality_harness/current.json",
+                        "ok": False,
+                        "status": "failed",
+                        "summary": {"passed_count": 8, "failed_count": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = ReliabilitySuite(
+                root,
+                "workspaces/demo",
+                project_harness="skip",
+            ).run()
+
+            self.assertFalse(result.ok)
+            checks = {check["name"]: check for check in result.checks}
+            check = checks["data-quality-harness"]
+            self.assertEqual(check["status"], "failed")
+            self.assertFalse(check["ok"])
+            self.assertEqual(check["details"]["passed"], 8)
+            self.assertEqual(check["details"]["failed"], 1)
+
+    def test_missing_required_data_quality_harness_blocks_suite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            contracts = workspace / "interns" / "generated" / "contracts"
+            contracts.mkdir(parents=True)
+            (contracts / "catalog_contract.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "catalog_contract.json",
+                        "objects": [{"logical_name": "raw.transactions"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (contracts / "pipeline_plan.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "pipeline_plan.json",
+                        "status": "ready_for_generation",
+                        "selected_track": "medallion",
+                        "layers": [{"layer": "bronze", "objects": [{"target_object": "bronze.transactions"}]}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = ReliabilitySuite(root, "workspaces/demo", project_harness="skip").run()
+
+            self.assertFalse(result.ok)
+            checks = {check["name"]: check for check in result.checks}
+            self.assertEqual(checks["data-quality-harness"]["status"], "failed")
+            self.assertFalse(checks["data-quality-harness"]["ok"])
+
+    def test_malformed_pipeline_execution_harness_blocks_suite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            harness_dir = workspace / "interns" / "generated" / "evidence" / "pipeline_execution_harness"
+            harness_dir.mkdir(parents=True)
+            (harness_dir / "current.json").write_text(
+                json.dumps({"artifact_type": "pipeline_execution_harness/current.json"}),
+                encoding="utf-8",
+            )
+
+            result = ReliabilitySuite(root, "workspaces/demo", project_harness="skip").run()
+
+            self.assertFalse(result.ok)
+            checks = {check["name"]: check for check in result.checks}
+            self.assertEqual(checks["pipeline-execution-harness"]["status"], "failed")
 
     def test_project_harness_run_mode_forces_project_harness(self):
         with tempfile.TemporaryDirectory() as tmp:

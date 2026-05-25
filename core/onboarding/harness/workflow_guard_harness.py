@@ -246,6 +246,41 @@ class WorkflowGuardHarness:
                         recommendation="Retry with the proper project tool or a platform-appropriate bounded command.",
                     )
                 )
+            lowered = command.lower()
+            if "move-item" in lowered and "workspaces/" in lowered.replace("\\", "/"):
+                findings.append(
+                    _finding(
+                        "error",
+                        "workspace_source_mutation_without_delete_plan",
+                        "Workspace source file was moved or renamed without a delete/mutation plan.",
+                        command=command,
+                        recommendation="Show a deletion/mutation plan and require explicit confirmation.",
+                    )
+                )
+            if "prepare-kpi-blocker-panel" in lowered:
+                findings.append(
+                    _finding(
+                        "error",
+                        "skip_data_quality_before_kpi_blocker",
+                        "KPI blocker workflow ran before data-quality review.",
+                        command=command,
+                        recommendation="Run data quality before KPI blocker questions.",
+                        details={
+                            "violated_rule_id": "skip_data_quality_before_kpi_or_generation",
+                            "replacement_command": f"uv run run-data-quality-harness --workspace {self.workspace_rel}",
+                        },
+                    )
+                )
+            if "generate-pipeline-sql" in lowered:
+                findings.append(
+                    _finding(
+                        "error",
+                        "generate_code_before_contracts_and_harnesses",
+                        "Pipeline SQL generation ran before contract/harness gates.",
+                        command=command,
+                        recommendation="Run source-to-target, pipeline plan, and layered harness first.",
+                    )
+                )
         return findings
 
     def _check_trajectory(self) -> list[dict[str, Any]]:
