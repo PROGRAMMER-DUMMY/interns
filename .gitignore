@@ -15,7 +15,7 @@ docs/*
 
 # Local data dumps and generated warehouse artifacts
 dump/
-workspaces/**/*.csv
+
 workspaces/**/*.parquet
 workspaces/**/*.duckdb
 workspaces/**/*.pdf
