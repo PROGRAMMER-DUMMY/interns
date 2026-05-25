@@ -1,0 +1,7 @@
+{
+  "cli_tool": "claude",
+  "cli_args": ["-p"],
+  "system_prompt_file": "config/ai_cli_system_prompt.example.txt",
+  "timeout_seconds": 60,
+  "pass_threshold": 0.95
+}

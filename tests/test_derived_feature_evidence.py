@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from core.onboarding.derived_feature_evidence import (
+from core.onboarding.features.derived_evidence import (
     derived_feature_options,
     fill_formula_template,
     substitute_formula_values,

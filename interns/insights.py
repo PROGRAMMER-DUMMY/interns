@@ -4,11 +4,11 @@ interns/insights.py — Insights Intern.
 Analyzes run logs, synthesises experiment results, identifies patterns, and ranks hypotheses.
 """
 from datetime import datetime, timezone
-from pathlib import Path
 from interns.base import InternBase
+from core.paths import PROJECT_ROOT
 from core.storage.workspace import Workspace
 
-ROOT = Path(__file__).parent.parent
+ROOT = PROJECT_ROOT
 
 _SYSTEM = """You are an Insights Intern for an autonomous prompt optimisation experiment.
 You analyze run logs and experiment results to identify patterns in why experiments succeeded or failed, and write precise, evidence-based hypotheses.

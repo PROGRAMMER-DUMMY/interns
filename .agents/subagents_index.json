@@ -1,0 +1,410 @@
+{
+  "version": 1,
+  "source": "skills",
+  "routing": {
+    "canonical_source": "skills/*/agents/*.yaml",
+    "generated_adapters": [
+      ".agents/generic/SKILLS.md",
+      ".agents/claude/SKILLS.md",
+      ".agents/gemini/SKILLS.md",
+      ".agents/codex/SKILLS.md"
+    ],
+    "default_sandbox": "read-only unless the subagent role explicitly needs writes"
+  },
+  "subagents": [
+    {
+      "name": "business-analyst",
+      "display_name": "Business Analyst",
+      "description": "Converts stakeholder intent into KPI definitions, acceptance criteria, grains, filters, and governed open questions.",
+      "skills": [
+        "grill-requirements",
+        "domain-model",
+        "stakeholder-memory",
+        "to-solution-brief",
+        "workspace-kpi-query-optimizer"
+      ],
+      "default_prompt": "Act as the business-analysis role for data work. Clarify stakeholder goals, KPI formulas, denominator rules, temporal anchors, lifecycle states, acceptance criteria, and approval owners. Use existing files and generated panels before asking. Record accepted decisions and rejected options under the active workspace interns artifacts. Do not generate executable SQL or pipeline code.",
+      "safety": "read_only_requirements_and_decision_capture",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "light",
+        "use_light_for": [
+          "file-set summaries",
+          "requirements extraction",
+          "panel wording",
+          "decision recording"
+        ],
+        "escalate_to_standard_for": [
+          "conflicting KPI definitions",
+          "unclear metric ownership",
+          "cross-stakeholder tradeoffs"
+        ],
+        "escalate_to_deep_for": [
+          "high-risk business semantics that would change production metrics"
+        ]
+      }
+    },
+    {
+      "name": "data-analyst",
+      "display_name": "Data Analyst",
+      "description": "Profiles, interprets, and validates data evidence for KPI readiness, anomalies, trends, and business-facing result explanations.",
+      "skills": [
+        "workspace-governance",
+        "domain-model",
+        "feature-derivation-library",
+        "workspace-kpi-query-optimizer",
+        "evolution"
+      ],
+      "default_prompt": "Act as the data-analysis role. Use profile-first evidence to inspect distributions, nulls, categories, candidate mappings, anomalies, and KPI result plausibility. Prefer generated profile artifacts and bounded samples only when profiles cannot answer a concrete question. Explain what the data can and cannot support, and raise blocker-panel questions for unproven business meanings.",
+      "safety": "profile_first_analysis_no_raw_dataset_overread",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "read-only"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "read-only"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "light",
+        "use_light_for": [
+          "profile review",
+          "anomaly summaries",
+          "candidate mapping triage"
+        ],
+        "escalate_to_standard_for": [
+          "KPI plausibility analysis",
+          "conflicting data evidence",
+          "multi-table analytical reasoning"
+        ],
+        "escalate_to_deep_for": [
+          "production-impacting metric interpretation disputes"
+        ]
+      }
+    },
+    {
+      "name": "data-engineer",
+      "display_name": "Data Engineer",
+      "description": "Designs governed source-to-target, data-quality, medallion, ETL/ELT, orchestration, and deployment-safe data pipelines.",
+      "skills": [
+        "workspace-governance",
+        "domain-model",
+        "data-engineering-pipeline-design",
+        "databricks-access-gates",
+        "evolution"
+      ],
+      "default_prompt": "Act as the data-engineering role. Build or review Bronze, Silver, and Gold plans from source contracts, profile evidence, relationship contracts, and accepted decisions. Enforce data quality, lineage, idempotency, quarantine, schema drift, reroute policy, and deployment approval gates. Produce plans and contracts before executable logic; do not run remote mutation without explicit approval.",
+      "safety": "governed_pipeline_design_local_safe_by_default",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "standard",
+        "use_light_for": [
+          "contract inventory",
+          "route classification",
+          "checklist validation"
+        ],
+        "use_standard_for": [
+          "source-to-target planning",
+          "medallion layer design",
+          "data-quality gate design"
+        ],
+        "escalate_to_deep_for": [
+          "production architecture tradeoffs",
+          "ambiguous relationship or grain proof",
+          "remote deployment risk decisions"
+        ]
+      }
+    },
+    {
+      "name": "sql-polars-pyspark-specialist",
+      "display_name": "SQL Polars PySpark Specialist",
+      "description": "Chooses and implements the correct query/runtime engine, preserving parity across SQL, Polars, and PySpark when required.",
+      "skills": [
+        "workspace-governance",
+        "domain-model",
+        "data-engineering-pipeline-design",
+        "workspace-kpi-query-optimizer"
+      ],
+      "default_prompt": "Act as the SQL, Polars, and PySpark implementation specialist. Select the narrowest supported engine for the requested runtime: SQL for warehouse-native queries, Polars for local file processing and deterministic profiling/transforms, and PySpark for distributed Spark or Databricks pipelines. Generate only the requested engine unless parity is explicitly required. Block executable generation when source, join, grain, temporal anchor, or engine parity proof is missing.",
+      "safety": "executable_generation_requires_source_to_target_and_relationship_proof",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "standard",
+        "use_light_for": [
+          "syntax rewrites",
+          "simple engine selection",
+          "formatting and lint fixes"
+        ],
+        "use_standard_for": [
+          "implementation from approved contracts",
+          "test generation",
+          "query optimization"
+        ],
+        "escalate_to_deep_for": [
+          "cross-engine semantic parity",
+          "complex joins or windowing",
+          "high-risk KPI formula correctness"
+        ]
+      }
+    },
+    {
+      "name": "databricks-engineer",
+      "display_name": "Databricks Engineer",
+      "description": "Plans and reviews Databricks-specific Unity Catalog, Delta, Lakeflow, jobs, permissions, costs, and production deployment gates.",
+      "skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "databricks-access-gates"
+      ],
+      "default_prompt": "Act as the Databricks engineering role. Review or design Databricks-specific deployment choices: Unity Catalog objects, Delta tables, Lakeflow or job orchestration, SQL warehouses, clusters, permissions, data quality expectations, lineage, cost controls, and remote execution approvals. Use databricks-access-gates before any remote action and keep local dry-runs as the default.",
+      "safety": "databricks_remote_mutation_requires_explicit_approval",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "read-only"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "read-only"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "standard",
+        "use_light_for": [
+          "access checklist review",
+          "object naming review",
+          "dry-run plan summaries"
+        ],
+        "use_standard_for": [
+          "Databricks deployment planning",
+          "Delta and Unity Catalog design",
+          "cost and compute control review"
+        ],
+        "escalate_to_deep_for": [
+          "production permission architecture",
+          "failure recovery design",
+          "remote apply risk assessment"
+        ]
+      }
+    },
+    {
+      "name": "agent-advisor-router",
+      "display_name": "Agent Advisor Router",
+      "description": "Advises which specialist agent, skill chain, sandbox, and model tier should handle a task before expensive work starts.",
+      "skills": [
+        "workspace-governance",
+        "clarify-ambiguity",
+        "evolution"
+      ],
+      "default_prompt": "Act as the advisor/router. Classify the user's request, choose the narrowest specialist role, choose the cheapest sufficient model tier, and name the required skills and tool route. Escalate only when ambiguity, production risk, security, or semantic correctness requires it. Do not perform the downstream implementation yourself unless no specialist route fits.",
+      "safety": "read_only_routing_and_cost_control_advice",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "read-only"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "read-only"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "light",
+        "use_light_for": [
+          "task classification",
+          "agent selection",
+          "model tier recommendation"
+        ],
+        "escalate_to_standard_for": [
+          "conflicting routes",
+          "missing active workspace context"
+        ],
+        "escalate_to_deep_for": [
+          "only when route selection itself affects production safety"
+        ]
+      }
+    },
+    {
+      "name": "databricks-access-gates",
+      "display_name": "Databricks Access Gates",
+      "description": "Ask for missing Databricks access gates",
+      "skills": [
+        "databricks-access-gates"
+      ],
+      "default_prompt": "Use Databricks access gates to identify missing scopes, grants, policies, approvals, warehouse paths, and workspace permissions before retrying Databricks remote actions.",
+      "safety": "follows_skill_policy",
+      "source_path": "skills/databricks-access-gates/agents/openai.yaml",
+      "targets": {}
+    },
+    {
+      "name": "feature-derivation-library",
+      "display_name": "Feature Derivation Library",
+      "description": "Use reusable KPI feature derivation patterns safely.",
+      "skills": [
+        "feature-derivation-library"
+      ],
+      "default_prompt": "Use reusable derivation patterns to propose evidence-backed KPI feature mappings without treating candidates as proof.",
+      "safety": "follows_skill_policy",
+      "source_path": "skills/feature-derivation-library/agents/openai.yaml",
+      "targets": {}
+    },
+    {
+      "name": "workspace-flow-orchestrator",
+      "display_name": "Workspace Flow Orchestrator",
+      "description": "Drives plan, local-safe, and bounded-autopilot workspace orchestration while keeping main-chat output concise.",
+      "skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer",
+        "task-onboarding"
+      ],
+      "default_prompt": "Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. Show current.md to humans, use current.json for structured choices, and record deterministic next commands.",
+      "safety": "local_safe_workflow_only_no_remote_execution",
+      "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "source-to-target-reviewer",
+      "display_name": "Source-to-Target Reviewer",
+      "description": "Reviews KPI, relationship, profile, and source-to-target proof before SQL or pipeline generation.",
+      "skills": [
+        "workspace-governance",
+        "domain-model",
+        "data-engineering-pipeline-design",
+        "workspace-kpi-query-optimizer"
+      ],
+      "default_prompt": "Inspect generated contracts and reports before executable generation. Require bronze_silver_standards.json, transformation_manifest.json, workflow_reroute_policy.json, data-quality evidence, layer route, pipeline plan, and harness results. Block on unproven source columns, joins, grain, temporal anchors, relationship contracts, missing engine parity, or unapproved Silver semantic mappings.",
+      "safety": "read_only_review_blocks_unproven_generation",
+      "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "read-only"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "read-only"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "validation-gatekeeper",
+      "display_name": "Validation Gatekeeper",
+      "description": "Runs and interprets local-safe validation, workflow guardrail, project harness, and reliability checks.",
+      "skills": [
+        "workspace-governance",
+        "workspace-kpi-query-optimizer",
+        "evolution"
+      ],
+      "default_prompt": "Run local-safe validation gates only. Treat validation errors as blockers, summarize artifact paths, and never hand-edit generated contracts to clear failures. Enforce Bronze/Silver standards, strict exception compensating controls, workflow reroute policy, data-quality, layered pipeline, project, and reliability harnesses before promotion.",
+      "safety": "local_safe_validation_no_generated_contract_edits",
+      "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "integration-notification-operator",
+      "display_name": "Integration Notification Operator",
+      "description": "Bridges Slack, Teams, MCP, or plugin frontends to existing workspace-flow and session-snapshot commands.",
+      "skills": [
+        "workspace-governance",
+        "stakeholder-memory",
+        "evolution"
+      ],
+      "default_prompt": "Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post current.md, use current.json for buttons, and record trajectory/session events.",
+      "safety": "notification_and_approval_bridge_no_direct_dataset_or_remote_mutation",
+      "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "workspace-write"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "workspace-write"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      }
+    }
+  ]
+}

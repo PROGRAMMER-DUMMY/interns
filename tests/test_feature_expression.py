@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from core.onboarding.feature_expression import extract_expression
+from core.onboarding.features.expression import extract_expression
 
 
 class FeatureExpressionTests(unittest.TestCase):

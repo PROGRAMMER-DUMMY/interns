@@ -5,16 +5,71 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.onboarding.workspace_definitions import (
+from core.onboarding.memory.workspace_definitions import (
     apply_workspace_definition,
+    apply_workspace_definitions_to_mapping,
     apply_workspace_definition_to_mapping,
     load_workspace_definitions,
+    _resolve_source_column,
     upsert_workspace_definition,
 )
 from core.storage.workspace_layout import WorkspaceLayout
 
 
 class WorkspaceDefinitionTests(unittest.TestCase):
+    def test_resolve_source_column_preserves_nested_csv_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            dataset_dir = workspace / "datasets" / "EMR" / "hospital-a"
+            dataset_dir.mkdir(parents=True)
+            dataset = dataset_dir / "transactions.csv"
+            dataset.write_text("LineOfBusiness\nMedicare\n", encoding="utf-8")
+            layout = WorkspaceLayout(project_root=workspace)
+
+            resolved = _resolve_source_column(
+                "workspaces/demo/datasets/EMR/hospital-a/transactions.csv.LineOfBusiness",
+                layout,
+            )
+
+            self.assertEqual(
+                resolved["dataset"],
+                "workspaces/demo/datasets/EMR/hospital-a/transactions.csv",
+            )
+            self.assertEqual(resolved["column"], "LineOfBusiness")
+
+    def test_resolve_source_column_finds_allowed_nested_table_shorthand(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            dataset_dir = workspace / "datasets" / "EMR" / "hospital-a"
+            dataset_dir.mkdir(parents=True)
+            (dataset_dir / "transactions.csv").write_text("LineOfBusiness\nMedicare\n", encoding="utf-8")
+            settings = workspace / "interns" / "state" / "workspace_settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text(
+                json.dumps(
+                    {
+                        "dataset_allowlist": [
+                            {
+                                "type": "workspace_relative",
+                                "path": "datasets/EMR/hospital-a",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            layout = WorkspaceLayout(project_root=workspace)
+
+            resolved = _resolve_source_column("transactions.LineOfBusiness", layout)
+
+            self.assertEqual(
+                resolved["dataset"],
+                "workspaces/demo/datasets/EMR/hospital-a/transactions.csv",
+            )
+            self.assertEqual(resolved["column"], "LineOfBusiness")
+
     def test_upsert_workspace_definition_replaces_by_normalized_feature(self):
         definitions = {
             "version": 1,
@@ -78,6 +133,97 @@ class WorkspaceDefinitionTests(unittest.TestCase):
         self.assertIsNone(mapping["kpis"][0]["features"][0]["question"])
         self.assertEqual(mapping["kpis"][1]["features"][0]["state"], "blocked_missing_evidence")
 
+    def test_scoped_workspace_definitions_override_broad_definitions(self):
+        mapping = {
+            "kpis": [
+                {
+                    "kpi_id": "kpi_001",
+                    "features": [
+                        {
+                            "feature": "cost",
+                            "state": "blocked_missing_evidence",
+                            "source_columns": [],
+                            "evidence": [],
+                            "decision_history": [],
+                        }
+                    ],
+                },
+                {
+                    "kpi_id": "kpi_002",
+                    "features": [
+                        {
+                            "feature": "cost",
+                            "state": "blocked_missing_evidence",
+                            "source_columns": [],
+                            "evidence": [],
+                            "decision_history": [],
+                        }
+                    ],
+                },
+            ]
+        }
+        definitions = {
+            "definitions": [
+                {
+                    "feature": "cost",
+                    "state": "user_confirmed",
+                    "resolution_type": "workspace_definition",
+                    "definition": "generic",
+                    "source_columns": [{"dataset": "", "column": "generic.COST"}],
+                    "applies_to_kpis": [],
+                },
+                {
+                    "feature": "cost",
+                    "state": "user_confirmed",
+                    "resolution_type": "workspace_definition",
+                    "definition": "specific",
+                    "source_columns": [{"dataset": "procedures.csv", "column": "BASE_COST"}],
+                    "applies_to_kpis": ["kpi_001"],
+                },
+            ]
+        }
+
+        updated = apply_workspace_definitions_to_mapping(mapping, definitions)
+
+        self.assertEqual(updated, 3)
+        by_kpi = {kpi["kpi_id"]: kpi["features"][0] for kpi in mapping["kpis"]}
+        self.assertEqual(by_kpi["kpi_001"]["source_columns"][0]["column"], "BASE_COST")
+        self.assertEqual(by_kpi["kpi_002"]["source_columns"][0]["column"], "generic.COST")
+
+    def test_scoped_workspace_definition_can_override_proven_direct_mapping(self):
+        mapping = {
+            "kpis": [
+                {
+                    "kpi_id": "kpi_001",
+                    "features": [
+                        {
+                            "feature": "encounter",
+                            "state": "proven_direct",
+                            "source_columns": [{"dataset": "procedures.csv", "column": "ENCOUNTER"}],
+                            "evidence": [],
+                            "decision_history": [],
+                        }
+                    ],
+                }
+            ]
+        }
+        definition = {
+            "feature": "encounter",
+            "state": "user_confirmed",
+            "resolution_type": "workspace_definition",
+            "definition": "encounters.Id",
+            "source_columns": [{"dataset": "encounters.csv", "column": "Id"}],
+            "applies_to_kpis": ["kpi_001"],
+        }
+
+        updated = apply_workspace_definition_to_mapping(mapping, definition)
+
+        self.assertEqual(updated, 1)
+        feature = mapping["kpis"][0]["features"][0]
+        self.assertEqual(feature["state"], "user_confirmed")
+        self.assertEqual(feature["source_columns"][0]["dataset"], "encounters.csv")
+        self.assertEqual(feature["source_columns"][0]["column"], "Id")
+
     def test_apply_workspace_definition_persists_contract_and_requirements(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -126,6 +272,53 @@ class WorkspaceDefinitionTests(unittest.TestCase):
             self.assertEqual(definitions["definitions"][0]["feature"], "DeniedAmount")
             requirements = json.loads((layout.requirements_dir / "requirements.json").read_text())
             self.assertEqual(requirements["workspace_feature_definitions"][0]["feature"], "DeniedAmount")
+
+    def test_apply_workspace_definition_normalizes_file_qualified_source_column(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "workspaces" / "demo"
+            layout = WorkspaceLayout(project_root=workspace)
+            layout.ensure_runtime_dirs()
+            (workspace / "encounters.csv").write_text("START\n2024-01-01\n", encoding="utf-8")
+            (layout.contracts_dir / "kpi_feature_mapping.json").write_text(
+                json.dumps(
+                    {
+                        "workspace": "workspaces/demo",
+                        "kpis": [
+                            {
+                                "kpi_id": "kpi_001",
+                                "status": "blocked_questions_pending",
+                                "features": [
+                                    {
+                                        "feature": "Year",
+                                        "state": "blocked_missing_evidence",
+                                        "source_columns": [],
+                                        "evidence": [],
+                                        "decision_history": [],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            apply_workspace_definition(
+                root,
+                "workspaces/demo",
+                feature="Year",
+                state="user_confirmed",
+                resolution_type="workspace_definition",
+                evidence_note="Accepted temporal anchor.",
+                definition="Year from encounters.START.",
+                source_columns=["encounters.csv.START"],
+            )
+
+            definitions = load_workspace_definitions(layout)
+            source = definitions["definitions"][0]["source_columns"][0]
+            self.assertEqual(source["dataset"], "workspaces/demo/encounters.csv")
+            self.assertEqual(source["column"], "START")
 
 
 if __name__ == "__main__":

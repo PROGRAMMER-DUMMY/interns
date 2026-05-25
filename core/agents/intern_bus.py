@@ -11,17 +11,17 @@ see in their chained context.
 """
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from core.config import Config
+from core.paths import PROJECT_ROOT
 from core.agents.registry import InternRegistry
 from core.storage.workspace import Workspace
 
 if TYPE_CHECKING:
     from core.observability.telemetry_backend import TelemetryBackend
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = PROJECT_ROOT
 
 _FAILURE_PREFIX = "INTERN_FAILED:"
 

@@ -53,8 +53,10 @@ _CLI_DISPATCH: dict[str, tuple[str, list[str]]] = {
 class CLIEngine(LLMEngine):
     """Calls an installed CLI tool (gemini, claude, codex) to generate a response."""
 
-    def __init__(self, main_agent: str = "gemini-cli"):
+    def __init__(self, main_agent: str = "gemini-cli", cwd: str | None = None, timeout_s: int = 60):
         self.main_agent = main_agent
+        self.cwd = cwd
+        self.timeout_s = timeout_s
 
     def generate(self, system: str, user: str, max_tokens: int, model: str) -> Optional[str]:
         dispatch = _CLI_DISPATCH.get(self.main_agent)
@@ -75,8 +77,9 @@ class CLIEngine(LLMEngine):
             result = subprocess.run(
                 cmd,
                 capture_output=True, text=True,
-                timeout=60,
+                timeout=self.timeout_s,
                 encoding="utf-8",
+                cwd=self.cwd,
             )
             if result.returncode == 0:
                 out = result.stdout.strip()

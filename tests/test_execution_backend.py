@@ -8,6 +8,7 @@ from pathlib import Path
 from core.config import Config, DatabricksConfig
 from core.execution.backend import DuckDBBackend, StrictWarehouseBackend, build_execution_backend, normalize_command
 from core.execution.databricks_client import DatabricksClient
+from core.resource.manager import ResourceDecision
 
 
 class ExecutionBackendTests(unittest.TestCase):
@@ -58,6 +59,30 @@ class ExecutionBackendTests(unittest.TestCase):
             self.assertEqual(result.exit_code, 1)
             self.assertIn("databricks_backend: warehouse", result.log_content)
             self.assertIn("remote unavailable", result.log_content)
+
+    def test_duckdb_backend_blocks_when_resource_decision_blocks_local_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "run.log"
+            decision = ResourceDecision(
+                status="blocked",
+                mode="local_blocked_remote_recommended",
+                recommended_workers=1,
+                recommended_api_concurrency=1,
+                max_stream_chunk_bytes=1_048_576,
+                warnings=[],
+                blockers=["workspace_disk_budget_exceeded"],
+            )
+
+            result = DuckDBBackend(resource_decision=decision).execute(
+                {"experiment_cmd": ["python", "-c", "print('should not run')"]},
+                10,
+                10,
+                log_path,
+            )
+
+            self.assertEqual(result.exit_code, 1)
+            self.assertIn("Resource preflight blocked", result.log_content)
+            self.assertEqual(result.metadata["resource_decision"]["mode"], "local_blocked_remote_recommended")
 
 
 if __name__ == "__main__":

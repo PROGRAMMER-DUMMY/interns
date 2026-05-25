@@ -1,7 +1,7 @@
-from pathlib import Path
 from interns.base import InternBase
+from core.paths import PROJECT_ROOT
 
-ROOT = Path(__file__).parent.parent
+ROOT = PROJECT_ROOT
 
 _SYSTEM = """You are a Code Review Intern.
 Critique the provided code file and identify the single highest-impact edit that will improve code style, efficiency, or fix potential bugs.
@@ -32,5 +32,6 @@ class CodeReviewIntern(InternBase):
         user = f"=== Code ===\n{code_content}\n\n=== Request ===\n{request}"
         
         response = self.engine.generate(_SYSTEM, user, max_tokens=900, model=self.cfg.models.prompt_engineer)
-        if response: return response
+        if response:
+            return response
         return "## Critique\nNone\n## Suggested edit\nNone\n## Expected effect\nNone\n## Confidence: low"

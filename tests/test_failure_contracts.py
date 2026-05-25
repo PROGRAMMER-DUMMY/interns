@@ -10,10 +10,10 @@ from core.config import Config, DatabricksConfig
 from core.execution.backend import DuckDBBackend, StrictWarehouseBackend, build_execution_backend
 from core.failures import FailureKind, WorkflowBlockedError, validation_blocker
 from core.medallion.design import _preflight
-from core.onboarding.kpi_blocker_workflow import prepare_kpi_blocker_panel
-from core.onboarding.relationship_contracts import load_relationship_contracts
-from core.onboarding.source_to_target_planner import SourceToTargetPlanner
-from core.onboarding.workspace_artifact_validator import WorkspaceArtifactValidator
+from core.onboarding.kpi.blocker_workflow import prepare_kpi_blocker_panel
+from core.onboarding.relationships.contracts import load_relationship_contracts
+from core.onboarding.relationships.source_to_target_planner import SourceToTargetPlanner
+from core.onboarding.workspace.validation import WorkspaceArtifactValidator
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -154,6 +154,206 @@ class FailureContractTests(unittest.TestCase):
 
             self.assertFalse(result.ok)
             self.assertTrue(any("source_to_target_plan.json" in error for error in result.errors))
+
+    def test_validator_does_not_require_new_route_artifacts_for_old_workspaces(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets").mkdir(parents=True)
+
+            result = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+
+            self.assertTrue(result.ok)
+            self.assertFalse(any("catalog_contract.json" in error for error in result.errors))
+            self.assertFalse(any("data_engineering_route.json" in error for error in result.errors))
+            self.assertFalse(any("pipeline_plan.json" in error for error in result.errors))
+            self.assertFalse(any("pipeline_decisions.json" in error for error in result.errors))
+            self.assertFalse(any("pipeline_layers.sql" in error for error in result.errors))
+
+    def test_validator_rejects_malformed_catalog_and_pipeline_route_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            contracts = workspace / "interns" / "generated" / "contracts"
+            contracts.mkdir(parents=True)
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets").mkdir(parents=True)
+            (contracts / "catalog_contract.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "catalog_contract.json",
+                        "version": 1,
+                        "generated_by": "build-catalog-contract",
+                        "catalog": "local_workspace",
+                        "default_schema": "raw",
+                        "objects": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (contracts / "data_engineering_route.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "data_engineering_route.json",
+                        "version": 1,
+                        "generated_by": "prepare-data-engineering-route",
+                        "workspace": "workspaces/demo",
+                        "selected_track": "kpi_only",
+                        "target_engine": "bad_engine",
+                        "start_layer": "raw",
+                        "catalog_contract": "workspaces/demo/interns/generated/contracts/catalog_contract.json",
+                        "catalog_object_count": "1",
+                        "existing_layers": {},
+                        "status": "ready_for_pipeline_plan",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (contracts / "pipeline_plan.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "pipeline_plan.json",
+                        "version": 1,
+                        "generated_by": "prepare-pipeline-plan",
+                        "workspace": "workspaces/demo",
+                        "selected_track": "kpi_only",
+                        "target_engine": "sql",
+                        "table_format": "duckdb_view",
+                        "catalog_contract": "workspaces/demo/interns/generated/contracts/catalog_contract.json",
+                        "route_contract": "workspaces/demo/interns/generated/contracts/data_engineering_route.json",
+                        "policy": [],
+                        "layers": {},
+                        "quality_gates": {},
+                        "blockers": {},
+                        "status": "ready_for_generation",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+
+            self.assertFalse(result.ok)
+            self.assertTrue(any("catalog_contract.json missing `workspace`" in error for error in result.errors))
+            self.assertTrue(any("catalog_contract.json `objects` must be a list" in error for error in result.errors))
+            self.assertTrue(any("data_engineering_route.json missing `requested_track`" in error for error in result.errors))
+            self.assertTrue(any("data_engineering_route.json unsupported target_engine" in error for error in result.errors))
+            self.assertTrue(any("pipeline_plan.json `policy` must be an object" in error for error in result.errors))
+            self.assertTrue(any("pipeline_plan.json `layers` must be a list" in error for error in result.errors))
+
+    def test_validator_rejects_malformed_pipeline_decisions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            contracts = workspace / "interns" / "generated" / "contracts"
+            contracts.mkdir(parents=True)
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets").mkdir(parents=True)
+            (contracts / "pipeline_decisions.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "wrong.json",
+                        "generated_by": "apply-pipeline-decision",
+                        "workspace": "workspaces/other",
+                        "percentage_denominator_scopes": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+
+            self.assertFalse(result.ok)
+            self.assertTrue(any("missing `artifact_type: pipeline_decisions.json`" in error for error in result.errors))
+
+            (contracts / "pipeline_decisions.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "pipeline_decisions.json",
+                        "generated_by": "apply-pipeline-decision",
+                        "workspace": "workspaces/other",
+                        "percentage_denominator_scopes": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+
+            self.assertFalse(result.ok)
+            self.assertTrue(any("pipeline_decisions.json missing `version`" in error for error in result.errors))
+            self.assertTrue(any("pipeline_decisions.json workspace" in error for error in result.errors))
+            self.assertTrue(
+                any(
+                    "pipeline_decisions.json `percentage_denominator_scopes` must be an object" in error
+                    for error in result.errors
+                )
+            )
+
+    def test_validator_rejects_empty_pipeline_sql(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            pipeline = workspace / "interns" / "generated" / "pipeline"
+            pipeline.mkdir(parents=True)
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets").mkdir(parents=True)
+            (pipeline / "pipeline_layers.sql").write_text(" \n", encoding="utf-8")
+
+            result = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+
+            self.assertFalse(result.ok)
+            self.assertTrue(any("generated pipeline SQL must be non-empty" in error for error in result.errors))
+
+    def test_validator_rejects_raw_pipeline_sql_paths_outside_bootstrap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            pipeline = workspace / "interns" / "generated" / "pipeline"
+            pipeline.mkdir(parents=True)
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets").mkdir(parents=True)
+            (pipeline / "pipeline_layers.sql").write_text(
+                "\n".join(
+                    [
+                        "-- BEGIN CATALOG BOOTSTRAP",
+                        "CREATE VIEW raw_claims AS SELECT * FROM read_csv_auto('workspaces/demo/datasets/claims.csv');",
+                        "-- END CATALOG BOOTSTRAP",
+                        "CREATE VIEW bronze_claims AS SELECT * FROM read_csv_auto('workspaces/demo/datasets/claims.csv');",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+
+            self.assertFalse(result.ok)
+            self.assertTrue(
+                any(
+                    "raw dataset path references are only allowed inside CATALOG BOOTSTRAP" in error
+                    for error in result.errors
+                )
+            )
+
+    def test_validator_rejects_pipeline_sql_raw_paths_without_bootstrap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            pipeline = workspace / "interns" / "generated" / "pipeline"
+            pipeline.mkdir(parents=True)
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets").mkdir(parents=True)
+            (pipeline / "pipeline_layers.sql").write_text(
+                "CREATE VIEW raw_claims AS SELECT * FROM read_csv_auto('workspaces/demo/datasets/claims.csv');\n",
+                encoding="utf-8",
+            )
+
+            result = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+
+            self.assertFalse(result.ok)
+            self.assertTrue(any("missing BEGIN/END CATALOG BOOTSTRAP" in error for error in result.errors))
 
 
 if __name__ == "__main__":

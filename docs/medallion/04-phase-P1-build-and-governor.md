@@ -313,7 +313,7 @@ Splitting v1 into per-KPI sections is best done by an anchor comment convention 
 | `core.orchestration.governor.Governor` | Add `MEDALLION_ROUTING` dict, `decide_medallion_routing` method | Strict addition; do not modify the existing KPI routing logic |
 | `core.execution.backend.build_execution_backend` | Call as-is; pass result to build orchestrator | No backend code changes in P1 |
 | `interns.sql_specialist.SQLSpecialistIntern` | Add a `regenerate_against_gold` entry path; OR extend `run()` to handle the new task class via a `task_type` context key | Pick one; document in the SQL Specialist's docstring |
-| `core.onboarding.blocker_question_panel.BlockerQuestionPanelBuilder` | Add a new source `"medallion_build"`; add entries from `kpi_diff.<kpi>.equal=false` | Re-use existing panel; do not fork |
+| `core.onboarding.kpi.blocker_question_panel.BlockerQuestionPanelBuilder` | Add a new source `"medallion_build"`; add entries from `kpi_diff.<kpi>.equal=false` | Re-use existing panel; do not fork |
 | `core.medallion.design.medallion_dirs` | Read paths; do not change | Single source of truth for medallion directory layout |
 
 ## Testing

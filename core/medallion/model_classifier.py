@@ -11,10 +11,11 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Callable, Optional
 
-CACHE_PATH = Path("core/agents/state/model_classification_cache.json")
+from core.paths import project_path
+
+CACHE_PATH = project_path("core", "agents", "state", "model_classification_cache.json")
 TTL = timedelta(days=7)
 
 

@@ -1,0 +1,200 @@
+version: 1
+subagents:
+  - name: business-analyst
+    display_name: Business Analyst
+    description: Converts stakeholder intent into KPI definitions, acceptance criteria, grains, filters, and governed open questions.
+    skills:
+      - grill-requirements
+      - domain-model
+      - stakeholder-memory
+      - to-solution-brief
+      - workspace-kpi-query-optimizer
+    default_prompt: "Act as the business-analysis role for data work. Clarify stakeholder goals, KPI formulas, denominator rules, temporal anchors, lifecycle states, acceptance criteria, and approval owners. Use existing files and generated panels before asking. Record accepted decisions and rejected options under the active workspace interns artifacts. Do not generate executable SQL or pipeline code."
+    safety: read_only_requirements_and_decision_capture
+    model_policy:
+      default_tier: light
+      use_light_for:
+        - file-set summaries
+        - requirements extraction
+        - panel wording
+        - decision recording
+      escalate_to_standard_for:
+        - conflicting KPI definitions
+        - unclear metric ownership
+        - cross-stakeholder tradeoffs
+      escalate_to_deep_for:
+        - high-risk business semantics that would change production metrics
+    targets:
+      codex:
+        enabled: true
+        sandbox_mode: workspace-write
+      claude:
+        enabled: true
+        permission: workspace-write
+      gemini:
+        enabled: true
+
+  - name: data-analyst
+    display_name: Data Analyst
+    description: Profiles, interprets, and validates data evidence for KPI readiness, anomalies, trends, and business-facing result explanations.
+    skills:
+      - workspace-governance
+      - domain-model
+      - feature-derivation-library
+      - workspace-kpi-query-optimizer
+      - evolution
+    default_prompt: "Act as the data-analysis role. Use profile-first evidence to inspect distributions, nulls, categories, candidate mappings, anomalies, and KPI result plausibility. Prefer generated profile artifacts and bounded samples only when profiles cannot answer a concrete question. Explain what the data can and cannot support, and raise blocker-panel questions for unproven business meanings."
+    safety: profile_first_analysis_no_raw_dataset_overread
+    model_policy:
+      default_tier: light
+      use_light_for:
+        - profile review
+        - anomaly summaries
+        - candidate mapping triage
+      escalate_to_standard_for:
+        - KPI plausibility analysis
+        - conflicting data evidence
+        - multi-table analytical reasoning
+      escalate_to_deep_for:
+        - production-impacting metric interpretation disputes
+    targets:
+      codex:
+        enabled: true
+        sandbox_mode: read-only
+      claude:
+        enabled: true
+        permission: read-only
+      gemini:
+        enabled: true
+
+  - name: data-engineer
+    display_name: Data Engineer
+    description: Designs governed source-to-target, data-quality, medallion, ETL/ELT, orchestration, and deployment-safe data pipelines.
+    skills:
+      - workspace-governance
+      - domain-model
+      - data-engineering-pipeline-design
+      - databricks-access-gates
+      - evolution
+    default_prompt: "Act as the data-engineering role. Build or review Bronze, Silver, and Gold plans from source contracts, profile evidence, relationship contracts, and accepted decisions. Enforce data quality, lineage, idempotency, quarantine, schema drift, reroute policy, and deployment approval gates. Produce plans and contracts before executable logic; do not run remote mutation without explicit approval."
+    safety: governed_pipeline_design_local_safe_by_default
+    model_policy:
+      default_tier: standard
+      use_light_for:
+        - contract inventory
+        - route classification
+        - checklist validation
+      use_standard_for:
+        - source-to-target planning
+        - medallion layer design
+        - data-quality gate design
+      escalate_to_deep_for:
+        - production architecture tradeoffs
+        - ambiguous relationship or grain proof
+        - remote deployment risk decisions
+    targets:
+      codex:
+        enabled: true
+        sandbox_mode: workspace-write
+      claude:
+        enabled: true
+        permission: workspace-write
+      gemini:
+        enabled: true
+
+  - name: sql-polars-pyspark-specialist
+    display_name: SQL Polars PySpark Specialist
+    description: Chooses and implements the correct query/runtime engine, preserving parity across SQL, Polars, and PySpark when required.
+    skills:
+      - workspace-governance
+      - domain-model
+      - data-engineering-pipeline-design
+      - workspace-kpi-query-optimizer
+    default_prompt: "Act as the SQL, Polars, and PySpark implementation specialist. Select the narrowest supported engine for the requested runtime: SQL for warehouse-native queries, Polars for local file processing and deterministic profiling/transforms, and PySpark for distributed Spark or Databricks pipelines. Generate only the requested engine unless parity is explicitly required. Block executable generation when source, join, grain, temporal anchor, or engine parity proof is missing."
+    safety: executable_generation_requires_source_to_target_and_relationship_proof
+    model_policy:
+      default_tier: standard
+      use_light_for:
+        - syntax rewrites
+        - simple engine selection
+        - formatting and lint fixes
+      use_standard_for:
+        - implementation from approved contracts
+        - test generation
+        - query optimization
+      escalate_to_deep_for:
+        - cross-engine semantic parity
+        - complex joins or windowing
+        - high-risk KPI formula correctness
+    targets:
+      codex:
+        enabled: true
+        sandbox_mode: workspace-write
+      claude:
+        enabled: true
+        permission: workspace-write
+      gemini:
+        enabled: true
+
+  - name: databricks-engineer
+    display_name: Databricks Engineer
+    description: Plans and reviews Databricks-specific Unity Catalog, Delta, Lakeflow, jobs, permissions, costs, and production deployment gates.
+    skills:
+      - workspace-governance
+      - data-engineering-pipeline-design
+      - databricks-access-gates
+    default_prompt: "Act as the Databricks engineering role. Review or design Databricks-specific deployment choices: Unity Catalog objects, Delta tables, Lakeflow or job orchestration, SQL warehouses, clusters, permissions, data quality expectations, lineage, cost controls, and remote execution approvals. Use databricks-access-gates before any remote action and keep local dry-runs as the default."
+    safety: databricks_remote_mutation_requires_explicit_approval
+    model_policy:
+      default_tier: standard
+      use_light_for:
+        - access checklist review
+        - object naming review
+        - dry-run plan summaries
+      use_standard_for:
+        - Databricks deployment planning
+        - Delta and Unity Catalog design
+        - cost and compute control review
+      escalate_to_deep_for:
+        - production permission architecture
+        - failure recovery design
+        - remote apply risk assessment
+    targets:
+      codex:
+        enabled: true
+        sandbox_mode: read-only
+      claude:
+        enabled: true
+        permission: read-only
+      gemini:
+        enabled: true
+
+  - name: agent-advisor-router
+    display_name: Agent Advisor Router
+    description: Advises which specialist agent, skill chain, sandbox, and model tier should handle a task before expensive work starts.
+    skills:
+      - workspace-governance
+      - clarify-ambiguity
+      - evolution
+    default_prompt: "Act as the advisor/router. Classify the user's request, choose the narrowest specialist role, choose the cheapest sufficient model tier, and name the required skills and tool route. Escalate only when ambiguity, production risk, security, or semantic correctness requires it. Do not perform the downstream implementation yourself unless no specialist route fits."
+    safety: read_only_routing_and_cost_control_advice
+    model_policy:
+      default_tier: light
+      use_light_for:
+        - task classification
+        - agent selection
+        - model tier recommendation
+      escalate_to_standard_for:
+        - conflicting routes
+        - missing active workspace context
+      escalate_to_deep_for:
+        - only when route selection itself affects production safety
+    targets:
+      codex:
+        enabled: true
+        sandbox_mode: read-only
+      claude:
+        enabled: true
+        permission: read-only
+      gemini:
+        enabled: true

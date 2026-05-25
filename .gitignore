@@ -7,6 +7,12 @@ run.log
 *.sqlite3
 *.db
 
+# Local documentation drafts
+docs/*
+!docs/data_workflow_medallion_reference.md
+!docs/databricks_production_practices.md
+!docs/session_snapshot.md
+
 # Local data dumps and generated warehouse artifacts
 dump/
 workspaces/**/*.csv
@@ -24,6 +30,7 @@ workspaces/**/csv_profile/
 .env.*
 !.env.example
 secrets.toml
+config/external_data_roots.local.json
 *.pem
 *.key
 *.token
@@ -57,6 +64,7 @@ env/
 .vscode/
 .ipynb_checkpoints/
 .claude/
+.agents/sessions/
 .memory/
 .code-review-graph/
 *.swp

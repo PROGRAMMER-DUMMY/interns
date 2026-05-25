@@ -1,0 +1,78 @@
+version: 1
+subagents:
+  - name: workspace-flow-orchestrator
+    display_name: Workspace Flow Orchestrator
+    description: Drives plan, local-safe, and bounded-autopilot workspace orchestration while keeping main-chat output concise.
+    skills:
+      - workspace-governance
+      - workspace-kpi-query-optimizer
+      - task-onboarding
+    default_prompt: "Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. Show current.md to humans, use current.json for structured choices, and record deterministic next commands."
+    safety: local_safe_workflow_only_no_remote_execution
+    targets:
+      codex:
+        enabled: true
+        sandbox_mode: workspace-write
+      claude:
+        enabled: true
+        permission: workspace-write
+      gemini:
+        enabled: true
+
+  - name: source-to-target-reviewer
+    display_name: Source-to-Target Reviewer
+    description: Reviews KPI, relationship, profile, and source-to-target proof before SQL or pipeline generation.
+    skills:
+      - workspace-governance
+      - domain-model
+      - data-engineering-pipeline-design
+      - workspace-kpi-query-optimizer
+    default_prompt: "Inspect generated contracts and reports before executable generation. Require bronze_silver_standards.json, transformation_manifest.json, workflow_reroute_policy.json, data-quality evidence, layer route, pipeline plan, and harness results. Block on unproven source columns, joins, grain, temporal anchors, relationship contracts, missing engine parity, or unapproved Silver semantic mappings."
+    safety: read_only_review_blocks_unproven_generation
+    targets:
+      codex:
+        enabled: true
+        sandbox_mode: read-only
+      claude:
+        enabled: true
+        permission: read-only
+      gemini:
+        enabled: true
+
+  - name: validation-gatekeeper
+    display_name: Validation Gatekeeper
+    description: Runs and interprets local-safe validation, workflow guardrail, project harness, and reliability checks.
+    skills:
+      - workspace-governance
+      - workspace-kpi-query-optimizer
+      - evolution
+    default_prompt: "Run local-safe validation gates only. Treat validation errors as blockers, summarize artifact paths, and never hand-edit generated contracts to clear failures. Enforce Bronze/Silver standards, strict exception compensating controls, workflow reroute policy, data-quality, layered pipeline, project, and reliability harnesses before promotion."
+    safety: local_safe_validation_no_generated_contract_edits
+    targets:
+      codex:
+        enabled: true
+        sandbox_mode: workspace-write
+      claude:
+        enabled: true
+        permission: workspace-write
+      gemini:
+        enabled: true
+
+  - name: integration-notification-operator
+    display_name: Integration Notification Operator
+    description: Bridges Slack, Teams, MCP, or plugin frontends to existing workspace-flow and session-snapshot commands.
+    skills:
+      - workspace-governance
+      - stakeholder-memory
+      - evolution
+    default_prompt: "Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post current.md, use current.json for buttons, and record trajectory/session events."
+    safety: notification_and_approval_bridge_no_direct_dataset_or_remote_mutation
+    targets:
+      codex:
+        enabled: true
+        sandbox_mode: workspace-write
+      claude:
+        enabled: true
+        permission: workspace-write
+      gemini:
+        enabled: true

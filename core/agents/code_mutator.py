@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from core.config import Config
+from core.paths import PROJECT_ROOT
 
 if TYPE_CHECKING:
     from core.observability.telemetry_backend import TelemetryBackend
@@ -77,7 +78,7 @@ class CodeMutator:
                  root: Optional[Path] = None):
         self.cfg = cfg
         self.telemetry = telemetry
-        self.root = root or Path(__file__).resolve().parents[2]
+        self.root = root or PROJECT_ROOT
         self.timeout_s = int(getattr(cfg, "main_agent_timeout_sec", 300))
         self.max_kb = int(getattr(cfg, "max_editable_file_kb", 50))
 

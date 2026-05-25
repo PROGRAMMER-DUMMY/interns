@@ -11,6 +11,8 @@ import json
 import sys
 from pathlib import Path
 
+from core.paths import PROJECT_ROOT
+
 from core.medallion.lineage import Lineage
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -42,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _trace(args) -> int:
-    repo_root = Path(args.repo_root).resolve() if args.repo_root else Path.cwd().resolve()
+    repo_root = Path(args.repo_root).resolve() if args.repo_root else PROJECT_ROOT
     workspace_path = (
         (repo_root / args.workspace).resolve()
         if not Path(args.workspace).is_absolute()

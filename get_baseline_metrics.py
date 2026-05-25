@@ -1,8 +1,30 @@
 import duckdb
-import time
+import argparse
+from pathlib import Path
 
 DB_PATH = ":memory:"
-SQL_FILE = "workspaces/Healthcare-RCM-Data-Platform/kpi_metrics.sql"
+DEFAULT_WORKSPACE = "workspaces/Healthcare-RCM-Data-Platform"
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the legacy Healthcare RCM KPI baseline.")
+    parser.add_argument("--workspace", default=DEFAULT_WORKSPACE)
+    return parser.parse_args()
+
+
+args = _parse_args()
+workspace = args.workspace.rstrip("/\\")
+if workspace != DEFAULT_WORKSPACE:
+    raise SystemExit(
+        "get_baseline_metrics.py is a legacy Healthcare-RCM-Data-Platform baseline only. "
+        "For generated KPI SQL, use: uv run run-kpi-execution-harness --workspace <workspace>"
+    )
+
+SQL_FILE = str(Path(workspace) / "kpi_metrics.sql")
+if not Path(SQL_FILE).exists():
+    fallback = Path(workspace) / "interns" / "generated" / "solutions" / "kpi_metrics.sql"
+    if fallback.exists():
+        SQL_FILE = str(fallback)
 
 conn = duckdb.connect(DB_PATH)
 conn.execute("CREATE SCHEMA IF NOT EXISTS silver;")

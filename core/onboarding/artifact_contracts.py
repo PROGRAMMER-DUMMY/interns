@@ -95,3 +95,51 @@ SOURCE_TO_TARGET_PLAN_CONTRACT = ArtifactContract(
     regenerate_command="plan-source-to-target",
     required_generated_by="plan-source-to-target",
 )
+
+CATALOG_CONTRACT_CONTRACT = ArtifactContract(
+    artifact_type="catalog_contract.json",
+    version_field="version",
+    supported_version=1,
+    regenerate_command="build-catalog-contract",
+    required_generated_by="build-catalog-contract",
+)
+
+DATA_ENGINEERING_ROUTE_CONTRACT = ArtifactContract(
+    artifact_type="data_engineering_route.json",
+    version_field="version",
+    supported_version=1,
+    regenerate_command="prepare-data-engineering-route",
+    required_generated_by="prepare-data-engineering-route",
+)
+
+PIPELINE_PLAN_CONTRACT = ArtifactContract(
+    artifact_type="pipeline_plan.json",
+    version_field="version",
+    supported_version=1,
+    regenerate_command="prepare-pipeline-plan",
+    required_generated_by="prepare-pipeline-plan",
+)
+
+PIPELINE_DECISIONS_CONTRACT = ArtifactContract(
+    artifact_type="pipeline_decisions.json",
+    version_field="version",
+    supported_version=1,
+    regenerate_command="apply-pipeline-decision",
+    required_generated_by="apply-pipeline-decision",
+)
+
+DATA_QUALITY_CONTRACT = ArtifactContract(
+    artifact_type="data_quality_contract.json",
+    version_field="version",
+    supported_version=1,
+    regenerate_command="run-data-quality-harness",
+    required_generated_by="run-data-quality-harness",
+)
+
+DUPLICATE_DECISIONS_CONTRACT = ArtifactContract(
+    artifact_type="duplicate_decisions.json",
+    version_field="version",
+    supported_version=1,
+    regenerate_command="apply-duplicate-review-answer",
+    required_generated_by="apply-duplicate-review-answer",
+)

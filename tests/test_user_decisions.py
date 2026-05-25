@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.onboarding.user_decisions import apply_decision_to_feature, apply_user_decision
+from core.onboarding.memory.user_decisions import apply_decision_to_feature, apply_user_decision
 from core.storage.workspace_layout import WorkspaceLayout
 
 

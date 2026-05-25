@@ -12,6 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.storage.external_data import (
+    external_allowlist_paths,
+    path_allowed_by_entries,
+)
+
 
 @dataclass(frozen=True)
 class WorkspaceLayout:
@@ -115,19 +120,10 @@ class WorkspaceLayout:
 
     def is_dataset_allowed(self, path: Path) -> bool:
         settings = self.load_settings()
-        allowlist = settings.get("dataset_allowlist")
-        if not allowlist:
-            return True
-            
-        try:
-            rel_path = path.relative_to(self.project_root)
-        except ValueError:
-            return True # Not inside the project root, cannot be restricted by workspace-level allowlist
-            
-        rel_str = str(rel_path).replace("\\", "/")
-        
-        # A file is allowed if it's within any of the allowlisted directory prefixes
-        return any(rel_str.startswith(allowed.replace("\\", "/")) for allowed in allowlist)
+        return path_allowed_by_entries(path, project_root=self.project_root, settings=settings)
+
+    def external_dataset_allowlist_paths(self) -> list[Path]:
+        return external_allowlist_paths(self.load_settings())
 
     def summary(self) -> dict[str, str]:
         return {

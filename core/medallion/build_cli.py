@@ -10,6 +10,8 @@ import json
 import sys
 from pathlib import Path
 
+from core.paths import PROJECT_ROOT
+
 from core.medallion.build import (
     build_medallion,
     MedallionBuildExit,
@@ -18,6 +20,7 @@ from core.medallion.build import (
     EXIT_SQL_LINT_FAIL,
     EXIT_DESIGN_BLOCKERS,
 )
+from core.resource.manager import ResourceManager
 
 
 _DESCRIPTION = (
@@ -66,7 +69,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--repo-root", default=None,
-        help="Repository root. Defaults to current working directory.",
+        help="Repository root. Defaults to detected project root.",
     )
     parser.add_argument(
         "--target", default=None, choices=["duckdb", "delta", "auto"],
@@ -97,7 +100,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    repo_root = Path(args.repo_root).resolve() if args.repo_root else Path.cwd().resolve()
+    repo_root = Path(args.repo_root).resolve() if args.repo_root else PROJECT_ROOT
     workspace = (
         (repo_root / args.workspace).resolve()
         if not Path(args.workspace).is_absolute()
@@ -110,6 +113,10 @@ def main(argv: list[str] | None = None) -> int:
             "proceeding with unresolved design panel entries.",
             file=sys.stderr,
         )
+
+    resource_manager = ResourceManager(workspace, repo_root=repo_root)
+    resource_artifacts = resource_manager.write_report(workload="medallion_build")
+    resource_decision = resource_manager.decide(workload="medallion_build")
 
     cfg = None
     try:
@@ -127,15 +134,19 @@ def main(argv: list[str] | None = None) -> int:
             only_table=args.only_table,
             resume=args.resume,
             force_with_blockers=args.force_with_blockers,
+            resource_decision=resource_decision,
         )
     except MedallionBuildExit as exc:
         _emit_exit(exc, json_mode=args.json)
         return _exit_code_for(exc.code)
 
     if args.json:
-        print(json.dumps(state.to_dict(), indent=2))
+        payload = state.to_dict()
+        payload["resource_artifacts"] = resource_artifacts
+        print(json.dumps(payload, indent=2))
     else:
         _emit_human(state, workspace, repo_root)
+        print(f"  resource_report: {resource_artifacts['report']}")
     return 0
 
 

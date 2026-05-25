@@ -44,6 +44,9 @@ def _lint_parse(sql: str, *, file_label: str) -> list[LintFinding]:
         import sqlglot
         sqlglot.parse(sql)
         return []
+    except ImportError:
+        # sqlglot not installed — skip parse pass
+        return []
     except Exception as exc:
         return [LintFinding(file_label, "error", "parse_failed", str(exc)[:300])]
 

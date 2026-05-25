@@ -33,6 +33,12 @@ class DashboardPaths:
     def reports(self, name: str) -> Path:
         return self.workspace(name) / "interns" / "reports"
 
+    def generated(self, name: str) -> Path:
+        return self.workspace(name) / "interns" / "generated"
+
+    def state(self, name: str) -> Path:
+        return self.workspace(name) / "interns" / "state"
+
     def lock_path(self, name: str) -> Path:
         return self.medallion_state(name) / ".lock"
 
@@ -245,3 +251,176 @@ class WorkspaceCommandService:
             "stdout": result.stdout[-3000:],
             "stderr": result.stderr[-500:],
         }
+
+
+class ReviewerProofService:
+    """Aggregate workspace proof artifacts for the dashboard.
+
+    This service is intentionally read-only. Commands that refresh artifacts stay
+    in WorkspaceCommandService so the dashboard can keep reads and mutations
+    separately testable.
+    """
+
+    def __init__(self, paths: DashboardPaths) -> None:
+        self.paths = paths
+
+    def load(self, workspace: str) -> dict[str, Any]:
+        reports = self.paths.reports(workspace)
+        generated = self.paths.generated(workspace)
+        state = self.paths.state(workspace)
+        graph = read_json(generated / "evidence_graph" / "graph.json", {})
+        trajectory = read_json(reports / "trajectory" / "current.json", {})
+        workflow_guard = read_json(reports / "workflow_guard_harness" / "current.json", {})
+        reliability = read_json(reports / "reliability_suite" / "current.json", {})
+        memory = read_json(reports / "memory_health" / "current.json", {})
+        blocker = read_json(reports / "blocker_question_panel" / "current.json", {})
+        project = read_json(generated / "evidence" / "project_harness.json", {})
+        proof_packet = read_json(reports / "kpi_proof_packet" / "current.json", {})
+
+        artifacts = [
+            self._artifact("Reliability suite", reports / "reliability_suite" / "current.json", reliability),
+            self._artifact("Workflow guardrails", reports / "workflow_guard_harness" / "current.json", workflow_guard),
+            self._artifact("Evidence graph", generated / "evidence_graph" / "graph.json", graph),
+            self._artifact("Memory health", reports / "memory_health" / "current.json", memory),
+            self._artifact("Trajectory", reports / "trajectory" / "current.json", trajectory),
+            self._artifact("Blocker panel", reports / "blocker_question_panel" / "current.json", blocker),
+            self._artifact("Project harness", generated / "evidence" / "project_harness.json", project),
+            self._artifact("KPI proof packet", reports / "kpi_proof_packet" / "current.json", proof_packet),
+        ]
+        missing = [item["path"] for item in artifacts if item["status"] == "missing"]
+        blockers = self._blockers(workflow_guard, reliability, memory, project)
+        return {
+            "workspace": f"workspaces/{workspace}",
+            "generated_at": self._latest_timestamp(artifacts),
+            "status": "blocked" if blockers else ("incomplete" if missing else "ready"),
+            "artifacts": artifacts,
+            "missing_artifacts": missing,
+            "blockers": blockers,
+            "summary": self._summary(
+                graph=graph,
+                trajectory=trajectory,
+                workflow_guard=workflow_guard,
+                reliability=reliability,
+                memory=memory,
+                blocker=blocker,
+                project=project,
+                proof_packet=proof_packet,
+            ),
+            "graph": self._graph_summary(graph),
+            "trajectory": self._trajectory_summary(trajectory, state / "trajectory.jsonl"),
+            "workflow_guard": workflow_guard,
+            "reliability": reliability,
+            "memory": memory,
+            "blocker": blocker,
+            "project": project,
+            "proof_packet": proof_packet,
+        }
+
+    def _artifact(self, label: str, path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+        exists = path.exists()
+        stat = path.stat() if exists else None
+        status = "present" if exists else "missing"
+        if exists and payload.get("ok") is False:
+            status = "blocked"
+        return {
+            "artifact": label,
+            "status": status,
+            "path": self._rel(path),
+            "updated": int(stat.st_mtime) if stat else "",
+            "generated_by": payload.get("generated_by", ""),
+            "artifact_type": payload.get("artifact_type", ""),
+        }
+
+    def _summary(
+        self,
+        *,
+        graph: dict[str, Any],
+        trajectory: dict[str, Any],
+        workflow_guard: dict[str, Any],
+        reliability: dict[str, Any],
+        memory: dict[str, Any],
+        blocker: dict[str, Any],
+        project: dict[str, Any],
+        proof_packet: dict[str, Any],
+    ) -> dict[str, Any]:
+        graph_summary = graph.get("summary") or {}
+        memory_summary = memory.get("summary") or {}
+        trajectory_records = trajectory.get("events") or trajectory.get("records") or []
+        return {
+            "reliability_status": reliability.get("status", "missing"),
+            "workflow_guard_status": workflow_guard.get("status", "missing"),
+            "project_status": project.get("status", "missing"),
+            "project_score": project.get("score", ""),
+            "memory_status": memory.get("status", "missing"),
+            "memory_entries": memory_summary.get("entry_count", 0),
+            "memory_findings": len(memory.get("findings") or []),
+            "graph_nodes": graph_summary.get("node_count", 0),
+            "graph_edges": graph_summary.get("edge_count", 0),
+            "introduced_terms": graph_summary.get("introduced_term_count", 0),
+            "trajectory_events": len(trajectory_records),
+            "active_blocker": blocker.get("feature", ""),
+            "proof_kpis": len(proof_packet.get("kpis") or proof_packet.get("items") or []),
+        }
+
+    def _graph_summary(self, graph: dict[str, Any]) -> dict[str, Any]:
+        nodes = graph.get("nodes") or []
+        edges = graph.get("edges") or []
+        kind_counts: dict[str, int] = {}
+        for node in nodes:
+            kind = str(node.get("kind") or node.get("type") or "unknown")
+            kind_counts[kind] = kind_counts.get(kind, 0) + 1
+        edge_counts: dict[str, int] = {}
+        for edge in edges:
+            kind = str(edge.get("type") or "unknown")
+            edge_counts[kind] = edge_counts.get(kind, 0) + 1
+        return {
+            "node_kinds": kind_counts,
+            "edge_types": edge_counts,
+            "introduced_terms": (graph.get("queries") or {}).get("introduced_terms") or [],
+        }
+
+    def _trajectory_summary(self, trajectory: dict[str, Any], jsonl_path: Path) -> dict[str, Any]:
+        records = trajectory.get("events") or trajectory.get("records") or []
+        status_counts: dict[str, int] = {}
+        type_counts: dict[str, int] = {}
+        for record in records:
+            status = str(record.get("status") or "unknown")
+            event_type = str(record.get("event_type") or "unknown")
+            status_counts[status] = status_counts.get(status, 0) + 1
+            type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        return {
+            "path": self._rel(jsonl_path),
+            "status_counts": status_counts,
+            "event_type_counts": type_counts,
+            "recent": records[-12:],
+        }
+
+    def _blockers(
+        self,
+        workflow_guard: dict[str, Any],
+        reliability: dict[str, Any],
+        memory: dict[str, Any],
+        project: dict[str, Any],
+    ) -> list[str]:
+        blockers = []
+        for finding in workflow_guard.get("findings") or []:
+            if finding.get("severity") in {"error", "critical", "blocker"}:
+                blockers.append(f"Workflow guardrail: {finding.get('message') or finding.get('code')}")
+        for check in reliability.get("checks") or []:
+            if check.get("status") == "failed":
+                blockers.append(f"Reliability check failed: {check.get('name') or check.get('check')}")
+        for finding in memory.get("findings") or []:
+            if finding.get("severity") == "critical":
+                blockers.append(f"Memory health: {finding.get('message') or finding.get('code')}")
+        blockers.extend(str(item) for item in project.get("blockers") or [])
+        return blockers[:20]
+
+    def _latest_timestamp(self, artifacts: list[dict[str, Any]]) -> int | str:
+        stamps = [item["updated"] for item in artifacts if isinstance(item.get("updated"), int)]
+        return max(stamps) if stamps else ""
+
+    def _rel(self, path: Path) -> str:
+        try:
+            return path.resolve().relative_to(self.paths.root.resolve()).as_posix()
+        except ValueError:
+            return path.as_posix()

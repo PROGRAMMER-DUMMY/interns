@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Union
 
-ROOT = Path(__file__).resolve().parents[2]
+from core.paths import PROJECT_ROOT
+
+ROOT = PROJECT_ROOT
 
 @dataclass
 class RunRecord:

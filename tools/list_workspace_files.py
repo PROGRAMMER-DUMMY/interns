@@ -1,15 +1,47 @@
 import argparse
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.paths import PROJECT_ROOT
+from core.storage.external_data import (
+    bounded_external_files,
+    is_external_path,
+    load_external_data_policy,
+)
 
-KPI_HINTS = ("kpi", "metric", "registry")
-DATA_MODEL_HINTS = ("data_model", "datamodel", "model")
+
+KPI_HINTS = ("kpi", "metric", "registry", "analytics_question", "analytics_questions", "question", "questions")
+DATA_MODEL_HINTS = (
+    "data_model",
+    "datamodel",
+    "model",
+    "schema",
+    "dictionary",
+    "data_dictionary",
+    "create_db",
+    "create_database",
+    "create_hospital_db",
+)
 DATA_EXTENSIONS = {".csv", ".parquet", ".json", ".jsonl", ".xlsx", ".xls"}
-DOC_EXTENSIONS = {".md", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".xlsx", ".xls"}
+DOC_EXTENSIONS = {
+    ".csv",
+    ".json",
+    ".md",
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".sql",
+    ".toml",
+    ".txt",
+    ".xls",
+    ".xlsx",
+    ".yaml",
+    ".yml",
+}
 
 
 @dataclass
@@ -24,6 +56,8 @@ class WorkspaceFileListing:
     dataset_roots: list[str]
     docs: list[str]
     files: list[str]
+    external_state: str = "workspace"
+    classifications: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -36,6 +70,11 @@ def list_workspace_files(
     max_files: int = 200,
 ) -> WorkspaceFileListing:
     root = Path(repo_root).resolve()
+    policy = load_external_data_policy(root)
+    requested_path = Path(workspace.strip().strip('"').strip("'")).expanduser()
+    if requested_path.is_absolute() and is_external_path(requested_path, root, policy):
+        return _list_external_files(root, requested_path.resolve(), policy, max_files=max_files)
+
     workspace_rel = _resolve_workspace(root, workspace)
     workspace_path = (root / workspace_rel).resolve()
     if not workspace_path.exists() or not workspace_path.is_dir():
@@ -62,6 +101,7 @@ def list_workspace_files(
             files.append(path)
 
     rel_files = [_display_path(root, path) for path in files]
+    classifications = _classify_files(rel_files)
     return WorkspaceFileListing(
         workspace=workspace_rel,
         exists=True,
@@ -73,6 +113,52 @@ def list_workspace_files(
         dataset_roots=_dataset_roots(rel_files),
         docs=_docs(rel_files),
         files=rel_files,
+        classifications=classifications,
+    )
+
+
+def _list_external_files(
+    repo_root: Path,
+    external_root: Path,
+    policy,
+    *,
+    max_files: int,
+) -> WorkspaceFileListing:
+    if not external_root.exists() or not external_root.is_dir():
+        return WorkspaceFileListing(
+            workspace=external_root.as_posix(),
+            exists=False,
+            file_count=0,
+            truncated=False,
+            interns_state="external_missing",
+            possible_kpi_files=[],
+            possible_data_model_files=[],
+            dataset_roots=[],
+            docs=[],
+            files=[],
+            external_state="external_danger_root_missing",
+        )
+    cap = min(max_files, policy.max_paths)
+    files, truncated = bounded_external_files(
+        external_root,
+        max_paths=cap,
+        max_seconds=policy.max_seconds,
+    )
+    rel_files = [_display_path(repo_root, path) for path in files]
+    classifications = _classify_files(rel_files)
+    return WorkspaceFileListing(
+        workspace=external_root.as_posix(),
+        exists=True,
+        file_count=len(rel_files),
+        truncated=truncated,
+        interns_state="external_bounded_listing_only",
+        possible_kpi_files=_possible_kpi_files(rel_files),
+        possible_data_model_files=_possible_data_model_files(rel_files),
+        dataset_roots=_dataset_roots(rel_files),
+        docs=_docs(rel_files),
+        files=rel_files,
+        external_state="external_danger_root_bounded_listing_only",
+        classifications=classifications,
     )
 
 
@@ -116,8 +202,8 @@ def _possible_kpi_files(files: list[str]) -> list[str]:
         file
         for file in files
         if "/interns/" not in file
-        and Path(file).suffix.lower() in {".xlsx", ".xls", ".csv", ".md"}
-        and any(hint in Path(file).name.lower() for hint in KPI_HINTS)
+        and Path(file).suffix.lower() in {".xlsx", ".xls", ".csv", ".json", ".md", ".sql", ".toml", ".txt", ".yaml", ".yml"}
+        and _has_kpi_filename_signal(file)
     )
 
 
@@ -127,16 +213,113 @@ def _possible_data_model_files(files: list[str]) -> list[str]:
         for file in files
         if "/interns/" not in file
         and Path(file).suffix.lower() in DOC_EXTENSIONS
-        and any(hint in Path(file).name.lower().replace(" ", "_") for hint in DATA_MODEL_HINTS)
+        and _has_data_model_filename_signal(file)
     )
+
+
+def _classify_files(files: list[str]) -> list[dict[str, Any]]:
+    classifications = []
+    for file in sorted(files):
+        if "/interns/" in file:
+            continue
+        roles, reasons = _file_roles_and_reasons(file)
+        if not roles:
+            continue
+        classifications.append(
+            {
+                "path": file,
+                "roles": roles,
+                "reasons": reasons,
+                "conflicts": [],
+            }
+        )
+    return classifications
+
+
+def _file_roles_and_reasons(file: str) -> tuple[list[str], list[str]]:
+    roles: list[str] = []
+    reasons: list[str] = []
+    suffix = Path(file).suffix.lower()
+    normalized = _normalized_name(file)
+
+    if suffix in {".xlsx", ".xls", ".csv", ".json", ".md", ".sql", ".toml", ".txt", ".yaml", ".yml"} and _has_kpi_filename_signal(file):
+        roles.append("kpi_input")
+        reasons.append(_kpi_reason(normalized, suffix))
+
+    if suffix in DOC_EXTENSIONS and _has_data_model_filename_signal(file):
+        roles.append("data_model_input")
+        reasons.append(_data_model_reason(normalized, suffix))
+
+    if suffix in DATA_EXTENSIONS and "/docs/" not in file:
+        roles.append("dataset_evidence")
+        reasons.append(f"{suffix} file outside docs/interns")
+
+    if suffix in DOC_EXTENSIONS and ("/docs/" in file or _looks_like_root_context_file(file)):
+        roles.append("context_doc")
+        reasons.append("documentation/context filename signal")
+
+    return roles, reasons
+
+
+def _kpi_reason(normalized: str, suffix: str) -> str:
+    matched = [hint for hint in KPI_HINTS if hint in normalized]
+    if matched:
+        return f"filename contains {matched[0]}"
+    if "analytics" in normalized and suffix == ".sql":
+        return "SQL filename contains analytics"
+    return "filename matches KPI input pattern"
+
+
+def _data_model_reason(normalized: str, suffix: str) -> str:
+    matched = [hint for hint in DATA_MODEL_HINTS if hint in normalized]
+    if matched:
+        return f"filename contains {matched[0]}"
+    if suffix == ".sql" and normalized.startswith("create_"):
+        return "SQL filename starts with create"
+    if suffix == ".sql" and "ddl" in normalized:
+        return "SQL filename contains ddl"
+    if suffix == ".sql" and "database" in normalized:
+        return "SQL filename contains database"
+    if suffix == ".sql" and normalized.endswith("_db"):
+        return "SQL filename ends with db"
+    return "filename matches data model pattern"
+
+
+def _has_kpi_filename_signal(file: str) -> bool:
+    normalized = _normalized_name(file)
+    return any(hint in normalized for hint in KPI_HINTS) or (
+        "analytics" in normalized and "sql" == Path(file).suffix.lower().lstrip(".")
+    )
+
+
+def _has_data_model_filename_signal(file: str) -> bool:
+    normalized = _normalized_name(file)
+    suffix = Path(file).suffix.lower()
+    if any(hint in normalized for hint in DATA_MODEL_HINTS):
+        return True
+    return suffix == ".sql" and (
+        normalized.startswith("create_")
+        or "ddl" in normalized
+        or "database" in normalized
+        or normalized.endswith("_db")
+    )
+
+
+def _normalized_name(file: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", Path(file).stem.lower()).strip("_")
 
 
 def _dataset_roots(files: list[str]) -> list[str]:
     roots = set()
     for file in files:
-        if "/interns/" in file or "/datasets/" not in file:
+        if "/interns/" in file:
             continue
         if Path(file).suffix.lower() not in DATA_EXTENSIONS:
+            continue
+        if "/datasets/" not in file:
+            parent = str(Path(file).parent).replace("\\", "/")
+            if "/docs" not in parent:
+                roots.add(parent)
             continue
         parts = Path(file).parts
         try:
@@ -154,8 +337,23 @@ def _docs(files: list[str]) -> list[str]:
         file
         for file in files
         if "/interns/" not in file
-        and "/docs/" in file
+        and ("/docs/" in file or _looks_like_root_context_file(file))
         and Path(file).suffix.lower() in DOC_EXTENSIONS
+    )
+
+
+def _looks_like_root_context_file(file: str) -> bool:
+    path = Path(file)
+    name = path.name.lower()
+    if len(path.parts) != 3 or path.parts[0] != "workspaces":
+        return False
+    return (
+        "dictionary" in name
+        or "question" in name
+        or "analytics" in name
+        or "schema" in name
+        or "db" in name
+        or "citation" in name
     )
 
 
@@ -178,7 +376,11 @@ def main() -> None:
         nargs="+",
         help="Workspace path or fuzzy workspace name. Multiple tokens are joined with spaces.",
     )
-    parser.add_argument("--repo-root", default=".", help="Repository root. Defaults to current directory.")
+    parser.add_argument(
+        "--repo-root",
+        default=str(PROJECT_ROOT),
+        help="Repository root. Defaults to detected project root.",
+    )
     parser.add_argument("--max-files", type=int, default=200, help="Maximum file paths to list.")
     parser.add_argument("--json", action="store_true", help="Print JSON instead of text.")
     args = parser.parse_args()
@@ -194,10 +396,21 @@ def main() -> None:
     print(f"Files listed: {listing.file_count}")
     print(f"Truncated: {listing.truncated}")
     print(f"Interns state: {listing.interns_state}")
-    _print_group("Possible KPI files", listing.possible_kpi_files)
-    _print_group("Possible data model files", listing.possible_data_model_files)
+    print(f"External state: {listing.external_state}")
+    _print_classified_group(
+        "Possible KPI files",
+        listing.possible_kpi_files,
+        listing.classifications,
+        "kpi_input",
+    )
+    _print_classified_group(
+        "Possible data model files",
+        listing.possible_data_model_files,
+        listing.classifications,
+        "data_model_input",
+    )
     _print_group("Dataset roots", listing.dataset_roots)
-    _print_group("Docs", listing.docs)
+    _print_classified_group("Docs", listing.docs, listing.classifications, "context_doc")
     _print_group("All files", listing.files)
 
 
@@ -208,6 +421,53 @@ def _print_group(title: str, values: list[str]) -> None:
         return
     for value in values:
         print(f"- {value}")
+
+
+def _print_classified_group(
+    title: str,
+    values: list[str],
+    classifications: list[dict[str, Any]],
+    role: str,
+) -> None:
+    by_path = {item["path"]: item for item in classifications}
+    print(f"\n{title}:")
+    if not values:
+        print("- (none)")
+        return
+    for value in values:
+        reasons = [
+            reason
+            for reason in by_path.get(value, {}).get("reasons", [])
+            if _reason_matches_role(reason, role)
+        ]
+        reason_text = reasons[0] if reasons else _first_reason(by_path.get(value, {}))
+        suffix = f" [reason: {reason_text}]" if reason_text else ""
+        print(f"- {value}{suffix}")
+
+
+def _reason_matches_role(reason: str, role: str) -> bool:
+    if role == "kpi_input":
+        return "KPI" in reason or "analytics" in reason or "question" in reason or "metric" in reason
+    if role == "data_model_input":
+        return (
+            "data model" in reason
+            or "dictionary" in reason
+            or "schema" in reason
+            or "create" in reason
+            or "database" in reason
+            or "ddl" in reason
+            or "db" in reason
+        )
+    if role == "context_doc":
+        return "documentation/context" in reason
+    return False
+
+
+def _first_reason(classification: dict[str, Any]) -> str:
+    reasons = classification.get("reasons", [])
+    if not reasons:
+        return ""
+    return str(reasons[0])
 
 
 if __name__ == "__main__":
