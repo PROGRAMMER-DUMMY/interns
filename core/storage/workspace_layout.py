@@ -131,6 +131,18 @@ class WorkspaceLayout:
     def handoffs_dir(self) -> Path:
         return self.state_dir / "handoffs"
 
+    @property
+    def dashboard_dir(self) -> Path:
+        return self.project_root / "dashboard"
+
+    @property
+    def dashboard_exports_dir(self) -> Path:
+        return self.dashboard_dir / "exports"
+
+    @property
+    def dashboard_index_path(self) -> Path:
+        return self.dashboard_dir / "index.json"
+
     def ensure_runtime_dirs(self) -> None:
         for path in [
             self.state_dir,

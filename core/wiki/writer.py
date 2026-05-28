@@ -112,6 +112,151 @@ def upsert_feature_note(layout: WikiLayout, feature: str, scaffold: dict[str, An
     return path
 
 
+KPI_MACHINE_SECTIONS = (
+    "Definition",
+    "Generated SQL",
+    "Result preview",
+    "Last execution",
+)
+
+KPI_HUMAN_SECTIONS = (
+    "Why (user)",
+    "Business context",
+    "Related notes",
+)
+
+
+def build_kpi_completion_scaffold(
+    *,
+    kpi_id: str,
+    entry: dict[str, Any],
+    contract_ref: str = "",
+    timestamp: str | None = None,
+) -> dict[str, Any]:
+    """Build the machine-owned scaffold for a KPI completion note.
+
+    ``entry`` is the same per-KPI dict produced by ``_write_result_preview``:
+    keys ``definition`` (kpi_registry record), ``sql_path``, ``sql_text``,
+    ``status``, ``preview_markdown``, ``error``, ``result_view``.
+    Workspace-agnostic.
+    """
+    now = timestamp or datetime.now(timezone.utc).isoformat()
+    definition = entry.get("definition") or {}
+    business_question = str(
+        definition.get("business_question") or definition.get("name") or ""
+    ).strip()
+    metric = str(definition.get("metric") or "").strip()
+    cuts = str(definition.get("cuts") or "").strip()
+    description = str(definition.get("description") or "").strip()
+    status = str(entry.get("status") or "")
+
+    definition_lines = [f"- **KPI**: `{kpi_id}`"]
+    if business_question:
+        definition_lines.append(f"- **Business question**: {business_question}")
+    if description and description != business_question:
+        definition_lines.append(f"- **Description**: {description}")
+    if metric:
+        definition_lines.append(f"- **Metric**: `{metric}`")
+    if cuts:
+        definition_lines.append(f"- **Cuts/grain**: {cuts}")
+    if entry.get("sql_path"):
+        definition_lines.append(f"- **SQL artifact**: `{entry.get('sql_path')}`")
+    definition_block = "\n".join(definition_lines)
+
+    sql_text = str(entry.get("sql_text") or "").strip()
+    sql_block = (
+        "```sql\n" + sql_text + "\n```" if sql_text else "_(no SQL generated yet)_"
+    )
+
+    preview = str(entry.get("preview_markdown") or "").strip()
+    error = str(entry.get("error") or "").strip()
+    if error:
+        preview_block = "```text\n" + error + "\n```"
+    elif preview:
+        preview_block = preview
+    else:
+        preview_block = "_(no result preview available)_"
+
+    exec_lines = [f"- **Status**: `{status}`", f"- **Last updated**: {now}"]
+    if entry.get("result_view"):
+        exec_lines.append(f"- **Result view**: `{entry.get('result_view')}`")
+    exec_block = "\n".join(exec_lines)
+
+    return {
+        "frontmatter": {
+            "contract_ref": contract_ref or "interns/generated/contracts/kpi_registry.json",
+            "entity_type": "kpi",
+            "entity_id": kpi_id,
+            "summary": business_question or f"KPI {kpi_id}",
+            "tags": ["kpi"],
+            "updated": now,
+            "last_validated_against_json": now,
+            "validator_status": "ok" if status == "ok" else "blocked",
+        },
+        "definition": definition_block,
+        "generated_sql": sql_block,
+        "result_preview": preview_block,
+        "last_execution": exec_block,
+    }
+
+
+def upsert_kpi_note(layout: WikiLayout, kpi_id: str, scaffold: dict[str, Any]) -> Path:
+    """Write/refresh a KPI wiki note. Machine sections refresh; human sections persist."""
+    layout.ensure_dirs()
+    path = layout.kpi_note_path(kpi_id)
+    existing = read_note(path)
+    now = scaffold["frontmatter"].get("updated") or datetime.now(timezone.utc).isoformat()
+
+    machine_sections = {
+        "Definition": scaffold["definition"],
+        "Generated SQL": scaffold["generated_sql"],
+        "Result preview": scaffold["result_preview"],
+        "Last execution": scaffold["last_execution"],
+    }
+
+    if existing is None:
+        frontmatter = dict(scaffold["frontmatter"])
+        frontmatter.setdefault("created", now)
+        sections = dict(machine_sections)
+        for human in KPI_HUMAN_SECTIONS:
+            sections[human] = empty_section(human)
+    else:
+        frontmatter = dict(existing.frontmatter)
+        frontmatter.update(scaffold["frontmatter"])
+        frontmatter.setdefault("created", now)
+        sections = dict(existing.sections)
+        sections.update(machine_sections)
+        for human in KPI_HUMAN_SECTIONS:
+            sections.setdefault(human, empty_section(human))
+
+    rendered = _render_kpi_note(frontmatter, sections, kpi_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(rendered, encoding="utf-8")
+    return path
+
+
+def _render_kpi_note(
+    frontmatter: dict[str, Any], sections: dict[str, str], kpi_id: str
+) -> str:
+    fm_ordered: dict[str, Any] = {}
+    for key in _FRONTMATTER_ORDER:
+        if key in frontmatter:
+            fm_ordered[key] = frontmatter[key]
+    for key, value in frontmatter.items():
+        if key not in fm_ordered:
+            fm_ordered[key] = value
+    fm_text = yaml.safe_dump(fm_ordered, sort_keys=False).strip()
+    lines = ["---", fm_text, "---", "", f"# KPI: {kpi_id}", ""]
+    section_order = list(KPI_MACHINE_SECTIONS) + list(KPI_HUMAN_SECTIONS)
+    for name in section_order:
+        body = sections.get(name, "").strip() or empty_section(name)
+        lines.append(f"## {name}")
+        lines.append("")
+        lines.append(body)
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _summary_line(feature: str, option: dict[str, Any], custom_definition: str) -> str:
     if physical := option.get("physical_column_option"):
         dataset = physical.get("dataset") or ""

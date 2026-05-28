@@ -70,6 +70,7 @@ query-workspace-evidence-graph = "core.onboarding.evidence_graph:query_main"
 prepare-workspace-bug-report = "core.onboarding.workspace.bugs:main"
 prepare-workspace-workflow = "core.onboarding.workspace.workflow:prepare_main"
 workspace-flow = "core.onboarding.workspace.flow:main"
+workspace-dashboard = "tools.workspace_dashboard:main"
 prepare-bronze-silver-standards = "core.onboarding.bronze_silver_standards:main"
 prepare-wiki-memory = "core.onboarding.memory.wiki_memory:prepare_main"
 validate-memory-health = "core.onboarding.memory.health:main"
@@ -160,6 +161,9 @@ enterprise-metadata = [
 dashboard = [
     "dash>=4.1.0",
     "dash-bootstrap-components>=2.0.4",
+]
+dashboard-testing = [
+    "dash[testing]>=4.1.0",
 ]
 ml = [
     "scikit-learn>=1.5",

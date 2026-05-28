@@ -65,3 +65,18 @@ Do not use yolo mode or bypass permissions for this workflow.
   read-or-extract tasks (e.g., "list relationship_ids in this 553-line JSON") to a
   subagent that returns only the extracted answer. Do not load large artifacts into the
   main chat context just to scan them.
+
+# Required-specialist + suggested-skills enforcement (hard rule)
+
+- Every panel JSON may carry `summary.required_specialists` (list of agent names)
+  and `summary.suggested_skills` (list of `{name, why}`). These are not advisory.
+  Before answering, rendering, or acting on a panel, you MUST:
+  1. Activate every skill named in `summary.suggested_skills` (load its `SKILL.md`).
+  2. For every agent in `summary.required_specialists`, either invoke the matching
+     subagent for review, OR include in your reply why you are choosing not to
+     invoke it (e.g., "trajectory shows it already fired in this session at <stage>").
+- Every panel may also carry `summary.delegations` — the programmatic verdicts
+  workspace-flow already captured on behalf of each specialist. Render those verdicts
+  inline in your reply so the user sees who reviewed what.
+- Never strip `required_specialists`, `suggested_skills`, or `delegations` from a
+  panel before showing it to the user.

@@ -274,6 +274,32 @@ def _layout_artifacts(layout: WorkspaceLayout) -> list[ArtifactSpec]:
             relative_path="interns/evaluation",
             producer_command="(hand-authored; created during workspace bootstrap)",
         ),
+        ArtifactSpec(
+            key="dashboard_index",
+            category="dashboard",
+            lifecycle="source_of_truth",
+            purpose="Dashboard index spec — which KPIs appear, in what order, with which user_overrides.",
+            relative_path="dashboard/index.json",
+            producer_command="uv run workspace-dashboard --workspace <workspace> (auto on workspace-flow complete)",
+        ),
+        ArtifactSpec(
+            key="dashboard_specs",
+            category="dashboard",
+            kind="dir",
+            lifecycle="source_of_truth",
+            purpose="Per-KPI dashboard JSON specs (machine_defaults + user_overrides). Edit user_overrides to customize charts; machine_defaults refresh on every regeneration.",
+            relative_path="dashboard",
+            producer_command="uv run workspace-dashboard --workspace <workspace>",
+        ),
+        ArtifactSpec(
+            key="dashboard_exports",
+            category="dashboard",
+            kind="dir",
+            lifecycle="derived",
+            purpose="Static HTML export of the dashboard (one page per KPI + index.html). Regeneratable.",
+            relative_path="dashboard/exports",
+            producer_command="uv run workspace-dashboard --workspace <workspace> --export",
+        ),
     ]
 
 
@@ -496,6 +522,31 @@ def write_workspace_readme(layout: WorkspaceLayout) -> str:
     return _rel(out, layout.project_root)
 
 
+def _render_delegations_section(layout: WorkspaceLayout) -> str:
+    try:
+        from core.onboarding.workspace.delegation import recent_delegations
+    except Exception:
+        return ""
+    events = recent_delegations(layout, tail=20)
+    if not events:
+        return ""
+    lines = [
+        "## Recent specialist activity (last 20 delegations)",
+        "",
+        "| When | Agent | Stage | Verdict | Summary |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for ev in events:
+        timestamp = str(ev.get("timestamp", ""))[:19].replace("T", " ")
+        agent = str(ev.get("agent", ""))
+        stage = str(ev.get("stage", ""))
+        status = str(ev.get("status", ""))
+        summary = str(ev.get("summary", "")).replace("|", "\\|")
+        lines.append(f"| {timestamp} | `{agent}` | `{stage}` | `{status}` | {summary} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def write_manifest(layout: WorkspaceLayout) -> dict[str, str]:
     """Write `interns/MANIFEST.md` + `interns/MANIFEST.json` + `interns/README.md`.
 
@@ -506,7 +557,11 @@ def write_manifest(layout: WorkspaceLayout) -> dict[str, str]:
     layout.interns_dir.mkdir(parents=True, exist_ok=True)
     md_path = layout.interns_dir / "MANIFEST.md"
     json_path = layout.interns_dir / "MANIFEST.json"
-    md_path.write_text(render_inventory_markdown(inv), encoding="utf-8")
+    md_body = render_inventory_markdown(inv)
+    delegations_section = _render_delegations_section(layout)
+    if delegations_section:
+        md_body = md_body + "\n" + delegations_section
+    md_path.write_text(md_body, encoding="utf-8")
     json_path.write_text(json.dumps(inv, indent=2) + "\n", encoding="utf-8")
     readme_path = write_workspace_readme(layout)
     return {

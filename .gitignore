@@ -51,6 +51,12 @@ workspaces/**/interns/state/*
 !workspaces/**/interns/state/workspace_settings.json
 !workspaces/**/interns/evaluation/
 !workspaces/**/interns/evaluation/**
+# Per-workspace BI dashboard: track JSON specs (carry user_overrides),
+# ignore the static HTML export.
+!workspaces/**/dashboard/
+!workspaces/**/dashboard/*.json
+!workspaces/**/dashboard/index.json
+workspaces/**/dashboard/exports/
 workspaces/Healthcare-RCM-Data-Platform/
 workspaces/**/hotspots.json
 workspaces/**/experiment_profile/

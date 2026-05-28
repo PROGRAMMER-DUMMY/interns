@@ -220,7 +220,21 @@ priority       = 100
 
 [[rule]]
 toolName       = "run_shell_command"
+commandPrefix  = "uv run cleanup-workspace-references"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
 commandPrefix  = "uv run session-snapshot"
+decision       = "allow"
+priority       = 100
+
+# --- Git hygiene ---
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "git status"
 decision       = "allow"
 priority       = 100
 

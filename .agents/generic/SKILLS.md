@@ -480,6 +480,11 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Path: `skills/clarify-ambiguity/SKILL.md`
 - Description: Use when a request is underspecified, ambiguous, assumption-heavy, or likely to produce a wrong, unsafe, costly, or irrelevant answer without clarification. Trigger when missing context materially affects correctness, safety, user intent, implementation choices, or recommendation quality. Do not trigger for clear requests or minor ambiguities that can be handled by stating a reasonable assumption.
 
+### dashboard-design
+
+- Path: `skills/dashboard-design/SKILL.md`
+- Description: Design, customize, debug, and verify per-workspace BI dashboards. Owns the dashboard/ directory in any workspace: JSON spec contracts (machine_defaults + user_overrides), chart-type inference, Dash renderer, static HTML export, dialect dispatch, and live callback testing. Use whenever the user wants a chart, a layout change, a new filter, a customization, or a dashboard bug investigated.
+
 ### data-engineering-pipeline-design
 
 - Path: `skills/data-engineering-pipeline-design/SKILL.md`

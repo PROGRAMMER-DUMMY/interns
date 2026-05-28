@@ -21,6 +21,18 @@ from core.onboarding.kpi.blocker_workflow import apply_kpi_panel_answer, prepare
 from core.onboarding.kpi.execution_harness import KPIExecutionHarness
 from core.onboarding.kpi.generation_workflow import KPIGenerationWorkflow
 from core.onboarding.kpi.registry_loader import load_kpi_definitions, render_kpi_block
+from core.wiki import WikiLayout, build_kpi_completion_scaffold, upsert_kpi_note
+from core.dashboard import refresh_workspace_dashboard
+from core.onboarding.workspace.delegation import (
+    DelegationEvent,
+    record_delegation,
+    render_delegation_markdown,
+    verdict_from_dashboard_summary,
+    verdict_from_kpi_completion,
+    verdict_from_relationship_summary,
+    verdict_from_source_to_target_summary,
+    verdict_from_validation_summary,
+)
 from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator
 from core.onboarding.pipeline_plan import DataEngineeringRoutePlanner
 from core.onboarding.relationships.contracts import RelationshipContractBuilder
@@ -302,8 +314,22 @@ class WorkspaceFlow:
 
         relationships = RelationshipContractBuilder(self.repo_root, self.workspace_rel).build()
         self._record_step(state, "build_relationship_contracts", "ok", relationships.summary())
+        self._delegate_and_record(
+            state,
+            agent="data-engineer",
+            stage="relationship_review",
+            reason="multi-source KPI generation requires executable relationship contracts",
+            verdict_fn=lambda: verdict_from_relationship_summary(relationships.summary()),
+        )
         plan = SourceToTargetPlanner(self.repo_root, self.workspace_rel, target_engine="sql").build()
         self._record_step(state, "plan_source_to_target", "ok", plan.summary())
+        self._delegate_and_record(
+            state,
+            agent="source-to-target-reviewer",
+            stage="source_to_target_review",
+            reason="every KPI plan must pass selected-sources + join-proof + grain checks before SQL gen",
+            verdict_fn=lambda: verdict_from_source_to_target_summary(plan.summary()),
+        )
         if plan.blocked_kpi_count:
             diff = compute_workflow_diff(self.repo_root, self.workspace_rel)
             recovery_commands: list[dict[str, str]] = []
@@ -366,6 +392,13 @@ class WorkspaceFlow:
             validation.summary(),
             validation="validate-workspace-artifacts",
         )
+        self._delegate_and_record(
+            state,
+            agent="validation-gatekeeper",
+            stage="artifact_validation",
+            reason="every workflow-produced contract must pass schema + cross-artifact validation",
+            verdict_fn=lambda: verdict_from_validation_summary(validation.summary()),
+        )
         if not harness.ok:
             return self._save_panel(
                 state,
@@ -399,6 +432,62 @@ class WorkspaceFlow:
         preview = self._write_result_preview(preview_rows=20)
         self._record_step(state, "preview_kpi_results", "ok", preview)
         kpi_entries = preview.get("kpis") or []
+        wiki_paths: list[str] = []
+        try:
+            wiki_layout = WikiLayout(project_root=self.workspace)
+            for entry in kpi_entries:
+                kpi_id = str(entry.get("kpi_id") or "")
+                if not kpi_id:
+                    continue
+                scaffold = build_kpi_completion_scaffold(kpi_id=kpi_id, entry=entry)
+                note_path = upsert_kpi_note(wiki_layout, kpi_id, scaffold)
+                wiki_paths.append(_rel(note_path, self.repo_root))
+        except Exception as exc:
+            self._record_step(
+                state,
+                "upsert_kpi_wiki_notes",
+                "failed",
+                {"error": str(exc), "count": len(wiki_paths)},
+            )
+        else:
+            self._record_step(
+                state,
+                "upsert_kpi_wiki_notes",
+                "ok",
+                {"count": len(wiki_paths), "notes": wiki_paths},
+            )
+        try:
+            dash_summary = refresh_workspace_dashboard(
+                self.layout, completed_kpi_entries=kpi_entries
+            )
+        except Exception as exc:
+            self._record_step(
+                state,
+                "refresh_workspace_dashboard",
+                "failed",
+                {"error": str(exc)},
+            )
+        else:
+            self._record_step(
+                state,
+                "refresh_workspace_dashboard",
+                "ok",
+                dash_summary,
+            )
+            self._delegate_and_record(
+                state,
+                agent="dashboard-engineer",
+                stage="dashboard_refresh",
+                reason="every workflow completion must refresh dashboard specs (preserving user_overrides)",
+                verdict_fn=lambda: verdict_from_dashboard_summary(dash_summary),
+            )
+        self._delegate_and_record(
+            state,
+            agent="kpi-analyst",
+            stage="kpi_completion_review",
+            reason="completed KPIs must be reviewed for definition+sql+result-row coverage",
+            verdict_fn=lambda: verdict_from_kpi_completion(kpi_entries),
+        )
         completed_kpis = [
             {
                 "kpi_id": entry.get("kpi_id"),
@@ -409,6 +498,13 @@ class WorkspaceFlow:
                 "result_view": entry.get("result_view"),
                 "preview_markdown": entry.get("preview_markdown"),
                 "error": entry.get("error"),
+                "wiki_path": next(
+                    (
+                        p for p in wiki_paths
+                        if Path(p).stem == str(entry.get("kpi_id") or "")
+                    ),
+                    "",
+                ),
             }
             for entry in kpi_entries
         ]
@@ -441,6 +537,14 @@ class WorkspaceFlow:
                         {"name": "kpi-analyst", "why": "Validate generated SQL and result samples against KPI intent."},
                         {"name": "self-grill", "why": "Cross-check completed KPIs before declaring the workflow done."},
                     ],
+                    "required_specialists": [
+                        "data-engineer",
+                        "source-to-target-reviewer",
+                        "validation-gatekeeper",
+                        "kpi-analyst",
+                        "dashboard-engineer",
+                    ],
+                    "delegations": list(state.get("delegations") or []),
                 },
             },
             source="complete",
@@ -669,6 +773,26 @@ class WorkspaceFlow:
             raise FileNotFoundError(f"workspace not found: {self.workspace}")
         if self.workspace == self.repo_root or not self.workspace.is_relative_to(self.repo_root):
             raise ValueError(f"workspace must be inside repo root: {self.workspace}")
+
+    def _delegate_and_record(
+        self,
+        state: dict[str, Any],
+        *,
+        agent: str,
+        stage: str,
+        reason: str,
+        verdict_fn,
+    ) -> DelegationEvent:
+        event = record_delegation(
+            self.layout,
+            self.workspace_rel,
+            agent=agent,
+            stage=stage,
+            reason=reason,
+            verdict_fn=verdict_fn,
+        )
+        state.setdefault("delegations", []).append(event.to_dict())
+        return event
 
     def _record_step(
         self,
@@ -1411,6 +1535,25 @@ def _rel(path: Path, root: Path) -> str:
 
 
 def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
+    panel_path = repo_root / result.current_panel_path if result.current_panel_path else None
+    delegations: list[dict[str, Any]] = []
+    if panel_path and panel_path.exists():
+        try:
+            panel_payload = json.loads(panel_path.read_text(encoding="utf-8"))
+            delegations = (panel_payload.get("summary") or {}).get("delegations") or []
+        except (json.JSONDecodeError, OSError):
+            delegations = []
+    if delegations:
+        print("## Specialist Reviews")
+        print("")
+        for event in delegations:
+            agent = event.get("agent", "")
+            stage = event.get("stage", "")
+            verdict = event.get("verdict") or {}
+            status = verdict.get("status", "")
+            summary = verdict.get("summary", "")
+            print(f"- `{agent}` @ `{stage}` → **{status}** — {summary}")
+        print("")
     markdown_path = repo_root / result.current_markdown_path
     if markdown_path.exists():
         print(markdown_path.read_text(encoding="utf-8").rstrip())

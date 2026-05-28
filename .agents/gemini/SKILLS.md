@@ -437,6 +437,18 @@ This file is generated from canonical repo skills. Do not hand-edit it.
 These subagents are generated from `skills/*/agents/*.yaml`; do not hand-edit adapter output.
 Use the narrowest role that fits the task and keep write access limited to implementer-style roles.
 
+### dashboard-engineer
+
+- Display name: Dashboard Engineer
+- Description: Designs, customizes, debugs, and verifies per-workspace BI dashboards (JSON spec contract, Dash renderer, static HTML export, live callback tests).
+- Skills: workspace-governance; dashboard-design; domain-model; kpi-analyst; evolution
+- Safety: governed_dashboard_spec_local_safe_by_default
+- Source: `skills/dashboard-design/agents/dashboard-team.yaml`
+- Target model: `default`
+- Target sandbox/permission: `role_defined`
+- Model policy: {"default_tier": "standard", "escalate_to_deep_for": ["cross-workspace dashboard schema migrations", "production embedding decisions", "performance investigations with large result sets"], "use_light_for": ["spec inventory", "render-tree inspection", "simple user_overrides edits", "static HTML export"], "use_standard_for": ["chart-type inference rule additions", "callback graph design", "dialect dispatch decisions", "regression test authoring"]}
+- Default prompt: Act as the dashboard-engineering role. Own everything under `workspaces/<ws>/dashboard/` and the platform modules at `core/dashboard/*`, `tools/workspace_dashboard.py`, `tests/test_dashboard_*.py`. Honor the two-section spec contract: rewrite `machine_defaults` on every regeneration; preserve `user_overrides` verbatim. Use live SQL re-execution via DuckDB — never read stale snapshots. Render blocked KPIs as recovery cards, not by hiding them. For any chart-type addition or schema change, ship a regression test that exercises both the inference rule and the renderer branch. Debug callbacks via `/_dash-dependencies` and `/_dash-layout` before reaching for browser tests. Do not edit upstream contracts (`kpi_registry.json`, `relationship_contracts.json`, `source_to_target_plan.json`) — escalate to `data-engineer` or `kpi-analyst` when the chart is wrong because the data is wrong.
+
 ### business-analyst
 
 - Display name: Business Analyst
@@ -555,7 +567,7 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Target model: `default`
 - Target sandbox/permission: `role_defined`
 - Model policy: Use the target CLI default model unless a workflow route specifies otherwise.
-- Default prompt: Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. For blocker, approval, KPI-generation, data-model, duplicate-review, or pipeline-format panels, post the generated current.md verbatim as the human card; do not replace it with a tool-native generic question box or a summary. Use current.json only to render buttons/options and to apply the exact selected answer. Record deterministic next commands.
+- Default prompt: Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. For blocker, approval, KPI-generation, data-model, duplicate-review, or pipeline-format panels, post the generated current.md verbatim as the human card; do not replace it with a tool-native generic question box or a summary. Use current.json only to render buttons/options and to apply the exact selected answer. Record deterministic next commands. Required-specialist + suggested-skills enforcement (hard rule): every panel JSON may carry summary.required_specialists, summary.suggested_skills, and summary.delegations. These are not advisory. Before answering or rendering a panel, activate every skill in suggested_skills, render every delegation verdict inline, and either invoke each agent in required_specialists or include in your reply why you are choosing not to. Never strip these fields from a panel before showing it to the user.
 
 ### source-to-target-reviewer
 
@@ -599,6 +611,11 @@ Use the narrowest role that fits the task and keep write access limited to imple
 
 - Path: `skills/clarify-ambiguity/SKILL.md`
 - Description: Use when a request is underspecified, ambiguous, assumption-heavy, or likely to produce a wrong, unsafe, costly, or irrelevant answer without clarification. Trigger when missing context materially affects correctness, safety, user intent, implementation choices, or recommendation quality. Do not trigger for clear requests or minor ambiguities that can be handled by stating a reasonable assumption.
+
+### dashboard-design
+
+- Path: `skills/dashboard-design/SKILL.md`
+- Description: Design, customize, debug, and verify per-workspace BI dashboards. Owns the dashboard/ directory in any workspace: JSON spec contracts (machine_defaults + user_overrides), chart-type inference, Dash renderer, static HTML export, dialect dispatch, and live callback testing. Use whenever the user wants a chart, a layout change, a new filter, a customization, or a dashboard bug investigated.
 
 ### data-engineering-pipeline-design
 
