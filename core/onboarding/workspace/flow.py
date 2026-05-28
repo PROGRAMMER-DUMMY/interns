@@ -20,6 +20,7 @@ from core.onboarding.harness.trajectory_recorder import record_trajectory_event_
 from core.onboarding.kpi.blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
 from core.onboarding.kpi.execution_harness import KPIExecutionHarness
 from core.onboarding.kpi.generation_workflow import KPIGenerationWorkflow
+from core.onboarding.kpi.registry_loader import load_kpi_definitions, render_kpi_block
 from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator
 from core.onboarding.pipeline_plan import DataEngineeringRoutePlanner
 from core.onboarding.relationships.contracts import RelationshipContractBuilder
@@ -30,7 +31,19 @@ from core.onboarding.workspace.workflow import MODES as ORCHESTRATION_MODES
 from core.onboarding.workspace.workflow import WorkspaceWorkflowOrchestrator
 from core.presentation.console_tables import render_markdown_table, render_query_result_table
 from core.storage.workspace_layout import WorkspaceLayout
+from tools.artifact_inventory import (
+    gitignore_patterns as artifact_gitignore_patterns,
+    inventory as inventory_artifacts,
+    render_inventory_markdown as render_artifact_inventory_markdown,
+    write_manifest as write_artifact_manifest,
+)
 from tools.list_workspace_files import list_workspace_files
+from tools.state_consolidator import consolidate_all as consolidate_state_all
+from tools.workspace_gc import (
+    DEFAULT_MAX_LOG_MB,
+    DEFAULT_MAX_SESSION_AGE_HOURS,
+    garbage_collect as gc_workspace,
+)
 
 
 FLOW_VERSION = 1
@@ -188,6 +201,16 @@ class WorkspaceFlow:
         state = self._load_state()
         return self._result_from_state(state)
 
+    def diff(self) -> dict[str, Any]:
+        """Read existing artifacts and report per-KPI gaps without re-running.
+
+        Returns a generic structured diff: per-KPI list of missing features,
+        missing relationships, validation failures, and the exact recovery
+        commands the agent should run. Designed to replace the "re-run
+        workspace-flow start to see what's missing" loop pattern.
+        """
+        return compute_workflow_diff(self.repo_root, self.workspace_rel)
+
     def results(self, *, preview_rows: int = 20) -> WorkspaceFlowResult:
         state = self._load_state()
         preview = self._write_result_preview(preview_rows=preview_rows)
@@ -282,17 +305,42 @@ class WorkspaceFlow:
         plan = SourceToTargetPlanner(self.repo_root, self.workspace_rel, target_engine="sql").build()
         self._record_step(state, "plan_source_to_target", "ok", plan.summary())
         if plan.blocked_kpi_count:
+            diff = compute_workflow_diff(self.repo_root, self.workspace_rel)
+            recovery_commands: list[dict[str, str]] = []
+            for gap in diff.get("kpi_gaps") or []:
+                recovery_commands.extend(gap.get("recovery_commands") or [])
+            seen_cmds: set[str] = set()
+            recovery_commands = [
+                cmd for cmd in recovery_commands
+                if cmd.get("command") and not (cmd["command"] in seen_cmds or seen_cmds.add(cmd["command"]))
+            ]
+            suggested_skills = [
+                {"name": "data-engineering-pipeline-design", "why": "Source-to-target blockers need pipeline-design judgment."},
+                {"name": "workspace-governance", "why": "Recovery commands mutate workspace contracts."},
+            ]
             return self._save_panel(
                 state,
                 panel={
                     "stage": "source_to_target_blocked",
                     "status": "blocked",
-                    "instruction": "Source-to-target planning found blockers. Review the plan report.",
-                    "question": "Resolve the blockers in the source-to-target plan before generating SQL.",
+                    "instruction": (
+                        "Source-to-target planning found blockers. The `summary.recovery_commands` "
+                        "array lists the exact commands to run; render them inline. "
+                        "Do NOT re-run `workspace-flow start` to retry — apply the recovery commands "
+                        "and then call `workspace-flow status --workspace <ws> --diff` to confirm."
+                    ),
+                    "question": "Apply the recovery commands shown below to unblock the plan.",
                     "options": [],
                     "recommended_option_id": "",
                     "artifact_paths": [plan.json_path, plan.markdown_path],
-                    "summary": plan.summary(),
+                    "recovery_commands": recovery_commands,
+                    "suggested_skills": suggested_skills,
+                    "summary": {
+                        **plan.summary(),
+                        "recovery_commands": recovery_commands,
+                        "suggested_skills": suggested_skills,
+                        "diff": diff,
+                    },
                 },
                 source="source_to_target",
             )
@@ -350,12 +398,31 @@ class WorkspaceFlow:
             )
         preview = self._write_result_preview(preview_rows=20)
         self._record_step(state, "preview_kpi_results", "ok", preview)
+        kpi_entries = preview.get("kpis") or []
+        completed_kpis = [
+            {
+                "kpi_id": entry.get("kpi_id"),
+                "definition": entry.get("definition") or {},
+                "sql_path": entry.get("sql_path"),
+                "sql_text": entry.get("sql_text"),
+                "status": entry.get("status"),
+                "result_view": entry.get("result_view"),
+                "preview_markdown": entry.get("preview_markdown"),
+                "error": entry.get("error"),
+            }
+            for entry in kpi_entries
+        ]
+        preview_summary = {k: v for k, v in preview.items() if k != "kpis"}
         return self._save_panel(
             state,
             panel={
                 "stage": "complete",
                 "status": "complete",
-                "instruction": "KPI SQL generation and previews are complete.",
+                "instruction": (
+                    "KPI SQL generation and previews are complete. "
+                    "Each entry under `summary.completed_kpis` carries the original KPI definition, "
+                    "the generated SQL text, and the result-table preview. Render them inline."
+                ),
                 "question": "",
                 "options": [],
                 "recommended_option_id": "",
@@ -368,7 +435,12 @@ class WorkspaceFlow:
                     "generated_kpi_count": len(generated),
                     "orchestration": orchestration_context,
                     "validation": validation.summary(),
-                    "results": preview,
+                    "results": preview_summary,
+                    "completed_kpis": completed_kpis,
+                    "suggested_skills": [
+                        {"name": "kpi-analyst", "why": "Validate generated SQL and result samples against KPI intent."},
+                        {"name": "self-grill", "why": "Cross-check completed KPIs before declaring the workflow done."},
+                    ],
                 },
             },
             source="complete",
@@ -455,6 +527,7 @@ class WorkspaceFlow:
         evidence_dir = self.layout.evidence_dir / "kpi_results"
         result_dir.mkdir(parents=True, exist_ok=True)
         evidence_dir.mkdir(parents=True, exist_ok=True)
+        kpi_definitions = load_kpi_definitions(self.layout)
         entries = []
         conn = duckdb.connect(":memory:")
         old_cwd = Path.cwd()
@@ -468,6 +541,8 @@ class WorkspaceFlow:
                 entry: dict[str, Any] = {
                     "kpi_id": kpi_id,
                     "sql_path": _rel(sql_file, self.repo_root),
+                    "sql_text": sql_text,
+                    "definition": kpi_definitions.get(kpi_id, {}),
                     "status": "ok",
                 }
                 try:
@@ -508,6 +583,7 @@ class WorkspaceFlow:
             "markdown_path": _rel(md_path, self.repo_root),
             "kpi_count": len(entries),
             "error_count": sum(1 for item in entries if item.get("status") != "ok"),
+            "kpis": entries,
         }
 
     def _base_state(self, intent: str) -> dict[str, Any]:
@@ -663,6 +739,18 @@ def _compact_panel(
             if key in source_panel
         },
     }
+    for key in ("output_dialect", "immutable_kpi_policy", "kpi_understanding"):
+        if source_panel.get(key):
+            panel[key] = source_panel[key]
+    for key in ("recovery_commands", "suggested_skills"):
+        if source_panel.get(key):
+            panel[key] = source_panel[key]
+    if stage == "kpi_blocker" and not panel.get("suggested_skills"):
+        panel["suggested_skills"] = [
+            {"name": "kpi-analyst", "why": "Interpret the KPI question and validate proposed mappings."},
+            {"name": "feature-derivation-library", "why": "Choose between direct and derived feature options."},
+            {"name": "clarify-ambiguity", "why": "Flag missing context before applying an answer."},
+        ]
     if orchestration_context:
         panel["orchestration_context"] = orchestration_context
     if resolution_review:
@@ -700,6 +788,91 @@ def _render_panel_markdown(panel: dict[str, Any]) -> str:
                 "",
             ]
         )
+    if panel.get("output_dialect"):
+        dialect = panel["output_dialect"]
+        lines.extend(
+            [
+                "## Output Dialect",
+                "",
+                f"- Default: `{dialect.get('label', 'SQL (default)')}`",
+                "- Alternatives: " + ", ".join(f"`{item}`" for item in dialect.get("alternatives", [])),
+                f"- Rule: {dialect.get('rule', '')}",
+                "",
+            ]
+        )
+    if panel.get("immutable_kpi_policy"):
+        policy = panel["immutable_kpi_policy"]
+        lines.extend(
+            [
+                "## Immutable KPI Policy",
+                "",
+                str(policy.get("rule", "")),
+                "",
+            ]
+        )
+    if panel.get("kpi_understanding"):
+        lines.extend(["## KPI Understanding Review", ""])
+        for item in panel.get("kpi_understanding") or []:
+            original = item.get("original_kpi") or {}
+            lines.extend(
+                [
+                    f"### {item.get('kpi_id', '')}",
+                    "",
+                    f"- Original KPI: {original.get('business_question', '')}",
+                    f"- Source metric: `{original.get('metric', '')}`",
+                    f"- Source cuts / filters: {', '.join(original.get('cuts') or [])}",
+                    "",
+                    "#### My Understanding",
+                    "",
+                    str(item.get("my_understanding", "")),
+                    "",
+                    "#### Strict Proven SQL",
+                    "",
+                    "```sql",
+                    str(item.get("strict_proven_sql", "")),
+                    "```",
+                    "",
+                    "#### Placeholder Intent SQL",
+                    "",
+                    "```sql",
+                    str(item.get("intent_sql_sketch", "")),
+                    "```",
+                    "",
+                    "#### Demo Result Table",
+                    "",
+                    str(item.get("demo_result_table", "")),
+                    "",
+                ]
+            )
+    completed_kpis = (panel.get("summary") or {}).get("completed_kpis") or []
+    if completed_kpis:
+        lines.extend(["## Completed KPIs", ""])
+        for entry in completed_kpis:
+            lines.extend(render_kpi_block(entry, heading_level=3))
+    recovery_commands = (panel.get("summary") or {}).get("recovery_commands") or panel.get("recovery_commands") or []
+    if recovery_commands:
+        lines.extend(["## Recovery Commands", ""])
+        for cmd in recovery_commands:
+            label = str(cmd.get("label") or cmd.get("why") or "").strip()
+            command = str(cmd.get("command") or "").strip()
+            if label:
+                lines.append(f"- **{label}**")
+            if command:
+                lines.append("  ```bash")
+                lines.append(f"  {command}")
+                lines.append("  ```")
+        lines.append("")
+    suggested_skills = (panel.get("summary") or {}).get("suggested_skills") or panel.get("suggested_skills") or []
+    if suggested_skills:
+        lines.extend(["## Suggested Skills", ""])
+        for skill in suggested_skills:
+            if isinstance(skill, dict):
+                name = str(skill.get("name") or "")
+                why = str(skill.get("why") or "")
+                lines.append(f"- `{name}`{f' — {why}' if why else ''}")
+            else:
+                lines.append(f"- `{skill}`")
+        lines.append("")
     if panel.get("question"):
         lines.extend(["## Question", "", str(panel.get("question", "")), ""])
     if panel.get("options"):
@@ -927,19 +1100,7 @@ def _render_results_markdown(payload: dict[str, Any]) -> str:
         "",
     ]
     for entry in payload.get("kpis", []):
-        lines.extend(
-            [
-                f"## {entry.get('kpi_id')}",
-                "",
-                f"- SQL: `{entry.get('sql_path', '')}`",
-                f"- Status: `{entry.get('status', '')}`",
-                "",
-            ]
-        )
-        if entry.get("error"):
-            lines.extend(["```text", str(entry["error"]), "```", ""])
-        else:
-            lines.extend([str(entry.get("preview_markdown", "")), ""])
+        lines.extend(render_kpi_block(entry, heading_level=2))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -996,6 +1157,248 @@ def _new_session_id() -> str:
     return "wf_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def latest_open_session(repo_root: Path, workspace_rel: str, *, max_age_hours: int = 24) -> str | None:
+    """Return the most recent workflow_session id for a workspace, if recent.
+
+    Returns None when no session exists, or the latest is older than
+    `max_age_hours`, or its status is `complete`. Lets `workspace-flow start`
+    resume in-progress work instead of minting yet another session.
+    """
+    layout = WorkspaceLayout(project_root=(Path(repo_root) / workspace_rel).resolve())
+    sessions_dir = layout.workflow_sessions_dir
+    if not sessions_dir.exists():
+        return None
+    candidates = []
+    for session_path in sessions_dir.iterdir():
+        if not session_path.is_dir():
+            continue
+        state_file = session_path / "session.json"
+        if not state_file.exists():
+            continue
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        status = str(data.get("status") or data.get("current_panel", {}).get("status") or "")
+        if status == "complete":
+            continue
+        updated = str(data.get("updated_at") or "")
+        try:
+            updated_dt = datetime.fromisoformat(updated)
+        except ValueError:
+            continue
+        if updated_dt.tzinfo is None:
+            updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - updated_dt
+        if age.total_seconds() > max_age_hours * 3600:
+            continue
+        candidates.append((updated_dt, session_path.name))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def write_session_handoff(repo_root: Path, workspace_rel: str, session_id: str) -> str | None:
+    """Write a compact handoff doc for a session and return its relative path.
+
+    Generic across workspaces. Persists under
+    `<workspace>/interns/state/handoffs/<session_id>.md` so the next session
+    can read prior context without paging through the full transcript.
+    Returns None if the session does not exist.
+    """
+    repo_root = Path(repo_root).resolve()
+    layout = WorkspaceLayout(project_root=(repo_root / workspace_rel).resolve())
+    state_path = layout.workflow_sessions_dir / session_id / "session.json"
+    if not state_path.exists():
+        return None
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    panel = state.get("current_panel") or {}
+    layout.handoffs_dir.mkdir(parents=True, exist_ok=True)
+    out_path = layout.handoffs_dir / f"{session_id}.md"
+    diff = compute_workflow_diff(repo_root, workspace_rel)
+    lines = [
+        f"# Handoff: session `{session_id}`",
+        "",
+        f"- Workspace: `{workspace_rel}`",
+        f"- Last updated: {state.get('updated_at', '')}",
+        f"- Stage: `{panel.get('stage', state.get('stage', ''))}`",
+        f"- Status: `{panel.get('status', state.get('status', ''))}`",
+        "",
+        "## Snapshot",
+        "",
+        f"- KPI count: {diff.get('kpi_count', 0)}",
+        f"- Ready KPIs: {diff.get('ready_kpi_count', 0)}",
+        f"- Blocked KPIs: {diff.get('blocked_kpi_count', 0)}",
+        f"- Executable relationships: {len(diff.get('executable_relationship_ids') or [])}",
+        f"- Pending relationships: {len(diff.get('pending_relationship_ids') or [])}",
+        "",
+        "## Open Recovery Commands",
+        "",
+    ]
+    has_recovery = False
+    for gap in diff.get("kpi_gaps") or []:
+        for cmd in gap.get("recovery_commands") or []:
+            has_recovery = True
+            lines.append(f"- **{gap.get('kpi_id', '')}** — {cmd.get('label', '')}")
+            lines.append(f"  - `{cmd.get('command', '')}`")
+    if not has_recovery:
+        lines.append("- (none — workspace appears unblocked)")
+    lines.extend(
+        [
+            "",
+            "## Next Step",
+            "",
+            "Resume by reading the panel artifact, then call `workspace-flow status "
+            f"--workspace {workspace_rel} --diff` to confirm state is still current.",
+            "",
+        ]
+    )
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    return _rel(out_path, repo_root)
+
+
+def compute_workflow_diff(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
+    """Return a generic per-KPI gap report + recovery commands.
+
+    Reads existing artifacts only — does NOT mutate state or re-run the
+    pipeline. The orchestrating agent uses this to learn what to fix
+    without burning a full workspace-flow start cycle.
+    """
+    repo_root = Path(repo_root).resolve()
+    layout = WorkspaceLayout(project_root=(repo_root / workspace_rel).resolve())
+    plan = _read_json(layout.source_to_target_plan_path)
+    relationships = _read_json(layout.relationship_contracts_path)
+    blocker_panel = _read_json(layout.reports_dir / "blocker_question_panel" / "current.json")
+    rels_by_id: dict[str, dict[str, Any]] = {
+        str(r.get("relationship_id", "")): r
+        for r in (relationships.get("relationships") or [])
+        if isinstance(r, dict)
+    }
+    executable_rel_ids = sorted(rid for rid, r in rels_by_id.items() if r.get("state") in {"user_confirmed", "proven_data_model"})
+    pending_rel_ids = sorted(rid for rid, r in rels_by_id.items() if r.get("state") not in {"user_confirmed", "proven_data_model", "rejected"})
+
+    def _norm(p: str) -> str:
+        return str(p or "").replace("\\", "/").lower()
+
+    kpi_gaps: list[dict[str, Any]] = []
+    for kpi in plan.get("kpis") or []:
+        if not isinstance(kpi, dict):
+            continue
+        kpi_id = str(kpi.get("kpi_id") or "")
+        status = str(kpi.get("status") or "")
+        blockers = kpi.get("blockers") or []
+        selected_sources = {
+            _norm(s) for s in (
+                kpi.get("selected_source_datasets")
+                or kpi.get("selected_sources")
+                or []
+            )
+        }
+        recovery: list[dict[str, str]] = []
+        seen_in_kpi: set[str] = set()
+        for blocker in blockers:
+            code = str(blocker.get("code") or "") if isinstance(blocker, dict) else str(blocker)
+            if code == "join_proof_missing":
+                for rid in pending_rel_ids:
+                    rel = rels_by_id.get(rid) or {}
+                    left = _norm(str(rel.get("left_dataset") or ""))
+                    right = _norm(str(rel.get("right_dataset") or ""))
+                    if selected_sources and not (left in selected_sources and right in selected_sources):
+                        continue
+                    if rid in seen_in_kpi:
+                        continue
+                    seen_in_kpi.add(rid)
+                    recovery.append(
+                        {
+                            "label": f"Approve relationship `{rid}` connecting this KPI's selected sources.",
+                            "command": (
+                                f"uv run apply-relationship-answer --workspace {workspace_rel} "
+                                f"--relationship-id {rid} --answer approve"
+                            ),
+                            "why": f"join_proof_missing for `{kpi_id}` — relationship `{rid}` is the executable link between its selected source datasets",
+                        }
+                    )
+                if not recovery and selected_sources:
+                    needed_pairs = sorted(
+                        {
+                            f"{a} ↔ {b}"
+                            for a in selected_sources
+                            for b in selected_sources
+                            if a < b
+                            and not any(
+                                {_norm(r.get("left_dataset") or ""), _norm(r.get("right_dataset") or "")}
+                                == {a, b}
+                                and r.get("state") in {"user_confirmed", "proven_data_model"}
+                                for r in rels_by_id.values()
+                            )
+                        }
+                    )
+                    for pair in needed_pairs:
+                        recovery.append(
+                            {
+                                "label": f"No relationship candidate yet between {pair} — build one.",
+                                "command": (
+                                    f"uv run build-relationship-contracts --workspace {workspace_rel}"
+                                ),
+                                "why": f"join_proof_missing for `{kpi_id}` — neither inferred nor user-supplied; rebuild from latest profiles/docs first",
+                            }
+                        )
+            elif code == "feature_not_ready":
+                recovery.append(
+                    {
+                        "label": "Resolve remaining KPI feature blockers via the panel.",
+                        "command": f"uv run prepare-kpi-blocker-panel --workspace {workspace_rel}",
+                        "why": code,
+                    }
+                )
+        kpi_gaps.append(
+            {
+                "kpi_id": kpi_id,
+                "status": status,
+                "blockers": blockers,
+                "missing_features": kpi.get("missing_features") or [],
+                "selected_source_datasets": sorted(selected_sources),
+                "recovery_commands": recovery,
+            }
+        )
+
+    if blocker_panel.get("status") == "needs_user_answer":
+        feature = str(blocker_panel.get("feature") or "")
+        kpi_gaps.append(
+            {
+                "kpi_id": "blocker_panel",
+                "status": "needs_user_answer",
+                "blockers": [{"code": "panel_open", "feature": feature}],
+                "missing_features": [feature] if feature else [],
+                "recovery_commands": [
+                    {
+                        "label": f"Answer the open blocker panel for `{feature}`.",
+                        "command": (
+                            f"uv run apply-kpi-panel-answer --workspace {workspace_rel} "
+                            f"--answer <option_id|custom>"
+                        ),
+                        "why": "open blocker panel awaits user decision",
+                    }
+                ],
+            }
+        )
+
+    return {
+        "workspace": workspace_rel,
+        "plan_present": bool(plan),
+        "kpi_count": len(plan.get("kpis") or []),
+        "executable_relationship_ids": executable_rel_ids,
+        "pending_relationship_ids": pending_rel_ids,
+        "kpi_gaps": kpi_gaps,
+        "ready_kpi_count": sum(1 for g in kpi_gaps if g.get("status") == "ready_for_generation"),
+        "blocked_kpi_count": sum(1 for g in kpi_gaps if g.get("status") == "blocked"),
+    }
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -1038,9 +1441,20 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--domain", default="healthcare")
     start.add_argument("--intent", choices=sorted(INTENTS), default="kpi_generation")
     start.add_argument("--mode", choices=sorted(ORCHESTRATION_MODES), default="local-safe")
+    start.add_argument(
+        "--new-session",
+        action="store_true",
+        help="Force minting a new session even if an in-progress one exists.",
+    )
 
     status = sub.add_parser("status")
-    status.add_argument("--session", required=True)
+    status.add_argument("--session", default="")
+    status.add_argument("--workspace", default="")
+    status.add_argument(
+        "--diff",
+        action="store_true",
+        help="Read existing artifacts and report per-KPI gaps + recovery commands without re-running the pipeline.",
+    )
 
     answer = sub.add_parser("answer")
     answer.add_argument("--session", required=True)
@@ -1052,8 +1466,82 @@ def main(argv: list[str] | None = None) -> int:
     results.add_argument("--session", required=True)
     results.add_argument("--preview-rows", type=int, default=20)
 
+    artifacts = sub.add_parser("artifacts")
+    artifacts.add_argument("--workspace", required=True)
+    artifacts.add_argument(
+        "--write-manifest",
+        action="store_true",
+        help="Also write interns/MANIFEST.md + interns/MANIFEST.json.",
+    )
+    artifacts.add_argument(
+        "--print-gitignore",
+        action="store_true",
+        help="Print suggested .gitignore patterns for non-source-of-truth artifacts.",
+    )
+
+    gc = sub.add_parser("gc")
+    gc.add_argument("--workspace", required=True)
+    gc.add_argument(
+        "--apply",
+        action="store_true",
+        help="Execute the GC (default is dry-run: shows what would be deleted).",
+    )
+    gc.add_argument(
+        "--max-session-age-hours",
+        type=int,
+        default=DEFAULT_MAX_SESSION_AGE_HOURS,
+        help="Delete workflow_sessions/ subdirs inactive longer than this (and any with status=complete).",
+    )
+    gc.add_argument(
+        "--max-log-mb",
+        type=int,
+        default=DEFAULT_MAX_LOG_MB,
+        help="Rotate trajectory.jsonl / events.jsonl when over this size.",
+    )
+
     args = parser.parse_args(argv)
     if args.cmd == "start":
+        repo_root_path = Path(args.repo_root).resolve()
+        workspace_layout = WorkspaceLayout(
+            project_root=(repo_root_path / args.workspace).resolve()
+        )
+        try:
+            consolidate_state_all(workspace_layout)
+        except Exception:
+            pass
+        try:
+            gc_workspace(workspace_layout, apply=True)
+        except Exception:
+            pass
+        try:
+            write_artifact_manifest(workspace_layout)
+        except Exception:
+            pass
+        resume_id: str | None = None
+        if not args.new_session:
+            resume_id = latest_open_session(repo_root_path, args.workspace)
+        if resume_id:
+            handoff_path = write_session_handoff(
+                Path(args.repo_root).resolve(), args.workspace, resume_id
+            )
+            print(
+                json.dumps(
+                    {
+                        "status": "resumed_existing_session",
+                        "session_id": resume_id,
+                        "handoff_path": handoff_path,
+                        "note": (
+                            "Resumed open session for this workspace. Pass --new-session to "
+                            "mint a fresh one. Read the handoff markdown for compact prior "
+                            f"state. Then run `workspace-flow status --session {resume_id}` "
+                            f"or `workspace-flow status --workspace {args.workspace} --diff` "
+                            "to inspect current artifacts."
+                        ),
+                    },
+                    indent=2,
+                )
+            )
+            return 0
         result = WorkspaceFlow(
             args.repo_root,
             args.workspace,
@@ -1061,6 +1549,17 @@ def main(argv: list[str] | None = None) -> int:
             orchestration_mode=args.mode,
         ).start(intent=args.intent)
     elif args.cmd == "status":
+        if args.diff:
+            if not args.workspace:
+                raise SystemExit("workspace-flow status --diff requires --workspace")
+            repo_root = Path(args.repo_root).resolve()
+            layout = WorkspaceLayout(project_root=(repo_root / args.workspace).resolve())
+            diff = compute_workflow_diff(repo_root, args.workspace)
+            diff["manifest_paths"] = write_artifact_manifest(layout)
+            print(json.dumps(diff, indent=2))
+            return 0
+        if not args.session:
+            raise SystemExit("workspace-flow status requires --session (or use --diff with --workspace)")
         result = WorkspaceFlow.from_session(args.repo_root, args.session).status()
     elif args.cmd == "answer":
         result = WorkspaceFlow.from_session(args.repo_root, args.session).answer(
@@ -1072,6 +1571,40 @@ def main(argv: list[str] | None = None) -> int:
         result = WorkspaceFlow.from_session(args.repo_root, args.session).results(
             preview_rows=args.preview_rows,
         )
+    elif args.cmd == "artifacts":
+        repo_root = Path(args.repo_root).resolve()
+        layout = WorkspaceLayout(project_root=(repo_root / args.workspace).resolve())
+        inv = inventory_artifacts(layout)
+        if args.write_manifest:
+            inv["manifest_paths"] = write_artifact_manifest(layout)
+        if args.print_gitignore:
+            patterns = artifact_gitignore_patterns(layout)
+            inv["suggested_gitignore_patterns"] = patterns
+            if not args.json:
+                print(render_artifact_inventory_markdown(inv))
+                print("\n## Suggested .gitignore patterns (non-source-of-truth)\n")
+                for pattern in patterns:
+                    print(pattern)
+                return 0
+        if args.json:
+            print(json.dumps(inv, indent=2))
+        else:
+            print(render_artifact_inventory_markdown(inv))
+        return 0
+    elif args.cmd == "gc":
+        repo_root = Path(args.repo_root).resolve()
+        layout = WorkspaceLayout(project_root=(repo_root / args.workspace).resolve())
+        consolidation = consolidate_state_all(layout)
+        report = gc_workspace(
+            layout,
+            apply=args.apply,
+            max_session_age_hours=args.max_session_age_hours,
+            max_log_mb=args.max_log_mb,
+        )
+        out = report.summary()
+        out["consolidation"] = consolidation
+        print(json.dumps(out, indent=2))
+        return 0
     else:
         raise SystemExit(2)
     if args.json:

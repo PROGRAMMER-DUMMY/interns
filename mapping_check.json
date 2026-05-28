@@ -1,0 +1,2403 @@
+{
+  "artifact_type": "kpi_feature_mapping.json",
+  "version": 2,
+  "generated_by": "resolve-kpi-features",
+  "workspace": "workspaces/Healthcare-RCM-Data-Platform",
+  "mode": "candidate_enriched",
+  "generated_at": "2026-05-28T12:09:27.061031+00:00",
+  "derived_feature_evidence_contract": {
+    "version": 1,
+    "required_fields": [
+      "derived_column_name",
+      "business_meaning",
+      "formula",
+      "input_columns",
+      "example",
+      "evidence_sources",
+      "derivation_reasoning",
+      "evidence_state",
+      "confidence",
+      "needs_user_confirmation"
+    ],
+    "rule": "Candidate derivations are not ground truth until proven or user-confirmed."
+  },
+  "states": [
+    "proven_direct",
+    "proven_alias",
+    "proven_join",
+    "proven_formula",
+    "proven_taxonomy",
+    "user_confirmed",
+    "blocked_missing_evidence",
+    "blocked_ambiguous",
+    "candidate_unconfirmed",
+    "candidate_pattern",
+    "rejected"
+  ],
+  "kpis": [
+    {
+      "kpi_id": "kpi_001",
+      "name": "What is trend for amount paid for medicare LOB across gender and payer for patients above 50 years of age",
+      "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\docs\\Sample KPI.xlsx",
+      "metric": "sum(PaidAmount)",
+      "cuts": "Month (ServiceDate), LineOfBusiness, PayorID, Gender, Age(DOB)",
+      "status": "ready_for_sql",
+      "features": [
+        {
+          "feature": "PaidAmount",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "PaidAmount",
+              "dtype": "Float64",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "observed_values": [
+                20.190000534057617,
+                20.239999771118164,
+                20.260000228881836,
+                20.31999969482422,
+                20.450000762939453,
+                20.799999237060547,
+                20.920000076293945,
+                21.030000686645508
+              ],
+              "value_profile": {
+                "sample_values": [
+                  20.190000534057617,
+                  20.239999771118164,
+                  20.260000228881836,
+                  20.31999969482422,
+                  20.450000762939453,
+                  20.799999237060547,
+                  20.920000076293945,
+                  21.030000686645508
+                ],
+                "sample_min": 20.190000534057617,
+                "sample_max": 799.9400024414062,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": 0,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "field": "PaidAmount",
+                  "meaning": "Column `PaidAmount` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`PaidAmount` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+                  "column": "PaidAmount",
+                  "dtype": "Float64",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      20.190000534057617,
+                      20.239999771118164,
+                      20.260000228881836,
+                      20.31999969482422,
+                      20.450000762939453,
+                      20.799999237060547,
+                      20.920000076293945,
+                      21.030000686645508
+                    ],
+                    "sample_min": 20.190000534057617,
+                    "sample_max": 799.9400024414062,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": 0,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"PaidAmount\" AS \"paidamount\" FROM \"transactions\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "paidamount": 20.190000534057617
+                  },
+                  {
+                    "paidamount": 20.239999771118164
+                  },
+                  {
+                    "paidamount": 20.260000228881836
+                  },
+                  {
+                    "paidamount": 20.31999969482422
+                  },
+                  {
+                    "paidamount": 20.450000762939453
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "PaidAmount"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "ServiceDate",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "ServiceDate",
+              "dtype": "String",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "observed_values": [
+                "2024-09-21",
+                "2024-09-05",
+                "2024-02-23",
+                "2024-07-21",
+                "2024-10-15",
+                "2024-02-19",
+                "2024-02-03",
+                "2024-02-04"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "2024-09-21",
+                  "2024-09-05",
+                  "2024-02-23",
+                  "2024-07-21",
+                  "2024-10-15",
+                  "2024-02-19",
+                  "2024-02-03",
+                  "2024-02-04"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "field": "ServiceDate",
+                  "meaning": "Column `ServiceDate` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`ServiceDate` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+                  "column": "ServiceDate",
+                  "dtype": "String",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "2024-09-21",
+                      "2024-09-05",
+                      "2024-02-23",
+                      "2024-07-21",
+                      "2024-10-15",
+                      "2024-02-19",
+                      "2024-02-03",
+                      "2024-02-04"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"ServiceDate\" AS \"servicedate\" FROM \"transactions\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "servicedate": "2024-09-21"
+                  },
+                  {
+                    "servicedate": "2024-09-05"
+                  },
+                  {
+                    "servicedate": "2024-02-23"
+                  },
+                  {
+                    "servicedate": "2024-07-21"
+                  },
+                  {
+                    "servicedate": "2024-10-15"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "ServiceDate"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "LineOfBusiness",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "LineOfBusiness",
+              "dtype": "String",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "observed_values": [
+                "Self-Pay",
+                "Commercial",
+                "Medicaid",
+                "Medicare"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "Self-Pay",
+                  "Commercial",
+                  "Medicaid",
+                  "Medicare"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "field": "LineOfBusiness",
+                  "meaning": "Column `LineOfBusiness` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`LineOfBusiness` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+                  "column": "LineOfBusiness",
+                  "dtype": "String",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "Self-Pay",
+                      "Commercial",
+                      "Medicaid",
+                      "Medicare"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"LineOfBusiness\" AS \"lineofbusiness\" FROM \"transactions\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "lineofbusiness": "Self-Pay"
+                  },
+                  {
+                    "lineofbusiness": "Commercial"
+                  },
+                  {
+                    "lineofbusiness": "Medicaid"
+                  },
+                  {
+                    "lineofbusiness": "Medicare"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "LineOfBusiness"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "PayorID",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "PayorID",
+              "dtype": "String",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "observed_values": [
+                "PAYOR1989",
+                "PAYOR5377",
+                "PAYOR5397",
+                "PAYOR6999",
+                "PAYOR3070",
+                "PAYOR8948",
+                "PAYOR3895",
+                "PAYOR2731"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "PAYOR1989",
+                  "PAYOR5377",
+                  "PAYOR5397",
+                  "PAYOR6999",
+                  "PAYOR3070",
+                  "PAYOR8948",
+                  "PAYOR3895",
+                  "PAYOR2731"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "field": "PayorID",
+                  "meaning": "Column `PayorID` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`PayorID` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+                  "column": "PayorID",
+                  "dtype": "String",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "PAYOR1989",
+                      "PAYOR5377",
+                      "PAYOR5397",
+                      "PAYOR6999",
+                      "PAYOR3070",
+                      "PAYOR8948",
+                      "PAYOR3895",
+                      "PAYOR2731"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"PayorID\" AS \"payorid\" FROM \"transactions\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "payorid": "PAYOR1989"
+                  },
+                  {
+                    "payorid": "PAYOR5377"
+                  },
+                  {
+                    "payorid": "PAYOR5397"
+                  },
+                  {
+                    "payorid": "PAYOR6999"
+                  },
+                  {
+                    "payorid": "PAYOR3070"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "PayorID"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "Gender",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+              "column": "Gender",
+              "dtype": "String",
+              "row_count": 5000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+              "observed_values": [
+                "Male",
+                "Female"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "Male",
+                  "Female"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "field": "Gender",
+                  "meaning": "Column `Gender` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`Gender` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+                  "column": "Gender",
+                  "dtype": "String",
+                  "row_count": 5000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "Male",
+                      "Female"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"Gender\" AS \"gender\" FROM \"patients\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "gender": "Male"
+                  },
+                  {
+                    "gender": "Female"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+              "column": "Gender"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "DOB",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+              "column": "DOB",
+              "dtype": "String",
+              "row_count": 5000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+              "observed_values": [
+                "2010-12-28",
+                "1946-07-29",
+                "1956-07-23",
+                "1989-12-31",
+                "1983-06-26",
+                "1961-08-20",
+                "1936-12-16",
+                "1981-05-11"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "2010-12-28",
+                  "1946-07-29",
+                  "1956-07-23",
+                  "1989-12-31",
+                  "1983-06-26",
+                  "1961-08-20",
+                  "1936-12-16",
+                  "1981-05-11"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "field": "DOB",
+                  "meaning": "Column `DOB` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`DOB` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+                  "column": "DOB",
+                  "dtype": "String",
+                  "row_count": 5000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "2010-12-28",
+                      "1946-07-29",
+                      "1956-07-23",
+                      "1989-12-31",
+                      "1983-06-26",
+                      "1961-08-20",
+                      "1936-12-16",
+                      "1981-05-11"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"DOB\" AS \"dob\" FROM \"patients\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "dob": "2010-12-28"
+                  },
+                  {
+                    "dob": "1946-07-29"
+                  },
+                  {
+                    "dob": "1956-07-23"
+                  },
+                  {
+                    "dob": "1989-12-31"
+                  },
+                  {
+                    "dob": "1983-06-26"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+              "column": "DOB"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        }
+      ],
+      "function_context": [
+        {
+          "function": "sum",
+          "arguments": [
+            "PaidAmount"
+          ]
+        },
+        {
+          "function": "Month",
+          "arguments": [
+            "ServiceDate"
+          ]
+        },
+        {
+          "function": "Age",
+          "arguments": [
+            "DOB"
+          ]
+        }
+      ],
+      "join_candidates": [],
+      "open_questions": []
+    },
+    {
+      "kpi_id": "kpi_002",
+      "name": "What is percentage share of lives by gender, age , visit type, department",
+      "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\docs\\Sample KPI.xlsx",
+      "metric": "percentage of sum(distinct PatientID)     /   sum(disitnct PatientID) for departement",
+      "cuts": "Department Name, VisitType, Gender, Age (DOB)",
+      "status": "ready_for_sql",
+      "features": [
+        {
+          "feature": "PatientID",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\encounters.csv",
+              "column": "PatientID",
+              "dtype": "String",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json",
+              "observed_values": [
+                "HOSP1-004354",
+                "HOSP1-001192",
+                "HOSP1-001696",
+                "HOSP1-002519",
+                "HOSP1-004506",
+                "HOSP1-002246",
+                "HOSP1-004351",
+                "HOSP1-001749"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "HOSP1-004354",
+                  "HOSP1-001192",
+                  "HOSP1-001696",
+                  "HOSP1-002519",
+                  "HOSP1-004506",
+                  "HOSP1-002246",
+                  "HOSP1-004351",
+                  "HOSP1-001749"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json",
+                  "field": "PatientID",
+                  "meaning": "Column `PatientID` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`PatientID` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\encounters.csv",
+                  "column": "PatientID",
+                  "dtype": "String",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "HOSP1-004354",
+                      "HOSP1-001192",
+                      "HOSP1-001696",
+                      "HOSP1-002519",
+                      "HOSP1-004506",
+                      "HOSP1-002246",
+                      "HOSP1-004351",
+                      "HOSP1-001749"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"PatientID\" AS \"patientid\" FROM \"encounters\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "patientid": "HOSP1-004354"
+                  },
+                  {
+                    "patientid": "HOSP1-001192"
+                  },
+                  {
+                    "patientid": "HOSP1-001696"
+                  },
+                  {
+                    "patientid": "HOSP1-002519"
+                  },
+                  {
+                    "patientid": "HOSP1-004506"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            },
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+              "column": "PatientID",
+              "dtype": "String",
+              "row_count": 5000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+              "observed_values": [
+                "HOSP1-000673",
+                "HOSP1-003646",
+                "HOSP1-001356",
+                "HOSP1-000915",
+                "HOSP1-003088",
+                "HOSP1-003943",
+                "HOSP1-003495",
+                "HOSP1-001008"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "HOSP1-000673",
+                  "HOSP1-003646",
+                  "HOSP1-001356",
+                  "HOSP1-000915",
+                  "HOSP1-003088",
+                  "HOSP1-003943",
+                  "HOSP1-003495",
+                  "HOSP1-001008"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "field": "PatientID",
+                  "meaning": "Column `PatientID` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`PatientID` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+                  "column": "PatientID",
+                  "dtype": "String",
+                  "row_count": 5000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "HOSP1-000673",
+                      "HOSP1-003646",
+                      "HOSP1-001356",
+                      "HOSP1-000915",
+                      "HOSP1-003088",
+                      "HOSP1-003943",
+                      "HOSP1-003495",
+                      "HOSP1-001008"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"PatientID\" AS \"patientid\" FROM \"patients\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "patientid": "HOSP1-000673"
+                  },
+                  {
+                    "patientid": "HOSP1-003646"
+                  },
+                  {
+                    "patientid": "HOSP1-001356"
+                  },
+                  {
+                    "patientid": "HOSP1-000915"
+                  },
+                  {
+                    "patientid": "HOSP1-003088"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            },
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "PatientID",
+              "dtype": "String",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "observed_values": [
+                "HOSP1-001613",
+                "HOSP1-000527",
+                "HOSP1-000385",
+                "HOSP1-002409",
+                "HOSP1-004904",
+                "HOSP1-000880",
+                "HOSP1-000036",
+                "HOSP1-001910"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "HOSP1-001613",
+                  "HOSP1-000527",
+                  "HOSP1-000385",
+                  "HOSP1-002409",
+                  "HOSP1-004904",
+                  "HOSP1-000880",
+                  "HOSP1-000036",
+                  "HOSP1-001910"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "field": "PatientID",
+                  "meaning": "Column `PatientID` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`PatientID` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+                  "column": "PatientID",
+                  "dtype": "String",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "HOSP1-001613",
+                      "HOSP1-000527",
+                      "HOSP1-000385",
+                      "HOSP1-002409",
+                      "HOSP1-004904",
+                      "HOSP1-000880",
+                      "HOSP1-000036",
+                      "HOSP1-001910"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"PatientID\" AS \"patientid\" FROM \"transactions\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "patientid": "HOSP1-001613"
+                  },
+                  {
+                    "patientid": "HOSP1-000527"
+                  },
+                  {
+                    "patientid": "HOSP1-000385"
+                  },
+                  {
+                    "patientid": "HOSP1-002409"
+                  },
+                  {
+                    "patientid": "HOSP1-004904"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\encounters.csv",
+              "column": "PatientID"
+            },
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+              "column": "PatientID"
+            },
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "PatientID"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "departement",
+          "state": "user_confirmed",
+          "resolution_type": "physical_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+              "column": "Name",
+              "source": "workspace_definition"
+            }
+          ],
+          "grain": "unknown",
+          "conflicts": [],
+          "decision_history": [
+            {
+              "state": "user_confirmed",
+              "resolution_type": "physical_column",
+              "note": "Applied workspace definition to kpi_002.",
+              "timestamp": "2026-05-28T12:09:27.062048+00:00"
+            }
+          ],
+          "evidence": [
+            {
+              "type": "workspace_feature_definition",
+              "source": "workspace_feature_definitions.json",
+              "feature": "departement",
+              "detail": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv.Name",
+              "verification_status": "needs_data_validation"
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "Department",
+          "state": "user_confirmed",
+          "resolution_type": "physical_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+              "column": "DepartmentID",
+              "source": "workspace_definition"
+            }
+          ],
+          "grain": "unknown",
+          "conflicts": [],
+          "decision_history": [
+            {
+              "state": "user_confirmed",
+              "resolution_type": "physical_column",
+              "note": "Applied workspace definition to kpi_002.",
+              "timestamp": "2026-05-28T12:09:27.062048+00:00"
+            }
+          ],
+          "evidence": [
+            {
+              "type": "workspace_feature_definition",
+              "source": "workspace_feature_definitions.json",
+              "feature": "Department",
+              "detail": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv.DepartmentID",
+              "verification_status": "needs_data_validation"
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "Name",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\departments.csv",
+              "column": "Name",
+              "dtype": "String",
+              "row_count": 20,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_departments.csv.profile.json",
+              "observed_values": [
+                "Gastroenterology",
+                "Radiology",
+                "Emergency",
+                "Oncology",
+                "Endocrinology",
+                "Rheumatology",
+                "Pediatrics",
+                "Anesthesiology"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "Gastroenterology",
+                  "Radiology",
+                  "Emergency",
+                  "Oncology",
+                  "Endocrinology",
+                  "Rheumatology",
+                  "Pediatrics",
+                  "Anesthesiology"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_departments.csv.profile.json",
+                  "field": "Name",
+                  "meaning": "Column `Name` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`Name` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_departments.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\departments.csv",
+                  "column": "Name",
+                  "dtype": "String",
+                  "row_count": 20,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_departments.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "Gastroenterology",
+                      "Radiology",
+                      "Emergency",
+                      "Oncology",
+                      "Endocrinology",
+                      "Rheumatology",
+                      "Pediatrics",
+                      "Anesthesiology"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"Name\" AS \"name\" FROM \"departments\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "name": "Gastroenterology"
+                  },
+                  {
+                    "name": "Radiology"
+                  },
+                  {
+                    "name": "Emergency"
+                  },
+                  {
+                    "name": "Oncology"
+                  },
+                  {
+                    "name": "Endocrinology"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\departments.csv",
+              "column": "Name"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "VisitType",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "VisitType",
+              "dtype": "String",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "observed_values": [
+                "Emergency",
+                "Follow-up",
+                "Consultation",
+                "Routine"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "Emergency",
+                  "Follow-up",
+                  "Consultation",
+                  "Routine"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "field": "VisitType",
+                  "meaning": "Column `VisitType` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`VisitType` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+                  "column": "VisitType",
+                  "dtype": "String",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "Emergency",
+                      "Follow-up",
+                      "Consultation",
+                      "Routine"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"VisitType\" AS \"visittype\" FROM \"transactions\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "visittype": "Emergency"
+                  },
+                  {
+                    "visittype": "Follow-up"
+                  },
+                  {
+                    "visittype": "Consultation"
+                  },
+                  {
+                    "visittype": "Routine"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "VisitType"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "Gender",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+              "column": "Gender",
+              "dtype": "String",
+              "row_count": 5000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+              "observed_values": [
+                "Male",
+                "Female"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "Male",
+                  "Female"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "field": "Gender",
+                  "meaning": "Column `Gender` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`Gender` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+                  "column": "Gender",
+                  "dtype": "String",
+                  "row_count": 5000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "Male",
+                      "Female"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"Gender\" AS \"gender\" FROM \"patients\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "gender": "Male"
+                  },
+                  {
+                    "gender": "Female"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+              "column": "Gender"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "DOB",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+              "column": "DOB",
+              "dtype": "String",
+              "row_count": 5000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+              "observed_values": [
+                "2010-12-28",
+                "1946-07-29",
+                "1956-07-23",
+                "1989-12-31",
+                "1983-06-26",
+                "1961-08-20",
+                "1936-12-16",
+                "1981-05-11"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "2010-12-28",
+                  "1946-07-29",
+                  "1956-07-23",
+                  "1989-12-31",
+                  "1983-06-26",
+                  "1961-08-20",
+                  "1936-12-16",
+                  "1981-05-11"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "field": "DOB",
+                  "meaning": "Column `DOB` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`DOB` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+                  "column": "DOB",
+                  "dtype": "String",
+                  "row_count": 5000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "2010-12-28",
+                      "1946-07-29",
+                      "1956-07-23",
+                      "1989-12-31",
+                      "1983-06-26",
+                      "1961-08-20",
+                      "1936-12-16",
+                      "1981-05-11"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"DOB\" AS \"dob\" FROM \"patients\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "dob": "2010-12-28"
+                  },
+                  {
+                    "dob": "1946-07-29"
+                  },
+                  {
+                    "dob": "1956-07-23"
+                  },
+                  {
+                    "dob": "1989-12-31"
+                  },
+                  {
+                    "dob": "1983-06-26"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+              "column": "DOB"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        }
+      ],
+      "function_context": [
+        {
+          "function": "sum",
+          "arguments": [
+            "PatientID"
+          ]
+        },
+        {
+          "function": "sum",
+          "arguments": [
+            "PatientID"
+          ]
+        },
+        {
+          "function": "Age",
+          "arguments": [
+            "DOB"
+          ]
+        }
+      ],
+      "join_candidates": [
+        {
+          "key": "patientid",
+          "state": "candidate_join",
+          "datasets": [
+            "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\encounters.csv",
+            "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+            "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv"
+          ],
+          "evidence": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\encounters.csv",
+              "column": "PatientID",
+              "dtype": "String",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json",
+              "observed_values": [
+                "HOSP1-004354",
+                "HOSP1-001192",
+                "HOSP1-001696",
+                "HOSP1-002519",
+                "HOSP1-004506",
+                "HOSP1-002246",
+                "HOSP1-004351",
+                "HOSP1-001749"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "HOSP1-004354",
+                  "HOSP1-001192",
+                  "HOSP1-001696",
+                  "HOSP1-002519",
+                  "HOSP1-004506",
+                  "HOSP1-002246",
+                  "HOSP1-004351",
+                  "HOSP1-001749"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json",
+                  "field": "PatientID",
+                  "meaning": "Column `PatientID` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`PatientID` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\encounters.csv",
+                  "column": "PatientID",
+                  "dtype": "String",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "HOSP1-004354",
+                      "HOSP1-001192",
+                      "HOSP1-001696",
+                      "HOSP1-002519",
+                      "HOSP1-004506",
+                      "HOSP1-002246",
+                      "HOSP1-004351",
+                      "HOSP1-001749"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"PatientID\" AS \"patientid\" FROM \"encounters\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "patientid": "HOSP1-004354"
+                  },
+                  {
+                    "patientid": "HOSP1-001192"
+                  },
+                  {
+                    "patientid": "HOSP1-001696"
+                  },
+                  {
+                    "patientid": "HOSP1-002519"
+                  },
+                  {
+                    "patientid": "HOSP1-004506"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            },
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+              "column": "PatientID",
+              "dtype": "String",
+              "row_count": 5000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+              "observed_values": [
+                "HOSP1-000673",
+                "HOSP1-003646",
+                "HOSP1-001356",
+                "HOSP1-000915",
+                "HOSP1-003088",
+                "HOSP1-003943",
+                "HOSP1-003495",
+                "HOSP1-001008"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "HOSP1-000673",
+                  "HOSP1-003646",
+                  "HOSP1-001356",
+                  "HOSP1-000915",
+                  "HOSP1-003088",
+                  "HOSP1-003943",
+                  "HOSP1-003495",
+                  "HOSP1-001008"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "field": "PatientID",
+                  "meaning": "Column `PatientID` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`PatientID` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\patients.csv",
+                  "column": "PatientID",
+                  "dtype": "String",
+                  "row_count": 5000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "HOSP1-000673",
+                      "HOSP1-003646",
+                      "HOSP1-001356",
+                      "HOSP1-000915",
+                      "HOSP1-003088",
+                      "HOSP1-003943",
+                      "HOSP1-003495",
+                      "HOSP1-001008"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"PatientID\" AS \"patientid\" FROM \"patients\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "patientid": "HOSP1-000673"
+                  },
+                  {
+                    "patientid": "HOSP1-003646"
+                  },
+                  {
+                    "patientid": "HOSP1-001356"
+                  },
+                  {
+                    "patientid": "HOSP1-000915"
+                  },
+                  {
+                    "patientid": "HOSP1-003088"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            },
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "PatientID",
+              "dtype": "String",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "observed_values": [
+                "HOSP1-001613",
+                "HOSP1-000527",
+                "HOSP1-000385",
+                "HOSP1-002409",
+                "HOSP1-004904",
+                "HOSP1-000880",
+                "HOSP1-000036",
+                "HOSP1-001910"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "HOSP1-001613",
+                  "HOSP1-000527",
+                  "HOSP1-000385",
+                  "HOSP1-002409",
+                  "HOSP1-004904",
+                  "HOSP1-000880",
+                  "HOSP1-000036",
+                  "HOSP1-001910"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "field": "PatientID",
+                  "meaning": "Column `PatientID` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`PatientID` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+                  "column": "PatientID",
+                  "dtype": "String",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "HOSP1-001613",
+                      "HOSP1-000527",
+                      "HOSP1-000385",
+                      "HOSP1-002409",
+                      "HOSP1-004904",
+                      "HOSP1-000880",
+                      "HOSP1-000036",
+                      "HOSP1-001910"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"PatientID\" AS \"patientid\" FROM \"transactions\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "patientid": "HOSP1-001613"
+                  },
+                  {
+                    "patientid": "HOSP1-000527"
+                  },
+                  {
+                    "patientid": "HOSP1-000385"
+                  },
+                  {
+                    "patientid": "HOSP1-002409"
+                  },
+                  {
+                    "patientid": "HOSP1-004904"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "requires": [
+            "uniqueness_check",
+            "null_check",
+            "grain_cardinality_check"
+          ]
+        }
+      ],
+      "open_questions": []
+    },
+    {
+      "kpi_id": "kpi_003",
+      "name": "What are top 10 payers in Commercial LOB w.r.t. amount paid",
+      "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\docs\\Sample KPI.xlsx",
+      "metric": "sum(PaidAmount)",
+      "cuts": "LineOfBusiness, PayorID",
+      "status": "ready_for_sql",
+      "features": [
+        {
+          "feature": "PaidAmount",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "PaidAmount",
+              "dtype": "Float64",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "observed_values": [
+                20.190000534057617,
+                20.239999771118164,
+                20.260000228881836,
+                20.31999969482422,
+                20.450000762939453,
+                20.799999237060547,
+                20.920000076293945,
+                21.030000686645508
+              ],
+              "value_profile": {
+                "sample_values": [
+                  20.190000534057617,
+                  20.239999771118164,
+                  20.260000228881836,
+                  20.31999969482422,
+                  20.450000762939453,
+                  20.799999237060547,
+                  20.920000076293945,
+                  21.030000686645508
+                ],
+                "sample_min": 20.190000534057617,
+                "sample_max": 799.9400024414062,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": 0,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "field": "PaidAmount",
+                  "meaning": "Column `PaidAmount` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`PaidAmount` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+                  "column": "PaidAmount",
+                  "dtype": "Float64",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      20.190000534057617,
+                      20.239999771118164,
+                      20.260000228881836,
+                      20.31999969482422,
+                      20.450000762939453,
+                      20.799999237060547,
+                      20.920000076293945,
+                      21.030000686645508
+                    ],
+                    "sample_min": 20.190000534057617,
+                    "sample_max": 799.9400024414062,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": 0,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"PaidAmount\" AS \"paidamount\" FROM \"transactions\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "paidamount": 20.190000534057617
+                  },
+                  {
+                    "paidamount": 20.239999771118164
+                  },
+                  {
+                    "paidamount": 20.260000228881836
+                  },
+                  {
+                    "paidamount": 20.31999969482422
+                  },
+                  {
+                    "paidamount": 20.450000762939453
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "PaidAmount"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "LineOfBusiness",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "LineOfBusiness",
+              "dtype": "String",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "observed_values": [
+                "Self-Pay",
+                "Commercial",
+                "Medicaid",
+                "Medicare"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "Self-Pay",
+                  "Commercial",
+                  "Medicaid",
+                  "Medicare"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "field": "LineOfBusiness",
+                  "meaning": "Column `LineOfBusiness` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`LineOfBusiness` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+                  "column": "LineOfBusiness",
+                  "dtype": "String",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "Self-Pay",
+                      "Commercial",
+                      "Medicaid",
+                      "Medicare"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"LineOfBusiness\" AS \"lineofbusiness\" FROM \"transactions\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "lineofbusiness": "Self-Pay"
+                  },
+                  {
+                    "lineofbusiness": "Commercial"
+                  },
+                  {
+                    "lineofbusiness": "Medicaid"
+                  },
+                  {
+                    "lineofbusiness": "Medicare"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "LineOfBusiness"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "PayorID",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "PayorID",
+              "dtype": "String",
+              "row_count": 10000,
+              "score": null,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "observed_values": [
+                "PAYOR1989",
+                "PAYOR5377",
+                "PAYOR5397",
+                "PAYOR6999",
+                "PAYOR3070",
+                "PAYOR8948",
+                "PAYOR3895",
+                "PAYOR2731"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "PAYOR1989",
+                  "PAYOR5377",
+                  "PAYOR5397",
+                  "PAYOR6999",
+                  "PAYOR3070",
+                  "PAYOR8948",
+                  "PAYOR3895",
+                  "PAYOR2731"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "field": "PayorID",
+                  "meaning": "Column `PayorID` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`PayorID` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+                  "column": "PayorID",
+                  "dtype": "String",
+                  "row_count": 10000,
+                  "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "PAYOR1989",
+                      "PAYOR5377",
+                      "PAYOR5397",
+                      "PAYOR6999",
+                      "PAYOR3070",
+                      "PAYOR8948",
+                      "PAYOR3895",
+                      "PAYOR2731"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"PayorID\" AS \"payorid\" FROM \"transactions\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "payorid": "PAYOR1989"
+                  },
+                  {
+                    "payorid": "PAYOR5377"
+                  },
+                  {
+                    "payorid": "PAYOR5397"
+                  },
+                  {
+                    "payorid": "PAYOR6999"
+                  },
+                  {
+                    "payorid": "PAYOR3070"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Healthcare-RCM-Data-Platform\\datasets\\EMR\\trendytech-hospital-a\\transactions.csv",
+              "column": "PayorID"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        }
+      ],
+      "function_context": [
+        {
+          "function": "sum",
+          "arguments": [
+            "PaidAmount"
+          ]
+        }
+      ],
+      "join_candidates": [],
+      "open_questions": []
+    }
+  ],
+  "summary": {
+    "kpi_count": 3,
+    "ready_kpi_count": 3,
+    "blocked_kpi_count": 0,
+    "unresolved_feature_count": 0
+  },
+  "blocker_clusters": []
+}

@@ -29,6 +29,7 @@ class BudgetTracker:
         self.state_path = state_path
         self.spent = 0.0
         self.history: list[dict[str, Any]] = []
+        self._load()
 
     def charge(
         self,
@@ -85,3 +86,14 @@ class BudgetTracker:
             )
         except Exception:
             pass
+
+    def _load(self) -> None:
+        if not self.state_path.exists():
+            return
+        try:
+            payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        self.spent = float(payload.get("spent", 0.0) or 0.0)
+        history = payload.get("history", [])
+        self.history = history if isinstance(history, list) else []

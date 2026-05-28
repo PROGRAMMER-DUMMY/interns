@@ -273,6 +273,57 @@ class WorkspaceDefinitionTests(unittest.TestCase):
             requirements = json.loads((layout.requirements_dir / "requirements.json").read_text())
             self.assertEqual(requirements["workspace_feature_definitions"][0]["feature"], "DeniedAmount")
 
+    def test_workspace_definition_rejects_distinct_typo_as_feature(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "workspaces" / "demo"
+            layout = WorkspaceLayout(project_root=workspace)
+            layout.ensure_runtime_dirs()
+            (layout.contracts_dir / "kpi_feature_mapping.json").write_text(
+                json.dumps(
+                    {
+                        "kpis": [
+                            {
+                                "kpi_id": "kpi_001",
+                                "features": [
+                                    {
+                                        "feature": "disitnct",
+                                        "state": "blocked_missing_evidence",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (layout.contracts_dir / "workspace_feature_definitions.json").write_text(
+                json.dumps(
+                    {
+                        "definitions": [
+                            {
+                                "feature": "disitnct",
+                                "definition": "patients.csv.PatientID",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            definitions = load_workspace_definitions(layout)
+            self.assertEqual(definitions["definitions"], [])
+            with self.assertRaisesRegex(ValueError, "expression keyword"):
+                apply_workspace_definition(
+                    root,
+                    "workspaces/demo",
+                    feature="disitnct",
+                    state="user_confirmed",
+                    resolution_type="workspace_definition",
+                    definition="patients.csv.PatientID",
+                    evidence_note="typo should not be persisted",
+                )
+
     def test_apply_workspace_definition_normalizes_file_qualified_source_column(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -319,6 +370,66 @@ class WorkspaceDefinitionTests(unittest.TestCase):
             source = definitions["definitions"][0]["source_columns"][0]
             self.assertEqual(source["dataset"], "workspaces/demo/encounters.csv")
             self.assertEqual(source["column"], "START")
+
+    def test_apply_workspace_definition_normalizes_absolute_physical_definition(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "workspaces" / "demo"
+            layout = WorkspaceLayout(project_root=workspace)
+            layout.ensure_runtime_dirs()
+            dataset = workspace / "datasets" / "EMR" / "hospital-a" / "departments.csv"
+            dataset.parent.mkdir(parents=True)
+            dataset.write_text("Name\nCardiology\n", encoding="utf-8")
+            (layout.contracts_dir / "kpi_feature_mapping.json").write_text(
+                json.dumps(
+                    {
+                        "workspace": "workspaces/demo",
+                        "kpis": [
+                            {
+                                "kpi_id": "kpi_002",
+                                "features": [
+                                    {
+                                        "feature": "departement",
+                                        "state": "blocked_missing_evidence",
+                                        "source_columns": [],
+                                        "evidence": [],
+                                        "decision_history": [],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            apply_workspace_definition(
+                root,
+                "workspaces/demo",
+                feature="departement",
+                state="user_confirmed",
+                resolution_type="physical_column",
+                evidence_note="Accepted department name mapping.",
+                definition=f"{dataset}.Name",
+                source_columns=[f"{dataset}.Name"],
+                applies_to_kpis=["kpi_002"],
+            )
+
+            definitions = load_workspace_definitions(layout)
+            record = definitions["definitions"][0]
+            self.assertEqual(
+                record["definition"],
+                "workspaces/demo/datasets/EMR/hospital-a/departments.csv.Name",
+            )
+            self.assertEqual(
+                record["source_columns"][0]["dataset"],
+                "workspaces/demo/datasets/EMR/hospital-a/departments.csv",
+            )
+            requirements = json.loads((layout.requirements_dir / "requirements.json").read_text())
+            self.assertEqual(
+                requirements["workspace_feature_definitions"][0]["definition"],
+                "workspaces/demo/datasets/EMR/hospital-a/departments.csv.Name",
+            )
 
 
 if __name__ == "__main__":

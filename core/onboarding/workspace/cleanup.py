@@ -142,6 +142,7 @@ class WorkspaceReferenceCleaner:
             target = (self.repo_root / action.target).resolve()
             if action.action == "delete_tree":
                 self._ensure_deletable(target)
+                self._preserve_workspace_settings(target)
                 shutil.rmtree(target)
             elif action.action == "delete_file":
                 self._ensure_deletable(target)
@@ -336,6 +337,16 @@ class WorkspaceReferenceCleaner:
         if path in {interns_dir, wiki_dir} or self._is_relative_to(path, state_root):
             return
         raise ValueError(f"Refusing to delete outside workspace interns, wiki, or repo state: {path}")
+
+    def _preserve_workspace_settings(self, target: Path) -> None:
+        interns_dir = (self.workspace_path / "interns").resolve()
+        if target.resolve() != interns_dir:
+            return
+        settings = interns_dir / "state" / "workspace_settings.json"
+        if not settings.exists():
+            return
+        durable = self.workspace_path / "workspace_settings.json"
+        durable.write_text(settings.read_text(encoding="utf-8"), encoding="utf-8")
 
     def _display_path(self, path: Path) -> str:
         try:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -17,6 +18,10 @@ RESULT_VIEW_PATTERN = re.compile(
     re.IGNORECASE,
 )
 KPI_SQL_PATTERN = re.compile(r"^kpi_\d{3}(?:_[a-z0-9_]+)?\.sql$", re.IGNORECASE)
+SUM_INPUT_PATTERN = re.compile(
+    r"sum\s*\(\s*(?:(?:distinct|disitnct)\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -25,6 +30,8 @@ class KPIExecutionRecord:
     sql_path: str
     status: str
     result_view: str = ""
+    sql_sha256: str = ""
+    semantic_checks: list[str] = field(default_factory=list)
     row_count: int | None = None
     columns: list[str] = field(default_factory=list)
     sample_output_table: str = ""
@@ -41,6 +48,8 @@ class KPIExecutionRecord:
             "sql_path": self.sql_path,
             "status": self.status,
             "result_view": self.result_view,
+            "sql_sha256": self.sql_sha256,
+            "semantic_checks": self.semantic_checks,
             "row_count": self.row_count,
             "columns": self.columns,
             "sample_output_table": self.sample_output_table,
@@ -160,10 +169,16 @@ class KPIExecutionHarness:
             result_view=result_view,
         )
         sql = sql_path.read_text(encoding="utf-8")
+        record.sql_sha256 = hashlib.sha256(sql.encode("utf-8")).hexdigest()
         if not sql_defines_result_view(sql, result_view):
             record.errors.append(
                 f"SQL must define final result view `{result_view}`; feature/staging views are not enough"
             )
+            return record
+        semantic_errors = self._semantic_errors(kpi_id, sql)
+        if semantic_errors:
+            record.semantic_checks.extend(semantic_errors)
+            record.errors.extend(semantic_errors)
             return record
         try:
             conn.execute(sql)
@@ -199,6 +214,46 @@ class KPIExecutionHarness:
         except Exception as exc:
             record.errors.append(str(exc))
             return record
+
+    def _semantic_errors(self, kpi_id: str, sql: str) -> list[str]:
+        kpi = self._kpi_registry_by_id().get(kpi_id)
+        if not kpi:
+            return []
+        errors: list[str] = []
+        metric = str(kpi.get("metric") or "")
+        cuts = str(kpi.get("cuts") or "")
+        name = str(kpi.get("name") or kpi.get("description") or "")
+        lowered_sql = sql.lower()
+        lowered_metric = metric.lower()
+        if "sum(" in lowered_metric:
+            if "sum(" not in lowered_sql:
+                errors.append(f"SQL does not implement workbook metric `{metric}`")
+            for column in _metric_input_columns(metric):
+                if column.lower() not in lowered_sql:
+                    errors.append(f"SQL does not reference metric input `{column}` from `{metric}`")
+        if "commercial" in cuts.lower() and "commercial" not in lowered_sql:
+            errors.append("SQL does not implement Commercial LOB filter from KPI cuts")
+        if "medicare" in cuts.lower() and "medicare" not in lowered_sql:
+            errors.append("SQL does not implement Medicare LOB filter from KPI cuts")
+        if "top 10" in name.lower() and not re.search(r"\blimit\s+10\b", lowered_sql):
+            errors.append("SQL does not implement top 10 ranking limit from KPI name")
+        return errors
+
+    def _kpi_registry_by_id(self) -> dict[str, dict[str, Any]]:
+        path = self.layout.contracts_dir / "kpi_registry.json"
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {}
+        result = {}
+        for idx, kpi in enumerate(data.get("kpis") or [], start=1):
+            if not isinstance(kpi, dict):
+                continue
+            kpi_id = str(kpi.get("kpi_id") or f"kpi_{idx:03d}")
+            result[kpi_id] = kpi
+        return result
 
 
 def sql_defines_result_view(sql: str, result_view: str) -> bool:
@@ -251,6 +306,18 @@ def _rel(path: Path, root: Path) -> str:
         return str(path.resolve().relative_to(root.resolve())).replace("\\", "/")
     except ValueError:
         return str(path)
+
+
+def _metric_input_columns(metric: str) -> list[str]:
+    columns: list[str] = []
+    seen: set[str] = set()
+    for match in SUM_INPUT_PATTERN.finditer(metric):
+        column = match.group(1)
+        key = column.lower()
+        if key not in seen:
+            columns.append(column)
+            seen.add(key)
+    return columns
 
 
 def main(argv: list[str] | None = None) -> int:

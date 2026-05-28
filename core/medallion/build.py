@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,6 +57,7 @@ def build_medallion(
     repo_root: Path,
     *,
     cfg=None,
+    target_override: Optional[str] = None,
     only_layer: Optional[str] = None,
     only_table: Optional[str] = None,
     resume: Optional[str] = None,
@@ -73,6 +75,7 @@ def build_medallion(
         with acquire_lock(state_dir) as _lock:
             return _run_build(
                 workspace, repo_root, layout, paths, cfg=cfg,
+                target_override=target_override,
                 only_layer=only_layer, only_table=only_table, resume=resume,
                 force_with_blockers=force_with_blockers,
                 resource_decision=resource_decision,
@@ -90,6 +93,7 @@ def _run_build(
     paths: dict[str, Path],
     *,
     cfg,
+    target_override: Optional[str],
     only_layer: Optional[str],
     only_table: Optional[str],
     resume: Optional[str],
@@ -119,11 +123,12 @@ def _run_build(
     if not force_with_blockers:
         _check_design_panel(layout, force_with_blockers)
 
-    # 4. Select target (P2: auto detects Databricks; P1 stays on duckdb)
-    if manifest.target == "auto":
+    # 4. Select target (P2: explicit CLI override wins; auto detects Databricks)
+    declared_target = target_override or manifest.target
+    if declared_target == "auto":
         target = "delta" if (cfg and hasattr(cfg, "databricks") and cfg.databricks.is_active()) else "duckdb"
     else:
-        target = manifest.target
+        target = declared_target
 
     # 5-6. Create run_id and state dir
     manifest_hash = manifest.inputs_hash
@@ -135,19 +140,46 @@ def _run_build(
     state = RunState(
         run_id=run_id,
         manifest_hash=manifest_hash,
-        target_declared=manifest.target,
+        target_declared=declared_target,
         target_actual=target,
         started_at=started_at,
     )
 
     governor = Governor(cfg=cfg, registry=None) if cfg else _NullGovernor()
 
-    # mlflow and salt retrieval disabled to avoid hangs on local build
-    mlflow_finalize = lambda *args: None
-    workspace_salt = None
+    from core.medallion.mlflow_emit import finalize_run as mlflow_finalize, start_run as mlflow_start
+    mlflow_start(workspace.name, run_id, declared_target, manifest_hash)
+    workspace_salt = _workspace_salt_if_required(workspace.name, paths)
 
     # 7. Initialize run.json
     state.write(run_dir)
+
+    wall_start = time.time()
+
+    if target == "delta":
+        delta_ok = _execute_delta_or_mark_degraded(
+            manifest,
+            paths,
+            state,
+            cfg=cfg,
+            workspace=workspace,
+            repo_root=repo_root,
+            only_layer=only_layer,
+            only_table=only_table,
+            run_dir=run_dir,
+            governor=governor,
+        )
+        if not delta_ok:
+            target = "duckdb"
+            state.target_actual = "duckdb"
+        else:
+            state.finished_at = datetime.now(timezone.utc).isoformat()
+            state.elapsed_seconds = round(time.time() - wall_start, 3)
+            state.write(run_dir)
+            state_dict = state.to_dict()
+            _write_runtime_lineage(paths, state_dict, run_dir)
+            mlflow_finalize(state_dict, run_dir)
+            return state
 
     # Open workspace DuckDB connection
     db_path = paths["state"] / "workspace.duckdb"
@@ -156,8 +188,6 @@ def _run_build(
     con.execute("CREATE SCHEMA IF NOT EXISTS bronze")
     con.execute("CREATE SCHEMA IF NOT EXISTS silver")
     con.execute("CREATE SCHEMA IF NOT EXISTS gold")
-
-    wall_start = time.time()
 
     try:
         # 8. Bronze layer
@@ -198,6 +228,128 @@ def _run_build(
     state.write(run_dir)
 
     # P5: write lineage-with-runtime annotation
+    _write_runtime_lineage(paths, state_dict, run_dir)
+
+    # P2: finalize MLflow run (best-effort)
+    mlflow_finalize(state_dict, run_dir)
+
+    # 13. Lockfile released by context manager
+
+    return state
+
+
+def _execute_delta_or_mark_degraded(
+    manifest: Manifest,
+    paths: dict[str, Path],
+    state: RunState,
+    *,
+    cfg,
+    workspace: Path,
+    repo_root: Path,
+    only_layer: Optional[str],
+    only_table: Optional[str],
+    run_dir: Path,
+    governor,
+) -> bool:
+    if not cfg or not getattr(cfg, "databricks", None) or not cfg.databricks.is_active():
+        state.degraded_run = True
+        state.fallback_reason = "Delta target requested but Databricks is not configured; falling back to DuckDB."
+        state.compromise_history.append({"target": "delta", "exit_code": 1, "reason": "databricks_not_configured"})
+        return False
+
+    from core.execution.backend import _strict_databricks
+    from core.medallion.databricks_target import execute_with_downsize_then_fallback
+
+    for layer, tables in _delta_layer_tables(manifest):
+        if only_layer and layer != only_layer:
+            continue
+        for table_name in tables:
+            if only_table and table_name != only_table:
+                continue
+            key = f"{layer}.{table_name}"
+            script_path = paths[layer] / f"{table_name}.spark.py"
+            if not script_path.exists():
+                state.per_table_status[key] = TableRunStatus(status="failed", error=f"Missing {script_path}")
+                _route(governor, state, f"{layer.upper()}_DELTA_SCRIPT_MISSING", f"Missing {script_path}", fatal=True)
+
+            t0 = time.time()
+            task = _delta_task(script_path, workspace=workspace, repo_root=repo_root, cfg=cfg, layer=layer, table_name=table_name)
+            result, history = execute_with_downsize_then_fallback(
+                task,
+                getattr(cfg, "max_run_seconds", 30),
+                getattr(cfg, "hard_timeout_seconds", 90),
+                run_dir / f"{layer}_{table_name}_delta.log",
+                cfg,
+            )
+            state.compromise_history.extend(history.attempts)
+            if history.degraded:
+                state.degraded_run = True
+                state.fallback_reason = history.fallback_reason or "Delta execution degraded to DuckDB."
+                return False
+            if result.exit_code != 0:
+                state.per_table_status[key] = TableRunStatus(
+                    status="failed",
+                    elapsed_s=round(time.time() - t0, 3),
+                    error=result.log_content[-500:],
+                )
+                if _strict_databricks(cfg.databricks):
+                    _route(governor, state, f"{layer.upper()}_DELTA_EXECUTION_FAIL", result.log_content[-500:], fatal=True)
+                state.degraded_run = True
+                state.fallback_reason = f"Delta execution failed for {key}; falling back to DuckDB."
+                state.compromise_history.append({"target": "duckdb", "reason": "delta_execution_failed", "source_table": key})
+                return False
+
+            state.per_table_status[key] = TableRunStatus(
+                status="ok",
+                elapsed_s=round(time.time() - t0, 3),
+            )
+    return True
+
+
+def _delta_layer_tables(manifest: Manifest) -> list[tuple[str, list[str]]]:
+    return [
+        ("bronze", [t.name for t in manifest.bronze]),
+        ("silver", [t.name for t in manifest.silver]),
+        ("gold", [t.name for t in manifest.gold]),
+    ]
+
+
+def _delta_task(
+    script_path: Path,
+    *,
+    workspace: Path,
+    repo_root: Path,
+    cfg,
+    layer: str,
+    table_name: str,
+) -> dict[str, Any]:
+    script_arg = str(script_path)
+    task: dict[str, Any] = {
+        "id": f"medallion_{layer}_{table_name}",
+        "workspace": str(workspace),
+        "editable_file": str(script_path),
+        "experiment_cmd": [sys.executable, script_arg],
+        "metric_key": "primary_metric",
+    }
+    remote_root = _remote_script_root(cfg)
+    if remote_root:
+        try:
+            rel = script_path.resolve().relative_to(repo_root.resolve()).as_posix()
+        except ValueError:
+            rel = script_path.name
+        task["databricks_python_file"] = remote_root.rstrip("/") + "/" + rel
+    return task
+
+
+def _remote_script_root(cfg) -> str:
+    root = getattr(getattr(cfg, "databricks", None), "workspace_root", "") or ""
+    if root:
+        return str(root)
+    import os
+    return os.environ.get("AUTORESEARCH_DATABRICKS_MEDALLION_REMOTE_ROOT", "")
+
+
+def _write_runtime_lineage(paths: dict[str, Path], state_dict: dict[str, Any], run_dir: Path) -> None:
     lineage_src = paths["medallion"] / "lineage.json"
     if lineage_src.exists():
         import json as _json
@@ -207,13 +359,6 @@ def _run_build(
             state_dict,
             run_dir / "lineage_with_runtime.json",
         )
-
-    # P2: finalize MLflow run (best-effort)
-    mlflow_finalize(state_dict, run_dir)
-
-    # 13. Lockfile released by context manager
-
-    return state
 
 
 # ── Bronze execution ───────────────────────────────────────────────────────────
@@ -549,6 +694,21 @@ def _row_count(con, fqn: str) -> int:
         return int(rows[0]) if rows else 0
     except Exception:
         return 0
+
+
+def _workspace_salt_if_required(workspace_name: str, paths: dict[str, Path]) -> Optional[str]:
+    contract_path = paths["medallion"] / "silver_contract.json"
+    if not contract_path.exists():
+        return None
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    for table_body in contract.values():
+        if isinstance(table_body, dict) and table_body.get("pii_hash_columns"):
+            from core.medallion.salt_store import get_workspace_salt
+            return get_workspace_salt(workspace_name)
+    return None
 
 
 def _run_assertions(con, assertions_sql: str) -> dict[str, int]:

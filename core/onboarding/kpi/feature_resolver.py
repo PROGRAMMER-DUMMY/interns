@@ -31,6 +31,7 @@ from core.onboarding.relationships.schema_alias_matching import (
     safe_structural_alias,
     source_columns,
 )
+from core.onboarding.lexicon import load_workspace_lexicon
 from core.onboarding.memory.workspace_definitions import (
     READY_STATES,
     apply_workspace_definition as apply_workspace_feature_definition,
@@ -50,9 +51,12 @@ from core.onboarding.features.derivation_search import (
 from core.onboarding.kpi.blocker_question_panel import BlockerQuestionPanelBuilder
 from core.storage.metadata_store import build_metadata_store
 from core.storage.workspace_layout import WorkspaceLayout
+from core.contracts.versioning import register_contract
 
 
 GENERATOR_VERSION = 2
+
+register_contract("kpi_feature_mapping.json", current_version=GENERATOR_VERSION)
 DERIVED_FEATURE_EVIDENCE_VERSION = 1
 PLACEHOLDER_KPI_TERMS = {"confirm", "metric", "grain", "dimension", "dimensions"}
 PLACEHOLDER_KPI_PHRASES = (
@@ -115,6 +119,7 @@ class KPIFeatureResolver:
         self.layout.ensure_runtime_dirs()
         kpis = self._load_kpis()
         schema_index = self._schema_index()
+        self._lexicon = load_workspace_lexicon(self.layout)
         alias_index = self._alias_index(schema_index)
         available_columns = sorted({entry["column"] for entries in schema_index.values() for entry in entries})
         mapping = {
@@ -243,7 +248,11 @@ class KPIFeatureResolver:
                 continue
             alias_candidates = alias_index.get(norm, [])
             if alias_candidates:
-                state = "proven_alias" if safe_structural_alias(token, alias_candidates) else "candidate_unconfirmed"
+                state = (
+                    "proven_alias"
+                    if safe_structural_alias(token, alias_candidates, lexicon=getattr(self, "_lexicon", None))
+                    else "candidate_unconfirmed"
+                )
                 features.append({
                     "feature": token,
                     "state": state,
@@ -344,7 +353,7 @@ class KPIFeatureResolver:
         return schema_index
 
     def _alias_index(self, schema_index: dict[str, list[dict[str, str]]]) -> dict[str, list[dict[str, str]]]:
-        return build_alias_index(schema_index)
+        return build_alias_index(schema_index, lexicon=getattr(self, "_lexicon", None))
 
     def _write_open_questions(self, mapping: dict[str, Any]) -> str:
         path = self.layout.reports_dir / "open_questions.md"
@@ -801,6 +810,13 @@ def _rel(path: Path, root: Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from core.onboarding.cli_deprecation import warn_soft_deprecated_cli
+
+    warn_soft_deprecated_cli(
+        "resolve-kpi-features",
+        prefer="prepare-kpi-blocker-panel",
+        reason="the wrapper runs resolve + derived-feature markdown + panel + validation in lock-step",
+    )
     parser = argparse.ArgumentParser(description="Resolve KPI features from generated workspace evidence.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")
     parser.add_argument("--repo-root", default=".", help="Repository root. Defaults to current directory.")

@@ -399,6 +399,13 @@ def _rel(path: Path, root: Path) -> str:
 
 
 def main() -> None:
+    from core.onboarding.cli_deprecation import warn_soft_deprecated_cli
+
+    warn_soft_deprecated_cli(
+        "derived-feature-markdown",
+        prefer="prepare-kpi-blocker-panel",
+        reason="the wrapper regenerates derived-feature markdown as part of the panel build",
+    )
     parser = argparse.ArgumentParser(
         description="Convert strict derived-feature JSON options into stakeholder Markdown."
     )

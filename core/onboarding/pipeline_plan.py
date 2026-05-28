@@ -7,9 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from core.onboarding.catalog_contract import CatalogContractBuilder
+from core.onboarding.data_quality import DataQualityHarness
 from core.onboarding.source_family_contracts import SourceFamilyContractBuilder
 from core.paths import PROJECT_ROOT
 from core.storage.workspace_layout import WorkspaceLayout
+from core.contracts.versioning import register_contract
+
+register_contract("pipeline_plan.json", current_version=1)
 
 
 @dataclass(frozen=True)
@@ -43,7 +47,14 @@ class PipelineDecisionRecorder:
         self.path = self.layout.contracts_dir / "pipeline_decisions.json"
 
     def _load(self) -> dict[str, Any]:
-        return _load_json(self.path) or {"table_format": "", "percentage_denominator_scopes": {}}
+        return _load_json(self.path) or {
+            "artifact_type": "pipeline_decisions.json",
+            "version": 1,
+            "generated_by": "apply-pipeline-decision",
+            "workspace": _rel(self.workspace, self.repo_root),
+            "table_format": "",
+            "percentage_denominator_scopes": {},
+        }
 
     def _write(self, data: dict[str, Any]) -> dict[str, Any]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -71,6 +82,9 @@ class PipelineFormatPanel:
 
     def prepare(self) -> dict[str, Any]:
         panel = {
+            "artifact_type": "pipeline_format/current.json",
+            "version": 1,
+            "generated_by": "prepare-pipeline-format-panel",
             "question": "What table/file format should medallion outputs use?",
             "options": [
                 {"option_id": "option_a", "label": "Delta", "value": "delta"},
@@ -105,25 +119,48 @@ class DataEngineeringRoutePlanner:
         if not (self.layout.contracts_dir / "catalog_contract.json").exists():
             CatalogContractBuilder(self.repo_root, _rel(self.workspace, self.repo_root)).build()
         kpis = _load_json(self.layout.contracts_dir / "kpi_registry.json").get("kpis", [])
-        selected = self.track if self.track != "auto" else ("kpi_only" if kpis else "medallion")
+        catalog = _load_json(self.layout.contracts_dir / "catalog_contract.json")
+        quality = DataQualityHarness(self.repo_root, _rel(self.workspace, self.repo_root)).run().summary()
+        selected, reason = _select_route(self.track, kpis, catalog, quality)
         source_family_summary: dict[str, Any] = {"family_count": 0}
         if selected == "medallion" and not kpis:
             SourceFamilyContractBuilder(self.repo_root, _rel(self.workspace, self.repo_root)).build()
             source_family_summary = _load_json(self.layout.contracts_dir / "source_family_contracts.json").get("summary", {})
-        catalog = _load_json(self.layout.contracts_dir / "catalog_contract.json")
         route = {
             "artifact_type": "data_engineering_route.json",
+            "version": 1,
+            "generated_by": "prepare-data-engineering-route",
+            "workspace": _rel(self.workspace, self.repo_root),
+            "requested_track": self.track,
             "selected_track": selected,
             "start_layer": "raw",
             "target_engine": self.target_engine,
             "catalog_object_count": len(catalog.get("objects", [])),
             "source_family_summary": source_family_summary,
+            "catalog_contract": _rel(self.layout.contracts_dir / "catalog_contract.json", self.repo_root),
+            "quality_assessment": quality,
+            "route_reason": reason,
+            "decision_inputs": {
+                "kpi_count": len(kpis),
+                "catalog_object_count": len(catalog.get("objects", [])),
+                "data_quality_status": quality.get("status", ""),
+                "unresolved_quality_findings": quality.get("unresolved_finding_count", 0),
+            },
             "remote_policy": {"mode": "local_first", "remote_mutation_requires_explicit_approval": True},
+            "status": "ready_for_pipeline_plan",
         }
         json_path = self.layout.contracts_dir / "data_engineering_route.json"
         md_path = self.layout.reports_dir / "data_engineering_route.md"
         json_path.write_text(json.dumps(route, indent=2) + "\n", encoding="utf-8")
-        md_path.write_text(f"# Data Engineering Route\n\nSelected track: `{selected}`\n", encoding="utf-8")
+        md_path.write_text(
+            "# Data Engineering Route\n\n"
+            f"- Requested track: `{self.track}`\n"
+            f"- Selected track: `{selected}`\n"
+            f"- Reason: {reason}\n"
+            f"- Data quality status: `{quality.get('status', '')}`\n"
+            f"- Catalog objects: `{len(catalog.get('objects', []))}`\n",
+            encoding="utf-8",
+        )
         return RouteResult(_rel(json_path, self.repo_root), _rel(md_path, self.repo_root), selected, "raw")
 
 
@@ -165,9 +202,18 @@ class PipelinePlanner:
         status = "blocked" if blockers else "ready_for_generation"
         plan = {
             "artifact_type": "pipeline_plan.json",
+            "version": 1,
+            "generated_by": "prepare-pipeline-plan",
+            "workspace": _rel(self.workspace, self.repo_root),
             "selected_track": selected,
             "target_engine": self.target_engine,
             "table_format": table_format,
+            "catalog_contract": _rel(self.layout.contracts_dir / "catalog_contract.json", self.repo_root),
+            "route_contract": _rel(self.layout.contracts_dir / "data_engineering_route.json", self.repo_root),
+            "policy": {
+                "remote_mutation_requires_explicit_approval": True,
+                "raw_paths_allowed_only_for_bronze_ingestion": True,
+            },
             "status": status,
             "decisions": decisions,
             "blockers": blockers,
@@ -187,6 +233,25 @@ def _layers(table_format: str) -> list[dict[str, Any]]:
         {"layer": "silver", "objects": [{"name": "silver_source", "deduplication": {"application": "approval_gated"}}]},
         {"layer": "gold", "objects": [{"name": "gold_kpi"}]},
     ]
+
+
+def _select_route(
+    requested_track: str,
+    kpis: list[dict[str, Any]],
+    catalog: dict[str, Any],
+    quality: dict[str, Any],
+) -> tuple[str, str]:
+    if requested_track != "auto":
+        return requested_track, f"User explicitly requested `{requested_track}`."
+    objects = catalog.get("objects") if isinstance(catalog.get("objects"), list) else []
+    unresolved_quality = int(quality.get("unresolved_finding_count") or 0)
+    if not kpis:
+        return "medallion", "No KPI registry is present, so start with governed source-to-layer modelling."
+    if unresolved_quality:
+        return "medallion", "Data-quality findings require a Bronze/Silver/Gold path before KPI/reporting outputs."
+    if len(objects) > 1:
+        return "medallion", "Multiple raw source objects need governed Bronze ingestion, Silver conformance, and Gold KPI views."
+    return "kpi_only", "Single-source KPI proof is sufficient; medallion remains optional."
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -214,6 +279,101 @@ def main(argv: list[str] | None = None) -> int:
     result = PipelinePlanner(args.repo_root, args.workspace, track=args.track, target_engine=args.target_engine, table_format=args.table_format).build()
     print(json.dumps(result.summary(), indent=2))
     return 0
+
+
+def route_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
+    parser.add_argument("--track", default="auto")
+    parser.add_argument("--target-engine", default="sql")
+    args = parser.parse_args(argv)
+    result = DataEngineeringRoutePlanner(
+        args.repo_root,
+        args.workspace,
+        track=args.track,
+        target_engine=args.target_engine,
+    ).build()
+    print(json.dumps(result.summary(), indent=2))
+    return 0
+
+
+def pipeline_main(argv: list[str] | None = None) -> int:
+    return main(argv)
+
+
+def format_panel_main(argv: list[str] | None = None) -> int:
+    from core.onboarding.workspace.cli_runner import run_workspace_command
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
+    args = parser.parse_args(argv)
+    return run_workspace_command(
+        command="prepare-pipeline-format-panel",
+        workspace=args.workspace,
+        repo_root=args.repo_root,
+        fn=lambda: PipelineFormatPanel(args.repo_root, args.workspace).prepare(),
+        validation="validate-workspace-artifacts",
+    )
+
+
+def format_answer_main(argv: list[str] | None = None) -> int:
+    from core.onboarding.workspace.cli_runner import run_workspace_command
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
+    parser.add_argument("--answer", required=True)
+    parser.add_argument("--allow-replay", action="store_true")
+    args = parser.parse_args(argv)
+    return run_workspace_command(
+        command="apply-pipeline-format-answer",
+        workspace=args.workspace,
+        repo_root=args.repo_root,
+        fn=lambda: PipelineFormatPanel(args.repo_root, args.workspace).apply(args.answer),
+        op_args={"workspace": args.workspace, "answer": args.answer},
+        allow_replay=args.allow_replay,
+        decision=args.answer,
+        metadata={"answer": args.answer},
+        record_idempotent=True,
+    )
+
+
+def decision_main(argv: list[str] | None = None) -> int:
+    from core.onboarding.workspace.cli_runner import run_workspace_command
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
+    parser.add_argument("--kpi-id", required=True)
+    parser.add_argument("--percentage-denominator-scope", required=True)
+    parser.add_argument("--allow-replay", action="store_true")
+    args = parser.parse_args(argv)
+    return run_workspace_command(
+        command="apply-pipeline-decision",
+        workspace=args.workspace,
+        repo_root=args.repo_root,
+        fn=lambda: PipelineDecisionRecorder(
+            args.repo_root, args.workspace
+        ).record_denominator_scope(
+            args.kpi_id,
+            args.percentage_denominator_scope,
+            reason="Accepted percentage denominator scope.",
+        ),
+        op_args={
+            "workspace": args.workspace,
+            "kpi_id": args.kpi_id,
+            "percentage_denominator_scope": args.percentage_denominator_scope,
+        },
+        allow_replay=args.allow_replay,
+        decision=args.percentage_denominator_scope,
+        metadata={
+            "kpi_id": args.kpi_id,
+            "percentage_denominator_scope": args.percentage_denominator_scope,
+        },
+        record_idempotent=True,
+    )
 
 
 if __name__ == "__main__":

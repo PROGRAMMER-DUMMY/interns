@@ -1,0 +1,37 @@
+description = "Apply a custom RCM KPI blocker definition, then render the next canonical panel."
+
+prompt = """
+# Task: Apply a Custom RCM KPI Definition
+
+The user provided this accepted mapping, formula, or business rule:
+
+```text
+{{args}}
+```
+
+Apply it only through the supported wrapper. Stdout is redirected to `$null` on
+purpose so only the next panel reaches the user; stderr is kept so failures
+still surface.
+
+```text
+!{uv run apply-kpi-panel-answer --workspace workspaces/Healthcare-RCM-Data-Platform --domain healthcare --answer custom --custom-definition "{{args}}" 1>$null}
+!{uv run validate-workspace-artifacts --workspace workspaces/Healthcare-RCM-Data-Platform 1>$null}
+```
+
+The block below is the next user-facing panel. Output it VERBATIM as your
+entire reply. Do not narrate it. Do not echo the commands above. Do not list
+files. Do not summarize. Do not append a recap. Do not wrap it in extra prose.
+
+```markdown
+!{Get-Content -LiteralPath workspaces/Healthcare-RCM-Data-Platform/interns/reports/blocker_question_panel/current.md -Raw}
+```
+
+Hard rules:
+
+- Your reply is ONLY the rendered Markdown above. No preamble, no postscript.
+- Use this command when the panel recommends `custom`, or when no JSON-backed concrete option exists.
+- Do not manually edit `kpi_feature_mapping.json` or `workspace_feature_definitions.json`.
+- Do not replace the Markdown with Gemini's generic Ask User or Answer Questions UI.
+- If either command above wrote to stderr (apply or validation failure), reply
+  with only the stderr error message and do not show the panel.
+"""

@@ -238,6 +238,12 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Outputs: updated interns/generated/requirements/data_model_draft.json; next interns/reports/data_model_blocker_panel/current.json; next interns/reports/data_model_blocker_panel/current.md
   - Safety: local_safe_validated_write
   - Required skills: domain-model; stakeholder-memory; grill-requirements
+- `parse-data-model-images`
+  - Command: `uv run parse-data-model-images --workspace <workspace>`
+  - Use when: workspace contains image-only data model evidence; ERD, star-schema, or medallion diagram sidecars need review; image-derived relationships must stay non-executable until proof or approval; local OCR can be auto-installed with --auto-install-ocr when missing
+  - Outputs: interns/generated/data_model_images/<image>.model.json; interns/reports/data_model_images/<image>.model.md; interns/reports/data_model_images/current.json; interns/reports/data_model_images/current.md
+  - Safety: local_safe_review_gated_no_remote_vision_without_explicit_sensitive_upload_confirmation
+  - Required skills: workspace-governance; domain-model; data-engineering-pipeline-design
 - `export-data-model-diagram`
   - Command: `uv run export-data-model-diagram --workspace <workspace>`
   - Use when: stakeholders need a presentable data model diagram; finalized or draft data model should be rendered as static SVG; Mermaid ERD should be exported for review
@@ -359,6 +365,12 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Outputs: interns/generated/contracts/relationship_contracts.json; interns/reports/relationship_contracts.md
   - Safety: local_safe_governed_contract_write
   - Required skills: domain-model; data-engineering-pipeline-design; workspace-kpi-query-optimizer
+- `apply-relationship-answer`
+  - Command: `uv run apply-relationship-answer --workspace <workspace> --relationship-id <relationship_id> --answer <approve|reject|keep_blocked>`
+  - Use when: user approved or rejected a relationship contract; profile_validated relationship needs governed promotion; agent must not hand-edit relationship_contracts.json
+  - Outputs: updated interns/generated/contracts/relationship_contracts.json; recomputed executable and candidate relationship counts; decision_history entry with source apply-relationship-answer
+  - Safety: local_safe_validated_decision_write_prevents_manual_json_edits
+  - Required skills: workspace-governance; domain-model; data-engineering-pipeline-design
 - `derived-feature-markdown`
   - Command: `uv run derived-feature-markdown --workspace <workspace>`
   - Use when: stakeholders need readable derived-feature blocker reviews; strict derived_feature_options JSON needs Markdown rendering
@@ -521,6 +533,18 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Model policy: Use the target CLI default model unless a workflow route specifies otherwise.
 - Default prompt: Use reusable derivation patterns to propose evidence-backed KPI feature mappings without treating candidates as proof.
 
+### kpi-analyst
+
+- Display name: KPI Analyst
+- Description: Interpret KPI sheets and validate KPI queries.
+- Skills: kpi-analyst
+- Safety: follows_skill_policy
+- Source: `skills/kpi-analyst/agents/openai.yaml`
+- Target model: `default`
+- Target sandbox/permission: `role_defined`
+- Model policy: Use the target CLI default model unless a workflow route specifies otherwise.
+- Default prompt: Use KPI analyst to parse KPI definitions, classify metric intent, write or review one query per KPI, show result tables, and surface only correctness-relevant assumptions.
+
 ### workspace-flow-orchestrator
 
 - Display name: Workspace Flow Orchestrator
@@ -531,7 +555,7 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Target model: `default`
 - Target sandbox/permission: `workspace-write`
 - Model policy: Use the target CLI default model unless a workflow route specifies otherwise.
-- Default prompt: Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. Show current.md to humans, use current.json for structured choices, and record deterministic next commands.
+- Default prompt: Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. For blocker, approval, KPI-generation, data-model, duplicate-review, or pipeline-format panels, post the generated current.md verbatim as the human card; do not replace it with a tool-native generic question box or a summary. Use current.json only to render buttons/options and to apply the exact selected answer. Record deterministic next commands.
 
 ### source-to-target-reviewer
 
@@ -567,7 +591,7 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Target model: `default`
 - Target sandbox/permission: `workspace-write`
 - Model policy: Use the target CLI default model unless a workflow route specifies otherwise.
-- Default prompt: Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post current.md, use current.json for buttons, and record trajectory/session events.
+- Default prompt: Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post the generated current.md verbatim as the human card, use current.json only for buttons/options and answer application, and record trajectory/session events. Do not collapse panels into a generic ask-user text box.
 
 ## Available Skills
 
@@ -605,6 +629,21 @@ Use the narrowest role that fits the task and keep write access limited to imple
 
 - Path: `skills/grill-requirements/SKILL.md`
 - Description: Interview stakeholders to understand what they want optimized, what must not change, how success is measured, and what preferences or constraints should shape the solution. Use for new workspace onboarding, KPI/data model discovery, product scoping, or when business/data/platform requirements are incomplete.
+
+### handoff
+
+- Path: `skills/handoff/SKILL.md`
+- Description: Compact the current conversation into a handoff document for another agent to pick up. Save to the temporary directory of the user's OS — not the current workspace. Reference existing artifacts (PRDs, plans, ADRs, issues, commits, diffs) by path; do not re-paste them. Redact secrets and PII. Include a "suggested skills" section.
+
+### kpi-analyst
+
+- Path: `skills/kpi-analyst/SKILL.md`
+- Description: Use this skill when the user uploads, shares, pastes, or describes a KPI sheet, KPI tracker, metrics document, dashboard metric list, or structured business analytics metric definitions; when asked to understand a metric, write queries for KPIs, calculate a KPI, build a dashboard from KPIs, or inspect files with columns such as Key Business Question, Metric, Dimension, Cut, Filter, Grain, or Description; also use when validating generated KPI SQL and result samples against KPI intent.
+
+### self-grill
+
+- Path: `skills/self-grill/SKILL.md`
+- Description: Use BEFORE you commit to a plan, design recommendation, or implementation approach. The skill turns the orchestrating agent into its own interviewer: it generates 3-6 grilling questions tailored to the current proposal, answers each with concrete evidence (file paths, samples, prior decisions), and surfaces any unknown-unknowns it can no longer brush past. Output is a short Self-Grill Audit block that goes into the response BEFORE the final recommendation.
 
 ### stakeholder-memory
 

@@ -25,6 +25,7 @@ class PreparedPanelResult:
     question_panel_path: str
     question_panel_markdown_path: str
     current_feature: str
+    question_count: int
     validation: dict[str, Any]
     next_step: str
 
@@ -36,6 +37,7 @@ class PreparedPanelResult:
             "question_panel_path": self.question_panel_path,
             "question_panel_markdown_path": self.question_panel_markdown_path,
             "current_feature": self.current_feature,
+            "question_count": self.question_count,
             "validation": self.validation,
             "next_step": self.next_step,
         }
@@ -101,6 +103,7 @@ def prepare_kpi_blocker_panel(
         question_panel_path=panel_result.current_json,
         question_panel_markdown_path=panel_result.current_markdown,
         current_feature=panel_result.current_feature,
+        question_count=panel_result.question_count,
         validation=validation.summary(),
         next_step=(
             f"Render {panel_result.current_markdown} as-is. Do not summarize it or write a "
@@ -119,6 +122,7 @@ def apply_kpi_panel_answer(
     domain: str = "healthcare",
     custom_definition: str = "",
     evidence_note: str = "",
+    via_cli_agent: bool = False,
 ) -> ApplyPanelAnswerResult:
     root = Path(repo_root).resolve()
     workspace_path = (root / workspace).resolve()
@@ -146,6 +150,7 @@ def apply_kpi_panel_answer(
         panel=panel,
         custom_definition=custom_definition,
         evidence_note=evidence_note,
+        via_cli_agent=via_cli_agent,
     )
     _write_feature_wiki_note(
         root,
@@ -208,8 +213,16 @@ def _apply_option(
     panel: dict[str, Any],
     custom_definition: str,
     evidence_note: str,
+    via_cli_agent: bool = False,
 ) -> dict[str, Any]:
     option_id = str(option.get("option_id") or "")
+    # CLI-agent two-step: when an answer is being applied by the orchestrating
+    # CLI agent on the user's behalf, persist it as `cli_agent_proposed` so the
+    # mapping does NOT become ``ready_for_sql`` until the user runs
+    # ``confirm-cli-agent-proposal``. Direct human-driven applies remain
+    # ``user_confirmed`` immediately as before.
+    accepted_state = "cli_agent_proposed" if via_cli_agent else "user_confirmed"
+    note_prefix = "CLI agent proposal: " if via_cli_agent else ""
     if option_id == "custom":
         if not custom_definition:
             raise ValueError("--custom-definition is required when applying the custom option")
@@ -217,10 +230,10 @@ def _apply_option(
             repo_root,
             workspace,
             feature=feature,
-            state="user_confirmed",
+            state=accepted_state,
             resolution_type="custom_business_definition",
             definition=custom_definition,
-            evidence_note=evidence_note or custom_definition,
+            evidence_note=(note_prefix + (evidence_note or custom_definition)),
             applies_to_kpis=panel.get("applies_to_kpis") or [],
         )
     if physical := option.get("physical_column_option"):
@@ -231,10 +244,10 @@ def _apply_option(
             repo_root,
             workspace,
             feature=feature,
-            state="user_confirmed",
+            state=accepted_state,
             resolution_type="physical_column",
             definition=definition,
-            evidence_note=evidence_note or f"Accepted panel option {option_id}: {definition}",
+            evidence_note=note_prefix + (evidence_note or f"Accepted panel option {option_id}: {definition}"),
             source_columns=[definition],
             applies_to_kpis=panel.get("applies_to_kpis") or [],
         )
@@ -251,10 +264,10 @@ def _apply_option(
             repo_root,
             workspace,
             feature=feature,
-            state="user_confirmed",
+            state=accepted_state,
             resolution_type="derived_formula",
             definition=formula,
-            evidence_note=evidence_note or f"Accepted panel option {option_id}: {formula}",
+            evidence_note=note_prefix + (evidence_note or f"Accepted panel option {option_id}: {formula}"),
             source_columns=source_columns,
             applies_to_kpis=panel.get("applies_to_kpis") or [],
         )
@@ -269,10 +282,10 @@ def _apply_option(
             repo_root,
             workspace,
             feature=feature,
-            state="user_confirmed",
+            state=accepted_state,
             resolution_type="custom_business_definition",
             definition=custom_definition,
-            evidence_note=evidence_note or custom_definition,
+            evidence_note=note_prefix + (evidence_note or custom_definition),
             applies_to_kpis=panel.get("applies_to_kpis") or [],
         )
     raise ValueError(f"Unsupported panel option shape for {option_id}")

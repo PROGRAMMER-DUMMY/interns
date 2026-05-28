@@ -4,11 +4,66 @@
       "GEMINI.md",
       "AGENTS.md",
       "TOOLS.md",
-      ".agents/tools.json"
+      ".agents/tools.json",
+      ".gemini/workspace-workflow-prompt.md",
+      "docs/agents/gemini-cli-reference.md"
     ],
     "includeDirectoryTree": true
   },
+  "model": {
+    "summarizeToolOutput": {
+      "run_shell_command": {
+        "tokenBudget": 12000
+      }
+    }
+  },
+  "tools": {
+    "truncateToolOutputThreshold": 120000,
+    "_policyEngineNote": "`tools.allowed` is deprecated. Forward-looking equivalent rules live in .gemini/policies/autoresearch.toml; workspace-tier policies are non-functional today (gemini-cli#18186), so this allowlist still drives behavior. Symlink the .toml file into ~/.gemini/policies/ to silence the deprecation warning until the workspace tier ships.",
+    "allowed": [
+      "run_shell_command(uv run prepare-kpi-blocker-panel)",
+      "run_shell_command(uv run apply-kpi-panel-answer)",
+      "run_shell_command(uv run confirm-cli-agent-proposal)",
+      "run_shell_command(uv run prepare-kpi-generation)",
+      "run_shell_command(uv run apply-kpi-generation-answer)",
+      "run_shell_command(uv run finalize-kpi-generation)",
+      "run_shell_command(uv run prepare-data-model-generation)",
+      "run_shell_command(uv run apply-data-model-answer)",
+      "run_shell_command(uv run finalize-data-model-generation)",
+      "run_shell_command(uv run prepare-data-model-blocker-panel)",
+      "run_shell_command(uv run apply-data-model-blocker-answer)",
+      "run_shell_command(uv run prepare-duplicate-review-panel)",
+      "run_shell_command(uv run apply-duplicate-review-answer)",
+      "run_shell_command(uv run prepare-pipeline-format-panel)",
+      "run_shell_command(uv run apply-pipeline-format-answer)",
+      "run_shell_command(uv run apply-pipeline-decision)",
+      "run_shell_command(uv run apply-relationship-answer)",
+      "run_shell_command(uv run build-relationship-contracts)",
+      "run_shell_command(uv run resolve-kpi-features)",
+      "run_shell_command(uv run derived-feature-markdown)",
+      "run_shell_command(uv run blocker-question-panel)",
+      "run_shell_command(uv run onboard-workspace)",
+      "run_shell_command(uv run validate-workspace-artifacts)",
+      "run_shell_command(uv run validate-project-harness)",
+      "run_shell_command(uv run validate-workflow-guardrails)",
+      "run_shell_command(uv run kpi-proof-packet)",
+      "run_shell_command(uv run list-workspace-files)",
+      "run_shell_command(uv run workspace-flow)",
+      "run_shell_command(uv run prepare-workspace-workflow)",
+      "run_shell_command(uv run prepare-workspace-selection)",
+      "run_shell_command(uv run session-snapshot)",
+      "run_shell_command(uv run prepare-kpi-generation)",
+      "run_shell_command(Get-Content)",
+      "run_shell_command(Select-String)",
+      "run_shell_command(Get-ChildItem)",
+      "ReadFile",
+      "ReadFolder",
+      "SearchText",
+      "Glob"
+    ]
+  },
   "experimental": {
-    "jitContext": false
+    "jitContext": false,
+    "enableAgents": true
   }
 }

@@ -63,6 +63,7 @@ class CatalogContractBuilder:
         contract = {
             "artifact_type": "catalog_contract.json",
             "version": 1,
+            "generated_by": "build-catalog-contract",
             "workspace": _rel(self.workspace, self.repo_root),
             "objects": objects,
             "object_count": len(objects),

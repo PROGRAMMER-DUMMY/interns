@@ -1,0 +1,4 @@
+interface:
+  display_name: "KPI Analyst"
+  short_description: "Interpret KPI sheets and validate KPI queries."
+  default_prompt: "Use KPI analyst to parse KPI definitions, classify metric intent, write or review one query per KPI, show result tables, and surface only correctness-relevant assumptions."

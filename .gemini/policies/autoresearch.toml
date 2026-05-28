@@ -1,0 +1,233 @@
+# Gemini CLI Policy Engine rules for the autoresearch project.
+#
+# Status (2026-05): The workspace tier (project-level policies under
+# .gemini/policies/) is non-functional — see
+# https://github.com/google-gemini/gemini-cli/issues/18186 and
+# https://geminicli.com/docs/reference/policy-engine.
+#
+# This file is the forward-looking equivalent of the deprecated
+# `tools.allowed` block in `.gemini/settings.json`. Until the workspace
+# tier is wired up, install it at user level to silence the deprecation
+# warning:
+#
+#   PowerShell:
+#     New-Item -ItemType SymbolicLink `
+#       -Path "$env:USERPROFILE\.gemini\policies\autoresearch.toml" `
+#       -Target "$PWD\.gemini\policies\autoresearch.toml"
+#
+#   Bash / WSL:
+#     ln -s "$(pwd)/.gemini/policies/autoresearch.toml" \
+#       "$HOME/.gemini/policies/autoresearch.toml"
+#
+# When workspace policies start being read, the symlink can be removed
+# and this file alone will govern the project's allowlist.
+
+# --- Governed KPI / data-engineering wrappers (preferred entry points) ---
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run prepare-kpi-blocker-panel"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run apply-kpi-panel-answer"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run confirm-cli-agent-proposal"
+decision       = "allow"
+priority       = 100
+
+# --- KPI generation flow ---
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run prepare-kpi-generation"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run apply-kpi-generation-answer"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run finalize-kpi-generation"
+decision       = "allow"
+priority       = 100
+
+# --- Data-model generation flow ---
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run prepare-data-model-generation"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run apply-data-model-answer"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run finalize-data-model-generation"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run prepare-data-model-blocker-panel"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run apply-data-model-blocker-answer"
+decision       = "allow"
+priority       = 100
+
+# --- Duplicate-review + pipeline-format panels ---
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run prepare-duplicate-review-panel"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run apply-duplicate-review-answer"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run prepare-pipeline-format-panel"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run apply-pipeline-format-answer"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run apply-pipeline-decision"
+decision       = "allow"
+priority       = 100
+
+# --- Relationships / source-to-target ---
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run apply-relationship-answer"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run build-relationship-contracts"
+decision       = "allow"
+priority       = 100
+
+# --- Resolver + derived-feature + panel internals ---
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run resolve-kpi-features"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run derived-feature-markdown"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run blocker-question-panel"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run onboard-workspace"
+decision       = "allow"
+priority       = 100
+
+# --- Validation + proof + harness ---
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run validate-workspace-artifacts"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run validate-project-harness"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run validate-workflow-guardrails"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run kpi-proof-packet"
+decision       = "allow"
+priority       = 100
+
+# --- Workspace inspection + flow ---
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run list-workspace-files"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run workspace-flow"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run prepare-workspace-workflow"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run prepare-workspace-selection"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run session-snapshot"
+decision       = "allow"
+priority       = 100
+
+# --- Read-only inspection of panel artifacts ---
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "Get-Content"
+decision       = "allow"
+priority       = 100

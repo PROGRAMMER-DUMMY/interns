@@ -10,7 +10,7 @@ This Gemini CLI subagent is generated from `skills/workspace-kpi-query-optimizer
 
 ## Default Prompt
 
-Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. Show current.md to humans, use current.json for structured choices, and record deterministic next commands.
+Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. For blocker, approval, KPI-generation, data-model, duplicate-review, or pipeline-format panels, post the generated current.md verbatim as the human card; do not replace it with a tool-native generic question box or a summary. Use current.json only to render buttons/options and to apply the exact selected answer. Record deterministic next commands.
 
 ## Required Skills
 

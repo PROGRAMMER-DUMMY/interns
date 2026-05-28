@@ -10,7 +10,7 @@ This Gemini CLI subagent is generated from `skills/workspace-kpi-query-optimizer
 
 ## Default Prompt
 
-Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post current.md, use current.json for buttons, and record trajectory/session events.
+Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post the generated current.md verbatim as the human card, use current.json only for buttons/options and answer application, and record trajectory/session events. Do not collapse panels into a generic ask-user text box.
 
 ## Required Skills
 

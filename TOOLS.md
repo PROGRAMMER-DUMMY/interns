@@ -21,6 +21,48 @@ strings, bearer headers, cookies, or config/AST/tree output that includes secret
 should report only existence/status or redacted key names, for example
 `DATABRICKS_TOKEN=<redacted>`.
 
+## Governance Modules
+
+Shared infrastructure every governed CLI in this repo plugs into. New apply / finalize / prepare
+commands should reuse these modules rather than re-implementing the envelope.
+
+### core.onboarding.workspace.cli_runner
+
+`run_workspace_command(...)` is the single entry point every `apply-*` / `finalize-*` /
+`prepare-*` CLI funnels through. It wraps four concerns into one call:
+
+1. `core.storage.workspace_lock.workspace_lock` — process-level mutex on
+   `workspaces/<ws>/interns/state/workspace.lock` so two concurrent commands cannot corrupt
+   workspace state. Cross-platform (`msvcrt` on Windows, `fcntl` on POSIX). Times out after
+   30 seconds with `WorkspaceLockTimeout` and a non-zero exit code.
+2. `core.observability.events.time_command` — appends a structured JSONL event with duration,
+   status, and per-command details to `workspaces/<ws>/interns/state/events.jsonl`. Never raises.
+3. `core.onboarding.workspace.idempotency.compute_op_id` / `record_op` — deterministic 16-char op
+   id from the user-visible arguments. Repeats with the same arguments return the prior payload
+   from `workspaces/<ws>/interns/state/applied_ops.jsonl` instead of re-running.
+4. `core.onboarding.harness.trajectory_recorder.record_trajectory_event_safe` — high-level
+   workflow events that feed `prepare-workspace-bug-report` and the workspace flow guard.
+
+Set `record_idempotent=True` for commands that mutate accepted decisions; leave it false for
+prepare/inspect commands.
+
+### core.onboarding.lexicon
+
+`build_workspace_lexicon(...)` derives a per-workspace vocabulary from authored evidence (KPI
+registry cells, profile column names, accepted `workspace_feature_definitions` entries,
+`kpi_feature_mapping` source columns, and `data_dictionary` excerpts). The lexicon is consumed by
+`core.onboarding.kpi.text_parser.infer_metric_and_cuts` and
+`core.onboarding.relationships.schema_alias_matching.alias_index` so that semantic inference is
+sourced from the workspace's own evidence rather than a curated keyword ladder. The old
+`BUSINESS_COLUMN_ALIASES` dictionary and the healthcare-RCM keyword ladder were removed.
+
+### core.contracts.versioning
+
+Generated contracts (`workspace_lexicon`, `kpi_registry`, `kpi_feature_mapping`,
+`relationship_contracts`, `source_to_target_plan`, `pipeline_plan`, `blocker_question_panel/current`)
+each register a `ContractVersion` and an optional `migrate(old, target_version)` callable.
+Readers can call `migrate(...)` before parsing so older artifacts continue to load.
+
 ## Tools
 
 ### list-workspace-files
@@ -665,6 +707,35 @@ Use after the user answers the current data-model blocker panel. It resolves the
 `current.json`, applies the structured operation to `data_model_draft.json`, writes the next blocker
 panel, and keeps unresolved decisions blocked.
 
+### parse-data-model-images
+
+Command:
+
+```powershell
+uv run parse-data-model-images --workspace workspaces/<project>
+```
+
+Use when a workspace contains image-only or image-backed data model evidence such as ERDs,
+star-schema diagrams, or medallion diagrams. The command is local-safe by default: it creates
+review-gated sidecars under `interns/generated/data_model_images/` and review panels under
+`interns/reports/data_model_images/`. Local OCR runs only if a configured local engine is available.
+If OCR is missing and the operator wants the tool to resolve it, pass `--auto-install-ocr`; the
+command attempts a supported local package-manager install for Tesseract and records the attempt in
+the sidecar.
+Remote/multimodal vision is not called unless explicit remote flags are added, and healthcare or
+customer diagrams require a separate sensitivity confirmation. Image-derived relationships remain
+non-executable until matched to profile/catalog/schema evidence or explicitly approved and then
+validated by the normal relationship-contract workflow.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/data_model_images/<image>.model.json
+workspaces/<project>/interns/reports/data_model_images/<image>.model.md
+workspaces/<project>/interns/reports/data_model_images/current.json
+workspaces/<project>/interns/reports/data_model_images/current.md
+```
+
 ### export-data-model-diagram
 
 Command:
@@ -1018,6 +1089,7 @@ Command:
 
 ```powershell
 uv run apply-kpi-panel-answer --workspace workspaces/<project> --domain <domain> --answer option_a
+uv run apply-kpi-panel-answer --workspace workspaces/<project> --domain <domain> --answer custom --custom-definition '<JSON>' --via-cli-agent
 ```
 
 Use after the user answers a blocker question from
@@ -1026,6 +1098,31 @@ such as `option_a`, `Option A: PaidAmount`, an exact label, or an unambiguous re
 against `current.json`, applies the selected physical-column or derived-formula definition through
 supported resolver APIs, then prepares and validates the next panel. Do not invent unsupported flags
 such as `--accept-option`.
+
+Pass `--via-cli-agent` when the orchestrating CLI agent is applying an answer derived from the
+`cli_agent_evidence_pack` (the panel emitted when scored options ran out). With that flag the
+mapping is recorded as `cli_agent_proposed` rather than `user_confirmed`; the user must then run
+`confirm-cli-agent-proposal` to finalize the decision.
+
+The command is idempotent: a deterministic op id is derived from the arguments, and a second call
+with the same arguments returns the prior result instead of duplicating decision history. Pass
+`--allow-replay` to force re-execution.
+
+### confirm-cli-agent-proposal
+
+Command:
+
+```powershell
+uv run confirm-cli-agent-proposal --workspace workspaces/<project> --feature <feature> --decision confirm
+uv run confirm-cli-agent-proposal --workspace workspaces/<project> --feature <feature> --decision reject --note "<why>"
+```
+
+Use as the second step of the CLI-agent proposal flow. When `apply-kpi-panel-answer --via-cli-agent`
+records a mapping as `cli_agent_proposed`, the KPI stays in the blocked state until the user
+confirms or rejects. `--decision confirm` flips the recorded mapping to `user_confirmed`;
+`--decision reject` flips it to `cli_agent_rejected` and reverts the affected KPI rows to
+`blocked_missing_evidence` so the next `prepare-kpi-blocker-panel` re-asks. The CLI agent should
+never run this command on the user's behalf without explicit direction.
 
 ### derived-feature-markdown
 
@@ -1306,6 +1403,28 @@ workspaces/<project>/interns/reports/relationship_contracts.md
 Only relationships with executable-approved states such as `proven_data_model` or `user_confirmed`
 may be used by trusted executable generation. Profile-only relationships remain advisory
 `profile_validated` candidates and should trigger blocker grilling before SQL/code generation.
+
+### apply-relationship-answer
+
+Command:
+
+```powershell
+uv run apply-relationship-answer --workspace workspaces/<project> --relationship-id <relationship_id> --answer approve
+```
+
+Use after a user approves, rejects, or keeps blocked a relationship from
+`interns/reports/relationship_contracts.md`. This is the supported lock-aware path for relationship
+approval. Do not edit `relationship_contracts.json` by hand. The command appends decision history,
+updates approval state, recomputes executable/candidate summary counts, and keeps portable
+repo-relative paths.
+
+Supported answers:
+
+```text
+approve
+reject
+keep_blocked
+```
 
 ### cleanup-workspace-references
 

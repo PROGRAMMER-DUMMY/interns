@@ -329,6 +329,15 @@
       ]
     },
     {
+      "tool": "parse-data-model-images",
+      "command": "uv run parse-data-model-images --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model",
+        "data-engineering-pipeline-design"
+      ]
+    },
+    {
       "tool": "export-data-model-diagram",
       "command": "uv run export-data-model-diagram --workspace <workspace>",
       "required_skills": [
@@ -502,6 +511,15 @@
         "domain-model",
         "data-engineering-pipeline-design",
         "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "apply-relationship-answer",
+      "command": "uv run apply-relationship-answer --workspace <workspace> --relationship-id <relationship_id> --answer <approve|reject|keep_blocked>",
+      "required_skills": [
+        "workspace-governance",
+        "domain-model",
+        "data-engineering-pipeline-design"
       ]
     },
     {

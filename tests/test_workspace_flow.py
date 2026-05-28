@@ -103,6 +103,28 @@ class WorkspaceFlowTests(unittest.TestCase):
                     "question": "Approve KPI 1 resolution?",
                     "options": [{"option_id": "option_a", "label": "Approve mapping"}],
                     "recommended_option_id": "option_a",
+                    "output_dialect": {
+                        "label": "SQL (default)",
+                        "alternatives": ["polars", "pyspark"],
+                        "rule": "Render SQL by default.",
+                    },
+                    "immutable_kpi_policy": {
+                        "rule": "The KPI from the source workbook or registry is hard truth and must not be rewritten.",
+                    },
+                    "kpi_understanding": [
+                        {
+                            "kpi_id": "kpi_001",
+                            "original_kpi": {
+                                "business_question": "What is trend for amount paid for medicare LOB?",
+                                "metric": "sum(PaidAmount)",
+                                "cuts": ["Month (ServiceDate)", "LOB = Medicare"],
+                            },
+                            "my_understanding": "Answer the KPI exactly as written.",
+                            "strict_proven_sql": "SELECT \"PaidAmount\" FROM \"transactions\" LIMIT 20;",
+                            "intent_sql_sketch": "-- NON-EXECUTABLE INTENT SKETCH\nSELECT sum(PaidAmount) FROM <SOURCE_TABLE>;",
+                            "demo_result_table": "| metric_value |\n| --- |\n| <computed> |",
+                        }
+                    ],
                 },
                 instruction="Review the full KPI resolution before answering.",
                 artifact_paths=["workspaces/demo/interns/reports/blocker_question_panel/current.json"],
@@ -117,6 +139,14 @@ class WorkspaceFlowTests(unittest.TestCase):
             self.assertIn("LOB = Medicare", markdown)
             self.assertIn("Age > 50", markdown)
             self.assertIn("Resolved Source Mapping", markdown)
+            self.assertIn("## Output Dialect", markdown)
+            self.assertIn("SQL (default)", markdown)
+            self.assertIn("## Immutable KPI Policy", markdown)
+            self.assertIn("## KPI Understanding Review", markdown)
+            self.assertIn("#### My Understanding", markdown)
+            self.assertIn("#### Strict Proven SQL", markdown)
+            self.assertIn("#### Placeholder Intent SQL", markdown)
+            self.assertIn("Demo Result Table", markdown)
             self.assertTrue(panel["hidden_panel_harness"]["hidden"])
             self.assertTrue(panel["hidden_panel_harness"]["passed"])
 
@@ -204,7 +234,7 @@ class WorkspaceFlowTests(unittest.TestCase):
             self.assertEqual(panel["source"], "duplicate_review")
             self.assertEqual(panel["recommended_option_id"], "option_a")
             self.assertIn("orchestration_context", panel)
-            self.assertEqual(panel["orchestration_context"]["layer_route"]["selected_track"], "kpi_only")
+            self.assertEqual(panel["orchestration_context"]["layer_route"]["selected_track"], "medallion")
 
             WorkspaceFlow.from_session(root, result.session_id).answer(answer="option_a")
 

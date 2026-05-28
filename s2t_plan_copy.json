@@ -1,0 +1,858 @@
+{
+  "artifact_type": "source_to_target_plan.json",
+  "version": 1,
+  "generated_by": "plan-source-to-target",
+  "workspace": "workspaces/Healthcare-RCM-Data-Platform",
+  "generated_at": "2026-05-28T11:51:37.571332+00:00",
+  "target_engine": "sql",
+  "resource_mode": "local_standard",
+  "resource_transform_settings": {
+    "mode": "local_standard",
+    "target_engine_recommendation": "sql",
+    "local_execution_allowed": true,
+    "sql_strategy": "standard_local",
+    "polars_strategy": "lazy_standard",
+    "pyspark_strategy": "remote_optional",
+    "reason": "resource_standard_transform"
+  },
+  "resource_artifacts": {
+    "resource_preflight": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/evidence/resource_preflight.json",
+    "report": "workspaces/Healthcare-RCM-Data-Platform/interns/reports/resource_preflight.md"
+  },
+  "engine_evolution_recommendation": {
+    "engine": "sql",
+    "confidence": "low",
+    "reason": "no_engine_evolution_lesson",
+    "evidence_count": 0
+  },
+  "context_manifest": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/context/manifests/plan-source-to-target_standard.json",
+  "context_wiki": "workspaces/Healthcare-RCM-Data-Platform/interns/reports/context/plan-source-to-target_standard.md",
+  "context_budget": {
+    "name": "standard",
+    "max_sections": 24,
+    "max_bytes": 48000,
+    "max_estimated_tokens": 12000,
+    "include_long_memory": true
+  },
+  "evidence_order": [
+    "kpi_feature_mapping",
+    "domain_model",
+    "profile_index",
+    "workspace_feature_definitions",
+    "user_clarification"
+  ],
+  "domain_model_sources": [
+    "workspaces/Healthcare-RCM-Data-Platform/docs/DataModel.png"
+  ],
+  "kpis": [
+    {
+      "kpi_id": "kpi_001",
+      "business_question": "What is trend for amount paid for medicare LOB across gender and payer for patients above 50 years of age",
+      "metric": "sum(PaidAmount)",
+      "dimensions_and_filters": "Month (ServiceDate), LineOfBusiness, PayorID, Gender, Age(DOB)",
+      "target_engine": "sql",
+      "status": "blocked",
+      "selected_source_datasets": [
+        "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+        "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+      ],
+      "rejected_source_datasets": [
+        {
+          "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+          "reason": "Profiled dataset was not required by resolved KPI feature mappings."
+        },
+        {
+          "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+          "reason": "Profiled dataset was not required by resolved KPI feature mappings."
+        },
+        {
+          "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/providers.csv",
+          "reason": "Profiled dataset was not required by resolved KPI feature mappings."
+        }
+      ],
+      "feature_mappings": [
+        {
+          "feature": "PaidAmount",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+              "column": "PaidAmount",
+              "dtype": "Float64",
+              "row_count": 10000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "ServiceDate",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+              "column": "ServiceDate",
+              "dtype": "String",
+              "row_count": 10000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "LineOfBusiness",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+              "column": "LineOfBusiness",
+              "dtype": "String",
+              "row_count": 10000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "PayorID",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+              "column": "PayorID",
+              "dtype": "String",
+              "row_count": 10000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "Gender",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+              "column": "Gender",
+              "dtype": "String",
+              "row_count": 5000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "DOB",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+              "column": "DOB",
+              "dtype": "String",
+              "row_count": 5000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        }
+      ],
+      "join_plan": {
+        "state": "candidate_join",
+        "join_keys": [
+          {
+            "key": "patientid",
+            "sources": [
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+            ],
+            "requires": [
+              "null_check",
+              "uniqueness_or_cardinality_check"
+            ]
+          }
+        ],
+        "executable_relationships": [],
+        "relationship_graph_connected": false,
+        "requires_review": true
+      },
+      "grain": {
+        "description": "Month (ServiceDate), LineOfBusiness, PayorID, Gender, Age(DOB)",
+        "dimensions": [
+          "Month (ServiceDate)",
+          "LineOfBusiness",
+          "PayorID",
+          "Gender",
+          "Age(DOB)"
+        ],
+        "state": "from_kpi_cuts"
+      },
+      "temporal_anchor": {
+        "state": "requires_confirmation_or_existing_definition",
+        "features": [
+          "ServiceDate"
+        ]
+      },
+      "medallion_layers": {
+        "bronze_inputs": [
+          "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+          "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+        ],
+        "silver_conformed": [
+          {
+            "source": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+            "checks": [
+              "schema_present",
+              "profile_available",
+              "key_null_review"
+            ]
+          },
+          {
+            "source": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+            "checks": [
+              "schema_present",
+              "profile_available",
+              "key_null_review"
+            ]
+          }
+        ],
+        "gold_output": {
+          "name": "kpi_001_gold",
+          "grain": {
+            "description": "Month (ServiceDate), LineOfBusiness, PayorID, Gender, Age(DOB)",
+            "dimensions": [
+              "Month (ServiceDate)",
+              "LineOfBusiness",
+              "PayorID",
+              "Gender",
+              "Age(DOB)"
+            ],
+            "state": "from_kpi_cuts"
+          },
+          "engine": "sql"
+        }
+      },
+      "validation_checks": [
+        "all_required_features_ready",
+        "selected_sources_exist_in_profile_index",
+        "selected_columns_exist_in_profile_schema",
+        "join_keys_profiled_when_multiple_sources",
+        "grain_matches_kpi_cuts",
+        "temporal_anchor_confirmed_for_date_or_age_features"
+      ],
+      "domain_model_evidence": {
+        "status": "generated_from_workspace_inputs",
+        "dataset_count": 5,
+        "data_models": [
+          "workspaces/Healthcare-RCM-Data-Platform/docs/DataModel.png"
+        ]
+      },
+      "blockers": [
+        {
+          "type": "join_proof_missing",
+          "message": "Multiple source datasets are selected but no executable relationship contract was found.",
+          "sources": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+          ]
+        }
+      ],
+      "engine_evolution_recommendation": {
+        "engine": "sql",
+        "confidence": "low",
+        "reason": "no_engine_evolution_lesson",
+        "evidence_count": 0
+      }
+    },
+    {
+      "kpi_id": "kpi_002",
+      "business_question": "What is percentage share of lives by gender, age , visit type, department",
+      "metric": "percentage of sum(distinct PatientID)     /   sum(disitnct PatientID) for departement",
+      "dimensions_and_filters": "Department Name, VisitType, Gender, Age (DOB)",
+      "target_engine": "sql",
+      "status": "blocked",
+      "selected_source_datasets": [
+        "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+        "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+        "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+        "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+      ],
+      "rejected_source_datasets": [
+        {
+          "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/providers.csv",
+          "reason": "Profiled dataset was not required by resolved KPI feature mappings."
+        }
+      ],
+      "feature_mappings": [
+        {
+          "feature": "PatientID",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+              "column": "PatientID",
+              "dtype": "String",
+              "row_count": 10000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json",
+              "evidence_state": "mapping"
+            },
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+              "column": "PatientID",
+              "dtype": "String",
+              "row_count": 5000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+              "evidence_state": "mapping"
+            },
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+              "column": "PatientID",
+              "dtype": "String",
+              "row_count": 10000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "departement",
+          "state": "user_confirmed",
+          "resolution_type": "physical_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+              "column": "Name",
+              "dtype": null,
+              "row_count": null,
+              "profile_path": "",
+              "evidence_state": "workspace_definition"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv"
+          ],
+          "evidence_types": [
+            "workspace_feature_definition"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "Department",
+          "state": "user_confirmed",
+          "resolution_type": "physical_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+              "column": "DepartmentID",
+              "dtype": null,
+              "row_count": null,
+              "profile_path": "",
+              "evidence_state": "workspace_definition"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv"
+          ],
+          "evidence_types": [
+            "workspace_feature_definition"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "Name",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+              "column": "Name",
+              "dtype": "String",
+              "row_count": 20,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_departments.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "VisitType",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+              "column": "VisitType",
+              "dtype": "String",
+              "row_count": 10000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "Gender",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+              "column": "Gender",
+              "dtype": "String",
+              "row_count": 5000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "DOB",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+              "column": "DOB",
+              "dtype": "String",
+              "row_count": 5000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        }
+      ],
+      "join_plan": {
+        "state": "candidate_join",
+        "join_keys": [
+          {
+            "key": "deptid",
+            "sources": [
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+            ],
+            "requires": [
+              "null_check",
+              "uniqueness_or_cardinality_check"
+            ]
+          },
+          {
+            "key": "encounterid",
+            "sources": [
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+            ],
+            "requires": [
+              "null_check",
+              "uniqueness_or_cardinality_check"
+            ]
+          },
+          {
+            "key": "patientid",
+            "sources": [
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+            ],
+            "requires": [
+              "null_check",
+              "uniqueness_or_cardinality_check"
+            ]
+          },
+          {
+            "key": "procedurecode",
+            "sources": [
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+            ],
+            "requires": [
+              "null_check",
+              "uniqueness_or_cardinality_check"
+            ]
+          },
+          {
+            "key": "providerid",
+            "sources": [
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+              "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+            ],
+            "requires": [
+              "null_check",
+              "uniqueness_or_cardinality_check"
+            ]
+          }
+        ],
+        "executable_relationships": [],
+        "relationship_graph_connected": false,
+        "requires_review": true
+      },
+      "grain": {
+        "description": "Department Name, VisitType, Gender, Age (DOB)",
+        "dimensions": [
+          "Department Name",
+          "VisitType",
+          "Gender",
+          "Age (DOB)"
+        ],
+        "state": "from_kpi_cuts"
+      },
+      "temporal_anchor": {
+        "state": "not_required",
+        "features": []
+      },
+      "medallion_layers": {
+        "bronze_inputs": [
+          "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+          "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+          "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+          "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+        ],
+        "silver_conformed": [
+          {
+            "source": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+            "checks": [
+              "schema_present",
+              "profile_available",
+              "key_null_review"
+            ]
+          },
+          {
+            "source": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+            "checks": [
+              "schema_present",
+              "profile_available",
+              "key_null_review"
+            ]
+          },
+          {
+            "source": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+            "checks": [
+              "schema_present",
+              "profile_available",
+              "key_null_review"
+            ]
+          },
+          {
+            "source": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+            "checks": [
+              "schema_present",
+              "profile_available",
+              "key_null_review"
+            ]
+          }
+        ],
+        "gold_output": {
+          "name": "kpi_002_gold",
+          "grain": {
+            "description": "Department Name, VisitType, Gender, Age (DOB)",
+            "dimensions": [
+              "Department Name",
+              "VisitType",
+              "Gender",
+              "Age (DOB)"
+            ],
+            "state": "from_kpi_cuts"
+          },
+          "engine": "sql"
+        }
+      },
+      "validation_checks": [
+        "all_required_features_ready",
+        "selected_sources_exist_in_profile_index",
+        "selected_columns_exist_in_profile_schema",
+        "join_keys_profiled_when_multiple_sources",
+        "grain_matches_kpi_cuts",
+        "temporal_anchor_confirmed_for_date_or_age_features"
+      ],
+      "domain_model_evidence": {
+        "status": "generated_from_workspace_inputs",
+        "dataset_count": 5,
+        "data_models": [
+          "workspaces/Healthcare-RCM-Data-Platform/docs/DataModel.png"
+        ]
+      },
+      "blockers": [
+        {
+          "type": "join_proof_missing",
+          "message": "Multiple source datasets are selected but no executable relationship contract was found.",
+          "sources": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+          ]
+        }
+      ],
+      "engine_evolution_recommendation": {
+        "engine": "sql",
+        "confidence": "low",
+        "reason": "no_engine_evolution_lesson",
+        "evidence_count": 0
+      }
+    },
+    {
+      "kpi_id": "kpi_003",
+      "business_question": "What are top 10 payers in Commercial LOB w.r.t. amount paid",
+      "metric": "sum(PaidAmount)",
+      "dimensions_and_filters": "LineOfBusiness, PayorID",
+      "target_engine": "sql",
+      "status": "ready_for_generation",
+      "selected_source_datasets": [
+        "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+      ],
+      "rejected_source_datasets": [
+        {
+          "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+          "reason": "Profiled dataset was not required by resolved KPI feature mappings."
+        },
+        {
+          "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+          "reason": "Profiled dataset was not required by resolved KPI feature mappings."
+        },
+        {
+          "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+          "reason": "Profiled dataset was not required by resolved KPI feature mappings."
+        },
+        {
+          "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/providers.csv",
+          "reason": "Profiled dataset was not required by resolved KPI feature mappings."
+        }
+      ],
+      "feature_mappings": [
+        {
+          "feature": "PaidAmount",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+              "column": "PaidAmount",
+              "dtype": "Float64",
+              "row_count": 10000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "LineOfBusiness",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+              "column": "LineOfBusiness",
+              "dtype": "String",
+              "row_count": 10000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        },
+        {
+          "feature": "PayorID",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+              "column": "PayorID",
+              "dtype": "String",
+              "row_count": 10000,
+              "profile_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+              "evidence_state": "mapping"
+            }
+          ],
+          "source_datasets": [
+            "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+          ],
+          "evidence_types": [
+            "schema_profile"
+          ],
+          "blockers": []
+        }
+      ],
+      "join_plan": {
+        "state": "single_source_no_join_required",
+        "join_keys": [],
+        "executable_relationships": [],
+        "relationship_graph_connected": true,
+        "requires_review": false
+      },
+      "grain": {
+        "description": "LineOfBusiness, PayorID",
+        "dimensions": [
+          "LineOfBusiness",
+          "PayorID"
+        ],
+        "state": "from_kpi_cuts"
+      },
+      "temporal_anchor": {
+        "state": "not_required",
+        "features": []
+      },
+      "medallion_layers": {
+        "bronze_inputs": [
+          "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv"
+        ],
+        "silver_conformed": [
+          {
+            "source": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+            "checks": [
+              "schema_present",
+              "profile_available",
+              "key_null_review"
+            ]
+          }
+        ],
+        "gold_output": {
+          "name": "kpi_003_gold",
+          "grain": {
+            "description": "LineOfBusiness, PayorID",
+            "dimensions": [
+              "LineOfBusiness",
+              "PayorID"
+            ],
+            "state": "from_kpi_cuts"
+          },
+          "engine": "sql"
+        }
+      },
+      "validation_checks": [
+        "all_required_features_ready",
+        "selected_sources_exist_in_profile_index",
+        "selected_columns_exist_in_profile_schema",
+        "join_keys_profiled_when_multiple_sources",
+        "grain_matches_kpi_cuts",
+        "temporal_anchor_confirmed_for_date_or_age_features"
+      ],
+      "domain_model_evidence": {
+        "status": "generated_from_workspace_inputs",
+        "dataset_count": 5,
+        "data_models": [
+          "workspaces/Healthcare-RCM-Data-Platform/docs/DataModel.png"
+        ]
+      },
+      "blockers": [],
+      "engine_evolution_recommendation": {
+        "engine": "sql",
+        "confidence": "low",
+        "reason": "no_engine_evolution_lesson",
+        "evidence_count": 0
+      }
+    }
+  ],
+  "summary": {
+    "kpi_count": 3,
+    "ready_kpi_count": 1,
+    "blocked_kpi_count": 2,
+    "target_engine": "sql",
+    "resource_mode": "local_standard",
+    "resource_target_engine_recommendation": "sql",
+    "engine_evolution_recommendation": {
+      "engine": "sql",
+      "confidence": "low",
+      "reason": "no_engine_evolution_lesson",
+      "evidence_count": 0
+    },
+    "local_execution_allowed": true,
+    "context_manifest": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/context/manifests/plan-source-to-target_standard.json",
+    "context_selected_sections": 22
+  }
+}

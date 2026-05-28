@@ -213,7 +213,33 @@ filter, date anchor, or business exception. When reusing a definition, report it
 Reusing accepted workspace definition for `DeniedAmount` from prior blocker grilling.
 ```
 
-Use this shape:
+For blocker, approval, KPI-generation, data-model, duplicate-review, and pipeline-format panels,
+the generated Markdown card is the human UI contract across Claude Code, Codex, Gemini, and generic
+chat integrations:
+
+```text
+post/render current.md verbatim to the user
+use current.json only for exact options/buttons and answer application
+never replace the panel with a tool-native generic question box
+never summarize away KPI source truth, evidence, SQL preview, result demo, or actions
+```
+
+For KPI blocker panels, prefer one full KPI review card per blocked KPI. The card should include:
+
+```text
+actual KPI row from the registry/workbook
+AI understanding of the KPI
+columns selected from that understanding with source dataset/column evidence
+derived features with formula, inputs, sample values, and expected output
+compact evidence plus deeper evidence details
+logic preview before recommendation
+recommended mapping/formula/action
+default SQL query preview
+result demo table
+actions: approve recommendation, edit mapping/formula, block until evidence
+```
+
+Use this shape only when no generated panel artifact exists yet:
 
 ```markdown
 Blocker: ...

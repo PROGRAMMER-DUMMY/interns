@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,9 +10,15 @@ from typing import Any
 
 from core.onboarding.artifact_contracts import (
     BLOCKER_QUESTION_PANEL_CONTRACT,
+    CATALOG_CONTRACT_CONTRACT,
+    DATA_ENGINEERING_ROUTE_CONTRACT,
+    DATA_QUALITY_CONTRACT,
+    DUPLICATE_DECISIONS_CONTRACT,
     DOMAIN_MODEL_CONTRACT,
     KPI_FEATURE_MAPPING_CONTRACT,
     KPI_REGISTRY_CONTRACT,
+    PIPELINE_DECISIONS_CONTRACT,
+    PIPELINE_PLAN_CONTRACT,
     PROFILE_INDEX_CONTRACT,
     RELATIONSHIP_CONTRACTS_CONTRACT,
     SOURCE_TO_TARGET_PLAN_CONTRACT,
@@ -85,12 +92,14 @@ class WorkspaceArtifactValidator:
         self._validate_workspace_definitions()
         self._validate_relationship_contracts()
         self._validate_source_to_target_plan()
+        self._validate_data_engineering_contracts()
         self._validate_open_questions()
         self._validate_question_panel(mapping)
         self._validate_derived_reviews(mapping)
         self._validate_kpi_sql_solutions(mapping)
         self._validate_kpi_execution_harness()
         self._validate_medallion_manifest()
+        self._validate_pipeline_harnesses()
         self._validate_workspace_bugs()
         return self.result
 
@@ -290,6 +299,19 @@ class WorkspaceArtifactValidator:
             self._error(json_path, "question panel needs_user_answer but has no options")
         for idx, option in enumerate(options, start=1):
             self._validate_panel_option(json_path, idx, option)
+        recommended = str(data.get("recommended_option_id") or "")
+        if recommended:
+            recommended_options = [
+                option for option in options if str(option.get("option_id") or "") == recommended
+            ]
+            if not recommended_options:
+                self._error(json_path, f"recommended option `{recommended}` is not present in options")
+            elif _is_unappliable_placeholder_option(recommended_options[0]):
+                self._error(
+                    json_path,
+                    f"recommended option `{recommended}` is a placeholder, not an appliable answer; "
+                    "emit a JSON-backed option or make `custom` the recommended option",
+                )
         if md_path.exists():
             self._checked(md_path)
         elif blocked_count > 0:
@@ -351,6 +373,12 @@ class WorkspaceArtifactValidator:
         data = self._load_json(path, required=False)
         if data:
             self._validate_artifact_contract(path, data, WORKSPACE_FEATURE_DEFINITIONS_CONTRACT)
+            definitions = data.get("definitions")
+            if not isinstance(definitions, list):
+                self._error(path, "workspace_feature_definitions.json `definitions` must be a list")
+                return
+            for idx, definition in enumerate(definitions, start=1):
+                self._validate_workspace_definition_record(path, idx, definition)
 
     def _validate_relationship_contracts(self) -> None:
         path = self.layout.contracts_dir / "relationship_contracts.json"
@@ -358,12 +386,87 @@ class WorkspaceArtifactValidator:
         if not data:
             return
         self._validate_artifact_contract(path, data, RELATIONSHIP_CONTRACTS_CONTRACT)
-        if not isinstance(data.get("relationships", []), list):
+        relationships = data.get("relationships", [])
+        if not isinstance(relationships, list):
             self._error(path, "relationship_contracts.json `relationships` must be a list")
+            return
         summary = data.get("summary") or {}
         for key in ("relationship_count", "executable_relationship_count", "candidate_relationship_count"):
             if key in summary and not isinstance(summary[key], int):
                 self._error(path, f"relationship summary `{key}` must be an integer")
+        executable_count = sum(1 for item in relationships if _relationship_executable(item))
+        candidate_count = len(relationships) - executable_count
+        expected = {
+            "relationship_count": len(relationships),
+            "executable_relationship_count": executable_count,
+            "candidate_relationship_count": candidate_count,
+        }
+        for key, value in expected.items():
+            if summary.get(key) != value:
+                self._error(
+                    path,
+                    f"relationship summary `{key}` is stale or hand-edited; expected {value}, found {summary.get(key)}",
+                )
+        for idx, relationship in enumerate(relationships, start=1):
+            self._validate_relationship_record(path, idx, relationship)
+
+    def _validate_workspace_definition_record(self, path: Path, idx: int, definition: dict[str, Any]) -> None:
+        if not isinstance(definition, dict):
+            self._error(path, f"workspace definition #{idx} must be an object")
+            return
+        value = str(definition.get("definition") or "")
+        if _looks_like_local_absolute_path(value):
+            self._error(
+                path,
+                f"workspace definition #{idx} uses a machine-specific absolute path in `definition`; "
+                "use repo-relative workspaces/... paths through apply-kpi-panel-answer",
+            )
+        source_columns = definition.get("source_columns") or []
+        if source_columns and not isinstance(source_columns, list):
+            self._error(path, f"workspace definition #{idx} `source_columns` must be a list")
+            return
+        if definition.get("resolution_type") == "physical_column" and not source_columns:
+            self._error(path, f"workspace definition #{idx} physical_column must include source_columns")
+        for col_idx, source_column in enumerate(source_columns, start=1):
+            dataset = str((source_column or {}).get("dataset") or "")
+            if _looks_like_local_absolute_path(dataset):
+                self._error(
+                    path,
+                    f"workspace definition #{idx} source column #{col_idx} uses an absolute dataset path",
+                )
+            if dataset and not dataset.replace("\\", "/").startswith("workspaces/"):
+                self._error(
+                    path,
+                    f"workspace definition #{idx} source column #{col_idx} dataset must be repo-relative",
+                )
+
+    def _validate_relationship_record(self, path: Path, idx: int, relationship: dict[str, Any]) -> None:
+        if not isinstance(relationship, dict):
+            self._error(path, f"relationship #{idx} must be an object")
+            return
+        policy = relationship.get("executable_usage_policy") or {}
+        executable = _relationship_executable(relationship)
+        if executable:
+            approval_state = str((relationship.get("approval") or {}).get("state") or "")
+            if approval_state not in {"approved", "approved_for_execution"}:
+                self._error(path, f"relationship #{idx} is executable but approval state is `{approval_state}`")
+            history = relationship.get("decision_history") or []
+            if not any(str(item.get("state") or "") == "user_confirmed" for item in history if isinstance(item, dict)):
+                if relationship.get("state") == "user_confirmed":
+                    self._error(
+                        path,
+                        f"relationship #{idx} is user_confirmed but has no user_confirmed decision_history entry; "
+                        "use apply-relationship-answer instead of editing JSON",
+                    )
+        if relationship.get("state") not in {"proven_data_model", "user_confirmed"}:
+            for key in (
+                "allowed_in_sql_generation",
+                "allowed_in_polars_generation",
+                "allowed_in_pyspark_generation",
+                "allowed_in_medallion_generation",
+            ):
+                if policy.get(key) is True:
+                    self._error(path, f"relationship #{idx} candidate state cannot set `{key}` true")
 
     def _validate_source_to_target_plan(self) -> None:
         path = self.layout.contracts_dir / "source_to_target_plan.json"
@@ -375,6 +478,80 @@ class WorkspaceArtifactValidator:
             self._error(path, "source_to_target_plan.json `kpis` must be a list")
         if data.get("target_engine") not in {"sql", "polars", "pyspark", "hybrid"}:
             self._error(path, f"source_to_target_plan.json unsupported target_engine `{data.get('target_engine')}`")
+
+    def _validate_data_engineering_contracts(self) -> None:
+        self._validate_catalog_contract()
+        self._validate_data_engineering_route()
+        self._validate_pipeline_plan_contract()
+        self._validate_pipeline_decisions_contract()
+        self._validate_data_quality_contracts()
+
+    def _validate_catalog_contract(self) -> None:
+        path = self.layout.contracts_dir / "catalog_contract.json"
+        data = self._load_json(path, required=False)
+        if not data:
+            return
+        self._validate_artifact_contract(path, data, CATALOG_CONTRACT_CONTRACT)
+        if not data.get("workspace"):
+            self._error(path, "catalog_contract.json missing `workspace`")
+        if not isinstance(data.get("objects"), list):
+            self._error(path, "catalog_contract.json `objects` must be a list")
+
+    def _validate_data_engineering_route(self) -> None:
+        path = self.layout.contracts_dir / "data_engineering_route.json"
+        data = self._load_json(path, required=False)
+        if not data:
+            return
+        self._validate_artifact_contract(path, data, DATA_ENGINEERING_ROUTE_CONTRACT)
+        if not data.get("requested_track"):
+            self._error(path, "data_engineering_route.json missing `requested_track`")
+        if data.get("target_engine") not in {"sql", "polars", "pyspark", "hybrid"}:
+            self._error(path, f"data_engineering_route.json unsupported target_engine `{data.get('target_engine')}`")
+        if not isinstance(data.get("catalog_object_count"), int):
+            self._error(path, "data_engineering_route.json `catalog_object_count` must be an integer")
+
+    def _validate_pipeline_plan_contract(self) -> None:
+        path = self.layout.contracts_dir / "pipeline_plan.json"
+        data = self._load_json(path, required=False)
+        if not data:
+            return
+        self._validate_artifact_contract(path, data, PIPELINE_PLAN_CONTRACT)
+        if data.get("target_engine") not in {"sql", "polars", "pyspark", "hybrid"}:
+            self._error(path, f"pipeline_plan.json unsupported target_engine `{data.get('target_engine')}`")
+        if not isinstance(data.get("policy"), dict):
+            self._error(path, "pipeline_plan.json `policy` must be an object")
+        if not isinstance(data.get("layers"), list):
+            self._error(path, "pipeline_plan.json `layers` must be a list")
+        if not isinstance(data.get("quality_gates"), list):
+            self._error(path, "pipeline_plan.json `quality_gates` must be a list")
+        if not isinstance(data.get("blockers"), list):
+            self._error(path, "pipeline_plan.json `blockers` must be a list")
+
+    def _validate_pipeline_decisions_contract(self) -> None:
+        path = self.layout.contracts_dir / "pipeline_decisions.json"
+        data = self._load_json(path, required=False)
+        if not data:
+            return
+        self._validate_artifact_contract(path, data, PIPELINE_DECISIONS_CONTRACT)
+        if data.get("workspace") != _rel(self.workspace, self.repo_root):
+            self._error(path, f"pipeline_decisions.json workspace mismatch `{data.get('workspace')}`")
+        scopes = data.get("percentage_denominator_scopes", {})
+        if not isinstance(scopes, dict):
+            self._error(path, "pipeline_decisions.json `percentage_denominator_scopes` must be an object")
+
+    def _validate_data_quality_contracts(self) -> None:
+        path = self.layout.contracts_dir / "data_quality_contract.json"
+        data = self._load_json(path, required=False)
+        if data:
+            self._validate_artifact_contract(path, data, DATA_QUALITY_CONTRACT)
+            if not isinstance(data.get("policy"), dict):
+                self._error(path, "data_quality_contract.json `policy` must be an object")
+        duplicate_path = self.layout.contracts_dir / "duplicate_decisions.json"
+        duplicate_data = self._load_json(duplicate_path, required=False)
+        if duplicate_data:
+            self._validate_artifact_contract(duplicate_path, duplicate_data, DUPLICATE_DECISIONS_CONTRACT)
+            if not isinstance(duplicate_data.get("decisions"), list):
+                self._error(duplicate_path, "duplicate_decisions.json `decisions` must be a list")
 
     def _validate_kpi_sql_solutions(self, mapping: dict[str, Any] | None) -> None:
         if not self.layout.solutions_dir.exists():
@@ -426,6 +603,25 @@ class WorkspaceArtifactValidator:
         for idx, record in enumerate(records, start=1):
             kpi_id = str(record.get("kpi_id") or "")
             expected_view = f"{kpi_id}_results" if kpi_id else ""
+            sql_path_value = str(record.get("sql_path") or "")
+            if sql_path_value:
+                sql_path = self.repo_root / sql_path_value
+                if not sql_path.exists():
+                    self._error(path, f"harness record #{idx} SQL path does not exist: {sql_path_value}")
+                else:
+                    recorded_hash = str(record.get("sql_sha256") or "")
+                    actual_hash = hashlib.sha256(sql_path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+                    if not recorded_hash:
+                        self._error(
+                            path,
+                            f"harness record #{idx} for `{kpi_id}` missing sql_sha256; "
+                            "rerun run-kpi-execution-harness after SQL generation",
+                        )
+                    elif recorded_hash != actual_hash:
+                        self._error(
+                            path,
+                            f"harness record #{idx} for `{kpi_id}` is stale; SQL hash changed since execution",
+                        )
             if record.get("result_view") != expected_view:
                 self._error(path, f"harness record #{idx} does not target exact result view `{expected_view}`")
             if record.get("status") != "passed":
@@ -436,6 +632,28 @@ class WorkspaceArtifactValidator:
                 self._error(path, f"harness record #{idx} for `{kpi_id}` has only placeholder result columns")
             if not isinstance(record.get("sample_output_table"), str) or "|" not in record.get("sample_output_table", ""):
                 self._error(path, f"harness record #{idx} for `{kpi_id}` missing table-form sample output")
+
+    def _validate_pipeline_harnesses(self) -> None:
+        pipeline_sql = self.layout.generated_dir / "pipeline" / "pipeline_layers.sql"
+        if not pipeline_sql.exists():
+            return
+        self._checked(pipeline_sql)
+        pipeline_harness = self.layout.evidence_dir / "pipeline_execution_harness" / "current.json"
+        data_quality_harness = self.layout.evidence_dir / "data_quality_harness" / "current.json"
+        if not pipeline_harness.exists():
+            self._error(pipeline_harness, "pipeline_execution_harness/current.json is required for generated pipeline SQL")
+        else:
+            self._checked(pipeline_harness)
+            payload = self._load_json(pipeline_harness, required=True) or {}
+            if payload.get("ok") is not True:
+                self._error(pipeline_harness, "pipeline execution harness did not pass")
+        if not data_quality_harness.exists():
+            self._error(data_quality_harness, "data_quality_harness/current.json is required for generated pipeline SQL")
+        else:
+            self._checked(data_quality_harness)
+            payload = self._load_json(data_quality_harness, required=True) or {}
+            if payload.get("ok") is not True:
+                self._error(data_quality_harness, "data quality harness did not pass")
 
     def _validate_derived_feature_option(self, path: Path, option: dict[str, Any]) -> None:
         required = [
@@ -669,6 +887,31 @@ def _inventory_has_data(inventory: dict[str, Any]) -> bool:
 def _placeholder_result_columns(columns: list[Any]) -> bool:
     normalized = {str(column).strip().lower() for column in columns}
     return bool(normalized) and normalized.issubset({"ready_marker"})
+
+
+def _is_unappliable_placeholder_option(option: dict[str, Any]) -> bool:
+    return (
+        option.get("json_backed") is False
+        and bool(option.get("expected_answer_shape"))
+        and str(option.get("option_id") or "") != "custom"
+    )
+
+
+def _relationship_executable(relationship: dict[str, Any]) -> bool:
+    policy = relationship.get("executable_usage_policy") or {}
+    return (
+        relationship.get("state") in {"proven_data_model", "user_confirmed"}
+        and policy.get("allowed_in_sql_generation") is True
+    )
+
+
+def _looks_like_local_absolute_path(value: str) -> bool:
+    text = str(value)
+    if not text:
+        return False
+    if len(text) >= 3 and text[1:3] in {":\\", ":/"}:
+        return True
+    return text.startswith(("/", "\\\\"))
 
 
 def _collect_pii_columns_from_sc(sc: dict[str, Any]) -> set[str]:

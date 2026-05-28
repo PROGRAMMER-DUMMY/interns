@@ -21,6 +21,14 @@ class FeatureExpressionTests(unittest.TestCase):
 
         self.assertEqual(extracted.identifiers, ["paidamount"])
 
+    def test_extract_expression_skips_common_distinct_typo(self):
+        extracted = extract_expression(
+            "percentage of sum(distinct PatientID) / sum(disitnct PatientID) for departement"
+        )
+
+        self.assertEqual(extracted.identifiers, ["PatientID", "departement"])
+        self.assertIn({"function": "sum", "arguments": ["PatientID"]}, extracted.functions)
+
 
 if __name__ == "__main__":
     unittest.main()

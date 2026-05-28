@@ -186,15 +186,54 @@ falls back to local DuckDB after any health check.
 - `core/orchestration/`: experiment loop and runner.
 - `core/execution/`: local and Databricks execution backends.
 - `core/governance/`: policies, contracts, semantic rules, approval gates.
+- `core/contracts/versioning.py`: per-artifact `ContractVersion` + `migrate(...)` registry.
 - `core/optimization/`: planning, memory, diff classification, decision strategy.
 - `core/profiling/`: data model profiling and downcast diagnostics.
 - `core/agents/`: intern routing and LLM engine abstractions.
-- `core/observability/`: metric parsing and telemetry.
-- `core/storage/`: SQLite/Git workspace state and workspace layout.
+- `core/observability/`: metric parsing, telemetry, structured event emitter
+  (`events.emit_event` / `time_command`) writing to `interns/state/events.jsonl`.
+- `core/storage/`: SQLite/Git workspace state, workspace layout, and
+  `workspace_lock.workspace_lock` (cross-platform per-workspace mutex).
+- `core/onboarding/lexicon/`: workspace-derived vocabulary (metric phrases, cut phrases,
+  column aliases) replacing the old curated keyword ladder.
+- `core/onboarding/workspace/cli_runner.py`: shared envelope for every `apply-*` /
+  `finalize-*` / `prepare-*` CLI (lock + event + idempotency + trajectory recording).
+- `core/onboarding/workspace/idempotency.py`: deterministic op-ids + `applied_ops.jsonl`
+  ledger so repeated apply calls don't duplicate decisions.
 - `tools/`: CLI utilities.
 - `interns/`: built-in intern agents.
 - `tests/`: unit and benchmark harnesses.
 - `workspaces/<project>/`: user/project input.
+
+### Governed CLI envelope
+
+Every `apply-*` / `finalize-*` / `prepare-*` command in `pyproject.toml` funnels through
+`core.onboarding.workspace.cli_runner.run_workspace_command(...)`. The envelope provides:
+
+* `workspace_lock` — fails fast with `WorkspaceLockTimeout` (exit code 2) if another command
+  is mutating the same workspace.
+* `time_command` — appends a JSONL event with `command`, `status`, `duration_ms`, and any
+  per-command details to `workspaces/<ws>/interns/state/events.jsonl`.
+* `compute_op_id` / `record_op` — for apply/finalize commands (passed `record_idempotent=True`),
+  derives a deterministic op id from the arguments and writes an `AppliedOp` row to
+  `workspaces/<ws>/interns/state/applied_ops.jsonl`. A second call with the same arguments
+  returns the prior payload as `{"status": "idempotent_replay", ...}` instead of re-running.
+  Pass `--allow-replay` to force re-execution.
+* `record_trajectory_event_safe` — tool_start / tool_result entries for the workflow guard
+  and `prepare-workspace-bug-report`.
+
+New CLI authors should add the standard envelope by calling `run_workspace_command(...)` rather
+than re-implementing the boilerplate.
+
+### CLI-agent two-step proposal flow
+
+When the blocker question panel emits a `cli_agent_proposal_needed` panel (no scored options
+remain), the orchestrating CLI agent reads the bounded `cli_agent_evidence_pack`, proposes a
+JSON mapping, then runs `apply-kpi-panel-answer ... --via-cli-agent`. That records the mapping
+as `cli_agent_proposed` (NOT `user_confirmed`); the KPI stays blocked until the user runs
+`confirm-cli-agent-proposal --decision confirm` (flips to `user_confirmed`) or
+`--decision reject` (flips to `cli_agent_rejected` and reverts the affected rows). The agent
+must never run the confirm step on the user's behalf without explicit direction.
 
 ## Workspace Rule
 
@@ -445,10 +484,12 @@ do not hand-edit generated contracts to apply a choice.
 
 KPI blocker UI behavior:
 
-- If the user asks for Markdown mode, show or summarize `current.md`; do not launch a generic
-  multiple-choice picker.
-- If an interactive picker is used, populate it directly from `current.json` and preserve the option
-  ids, labels, order, recommended option, and business summaries from that artifact.
+- Render `current.md` verbatim as the human-facing blocker card. Do not summarize it, collapse it,
+  or replace it with a tool-native generic picker.
+- Do not use generic `ask_user`, `Ask User`, or `Answer Questions` UI for KPI blocker panels.
+- Use `current.json` only for exact option ids, button labels, answer application, and automation.
+  Preserve the option ids, labels, order, recommended option, and business summaries from that
+  artifact.
 - Do not invent, rename, reorder, or simplify blocker options outside the panel artifact.
 - Do not ask from truncated terminal output. Read the relevant `current.md` or `current.json` file
   explicitly first.

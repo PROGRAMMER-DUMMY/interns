@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.onboarding.relationships.contracts import RelationshipContractBuilder
+from core.onboarding.relationships.contracts import RelationshipContractBuilder, apply_relationship_answer
 from core.onboarding.relationships.source_to_target_planner import _source_group
 from core.onboarding.workspace.validation import WorkspaceArtifactValidator
 from core.storage.workspace_layout import WorkspaceLayout
@@ -166,7 +166,11 @@ class RelationshipContractTests(unittest.TestCase):
                         "relationships": [
                             {
                                 "relationship_id": "patients__patientid__transactions__patientid",
-                                "approval": "approved",
+                                "state": "user_confirmed",
+                                "approval": {"state": "approved"},
+                                "decision_history": [
+                                    {"state": "profile_validated", "note": "Generated.", "timestamp": "now"}
+                                ],
                                 "executable_usage_policy": {
                                     "allowed_in_sql_generation": True,
                                 },
@@ -189,6 +193,69 @@ class RelationshipContractTests(unittest.TestCase):
                 any("executable_relationship_count" in error for error in result.errors),
                 result.errors,
             )
+
+    def test_apply_relationship_answer_approves_and_recomputes_summary(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "workspaces" / "demo"
+            layout = WorkspaceLayout(project_root=workspace)
+            layout.ensure_runtime_dirs()
+            relationship_id = "patients__patientid__transactions__patientid"
+            (layout.contracts_dir / "relationship_contracts.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "relationship_contracts.json",
+                        "version": 1,
+                        "generated_by": "build-relationship-contracts",
+                        "relationships": [
+                            {
+                                "relationship_id": relationship_id,
+                                "left_dataset": "workspaces/demo/patients.csv",
+                                "left_column": "PatientID",
+                                "right_dataset": "workspaces/demo/transactions.csv",
+                                "right_column": "PatientID",
+                                "state": "profile_validated",
+                                "approval": {"state": "needs_review"},
+                                "executable_usage_policy": {
+                                    "allowed_in_sql_generation": False,
+                                    "allowed_in_polars_generation": False,
+                                    "allowed_in_pyspark_generation": False,
+                                    "allowed_in_medallion_generation": False,
+                                    "block_reason": "candidate relationship requires data-model proof or user confirmation",
+                                },
+                                "decision_history": [
+                                    {"state": "profile_validated", "note": "Generated.", "timestamp": "now"}
+                                ],
+                            }
+                        ],
+                        "summary": {
+                            "relationship_count": 1,
+                            "executable_relationship_count": 0,
+                            "candidate_relationship_count": 1,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = apply_relationship_answer(
+                root,
+                "workspaces/demo",
+                relationship_id=relationship_id,
+                answer="approve",
+                evidence_note="User approved PatientID join for Hospital A.",
+            )
+
+            self.assertEqual(result.executable_relationship_count, 1)
+            contract = json.loads((layout.contracts_dir / "relationship_contracts.json").read_text())
+            relationship = contract["relationships"][0]
+            self.assertEqual(relationship["state"], "user_confirmed")
+            self.assertTrue(relationship["executable_usage_policy"]["allowed_in_sql_generation"])
+            self.assertTrue(
+                any(item.get("state") == "user_confirmed" for item in relationship["decision_history"])
+            )
+            validation = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+            self.assertTrue(validation.ok, validation.errors)
 
 
 if __name__ == "__main__":

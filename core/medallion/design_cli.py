@@ -24,6 +24,8 @@ from core.medallion.design import (
     EXIT_EMPTY_WORKSPACE,
     EXIT_WORKSPACE_BUSY,
     EXIT_BUDGET_EXCEEDED,
+    EXIT_MODEL_SEARCH_FAILED,
+    EXIT_INSUFFICIENT_MODEL_CAPABILITY,
 )
 
 
@@ -56,6 +58,8 @@ exit codes:
   EMPTY_WORKSPACE            no source datasets
   WORKSPACE_BUSY             lockfile held by another run
   BUDGET_EXCEEDED            max_usd_per_run hit mid-run
+  MODEL_SEARCH_FAILED        --no-search requested but no cached model classification exists
+  INSUFFICIENT_MODEL_CAPABILITY no discovered tier can satisfy a required design task
 """
 
 
@@ -97,6 +101,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Pin a specific model id (skips discovery, validated against the active engine).",
     )
     parser.add_argument(
+        "--no-search", action="store_true",
+        help="Use only cached model classifications; fail if the requested model is unfamiliar.",
+    )
+    parser.add_argument(
+        "--calibrate", action="store_true",
+        help="Record calibration intent in model routing metadata for this design run.",
+    )
+    parser.add_argument(
         "--json", action="store_true",
         help="Emit the result as a single JSON object (for piping).",
     )
@@ -126,6 +138,10 @@ def main(argv: list[str] | None = None) -> int:
             cheap=args.cheap,
             dry_run=args.dry_run,
             force=args.force,
+            engine=args.engine,
+            model=args.model,
+            no_search=args.no_search,
+            calibrate=args.calibrate,
         )
     except MedallionExit as exc:
         _emit_exit(exc, json_mode=args.json)
@@ -160,7 +176,7 @@ def _emit_human(result) -> None:
     else:
         print("  unconfirmed_decisions: 0")
         print("")
-        print(f"  Next: uv run build-medallion --workspace {result.workspace}  (P1, not yet shipped)")
+        print(f"  Next: uv run build-medallion --workspace {result.workspace}")
 
 
 def _emit_exit(exc: MedallionExit, *, json_mode: bool) -> None:
@@ -187,6 +203,8 @@ def _exit_code_for(code: str) -> int:
         EXIT_EMPTY_WORKSPACE:         5,
         EXIT_WORKSPACE_BUSY:          6,
         EXIT_BUDGET_EXCEEDED:         7,
+        EXIT_MODEL_SEARCH_FAILED:     8,
+        EXIT_INSUFFICIENT_MODEL_CAPABILITY: 9,
     }
     return mapping.get(code, 1)
 

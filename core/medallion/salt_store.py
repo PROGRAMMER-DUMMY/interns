@@ -105,9 +105,8 @@ def _init_salt_cli(argv=None) -> int:
     p.add_argument("--workspace", required=True)
     args = p.parse_args(argv)
     try:
-        salt = materialize_salt_if_missing(args.workspace)
-        print(f"[medallion-init-salt] Salt ready for workspace `{args.workspace}` "
-              f"(first 8 chars: {salt[:8]}...)")
+        materialize_salt_if_missing(args.workspace)
+        print(f"[medallion-init-salt] Salt ready for workspace `{args.workspace}`")
         return 0
     except Exception as exc:
         print(f"[medallion-init-salt] ERROR: {exc}", file=sys.stderr)

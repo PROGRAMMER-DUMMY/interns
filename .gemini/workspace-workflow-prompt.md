@@ -16,6 +16,10 @@ Use short user intents, but execute governed repo commands:
 - `set <workspace>` or a fuzzy workspace name: resolve it against `workspaces/`, run only `uv run list-workspace-files --workspace <workspace>`, then ask for workspace confirmation.
 - After confirmation, `start onboarding`, `prepare blockers`, `continue`, or `next`: run `uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>`.
 - Before asking any KPI blocker question, rely on `interns/reports/blocker_question_panel/current.json` or `current.md`, and require successful `validate-workspace-artifacts`.
+- Render `current.md` verbatim as the human-facing panel. Do not collapse blocker, approval,
+  KPI-generation, data-model, duplicate-review, or pipeline-format panels into Gemini's generic
+  `Ask User` / `Answer Questions` box.
+- Use `current.json` only for exact option buttons and answer application.
 - `accept option A` or `choose A`: run `uv run apply-kpi-panel-answer --workspace <workspace> --domain <domain> --answer option_a`.
 - `show blocker json`: show `<workspace>/interns/reports/blocker_question_panel/current.json`.
 - `show blocker markdown`: show `<workspace>/interns/reports/blocker_question_panel/current.md`.
@@ -32,5 +36,32 @@ Do not invent unsupported flags such as `--accept-option`.
 Do not ask from truncated command output.
 Do not present "Recommended" as if it is the user's only answer. Treat it as an instruction or safe
 default, then show the concrete option ids the user can choose.
-Do not use subagents unless the user explicitly asks for parallel agent work.
 Do not use yolo mode or bypass permissions for this workflow.
+
+# Read & shell rules (Windows PowerShell host)
+
+- Read workspace files in place via `ReadFile` / `SearchText`. Never `copy` a workspace
+  file to the working directory just to read it; that is a banned habit.
+- To find a string inside a file, use `SearchText` (or `Select-String` in PowerShell).
+  Do NOT escalate `Get-Content -TotalCount N` repeatedly to "grep by reading more lines".
+- On PowerShell, chain commands with `;` (or `; if ($?) { ... }` for "only on success").
+  `&&` is a parser error in PowerShell 5.1 — never retry it.
+- Before calling `workspace-flow start`, check `interns/state/workflow_sessions/` for an
+  open session for this workspace. If one exists and is recent, RESUME it via
+  `workspace-flow status --session <id>` and `workspace-flow status --diff --workspace <ws>`
+  instead of minting a new session.
+
+# Recovery without re-running
+
+- When a panel reports a blocker, prefer `workspace-flow status --diff --workspace <ws>`
+  to learn the exact missing pieces and recommended `apply-*` commands, instead of
+  re-running `workspace-flow start` (which re-traverses the whole pipeline).
+- A panel JSON's `summary.recovery_commands` and `summary.suggested_skills` arrays are
+  the source of truth for the next step. Render them inline; do not paraphrase.
+
+# Subagent delegation
+
+- The Gemini subagents under `.gemini/agents/` ARE available. Delegate narrow
+  read-or-extract tasks (e.g., "list relationship_ids in this 553-line JSON") to a
+  subagent that returns only the extracted answer. Do not load large artifacts into the
+  main chat context just to scan them.

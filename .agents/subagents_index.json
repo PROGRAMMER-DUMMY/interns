@@ -302,6 +302,18 @@
       "targets": {}
     },
     {
+      "name": "kpi-analyst",
+      "display_name": "KPI Analyst",
+      "description": "Interpret KPI sheets and validate KPI queries.",
+      "skills": [
+        "kpi-analyst"
+      ],
+      "default_prompt": "Use KPI analyst to parse KPI definitions, classify metric intent, write or review one query per KPI, show result tables, and surface only correctness-relevant assumptions.",
+      "safety": "follows_skill_policy",
+      "source_path": "skills/kpi-analyst/agents/openai.yaml",
+      "targets": {}
+    },
+    {
       "name": "workspace-flow-orchestrator",
       "display_name": "Workspace Flow Orchestrator",
       "description": "Drives plan, local-safe, and bounded-autopilot workspace orchestration while keeping main-chat output concise.",
@@ -310,7 +322,7 @@
         "workspace-kpi-query-optimizer",
         "task-onboarding"
       ],
-      "default_prompt": "Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. Show current.md to humans, use current.json for structured choices, and record deterministic next commands.",
+      "default_prompt": "Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. For blocker, approval, KPI-generation, data-model, duplicate-review, or pipeline-format panels, post the generated current.md verbatim as the human card; do not replace it with a tool-native generic question box or a summary. Use current.json only to render buttons/options and to apply the exact selected answer. Record deterministic next commands.",
       "safety": "local_safe_workflow_only_no_remote_execution",
       "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
       "targets": {
@@ -389,7 +401,7 @@
         "stakeholder-memory",
         "evolution"
       ],
-      "default_prompt": "Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post current.md, use current.json for buttons, and record trajectory/session events.",
+      "default_prompt": "Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post the generated current.md verbatim as the human card, use current.json only for buttons/options and answer application, and record trajectory/session events. Do not collapse panels into a generic ask-user text box.",
       "safety": "notification_and_approval_bridge_no_direct_dataset_or_remote_mutation",
       "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
       "targets": {

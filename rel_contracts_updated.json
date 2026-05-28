@@ -1,0 +1,552 @@
+{
+  "artifact_type": "relationship_contracts.json",
+  "version": 1,
+  "generated_by": "build-relationship-contracts",
+  "workspace": "workspaces/Healthcare-RCM-Data-Platform",
+  "generated_at": "2026-05-28T11:51:37.516566+00:00",
+  "evidence_order": [
+    "data_model_docs",
+    "profile_schema",
+    "user_confirmed_relationships"
+  ],
+  "executable_usage_policy": {
+    "required_for_multi_dataset_generation": true,
+    "allowed_states": [
+      "proven_data_model",
+      "user_confirmed"
+    ],
+    "candidate_policy": "candidate relationships are advisory and block trusted executable generation"
+  },
+  "relationships": [
+    {
+      "relationship_id": "departments__deptid__providers__deptid",
+      "left_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+      "left_column": "DeptID",
+      "right_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/providers.csv",
+      "right_column": "DeptID",
+      "join_type": "left",
+      "relationship_type": "foreign_key",
+      "state": "profile_validated",
+      "confidence": 0.62,
+      "evidence_sources": [
+        {
+          "type": "profile_shared_key",
+          "left_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_departments.csv.profile.json",
+          "right_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_providers.csv.profile.json",
+          "normalized_key": "deptid"
+        }
+      ],
+      "cardinality": {
+        "expected": "many_to_one_or_many_to_many_pending_validation",
+        "validation_query_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "null_behavior": {
+        "left_key_null_check_required": true,
+        "right_key_null_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "uniqueness_checks": {
+        "right_key_uniqueness_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "referential_integrity_checks": {
+        "orphan_left_key_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "grain_impact": {
+        "risk": "join may duplicate base rows unless cardinality is validated",
+        "requires_review": true
+      },
+      "approval": {
+        "state": "needs_review",
+        "owner": "data_engineering",
+        "approved_at": "",
+        "review_due_at": "2026-11-24T11:51:37.516566+00:00"
+      },
+      "source_system_scope": {
+        "left": "EMR/trendytech-hospital-a",
+        "right": "EMR/trendytech-hospital-a",
+        "cross_source": false
+      },
+      "executable_usage_policy": {
+        "allowed_in_sql_generation": false,
+        "allowed_in_polars_generation": false,
+        "allowed_in_pyspark_generation": false,
+        "allowed_in_medallion_generation": false,
+        "block_reason": "candidate relationship requires data-model proof or user confirmation"
+      },
+      "decision_history": [
+        {
+          "state": "profile_validated",
+          "note": "Generated relationship contract from available workspace evidence.",
+          "timestamp": "2026-05-28T11:51:37.515566+00:00"
+        }
+      ],
+      "lineage_export": {
+        "enabled": true,
+        "format": "contract_json"
+      },
+      "promotion_policy": {
+        "requires_validation_checks_passed": true,
+        "requires_owner_review": true,
+        "rollback_policy": "Remove relationship from executable usage if validation or drift checks fail."
+      }
+    },
+    {
+      "relationship_id": "departments__deptid__transactions__deptid",
+      "left_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/departments.csv",
+      "left_column": "DeptID",
+      "right_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+      "right_column": "DeptID",
+      "join_type": "left",
+      "relationship_type": "foreign_key",
+      "state": "profile_validated",
+      "confidence": 0.62,
+      "evidence_sources": [
+        {
+          "type": "profile_shared_key",
+          "left_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_departments.csv.profile.json",
+          "right_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+          "normalized_key": "deptid"
+        }
+      ],
+      "cardinality": {
+        "expected": "many_to_one_or_many_to_many_pending_validation",
+        "validation_query_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "null_behavior": {
+        "left_key_null_check_required": true,
+        "right_key_null_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "uniqueness_checks": {
+        "right_key_uniqueness_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "referential_integrity_checks": {
+        "orphan_left_key_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "grain_impact": {
+        "risk": "join may duplicate base rows unless cardinality is validated",
+        "requires_review": true
+      },
+      "approval": {
+        "state": "needs_review",
+        "owner": "data_engineering",
+        "approved_at": "",
+        "review_due_at": "2026-11-24T11:51:37.516566+00:00"
+      },
+      "source_system_scope": {
+        "left": "EMR/trendytech-hospital-a",
+        "right": "EMR/trendytech-hospital-a",
+        "cross_source": false
+      },
+      "executable_usage_policy": {
+        "allowed_in_sql_generation": false,
+        "allowed_in_polars_generation": false,
+        "allowed_in_pyspark_generation": false,
+        "allowed_in_medallion_generation": false,
+        "block_reason": "candidate relationship requires data-model proof or user confirmation"
+      },
+      "decision_history": [
+        {
+          "state": "profile_validated",
+          "note": "Generated relationship contract from available workspace evidence.",
+          "timestamp": "2026-05-28T11:51:37.516566+00:00"
+        }
+      ],
+      "lineage_export": {
+        "enabled": true,
+        "format": "contract_json"
+      },
+      "promotion_policy": {
+        "requires_validation_checks_passed": true,
+        "requires_owner_review": true,
+        "rollback_policy": "Remove relationship from executable usage if validation or drift checks fail."
+      }
+    },
+    {
+      "relationship_id": "encounters__patientid__patients__patientid",
+      "left_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+      "left_column": "PatientID",
+      "right_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+      "right_column": "PatientID",
+      "join_type": "left",
+      "relationship_type": "foreign_key",
+      "state": "profile_validated",
+      "confidence": 0.62,
+      "evidence_sources": [
+        {
+          "type": "profile_shared_key",
+          "left_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json",
+          "right_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+          "normalized_key": "patientid"
+        }
+      ],
+      "cardinality": {
+        "expected": "many_to_one_or_many_to_many_pending_validation",
+        "validation_query_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "null_behavior": {
+        "left_key_null_check_required": true,
+        "right_key_null_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "uniqueness_checks": {
+        "right_key_uniqueness_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "referential_integrity_checks": {
+        "orphan_left_key_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "grain_impact": {
+        "risk": "join may duplicate base rows unless cardinality is validated",
+        "requires_review": true
+      },
+      "approval": {
+        "state": "needs_review",
+        "owner": "data_engineering",
+        "approved_at": "",
+        "review_due_at": "2026-11-24T11:51:37.516566+00:00"
+      },
+      "source_system_scope": {
+        "left": "EMR/trendytech-hospital-a",
+        "right": "EMR/trendytech-hospital-a",
+        "cross_source": false
+      },
+      "executable_usage_policy": {
+        "allowed_in_sql_generation": false,
+        "allowed_in_polars_generation": false,
+        "allowed_in_pyspark_generation": false,
+        "allowed_in_medallion_generation": false,
+        "block_reason": "candidate relationship requires data-model proof or user confirmation"
+      },
+      "decision_history": [
+        {
+          "state": "profile_validated",
+          "note": "Generated relationship contract from available workspace evidence.",
+          "timestamp": "2026-05-28T11:51:37.516566+00:00"
+        }
+      ],
+      "lineage_export": {
+        "enabled": true,
+        "format": "contract_json"
+      },
+      "promotion_policy": {
+        "requires_validation_checks_passed": true,
+        "requires_owner_review": true,
+        "rollback_policy": "Remove relationship from executable usage if validation or drift checks fail."
+      }
+    },
+    {
+      "relationship_id": "encounters__patientid__transactions__patientid",
+      "left_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+      "left_column": "PatientID",
+      "right_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+      "right_column": "PatientID",
+      "join_type": "left",
+      "relationship_type": "foreign_key",
+      "state": "profile_validated",
+      "confidence": 0.62,
+      "evidence_sources": [
+        {
+          "type": "profile_shared_key",
+          "left_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json",
+          "right_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+          "normalized_key": "patientid"
+        }
+      ],
+      "cardinality": {
+        "expected": "many_to_one_or_many_to_many_pending_validation",
+        "validation_query_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "null_behavior": {
+        "left_key_null_check_required": true,
+        "right_key_null_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "uniqueness_checks": {
+        "right_key_uniqueness_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "referential_integrity_checks": {
+        "orphan_left_key_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "grain_impact": {
+        "risk": "join may duplicate base rows unless cardinality is validated",
+        "requires_review": true
+      },
+      "approval": {
+        "state": "needs_review",
+        "owner": "data_engineering",
+        "approved_at": "",
+        "review_due_at": "2026-11-24T11:51:37.516566+00:00"
+      },
+      "source_system_scope": {
+        "left": "EMR/trendytech-hospital-a",
+        "right": "EMR/trendytech-hospital-a",
+        "cross_source": false
+      },
+      "executable_usage_policy": {
+        "allowed_in_sql_generation": false,
+        "allowed_in_polars_generation": false,
+        "allowed_in_pyspark_generation": false,
+        "allowed_in_medallion_generation": false,
+        "block_reason": "candidate relationship requires data-model proof or user confirmation"
+      },
+      "decision_history": [
+        {
+          "state": "profile_validated",
+          "note": "Generated relationship contract from available workspace evidence.",
+          "timestamp": "2026-05-28T11:51:37.516566+00:00"
+        }
+      ],
+      "lineage_export": {
+        "enabled": true,
+        "format": "contract_json"
+      },
+      "promotion_policy": {
+        "requires_validation_checks_passed": true,
+        "requires_owner_review": true,
+        "rollback_policy": "Remove relationship from executable usage if validation or drift checks fail."
+      }
+    },
+    {
+      "relationship_id": "encounters__providerid__providers__providerid",
+      "left_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/encounters.csv",
+      "left_column": "ProviderID",
+      "right_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/providers.csv",
+      "right_column": "ProviderID",
+      "join_type": "left",
+      "relationship_type": "foreign_key",
+      "state": "profile_validated",
+      "confidence": 0.62,
+      "evidence_sources": [
+        {
+          "type": "profile_shared_key",
+          "left_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_encounters.csv.profile.json",
+          "right_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_providers.csv.profile.json",
+          "normalized_key": "providerid"
+        }
+      ],
+      "cardinality": {
+        "expected": "many_to_one_or_many_to_many_pending_validation",
+        "validation_query_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "null_behavior": {
+        "left_key_null_check_required": true,
+        "right_key_null_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "uniqueness_checks": {
+        "right_key_uniqueness_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "referential_integrity_checks": {
+        "orphan_left_key_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "grain_impact": {
+        "risk": "join may duplicate base rows unless cardinality is validated",
+        "requires_review": true
+      },
+      "approval": {
+        "state": "needs_review",
+        "owner": "data_engineering",
+        "approved_at": "",
+        "review_due_at": "2026-11-24T11:51:37.516566+00:00"
+      },
+      "source_system_scope": {
+        "left": "EMR/trendytech-hospital-a",
+        "right": "EMR/trendytech-hospital-a",
+        "cross_source": false
+      },
+      "executable_usage_policy": {
+        "allowed_in_sql_generation": false,
+        "allowed_in_polars_generation": false,
+        "allowed_in_pyspark_generation": false,
+        "allowed_in_medallion_generation": false,
+        "block_reason": "candidate relationship requires data-model proof or user confirmation"
+      },
+      "decision_history": [
+        {
+          "state": "profile_validated",
+          "note": "Generated relationship contract from available workspace evidence.",
+          "timestamp": "2026-05-28T11:51:37.516566+00:00"
+        }
+      ],
+      "lineage_export": {
+        "enabled": true,
+        "format": "contract_json"
+      },
+      "promotion_policy": {
+        "requires_validation_checks_passed": true,
+        "requires_owner_review": true,
+        "rollback_policy": "Remove relationship from executable usage if validation or drift checks fail."
+      }
+    },
+    {
+      "relationship_id": "patients__patientid__transactions__patientid",
+      "left_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/patients.csv",
+      "left_column": "PatientID",
+      "right_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+      "right_column": "PatientID",
+      "join_type": "left",
+      "relationship_type": "foreign_key",
+      "state": "profile_validated",
+      "confidence": 0.62,
+      "evidence_sources": [
+        {
+          "type": "profile_shared_key",
+          "left_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_patients.csv.profile.json",
+          "right_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+          "normalized_key": "patientid"
+        }
+      ],
+      "cardinality": {
+        "expected": "many_to_one_or_many_to_many_pending_validation",
+        "validation_query_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "null_behavior": {
+        "left_key_null_check_required": true,
+        "right_key_null_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "uniqueness_checks": {
+        "right_key_uniqueness_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "referential_integrity_checks": {
+        "orphan_left_key_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "grain_impact": {
+        "risk": "join may duplicate base rows unless cardinality is validated",
+        "requires_review": true
+      },
+      "approval": {
+        "state": "needs_review",
+        "owner": "data_engineering",
+        "approved_at": "",
+        "review_due_at": "2026-11-24T11:51:37.516566+00:00"
+      },
+      "source_system_scope": {
+        "left": "EMR/trendytech-hospital-a",
+        "right": "EMR/trendytech-hospital-a",
+        "cross_source": false
+      },
+      "executable_usage_policy": {
+        "allowed_in_sql_generation": false,
+        "allowed_in_polars_generation": false,
+        "allowed_in_pyspark_generation": false,
+        "allowed_in_medallion_generation": false,
+        "block_reason": "candidate relationship requires data-model proof or user confirmation"
+      },
+      "decision_history": [
+        {
+          "state": "profile_validated",
+          "note": "Generated relationship contract from available workspace evidence.",
+          "timestamp": "2026-05-28T11:51:37.516566+00:00"
+        }
+      ],
+      "lineage_export": {
+        "enabled": true,
+        "format": "contract_json"
+      },
+      "promotion_policy": {
+        "requires_validation_checks_passed": true,
+        "requires_owner_review": true,
+        "rollback_policy": "Remove relationship from executable usage if validation or drift checks fail."
+      }
+    },
+    {
+      "relationship_id": "providers__deptid__transactions__deptid",
+      "left_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/providers.csv",
+      "left_column": "DeptID",
+      "right_dataset": "workspaces/Healthcare-RCM-Data-Platform/datasets/EMR/trendytech-hospital-a/transactions.csv",
+      "right_column": "DeptID",
+      "join_type": "left",
+      "relationship_type": "foreign_key",
+      "state": "profile_validated",
+      "confidence": 0.62,
+      "evidence_sources": [
+        {
+          "type": "profile_shared_key",
+          "left_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_providers.csv.profile.json",
+          "right_profile": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/profiles/datasets_EMR_trendytech-hospital-a_transactions.csv.profile.json",
+          "normalized_key": "deptid"
+        }
+      ],
+      "cardinality": {
+        "expected": "many_to_one_or_many_to_many_pending_validation",
+        "validation_query_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "null_behavior": {
+        "left_key_null_check_required": true,
+        "right_key_null_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "uniqueness_checks": {
+        "right_key_uniqueness_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "referential_integrity_checks": {
+        "orphan_left_key_check_required": true,
+        "status": "needs_runtime_validation"
+      },
+      "grain_impact": {
+        "risk": "join may duplicate base rows unless cardinality is validated",
+        "requires_review": true
+      },
+      "approval": {
+        "state": "needs_review",
+        "owner": "data_engineering",
+        "approved_at": "",
+        "review_due_at": "2026-11-24T11:51:37.516566+00:00"
+      },
+      "source_system_scope": {
+        "left": "EMR/trendytech-hospital-a",
+        "right": "EMR/trendytech-hospital-a",
+        "cross_source": false
+      },
+      "executable_usage_policy": {
+        "allowed_in_sql_generation": false,
+        "allowed_in_polars_generation": false,
+        "allowed_in_pyspark_generation": false,
+        "allowed_in_medallion_generation": false,
+        "block_reason": "candidate relationship requires data-model proof or user confirmation"
+      },
+      "decision_history": [
+        {
+          "state": "profile_validated",
+          "note": "Generated relationship contract from available workspace evidence.",
+          "timestamp": "2026-05-28T11:51:37.516566+00:00"
+        }
+      ],
+      "lineage_export": {
+        "enabled": true,
+        "format": "contract_json"
+      },
+      "promotion_policy": {
+        "requires_validation_checks_passed": true,
+        "requires_owner_review": true,
+        "rollback_policy": "Remove relationship from executable usage if validation or drift checks fail."
+      }
+    }
+  ],
+  "summary": {
+    "relationship_count": 7,
+    "executable_relationship_count": 0,
+    "candidate_relationship_count": 7
+  }
+}

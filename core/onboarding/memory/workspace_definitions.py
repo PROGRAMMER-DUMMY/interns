@@ -14,6 +14,10 @@ from core.storage.workspace_layout import WorkspaceLayout
 
 
 WORKSPACE_DEFINITIONS_VERSION = 1
+NON_FEATURE_TOKENS = {
+    "distinct",
+    "disitnct",
+}
 READY_STATES = {
     "proven_direct",
     "proven_alias",
@@ -44,24 +48,43 @@ def apply_workspace_definition(
     if not mapping_path.exists():
         raise FileNotFoundError(f"KPI feature mapping not found: {mapping_path}")
     mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
-    allowed = {"user_confirmed", "rejected", "blocked_ambiguous", "blocked_missing_evidence"}
+    allowed = {
+        "user_confirmed",
+        "rejected",
+        "blocked_ambiguous",
+        "blocked_missing_evidence",
+        # Two-step CLI-agent flow: a CLI agent proposes a mapping, the user
+        # confirms (-> user_confirmed) or rejects (-> cli_agent_rejected).
+        "cli_agent_proposed",
+        "cli_agent_rejected",
+    }
     if state not in allowed and not state.startswith("proven_"):
         raise ValueError(f"Unsupported decision state: {state}")
+    if _is_non_feature_token(feature):
+        raise ValueError(
+            f"`{feature}` is an expression keyword, not a reusable workspace feature definition."
+        )
 
     timestamp = datetime.now(timezone.utc).isoformat()
     definitions = load_workspace_definitions(layout)
+    resolved_source_columns = [
+        _resolve_source_column(column, layout) for column in (source_columns or [])
+    ]
+    portable_definition = _portable_definition(
+        definition or evidence_note,
+        resolution_type=resolution_type,
+        source_columns=resolved_source_columns,
+    )
     definition_record = {
         "feature": feature,
         "status": state,
         "state": state,
         "scope": "workspace",
         "resolution_type": resolution_type,
-        "definition": definition or evidence_note,
+        "definition": portable_definition,
         "applies_to_kpis": list(applies_to_kpis or []),
         "exceptions": list(exceptions or []),
-        "source_columns": [
-            _resolve_source_column(column, layout) for column in (source_columns or [])
-        ],
+        "source_columns": resolved_source_columns,
         "evidence": [
             {
                 "type": "user_confirmed" if state == "user_confirmed" else "user_decision",
@@ -91,7 +114,7 @@ def apply_workspace_definition(
         feature=feature,
         state=state,
         resolution_type=resolution_type,
-        definition=definition or evidence_note,
+        definition=portable_definition,
         evidence_note=evidence_note,
         applies_to_kpis=applies_to_kpis or [],
     )
@@ -130,6 +153,22 @@ def _resolve_source_column(column_expr: str, layout: WorkspaceLayout) -> dict[st
             }
 
     return {"dataset": source_ref, "column": column, "source": "workspace_definition"}
+
+
+def _portable_definition(
+    definition: str,
+    *,
+    resolution_type: str,
+    source_columns: list[dict[str, str]],
+) -> str:
+    if resolution_type != "physical_column" or not source_columns:
+        return definition
+    first = source_columns[0]
+    dataset = str(first.get("dataset") or "").replace("\\", "/")
+    column = str(first.get("column") or "")
+    if dataset and column:
+        return f"{dataset}.{column}"
+    return column or definition
 
 
 def _split_source_column_expr(column_expr: str) -> tuple[str, str]:
@@ -184,10 +223,17 @@ def load_workspace_definitions(layout: WorkspaceLayout) -> dict[str, Any]:
     data.setdefault("generated_by", "apply-kpi-panel-answer")
     data.setdefault("version", WORKSPACE_DEFINITIONS_VERSION)
     data.setdefault("definitions", [])
+    data["definitions"] = [
+        item for item in data.get("definitions", []) if not _is_non_feature_token(item.get("feature", ""))
+    ]
     return data
 
 
 def upsert_workspace_definition(definitions: dict[str, Any], record: dict[str, Any]) -> None:
+    if _is_non_feature_token(record.get("feature", "")):
+        raise ValueError(
+            f"`{record.get('feature', '')}` is an expression keyword, not a reusable workspace feature definition."
+        )
     target_feature = normalize(record.get("feature", ""))
     target_kpis = sorted(record.get("applies_to_kpis") or [])
 
@@ -207,6 +253,10 @@ def upsert_workspace_definition(definitions: dict[str, Any], record: dict[str, A
         )
     )
     definitions["definitions"] = kept
+
+
+def _is_non_feature_token(feature: Any) -> bool:
+    return normalize(str(feature or "")) in NON_FEATURE_TOKENS
 
 
 def apply_workspace_definitions_to_mapping(mapping: dict[str, Any], definitions: dict[str, Any]) -> int:

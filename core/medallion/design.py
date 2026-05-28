@@ -72,6 +72,8 @@ EXIT_KPI_BLOCKERS_UNRESOLVED = "KPI_BLOCKERS_UNRESOLVED"
 EXIT_EMPTY_WORKSPACE         = "EMPTY_WORKSPACE"
 EXIT_WORKSPACE_BUSY          = "WORKSPACE_BUSY"
 EXIT_BUDGET_EXCEEDED         = "BUDGET_EXCEEDED"
+EXIT_MODEL_SEARCH_FAILED     = "MODEL_SEARCH_FAILED"
+EXIT_INSUFFICIENT_MODEL_CAPABILITY = "INSUFFICIENT_MODEL_CAPABILITY"
 
 
 # ── Result type ────────────────────────────────────────────────────────────────
@@ -140,6 +142,10 @@ def design_medallion(
     cheap: bool = False,
     dry_run: bool = False,
     force: bool = False,
+    engine: Optional[str] = None,
+    model: Optional[str] = None,
+    no_search: bool = False,
+    calibrate: bool = False,
 ) -> DesignResult:
     """
     Main orchestrator. `intern` is an optional MedallionArchitectIntern
@@ -179,6 +185,19 @@ def design_medallion(
             cache_hit=False,
         )
 
+    for d in paths.values():
+        d.mkdir(parents=True, exist_ok=True)
+
+    _prepare_model_routing(
+        paths,
+        cfg=cfg,
+        engine=engine,
+        model=model,
+        no_search=no_search,
+        calibrate=calibrate,
+        cheap=cheap,
+    )
+
     proposal, llm_used = _build_proposal(intern, inputs, cheap=cheap)
     workspace_name = workspace.name
 
@@ -198,10 +217,6 @@ def design_medallion(
     )
 
     lineage = _build_lineage(workspace_name, manifest, silver_contract)
-
-    # write artifacts
-    for d in paths.values():
-        d.mkdir(parents=True, exist_ok=True)
 
     manifest_path = paths["medallion"] / "manifest.yaml"
     manifest_path.write_text(manifest_to_yaml(manifest), encoding="utf-8")
@@ -360,6 +375,90 @@ def _build_proposal(intern, inputs: dict[str, Any], *, cheap: bool) -> tuple[dic
         return proposal, True
     except Exception:
         return _seed_proposal(inputs), False
+
+
+def _prepare_model_routing(
+    paths: dict[str, Path],
+    *,
+    cfg,
+    engine: Optional[str],
+    model: Optional[str],
+    no_search: bool,
+    calibrate: bool,
+    cheap: bool,
+) -> dict[str, Any]:
+    from core.medallion.model_classifier import ModelCapability, ModelSearchFailed, classify
+    from core.medallion.model_discovery import DiscoveredModel, discover_models
+    from core.medallion.tier_router import InsufficientModelCapability, assign_tiers, pick_model, rank_models
+
+    selected_engine = engine or getattr(cfg, "main_agent", "") or "api"
+    if selected_engine == "api":
+        selected_engine = "gemini-api"
+
+    if model:
+        discovered = [DiscoveredModel(engine=selected_engine, model_id=model)]
+    elif cheap:
+        discovered = [DiscoveredModel(engine=selected_engine, model_id="cheap-seed")]
+    else:
+        discovered = discover_models(selected_engine, cfg=cfg)
+
+    if not discovered:
+        if no_search:
+            raise MedallionExit(
+                EXIT_MODEL_SEARCH_FAILED,
+                f"No discovered models for engine `{selected_engine}` and --no-search was set.",
+            )
+        discovered = [DiscoveredModel(engine=selected_engine, model_id="unclassified-runtime-model")]
+
+    capabilities: list[ModelCapability] = []
+    cache_hits = 0
+    for discovered_model in discovered:
+        try:
+            cap = classify(discovered_model.engine, discovered_model.model_id, no_search=True)
+            cache_hits += 1
+        except ModelSearchFailed as exc:
+            if no_search:
+                raise MedallionExit(EXIT_MODEL_SEARCH_FAILED, str(exc)) from exc
+            cap = ModelCapability(
+                engine=discovered_model.engine,
+                model_id=discovered_model.model_id,
+                classified_at="",
+                evidence=["runtime discovery without cached WebSearch classification"],
+                confidence=0.0,
+            )
+        capabilities.append(cap)
+
+    ranking = rank_models(capabilities)
+    assignment = assign_tiers(ranking)
+    try:
+        selected_tier, selected_model = pick_model("star_schema_design", assignment)
+    except InsufficientModelCapability as exc:
+        raise MedallionExit(EXIT_INSUFFICIENT_MODEL_CAPABILITY, str(exc)) from exc
+
+    metadata = {
+        "engine": selected_engine,
+        "pinned_model": model or "",
+        "no_search": no_search,
+        "calibrate": calibrate,
+        "cache_hits": cache_hits,
+        "discovered_models": [
+            {"engine": item.engine, "model_id": item.model_id, "raw_metadata": item.raw_metadata}
+            for item in discovered
+        ],
+        "capabilities": [cap.to_dict() for cap in capabilities],
+        "ranking": ranking,
+        "tier_assignment": assignment.by_tier,
+        "selected": {
+            "task_class": "star_schema_design",
+            "tier": selected_tier,
+            "model_id": selected_model,
+        },
+    }
+    run_dir = paths["runs"] / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-p4")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "discovered_models.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    (paths["state"] / "discovered_models_latest.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    return metadata
 
 
 def _seed_proposal(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -781,10 +880,10 @@ def _emit_silver_sql_duckdb(manifest: Manifest, contract: SilverContract, out_di
         for src in sources:
             select_lines.append(f"    SELECT *, '{_source_system_from_silver_src(src)}' AS source_system FROM {src}")
         union_sql = "\n    UNION ALL\n".join(select_lines)
-        pii_hash_lines = "\n".join(
-            f"    {col} = sha256(coalesce(cast({col} AS VARCHAR), '') || '{{salt}}'),  -- PII"
+        pii_replacements = [
+            f"sha256(coalesce(cast({col} AS VARCHAR), '') || $salt) AS {col}"
             for col in tc.pii_hash_columns
-        )
+        ]
         derived_lines: list[str] = []
         for dname, dc in tc.derived_columns.items():
             duck = dc.formula_templates.duckdb_sql or ""
@@ -803,10 +902,13 @@ def _emit_silver_sql_duckdb(manifest: Manifest, contract: SilverContract, out_di
             f"    -- TODO(P1): apply type casts from silver_contract.json#/{s.name}/type_casts\n"
             f"    -- TODO(P1): apply null policies\n"
             + (derived_block + "\n" if derived_block else "")
-            + "    *\n"
-            "FROM unioned;\n\n"
-            "-- PII hashing (applied via UPDATE in P0 — moved into a single CTE in P1)\n"
-            + (pii_hash_lines + "\n" if pii_hash_lines else "")
+            + (
+                "    * REPLACE (\n        "
+                + ",\n        ".join(pii_replacements)
+                + "\n    )\n"
+                if pii_replacements else "    *\n"
+            )
+            + "FROM unioned;\n\n"
             + f"\n-- Post-load assertions: see {assertion_path.name}\n"
         )
         sql_path.write_text(body, encoding="utf-8")

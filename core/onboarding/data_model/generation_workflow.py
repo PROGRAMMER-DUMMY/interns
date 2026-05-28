@@ -283,11 +283,13 @@ class DataModelGenerationWorkflow:
                     for pattern in patterns.get("patterns", [])
                 ],
             },
+            "architecture_reference": _architecture_reference(),
             "evidence_order": ["profile_index", "text_data_model_docs", "reviewed_diagram_sidecars", "user_approval"],
             "image_model_policy": {
                 "state": "review_gated",
                 "rule": "Images require a reviewed text/JSON/Markdown sidecar before relationships become executable.",
                 "image_files": image_models,
+                "parse_contract": _image_parse_contract(image_models),
             },
             "tables": tables,
             "relationships": relationships,
@@ -673,6 +675,9 @@ def _table_from_profile(profile: dict[str, Any], patterns: dict[str, Any]) -> di
         },
         "scd_type": "not_applicable" if inference["role"] == "fact" else "needs_review",
         "medallion_layer": "silver",
+        "dimensional_model_role": _dimensional_model_role(inference["role"]),
+        "star_schema_candidate": _star_schema_candidate(inference["role"], columns, primary_key),
+        "medallion_contract": _medallion_table_contract(inference["role"]),
         "load_pattern": _load_pattern_for(inference["pattern_id"]),
         "partitioning_policy": {
             "state": "candidate" if _first_role(columns, "timestamp") else "not_recommended_yet",
@@ -686,6 +691,152 @@ def _table_from_profile(profile: dict[str, Any], patterns: dict[str, Any]) -> di
         "primary_key": primary_key,
         "columns": columns,
         "approval": {"state": "draft"},
+    }
+
+
+def _architecture_reference() -> dict[str, Any]:
+    return {
+        "version": "1.0.0",
+        "purpose": "Machine-parseable rules for data-model understanding, star schema design, medallion layers, and image sidecar review.",
+        "star_schema": {
+            "fact_table": {
+                "required": ["grain", "foreign_keys", "numeric_measures", "temporal_anchor"],
+                "grain_types": ["transaction", "periodic_snapshot", "accumulating_snapshot", "factless"],
+                "anti_patterns": [
+                    "descriptive_text_attributes_in_fact",
+                    "missing_fact_grain",
+                    "measures_in_dimension_tables",
+                    "natural_keys_as_dimension_primary_keys",
+                ],
+            },
+            "dimension_table": {
+                "required": ["surrogate_key", "natural_key", "descriptive_attributes", "scd_policy"],
+                "scd_types": [0, 1, 2, 3, 4, 6],
+                "default_scd_type": 2,
+                "anti_patterns": [
+                    "scd2_without_validity_columns",
+                    "dimension_to_dimension_joins_without_snowflake_label",
+                    "nullable_fact_fk_without_unknown_member_policy",
+                ],
+            },
+            "relationships": {
+                "default_fact_to_dimension_cardinality": "many_to_one",
+                "default_join_type": "left",
+                "required_proof": ["fk_column", "referenced_pk", "cardinality", "grain_compatibility"],
+            },
+        },
+        "medallion": {
+            "bronze": {
+                "purpose": "Raw append-only ingestion with source fidelity.",
+                "allowed_transformations": ["add_ingestion_metadata", "capture_raw_payload"],
+                "forbidden_transformations": ["deduplication", "business_logic", "semantic_renaming"],
+                "required_metadata": ["_ingestion_timestamp", "_source_system", "_source_table", "_batch_id"],
+            },
+            "silver": {
+                "purpose": "Cleaned, typed, conformed, reusable entities/events.",
+                "allowed_transformations": [
+                    "type_cast",
+                    "null_handling",
+                    "standardization",
+                    "reference_validation",
+                    "approved_semantic_conformance",
+                    "approval_gated_deduplication",
+                    "pii_masking",
+                ],
+                "forbidden_transformations": ["kpi_specific_aggregation", "final_metric_formula"],
+                "required_metadata": ["_valid_from", "_valid_to", "_is_current", "_dq_score", "_is_deleted"],
+            },
+            "gold": {
+                "purpose": "Business-ready KPI outputs, aggregations, and dimensional models.",
+                "allowed_structures": ["star_schema", "snowflake_schema", "galaxy_schema", "certified_aggregate"],
+                "required_checks": ["gold_reads_from_silver_or_approved_conformed_source", "business_friendly_names", "sensitive_columns_excluded_or_masked"],
+                "anti_patterns": ["gold_directly_from_bronze", "bronze_metadata_leak", "raw_source_column_names_in_bi_output"],
+            },
+        },
+        "canonical_outputs": {
+            "table": ["name", "role", "grain", "primary_key", "columns", "medallion_layer", "dimensional_model_role"],
+            "relationship": ["from_table", "from_column", "to_table", "to_column", "cardinality", "join_type", "confidence", "approval"],
+            "image_parse": ["parse_metadata", "schema", "warnings", "confidence_by_element"],
+        },
+    }
+
+
+def _image_parse_contract(image_models: list[str]) -> dict[str, Any]:
+    return {
+        "required_when_image_models_present": bool(image_models),
+        "schema_type_detection": {
+            "star_schema_signals": ["central_fact_box", "surrounding_dimension_boxes", "fact_to_dimension_lines", "FACT_or_DIM_prefixes"],
+            "medallion_signals": ["bronze_silver_gold_layers", "left_to_right_pipeline_arrows", "source_and_consumer_icons"],
+            "combined_signal": "medallion_pipeline_with_gold_star_schema",
+        },
+        "sidecar_required_fields": [
+            "detected_schema_types",
+            "tables",
+            "columns",
+            "relationships",
+            "cardinality",
+            "join_columns",
+            "confidence_by_element",
+            "warnings",
+        ],
+        "confidence_rules": {
+            "explicit_fact_or_dim_label": 0.95,
+            "position_inferred_table_role": 0.75,
+            "explicit_pk_fk_marker": 0.95,
+            "name_suffix_inferred_key": 0.70,
+            "explicit_cardinality": 0.90,
+            "topology_inferred_relationship": 0.75,
+        },
+        "execution_policy": "Image-derived relationships remain non-executable until reviewed sidecar text and user approval promote them.",
+    }
+
+
+def _dimensional_model_role(role: str) -> str:
+    if role == "fact":
+        return "fact_candidate"
+    if role == "dimension":
+        return "dimension_candidate"
+    if role == "bridge":
+        return "bridge_candidate"
+    return "supporting_table_candidate"
+
+
+def _star_schema_candidate(role: str, columns: list[dict[str, Any]], primary_key: list[str]) -> dict[str, Any]:
+    measures = [column["name"] for column in columns if column.get("role") == "measure"]
+    identifiers = [column["name"] for column in columns if column.get("role") == "identifier"]
+    descriptive = [column["name"] for column in columns if column.get("role") == "descriptor"]
+    is_fact = role == "fact"
+    return {
+        "role": _dimensional_model_role(role),
+        "grain_required": is_fact,
+        "surrogate_key_required": role == "dimension",
+        "natural_key_candidates": identifiers[:5],
+        "measure_candidates": measures[:8],
+        "descriptive_attribute_candidates": descriptive[:12],
+        "primary_key_candidates": primary_key,
+        "validation_checks": [
+            "grain_declared" if is_fact else "natural_key_declared",
+            "measure_columns_present" if is_fact else "descriptive_attributes_present",
+            "relationship_cardinality_reviewed",
+        ],
+    }
+
+
+def _medallion_table_contract(role: str) -> dict[str, Any]:
+    return {
+        "bronze": {
+            "state": "source_landing_required",
+            "rule": "Preserve original source columns and add ingestion metadata only.",
+        },
+        "silver": {
+            "state": "default_target_layer",
+            "rule": "Apply technical normalization plus approved semantic conformance; keep KPI formulas out.",
+        },
+        "gold": {
+            "state": "candidate_if_kpi_or_bi_output",
+            "rule": "Use star/snowflake/aggregate output from conformed Silver data.",
+            "dimensional_role": _dimensional_model_role(role),
+        },
     }
 
 
@@ -794,11 +945,28 @@ def _approve_relationship(relationship: dict[str, Any]) -> dict[str, Any]:
 
 def _render_data_model_md(contract: dict[str, Any]) -> str:
     lines = ["# Data Model", "", f"- Workspace: `{contract.get('workspace', '')}`", ""]
+    reference = contract.get("architecture_reference") or {}
+    if reference:
+        lines.extend(
+            [
+                "## Architecture Reference",
+                "",
+                f"- Version: `{reference.get('version', '')}`",
+                "- Star schema: facts require grain, measures, temporal anchor, and proven relationships; dimensions require surrogate/natural keys and SCD policy.",
+                "- Medallion: Bronze preserves raw source, Silver cleans/conforms reusable entities, Gold serves business/KPI star or aggregate outputs.",
+                "- Image diagrams remain review-gated until a text sidecar and approval promote relationships.",
+                "",
+            ]
+        )
     for table in contract.get("tables", []):
         lines.extend([
             f"## {table.get('name', '')}",
             "",
             f"> {table.get('description', '')}",
+            "",
+            f"- Dimensional role: `{table.get('dimensional_model_role', '')}`",
+            f"- Medallion layer: `{table.get('medallion_layer', '')}`",
+            f"- Table pattern: `{table.get('table_pattern', '')}`",
             "",
             "| column | type | role | nullable | description |",
             "|---|---|---|---|---|",

@@ -1,0 +1,37 @@
+description = "Prepare and render the RCM KPI blocker panel as the canonical Markdown card."
+
+prompt = """
+# Task: Render the RCM KPI Blocker Panel
+
+Use the active RCM workspace exactly as configured:
+
+- Workspace: `workspaces/Healthcare-RCM-Data-Platform`
+- Domain: `healthcare`
+- Dataset isolation: Hospital A only, from `workspaces/Healthcare-RCM-Data-Platform/workspace_settings.json`
+
+Run the deterministic panel workflow and validation. Their stdout is redirected
+to `$null` on purpose so only the final panel reaches the user; stderr is kept
+so failures still surface.
+
+```text
+!{uv run prepare-kpi-blocker-panel --workspace workspaces/Healthcare-RCM-Data-Platform --domain healthcare 1>$null}
+!{uv run validate-workspace-artifacts --workspace workspaces/Healthcare-RCM-Data-Platform 1>$null}
+```
+
+The block below is the user-facing panel content. Output it VERBATIM as your
+entire reply. Do not narrate it. Do not echo the commands above. Do not list
+files. Do not summarize. Do not append a recap. Do not wrap it in extra prose.
+
+```markdown
+!{Get-Content -LiteralPath workspaces/Healthcare-RCM-Data-Platform/interns/reports/blocker_question_panel/current.md -Raw}
+```
+
+Hard rules:
+
+- Your reply is ONLY the rendered Markdown above. No preamble, no postscript.
+- Do not replace the Markdown with Gemini's generic Ask User or Answer Questions UI.
+- Do not summarize, reorder, rename, or simplify options.
+- Use `current.json` only as the structured source for buttons/options and answer application.
+- If either command above wrote to stderr (validation or prep failure), reply with
+  only the stderr error message and do not show the panel.
+"""

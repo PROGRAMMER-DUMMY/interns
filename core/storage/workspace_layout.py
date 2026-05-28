@@ -52,6 +52,10 @@ class WorkspaceLayout:
         return self.state_dir / "workspace_settings.json"
 
     @property
+    def durable_workspace_settings(self) -> Path:
+        return self.project_root / "workspace_settings.json"
+
+    @property
     def run_log(self) -> Path:
         return self.state_dir / "run.log"
 
@@ -95,6 +99,38 @@ class WorkspaceLayout:
     def reports_dir(self) -> Path:
         return self.interns_dir / "reports"
 
+    @property
+    def kpi_registry_path(self) -> Path:
+        return self.contracts_dir / "kpi_registry.json"
+
+    @property
+    def kpi_feature_mapping_path(self) -> Path:
+        return self.contracts_dir / "kpi_feature_mapping.json"
+
+    @property
+    def relationship_contracts_path(self) -> Path:
+        return self.contracts_dir / "relationship_contracts.json"
+
+    @property
+    def data_model_contract_path(self) -> Path:
+        return self.contracts_dir / "data_model_contract.json"
+
+    @property
+    def source_to_target_plan_path(self) -> Path:
+        return self.contracts_dir / "source_to_target_plan.json"
+
+    @property
+    def profile_index_path(self) -> Path:
+        return self.profiles_dir / "profile_index.json"
+
+    @property
+    def workflow_sessions_dir(self) -> Path:
+        return self.state_dir / "workflow_sessions"
+
+    @property
+    def handoffs_dir(self) -> Path:
+        return self.state_dir / "handoffs"
+
     def ensure_runtime_dirs(self) -> None:
         for path in [
             self.state_dir,
@@ -111,9 +147,11 @@ class WorkspaceLayout:
             path.mkdir(parents=True, exist_ok=True)
 
     def load_settings(self) -> dict[str, Any]:
-        if self.workspace_settings.exists():
+        for path in (self.workspace_settings, self.durable_workspace_settings):
+            if not path.exists():
+                continue
             try:
-                return json.loads(self.workspace_settings.read_text(encoding="utf-8"))
+                return json.loads(path.read_text(encoding="utf-8"))
             except Exception:
                 pass
         return {}

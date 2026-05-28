@@ -94,7 +94,7 @@ class WorkspaceBugDetector:
         bug = self._detect_panel_artifact_question(panel, mapping)
         if bug:
             bugs.append(bug)
-        bug = self._detect_scoped_definition_overwrite_risk(requirements, definitions)
+        bug = self._detect_scoped_definition_overwrite_risk(requirements, definitions, mapping)
         if bug:
             bugs.append(bug)
 
@@ -251,6 +251,7 @@ class WorkspaceBugDetector:
         self,
         requirements: dict[str, Any] | None,
         definitions: dict[str, Any] | None,
+        mapping: dict[str, Any] | None = None,
     ) -> WorkspaceBug | None:
         history = (requirements or {}).get("workspace_feature_definitions") or []
         if not isinstance(history, list):
@@ -269,12 +270,14 @@ class WorkspaceBugDetector:
             by_feature.setdefault(feature, []).append(item)
         stored = (definitions or {}).get("definitions") or []
         stored_counts: dict[str, int] = {}
+        stored_records_by_feature: dict[str, list[dict[str, Any]]] = {}
         if isinstance(stored, list):
             for item in stored:
                 if isinstance(item, dict):
-                    stored_counts[_normalize_feature(str(item.get("feature") or ""))] = (
-                        stored_counts.get(_normalize_feature(str(item.get("feature") or "")), 0) + 1
-                    )
+                    normalized_feature = _normalize_feature(str(item.get("feature") or ""))
+                    stored_counts[normalized_feature] = stored_counts.get(normalized_feature, 0) + 1
+                    stored_records_by_feature.setdefault(normalized_feature, []).append(item)
+        current_feature_kpis = _current_feature_kpis(mapping)
         for feature, records in by_feature.items():
             distinct_scoped_definitions = {
                 (
@@ -286,6 +289,13 @@ class WorkspaceBugDetector:
             if len(distinct_scoped_definitions) <= 1:
                 continue
             if stored_counts.get(feature, 0) >= len(distinct_scoped_definitions):
+                continue
+            if current_feature_kpis and _feature_coverage_is_preserved(
+                feature=feature,
+                records=records,
+                stored_records=stored_records_by_feature.get(feature, []),
+                current_feature_kpis=current_feature_kpis,
+            ):
                 continue
             return WorkspaceBug(
                 bug_id="WS-BUG-003",
@@ -371,6 +381,50 @@ def _evidence_summary(
 
 def _role_count(classifications: list[dict[str, Any]], role: str) -> int:
     return sum(1 for item in classifications if role in item.get("roles", []))
+
+
+def _current_feature_kpis(mapping: dict[str, Any] | None) -> dict[str, set[str]]:
+    if not mapping:
+        return {}
+    result: dict[str, set[str]] = {}
+    for kpi in mapping.get("kpis") or []:
+        if not isinstance(kpi, dict):
+            continue
+        kpi_id = str(kpi.get("kpi_id") or "")
+        if not kpi_id:
+            continue
+        for feature in kpi.get("features") or []:
+            if not isinstance(feature, dict):
+                continue
+            name = _normalize_feature(str(feature.get("feature") or ""))
+            if name:
+                result.setdefault(name, set()).add(kpi_id)
+    return result
+
+
+def _feature_coverage_is_preserved(
+    *,
+    feature: str,
+    records: list[dict[str, Any]],
+    stored_records: list[dict[str, Any]],
+    current_feature_kpis: dict[str, set[str]],
+) -> bool:
+    current_kpis = current_feature_kpis.get(feature, set())
+    if not current_kpis:
+        return False
+    historical_coverage = _definition_coverage(records, current_kpis)
+    stored_coverage = _definition_coverage(stored_records, current_kpis)
+    return historical_coverage <= stored_coverage
+
+
+def _definition_coverage(records: list[dict[str, Any]], current_kpis: set[str]) -> set[str]:
+    coverage: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        scope = {str(kpi) for kpi in record.get("applies_to_kpis") or []}
+        coverage.update(scope & current_kpis if scope else current_kpis)
+    return coverage
 
 
 def _markdown_report(report: WorkspaceBugReport) -> str:

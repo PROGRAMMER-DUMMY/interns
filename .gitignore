@@ -1,5 +1,6 @@
 # Runtime state and experiment outputs
 state/
+core/agents/state/
 results.tsv
 run.log
 *.log
@@ -9,6 +10,9 @@ run.log
 
 # Local documentation drafts
 docs/*
+docs/project_sections.local.md
+!docs/agents/
+!docs/agents/gemini-cli-reference.md
 !docs/data_workflow_medallion_reference.md
 !docs/databricks_production_practices.md
 !docs/session_snapshot.md
@@ -20,6 +24,33 @@ workspaces/**/*.parquet
 workspaces/**/*.duckdb
 workspaces/**/*.pdf
 workspaces/**/interns/
+# Track source-of-truth and scaffold artifacts inside interns/ (un-ignores).
+# Lifecycle classification lives in tools/artifact_inventory.py — every entry
+# below corresponds to a source_of_truth or scaffold spec. Derived/cache/log
+# stay ignored.
+!workspaces/**/interns/
+workspaces/**/interns/*
+!workspaces/**/interns/README.md
+!workspaces/**/interns/MANIFEST.md
+!workspaces/**/interns/MANIFEST.json
+!workspaces/**/interns/generated/
+workspaces/**/interns/generated/*
+!workspaces/**/interns/generated/contracts/
+workspaces/**/interns/generated/contracts/*
+!workspaces/**/interns/generated/contracts/kpi_registry.json
+!workspaces/**/interns/generated/contracts/kpi_feature_mapping.json
+!workspaces/**/interns/generated/contracts/relationship_contracts.json
+!workspaces/**/interns/generated/contracts/data_model_contract.json
+!workspaces/**/interns/generated/contracts/workspace_feature_definitions.json
+!workspaces/**/interns/generated/contracts/domain_model.json
+!workspaces/**/interns/generated/profiles/
+!workspaces/**/interns/generated/profiles/**
+!workspaces/**/interns/state/
+workspaces/**/interns/state/*
+!workspaces/**/interns/state/applied_ops.jsonl
+!workspaces/**/interns/state/workspace_settings.json
+!workspaces/**/interns/evaluation/
+!workspaces/**/interns/evaluation/**
 workspaces/Healthcare-RCM-Data-Platform/
 workspaces/**/hotspots.json
 workspaces/**/experiment_profile/

@@ -18,16 +18,16 @@ The companion PRD is at `docs/PRD_medallion_architect.md`. **The PRD locks the *
 | 9 | [09-testing.md](09-testing.md) | Engineers | Throughout implementation. |
 | 10 | [10-operations.md](10-operations.md) | Operators, on-call | After P0 lands on a workspace. |
 
-## Phase status (as of 2026-05-15)
+## Phase status (as of 2026-05-27)
 
 | Phase | Status | Exit criterion |
 |---|---|---|
 | **P0** Foundation | ✅ shipped | `design-medallion --cheap` produces ratifiable manifest on Healthcare RCM |
 | **P1** Build + Governor | ⬜ pending | Acceptance #1, #3, #4 (subset) |
-| **P2** Delta + Databricks | ⬜ pending | Acceptance #2, #6 |
-| **P3** PII at rest | ⬜ pending | Acceptance #5 |
-| **P4** Dynamic models | ⬜ pending | Acceptance #7 |
-| **P5** Lineage + MLflow | ⬜ pending | Acceptance #8 |
+| **P2** Delta + Databricks | ✅ implemented, external validation pending | Spark/Delta files emit, `--target delta` uses the Databricks execution wrapper, permissive degradation records `degraded_run`, MLflow starts/finalizes best-effort; real workspace acceptance still requires approved Databricks credentials |
+| **P3** PII at rest | ✅ implemented | Salt CLI does not print salt material; DuckDB and Spark generated hashes use workspace salt references |
+| **P4** Dynamic models | ✅ implemented, external validation pending | CLI model flags, cache-only failure, discovery metadata, budget resume state, and tier routing are covered; live WebSearch/CLI discovery quality depends on configured tools |
+| **P5** Lineage + MLflow | ✅ implemented, parser depth expandable | `lineage_with_runtime.json`, MLflow finalization, and Gold column trace markdown exist; parser coverage can be broadened as emitted SQL/Spark shapes expand |
 
 Acceptance criteria numbering refers to PRD Section 20.
 

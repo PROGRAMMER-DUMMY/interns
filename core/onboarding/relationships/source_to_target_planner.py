@@ -24,9 +24,12 @@ from core.onboarding.relationships.contracts import (
 from core.optimization.engine_evolution import EngineEvolutionMemory
 from core.resource.manager import ResourceManager
 from core.storage.workspace_layout import WorkspaceLayout
+from core.contracts.versioning import register_contract
 
 
 SUPPORTED_TARGET_ENGINES = {"sql", "polars", "pyspark", "hybrid"}
+
+register_contract("source_to_target_plan.json", current_version=1)
 
 
 @dataclass(frozen=True)

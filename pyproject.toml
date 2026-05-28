@@ -29,6 +29,7 @@ dependencies = [
     "fastexcel>=0.12.0",
     "xlsxwriter>=3.2.0",
     "duckdb>=1.5.2",
+    "sqlglot>=23.0,<25",
     "dash>=4.1.0",
     "dash-bootstrap-components>=2.0.4",
     # Databricks integration
@@ -75,9 +76,11 @@ validate-memory-health = "core.onboarding.memory.health:main"
 prepare-agent-benchmark = "core.onboarding.benchmark.agent_benchmark:prepare_main"
 prepare-kpi-blocker-panel = "core.onboarding.kpi.blocker_cli:prepare_main"
 apply-kpi-panel-answer = "core.onboarding.kpi.blocker_cli:apply_main"
+confirm-cli-agent-proposal = "core.onboarding.kpi.cli_agent_confirm_cli:main"
 plan-source-to-target = "core.onboarding.relationships.source_to_target_planner:main"
 context-router = "core.context.cli:main"
 build-relationship-contracts = "core.onboarding.relationships.contracts:main"
+apply-relationship-answer = "core.onboarding.relationships.contracts:apply_main"
 record-engine-evolution = "core.optimization.engine_evolution:main"
 prepare-kpi-generation = "core.onboarding.kpi.generation_cli:prepare_main"
 apply-kpi-generation-answer = "core.onboarding.kpi.generation_cli:apply_main"
@@ -87,6 +90,7 @@ apply-data-model-answer = "core.onboarding.data_model.generation_cli:apply_main"
 finalize-data-model-generation = "core.onboarding.data_model.generation_cli:finalize_main"
 prepare-data-model-blocker-panel = "core.onboarding.data_model.generation_cli:prepare_blocker_main"
 apply-data-model-blocker-answer = "core.onboarding.data_model.generation_cli:apply_blocker_main"
+parse-data-model-images = "core.onboarding.data_model.image_parser:main"
 export-data-model-diagram = "core.presentation.exports:export_data_model_diagram_main"
 export-kpi-registry-excel = "core.presentation.exports:export_kpi_registry_excel_main"
 export-workspace-presentation = "core.presentation.exports:export_workspace_presentation_main"
@@ -135,6 +139,13 @@ dev = [
 ]
 
 # Optional extras: install with `uv sync --extra databricks-full`
+#
+# Additive extras (added 2026-05): these groups list dependencies that are
+# ALSO present in the default [dependencies] block above. They exist so that
+# a future commit can move those packages OUT of core and into the extras
+# without breaking existing installs. Today, `uv sync` still installs
+# everything; tomorrow, `uv sync --no-default-extras --extra dashboard` (or
+# similar) can produce a slimmer headless install.
 [project.optional-dependencies]
 databricks-full = [
     "databricks-sql-connector>=3.0",   # warehouse execution mode
@@ -145,6 +156,29 @@ databricks-full = [
 ]
 enterprise-metadata = [
     "pymongo>=4.7",
+]
+dashboard = [
+    "dash>=4.1.0",
+    "dash-bootstrap-components>=2.0.4",
+]
+ml = [
+    "scikit-learn>=1.5",
+    "shap>=0.46",
+]
+documents = [
+    "pdfplumber>=0.11.9",
+    "openpyxl>=3.1.5",
+    "xlsxwriter>=3.2.0",
+    "fastexcel>=0.12.0",
+]
+notebook = [
+    "notebook>=7.5.6",
+]
+databricks = [
+    "databricks-sdk>=0.20",
+    "mlflow>=3.0",
+    "pyspark>=3.5.1",
+    "deltalake>=1.5.1",
 ]
 
 [tool.ruff]

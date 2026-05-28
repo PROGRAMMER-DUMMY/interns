@@ -25,9 +25,10 @@ from core.resource.manager import ResourceManager
 
 _DESCRIPTION = (
     "Execute the Bronze -> Silver -> Gold medallion pipeline for a workspace. "
-    "Reads the manifest produced by design-medallion, executes SQL in dependency "
-    "order on DuckDB, runs Silver assertions, regenerates KPI SQL against Gold, "
-    "and writes a per-run state file under interns/state/medallion/runs/<run_id>/."
+    "Reads the manifest produced by design-medallion, runs DuckDB SQL locally or "
+    "generated Spark/Delta files through the Databricks execution backend, runs "
+    "Silver assertions on local builds, regenerates KPI SQL against Gold, and writes "
+    "a per-run state file under interns/state/medallion/runs/<run_id>/."
 )
 
 _EPILOG = """\
@@ -130,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
             workspace=workspace,
             repo_root=repo_root,
             cfg=cfg,
+            target_override=args.target,
             only_layer=args.only_layer,
             only_table=args.only_table,
             resume=args.resume,

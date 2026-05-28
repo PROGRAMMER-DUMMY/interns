@@ -205,14 +205,42 @@ class MongoMetadataStore(MetadataStore):
 def build_metadata_store(layout, *, repo_root: str | Path | None = None) -> MetadataStore:
     """Build the configured metadata store.
 
+    Selection precedence (most specific first):
+
+    1. ``AUTORESEARCH_METADATA_BACKEND`` env var (``local``, ``delta``, ``mongo``)
+       — explicit override for tests/CI/ops.
+    2. ``workspace_settings.json`` keys ``delta_enabled`` (bool) or
+       ``metadata_backend`` (string) — per-workspace opt-in.
+    3. Default: ``local`` (file-per-document JSON, no Delta-table scaffolding).
+       The Delta backend would otherwise emit hundreds of KB of Delta-log +
+       parquet snapshots per workspace, which is pure overhead for any
+       workspace that does NOT target Databricks/Spark downstream.
+
     Environment variables:
-    - ``AUTORESEARCH_METADATA_BACKEND``: ``delta`` (default), ``local``, or ``mongo``.
-    - ``AUTORESEARCH_MONGO_URI``: MongoDB connection URI.
-    - ``AUTORESEARCH_MONGO_DB``: database name, defaults to ``autoresearch``.
+    - ``AUTORESEARCH_METADATA_BACKEND``: explicit override of all settings.
+    - ``AUTORESEARCH_MONGO_URI`` / ``AUTORESEARCH_MONGO_DB``: Mongo backend config.
     """
     local_root = layout.state_dir / "metadata_store"
     local_store = LocalMetadataStore(local_root)
-    backend = os.environ.get("AUTORESEARCH_METADATA_BACKEND", "delta").strip().lower()
+
+    env_backend = os.environ.get("AUTORESEARCH_METADATA_BACKEND", "").strip().lower()
+    settings: dict[str, Any] = {}
+    try:
+        settings = layout.load_settings() or {}
+    except Exception:
+        settings = {}
+    workspace_backend = str(settings.get("metadata_backend") or "").strip().lower()
+    delta_enabled = bool(settings.get("delta_enabled", False))
+
+    if env_backend:
+        backend = env_backend
+    elif workspace_backend:
+        backend = workspace_backend
+    elif delta_enabled:
+        backend = "delta"
+    else:
+        backend = "local"
+
     if backend == "local":
         return local_store
     if backend == "delta":

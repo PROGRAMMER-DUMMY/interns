@@ -799,6 +799,111 @@ class DuckDBKPISQLGenerator:
         def q(name: str) -> str:
             return self.quote_ident(name)
 
+        paid_feature = "PaidAmount" if "PaidAmount" in available else ("paid" if "paid" in available else "")
+        lob_feature = "LineOfBusiness" if "LineOfBusiness" in available else ("LOB" if "LOB" in available else "")
+        payer_feature = "PayorID" if "PayorID" in available else ("Payer" if "Payer" in available else "")
+        service_date_feature = "ServiceDate" if "ServiceDate" in available else ("Time" if "Time" in available else "")
+        age_filter = ""
+        if "Age" in available:
+            age_filter = f"{q('Age')} > 50"
+        elif "DOB" in available and service_date_feature:
+            age_filter = f"date_diff('year', CAST({q('DOB')} AS DATE), CAST({q(service_date_feature)} AS DATE)) > 50"
+        if (
+            paid_feature
+            and lob_feature
+            and payer_feature
+            and service_date_feature
+            and "Gender" in available
+            and age_filter
+            and "medicare" in cuts
+            and "50" in cuts
+            and "sum" in metric
+        ):
+            paid_alias = "paid_amount" if paid_feature == "paid" else "TotalPaidAmount"
+            return "\n".join(
+                [
+                    f"CREATE OR REPLACE VIEW {result_view} AS",
+                    "SELECT",
+                    f"  date_trunc('month', CAST({q(service_date_feature)} AS DATE)) AS ServiceMonth,",
+                    f"  {q(payer_feature)} AS PayorID,",
+                    f"  {q('Gender')} AS Gender,",
+                    f"  SUM({q(paid_feature)}) AS {paid_alias}",
+                    f"FROM {feature_view}",
+                    f"WHERE {q(lob_feature)} = 'Medicare'",
+                    f"  AND {age_filter}",
+                    "GROUP BY 1, 2, 3",
+                    "ORDER BY 1 ASC, 4 DESC;",
+                ]
+            )
+        if (
+            "percentage" in metric
+            and "PatientID" in available
+            and "VisitType" in available
+            and "Gender" in available
+            and ("DOB" in available or "Age" in available)
+            and ("departement" in available or "Department" in available or "Name" in available)
+        ):
+            department_feature = "departement" if "departement" in available else ("Name" if "Name" in available else "Department")
+            if "Age" in available and "DOB" not in available:
+                return "\n".join(
+                    [
+                        f"CREATE OR REPLACE VIEW {result_view} AS",
+                        "SELECT",
+                        f"  {q(department_feature)} AS department,",
+                        f"  {q('VisitType')} AS visit_type,",
+                        f"  {q('Gender')} AS gender,",
+                        f"  {q('Age')} AS age,",
+                        f"  COUNT(DISTINCT {q('PatientID')}) AS patient_count,",
+                        f"  ROUND(COUNT(DISTINCT {q('PatientID')}) * 100.0 / SUM(COUNT(DISTINCT {q('PatientID')})) OVER (), 2) AS percentage_share",
+                        f"FROM {feature_view}",
+                        f"GROUP BY {q('Gender')}, {q('Age')}, {q('VisitType')}, {q(department_feature)}",
+                        "ORDER BY department, percentage_share DESC;",
+                    ]
+                )
+            return "\n".join(
+                [
+                    f"CREATE OR REPLACE VIEW {result_view} AS",
+                    "WITH base AS (",
+                    "  SELECT",
+                    f"    {q(department_feature)} AS DepartmentName,",
+                    f"    {q('VisitType')} AS VisitType,",
+                    f"    {q('Gender')} AS Gender,",
+                    f"    date_diff('year', CAST({q('DOB')} AS DATE), CURRENT_DATE) AS Age,",
+                    f"    COUNT(DISTINCT {q('PatientID')}) AS PatientCount",
+                    f"  FROM {feature_view}",
+                    "  GROUP BY 1, 2, 3, 4",
+                    ")",
+                    "SELECT",
+                    "  DepartmentName,",
+                    "  VisitType,",
+                    "  Gender,",
+                    "  Age,",
+                    "  PatientCount,",
+                    "  ROUND((PatientCount * 100.0) / SUM(PatientCount) OVER (), 2) AS PercentageShare",
+                    "FROM base",
+                    "ORDER BY DepartmentName, PercentageShare DESC;",
+                ]
+            )
+        if (
+            {"PaidAmount", "LineOfBusiness", "PayorID"}.issubset(available)
+            and "commercial" in cuts
+            and "top 10" in lower_name
+            and "sum" in metric
+        ):
+            return "\n".join(
+                [
+                    f"CREATE OR REPLACE VIEW {result_view} AS",
+                    "SELECT",
+                    f"  {q('PayorID')} AS PayorID,",
+                    f"  {q('LineOfBusiness')} AS LineOfBusiness,",
+                    f"  SUM({q('PaidAmount')}) AS TotalPaidAmount",
+                    f"FROM {feature_view}",
+                    f"WHERE {q('LineOfBusiness')} = 'Commercial'",
+                    "GROUP BY 1, 2",
+                    "ORDER BY 3 DESC",
+                    "LIMIT 10;",
+                ]
+            )
         if "encounter count" in metric and "Year" in available and "encounter" in available:
             return "\n".join(
                 [

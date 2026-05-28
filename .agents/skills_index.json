@@ -44,6 +44,21 @@
       "path": "skills/grill-requirements/SKILL.md"
     },
     {
+      "name": "handoff",
+      "description": "Compact the current conversation into a handoff document for another agent to pick up. Save to the temporary directory of the user's OS \u2014 not the current workspace. Reference existing artifacts (PRDs, plans, ADRs, issues, commits, diffs) by path; do not re-paste them. Redact secrets and PII. Include a \"suggested skills\" section.",
+      "path": "skills/handoff/SKILL.md"
+    },
+    {
+      "name": "kpi-analyst",
+      "description": "Use this skill when the user uploads, shares, pastes, or describes a KPI sheet, KPI tracker, metrics document, dashboard metric list, or structured business analytics metric definitions; when asked to understand a metric, write queries for KPIs, calculate a KPI, build a dashboard from KPIs, or inspect files with columns such as Key Business Question, Metric, Dimension, Cut, Filter, Grain, or Description; also use when validating generated KPI SQL and result samples against KPI intent.",
+      "path": "skills/kpi-analyst/SKILL.md"
+    },
+    {
+      "name": "self-grill",
+      "description": "Use BEFORE you commit to a plan, design recommendation, or implementation approach. The skill turns the orchestrating agent into its own interviewer: it generates 3-6 grilling questions tailored to the current proposal, answers each with concrete evidence (file paths, samples, prior decisions), and surfaces any unknown-unknowns it can no longer brush past. Output is a short Self-Grill Audit block that goes into the response BEFORE the final recommendation.",
+      "path": "skills/self-grill/SKILL.md"
+    },
+    {
       "name": "stakeholder-memory",
       "description": "Capture durable user, team, and stakeholder preferences discovered during interviews or corrections. Use when the user states how they prefer decisions, reviews, risk handling, output style, naming, governance, or optimization tradeoffs.",
       "path": "skills/stakeholder-memory/SKILL.md"
@@ -822,6 +837,28 @@
         ]
       },
       {
+        "name": "parse-data-model-images",
+        "command": "uv run parse-data-model-images --workspace <workspace>",
+        "use_when": [
+          "workspace contains image-only data model evidence",
+          "ERD, star-schema, or medallion diagram sidecars need review",
+          "image-derived relationships must stay non-executable until proof or approval",
+          "local OCR can be auto-installed with --auto-install-ocr when missing"
+        ],
+        "outputs": [
+          "interns/generated/data_model_images/<image>.model.json",
+          "interns/reports/data_model_images/<image>.model.md",
+          "interns/reports/data_model_images/current.json",
+          "interns/reports/data_model_images/current.md"
+        ],
+        "safety": "local_safe_review_gated_no_remote_vision_without_explicit_sensitive_upload_confirmation",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
         "name": "export-data-model-diagram",
         "command": "uv run export-data-model-diagram --workspace <workspace>",
         "use_when": [
@@ -1203,6 +1240,26 @@
           "domain-model",
           "data-engineering-pipeline-design",
           "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "apply-relationship-answer",
+        "command": "uv run apply-relationship-answer --workspace <workspace> --relationship-id <relationship_id> --answer <approve|reject|keep_blocked>",
+        "use_when": [
+          "user approved or rejected a relationship contract",
+          "profile_validated relationship needs governed promotion",
+          "agent must not hand-edit relationship_contracts.json"
+        ],
+        "outputs": [
+          "updated interns/generated/contracts/relationship_contracts.json",
+          "recomputed executable and candidate relationship counts",
+          "decision_history entry with source apply-relationship-answer"
+        ],
+        "safety": "local_safe_validated_decision_write_prevents_manual_json_edits",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "data-engineering-pipeline-design"
         ]
       },
       {
@@ -1667,6 +1724,18 @@
       "targets": {}
     },
     {
+      "name": "kpi-analyst",
+      "display_name": "KPI Analyst",
+      "description": "Interpret KPI sheets and validate KPI queries.",
+      "skills": [
+        "kpi-analyst"
+      ],
+      "default_prompt": "Use KPI analyst to parse KPI definitions, classify metric intent, write or review one query per KPI, show result tables, and surface only correctness-relevant assumptions.",
+      "safety": "follows_skill_policy",
+      "source_path": "skills/kpi-analyst/agents/openai.yaml",
+      "targets": {}
+    },
+    {
       "name": "workspace-flow-orchestrator",
       "display_name": "Workspace Flow Orchestrator",
       "description": "Drives plan, local-safe, and bounded-autopilot workspace orchestration while keeping main-chat output concise.",
@@ -1675,7 +1744,7 @@
         "workspace-kpi-query-optimizer",
         "task-onboarding"
       ],
-      "default_prompt": "Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. Show current.md to humans, use current.json for structured choices, and record deterministic next commands.",
+      "default_prompt": "Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. For blocker, approval, KPI-generation, data-model, duplicate-review, or pipeline-format panels, post the generated current.md verbatim as the human card; do not replace it with a tool-native generic question box or a summary. Use current.json only to render buttons/options and to apply the exact selected answer. Record deterministic next commands.",
       "safety": "local_safe_workflow_only_no_remote_execution",
       "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
       "targets": {
@@ -1754,7 +1823,7 @@
         "stakeholder-memory",
         "evolution"
       ],
-      "default_prompt": "Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post current.md, use current.json for buttons, and record trajectory/session events.",
+      "default_prompt": "Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post the generated current.md verbatim as the human card, use current.json only for buttons/options and answer application, and record trajectory/session events. Do not collapse panels into a generic ask-user text box.",
       "safety": "notification_and_approval_bridge_no_direct_dataset_or_remote_mutation",
       "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
       "targets": {

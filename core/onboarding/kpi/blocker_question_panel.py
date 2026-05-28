@@ -12,9 +12,19 @@ from typing import Any
 from core.paths import PROJECT_ROOT
 from core.storage.workspace_layout import WorkspaceLayout
 from core.wiki import WikiLayout, read_feature_note
+from core.contracts.versioning import register_contract
+from core.onboarding.kpi.panel_preview_cache import (
+    compute_preview_cache_key,
+    load_cached_preview,
+    save_cached_preview,
+)
+from core.onboarding.kpi.panel_preview_executor import execute_preview
+from core.onboarding.kpi.pii_redaction import is_pii_column, redact_rows, redact_sample_values
 
 
 PANEL_VERSION = 1
+
+register_contract("blocker_question_panel/current.json", current_version=PANEL_VERSION)
 INTERACTION_CONTRACT = {
     "display_mode": "project_blocker_panel",
     "primary_artifact": "current.md",
@@ -81,6 +91,19 @@ class BlockerQuestionPanelBuilder:
 
         questions = _build_questions(mapping, self.workspace, self.repo_root)
         current = questions[0] if questions else _empty_panel(mapping, self.workspace, self.repo_root)
+        # Attach the new "real-ops-dashboard" preview sections to every
+        # generated panel so the renderer has data to work with.
+        try:
+            _attach_preview_sections(current, mapping, self.workspace, self.repo_root)
+            for question in questions:
+                if question is current:
+                    continue
+                _attach_preview_sections(question, mapping, self.workspace, self.repo_root)
+        except Exception as exc:  # pragma: no cover - defensive
+            # Preview composition must never break panel emission. If anything
+            # in the executor / cache / redactor fails we drop the previews
+            # silently; the rest of the panel still renders.
+            current.setdefault("preview_compose_error", str(exc))
 
         current_json = self.output_dir / "current.json"
         current_markdown = self.output_dir / "current.md"
@@ -174,6 +197,9 @@ def _question_for_cluster(
     applies_to = [str(item["kpi"].get("kpi_id") or "") for item in items]
     evidence_files = _evidence_files(items, repo_root)
     source_truth = _kpi_source_truth(items, workspace, repo_root)
+    kpi_understanding = _kpi_understanding_packet(items, source_truth, feature)
+    if not physical_options:
+        physical_options = _profile_candidate_options(items, workspace, repo_root, feature)
     base = {
         "artifact_type": "blocker_question_panel/current.json",
         "version": PANEL_VERSION,
@@ -200,7 +226,7 @@ def _question_for_cluster(
                 "source cell or source artifact proof",
                 "recommended option",
                 "formula or derived logic when present",
-                "column and dataset proof",
+                "SQL table/column mapping with source evidence",
                 "sample values",
                 "SQL query or query sketch",
                 "demo result table shape",
@@ -208,7 +234,19 @@ def _question_for_cluster(
             ],
         },
         "default_code_preference": "sql",
+        "output_dialect": {
+            "default": "sql",
+            "label": "SQL (default)",
+            "alternatives": ["polars", "pyspark", "databricks_sql"],
+            "rule": "Render SQL by default. Generate other dialects only when the user explicitly selects them.",
+        },
+        "immutable_kpi_policy": {
+            "rule": "The KPI from the source workbook or registry is hard truth and must not be rewritten.",
+            "understanding_is_review_context_only": True,
+            "placeholder_sql_is_non_executable": True,
+        },
         "kpi_source_truth": source_truth,
+        "kpi_understanding": kpi_understanding,
     }
     prior = _prior_wiki_decision(workspace, repo_root, feature)
     if prior:
@@ -312,6 +350,41 @@ def _question_for_cluster(
             ]
             + [_custom_rule_option(feature)],
         }
+    evidence_pack = _cli_agent_evidence_pack(feature, items, workspace, repo_root)
+    if evidence_pack["available_columns"]:
+        return {
+            **base,
+            "blocker": (
+                f"`{feature}` is unresolved for {len(applies_to)} KPI(s). No evidence-backed "
+                "derived or physical option could be produced from the workspace alone, but "
+                f"{len(evidence_pack['available_columns'])} profile-scanned column(s) are available "
+                "as bounded evidence for a semantic proposal."
+            ),
+            "question": (
+                f"Propose a mapping for `{feature}` from the bounded evidence below, then ask the "
+                "user to confirm before applying."
+            ),
+            "answer_type": "cli_agent_proposal_needed",
+            "recommended_option_id": "option_a",
+            "recommended_answer": (
+                "The orchestrating CLI agent should read `cli_agent_evidence_pack`, propose a JSON "
+                "mapping in the shape of `option_a.expected_answer_shape`, present it to the user, "
+                "and only after explicit user approval call apply-kpi-panel-answer with "
+                "--answer custom --custom-definition <agent-proposed JSON>."
+            ),
+            "why": (
+                "The Python resolver does not call any LLM directly. When workspace evidence alone "
+                "cannot resolve a feature, the orchestrating CLI agent (whichever LLM-backed CLI is "
+                "currently running) proposes a mapping from the bounded evidence pack. The proposal "
+                "is non-executable until the user confirms it via the normal apply path."
+            ),
+            "cli_agent_evidence_pack": evidence_pack,
+            "cli_agent_task": _cli_agent_task_text(feature, applies_to, evidence_pack, workspace, repo_root),
+            "options": [
+                _cli_agent_proposal_option(feature, evidence_pack),
+                _custom_rule_option(feature),
+            ],
+        }
     return {
         **base,
         "blocker": (
@@ -320,31 +393,13 @@ def _question_for_cluster(
         ),
         "question": f"What authoritative source, physical column, or accepted workspace rule defines `{feature}`?",
         "answer_type": "direct_mapping_or_business_rule",
-        "recommended_option_id": "option_a",
-        "recommended_answer": "Use a direct source-backed mapping or provide a data dictionary/business rule.",
+        "recommended_option_id": "custom",
+        "recommended_answer": "Provide a concrete source-backed mapping, formula, or business rule.",
         "why": (
             "A formula should not be invented when the resolver cannot produce a valid evidence-backed "
             "derived option. This answer can be saved as a reusable workspace definition."
         ),
         "options": [
-            {
-                "option_id": "option_a",
-                "label": "Provide direct source-backed definition",
-                "business_summary": (
-                    f"Map `{feature}` to a physical column, data dictionary field, source-origin rule, "
-                    "or accepted business definition."
-                ),
-                "expected_answer_shape": {
-                    "feature": feature,
-                    "resolution_type": "direct_column | source_origin_rule | business_formula | taxonomy",
-                    "source_columns": [],
-                    "formula": "",
-                    "grain": "",
-                    "evidence_source": "",
-                    "applies_to_kpis": applies_to,
-                },
-                "json_backed": False,
-            },
             _custom_rule_option(feature),
         ],
     }
@@ -403,6 +458,178 @@ def _kpi_source_truth(items: list[dict[str, Any]], workspace: Path, repo_root: P
     return rows
 
 
+def _kpi_understanding_packet(
+    items: list[dict[str, Any]],
+    source_truth: list[dict[str, Any]],
+    feature: str,
+) -> list[dict[str, Any]]:
+    truth_by_id = {str(item.get("kpi_id") or ""): item for item in source_truth}
+    rows = []
+    seen = set()
+    for item in items:
+        kpi = item["kpi"]
+        kpi_id = str(kpi.get("kpi_id") or "")
+        if kpi_id in seen:
+            continue
+        seen.add(kpi_id)
+        truth = truth_by_id.get(kpi_id, {})
+        metric = str(truth.get("metric") or kpi.get("metric") or "")
+        cuts = list(truth.get("cuts") or _split_cuts(str(kpi.get("cuts") or "")))
+        question = str(truth.get("business_question") or kpi.get("name") or "")
+        semantic = _is_semantic_blocker(feature, metric, cuts, question, kpi)
+        rows.append(
+            {
+                "kpi_id": kpi_id,
+                "presentation_level": "full" if semantic else "compact",
+                "requires_understanding_approval": semantic,
+                "affected_unresolved_feature": feature,
+                "original_kpi": {
+                    "business_question": question,
+                    "description": str(truth.get("description") or kpi.get("description") or ""),
+                    "metric": metric,
+                    "cuts": cuts,
+                    "source": str(truth.get("source") or kpi.get("source") or ""),
+                },
+                "my_understanding": _understanding_text(question, metric, cuts),
+                "understanding_warning": (
+                    "This is interpretation for review only. It does not replace or modify the source KPI."
+                ),
+                "output_dialect": "SQL",
+                "strict_proven_sql": _strict_proven_sql(kpi),
+                "intent_sql_sketch": _intent_sql_sketch(kpi, feature, metric, cuts),
+                "demo_result_table": _kpi_demo_table(kpi_id, metric, cuts),
+            }
+        )
+    return rows
+
+
+def _is_semantic_blocker(
+    feature: str,
+    metric: str,
+    cuts: list[str],
+    question: str,
+    kpi: dict[str, Any],
+) -> bool:
+    haystack = " ".join([feature, metric, question, ", ".join(cuts)]).lower()
+    semantic_tokens = {
+        "percentage",
+        "share",
+        "denominator",
+        "grain",
+        "age",
+        "dob",
+        "date",
+        "month",
+        "quarter",
+        "year",
+        "top",
+        "payer",
+        "lob",
+        "medicare",
+        "commercial",
+        "join",
+        "distinct",
+        "sum(",
+        "avg(",
+        "count(",
+    }
+    if any(token in haystack for token in semantic_tokens):
+        return True
+    return any(
+        feature_item.get("resolution_type") in {"derived_formula", "kpi_definition_required"}
+        for feature_item in kpi.get("features", [])
+    )
+
+
+def _understanding_text(question: str, metric: str, cuts: list[str]) -> str:
+    parts = [f"Answer the source KPI exactly as written: {question}"]
+    if metric:
+        parts.append(f"Compute `{metric}`.")
+    if cuts:
+        parts.append("Break out or filter by: " + ", ".join(cuts) + ".")
+    return " ".join(parts)
+
+
+def _strict_proven_sql(kpi: dict[str, Any]) -> str:
+    ready_features = [
+        feature
+        for feature in kpi.get("features", [])
+        if feature.get("state") in READY_STATES and feature.get("source_columns")
+    ]
+    if not ready_features:
+        return "-- No strict proven SQL yet: this KPI has no fully proven source mappings for the current preview."
+    select_items = []
+    table = "proven_source"
+    for feature in ready_features[:8]:
+        source = (feature.get("source_columns") or [{}])[0]
+        table = Path(str(source.get("dataset") or "")).stem or table
+        column = str(source.get("column") or "")
+        if column:
+            select_items.append(f'  "{column}" AS "{_slug(str(feature.get("feature") or column))}"')
+    if not select_items:
+        return "-- No strict proven SQL yet: proven mappings have no physical columns."
+    return "SELECT\n" + ",\n".join(select_items) + f'\nFROM "{table}"\nLIMIT 20;'
+
+
+def _intent_sql_sketch(
+    kpi: dict[str, Any],
+    feature: str,
+    metric: str,
+    cuts: list[str],
+) -> str:
+    metric_expr = metric or "<METRIC_EXPRESSION>"
+    table = _first_kpi_table(kpi) or "<SOURCE_TABLE>"
+    group_columns = [
+        _placeholder_for_cut(cut)
+        for cut in cuts
+        if not any(token in cut for token in ("=", ">", "<"))
+    ][:6]
+    filters = [cut for cut in cuts if any(token in cut for token in ("=", ">", "<"))]
+    select_lines = [f"  {metric_expr} AS metric_value"]
+    select_lines.extend(f"  {column}" for column in group_columns)
+    lines = [
+        "-- NON-EXECUTABLE INTENT SKETCH: placeholders require user/proof confirmation.",
+        "-- KPI text is hard truth; this sketch is only to review intent.",
+        "SELECT",
+        ",\n".join(select_lines),
+        f"FROM {table}",
+    ]
+    if filters:
+        lines.extend(["WHERE " + " AND ".join(filters)])
+    if group_columns:
+        lines.append("GROUP BY " + ", ".join(group_columns))
+    lines.append(f"-- unresolved blocker: <{feature}>")
+    return "\n".join(lines) + ";"
+
+
+def _first_kpi_table(kpi: dict[str, Any]) -> str:
+    for feature in kpi.get("features", []):
+        for source in feature.get("source_columns") or []:
+            dataset = str(source.get("dataset") or "")
+            if dataset:
+                return '"' + (Path(dataset).stem or "source_table") + '"'
+    return ""
+
+
+def _placeholder_for_cut(cut: str) -> str:
+    clean = re.sub(r"\([^)]*\)", "", cut)
+    clean = re.sub(r"[^A-Za-z0-9_]+", "_", clean).strip("_")
+    return f"<{clean or 'DIMENSION'}>"
+
+
+def _kpi_demo_table(kpi_id: str, metric: str, cuts: list[str]) -> str:
+    dimensions = [
+        _placeholder_for_cut(cut).strip("<>")
+        for cut in cuts
+        if not any(token in cut for token in ("=", ">", "<"))
+    ][:3]
+    row: dict[str, Any] = {dimension: "<example>" for dimension in dimensions}
+    metric_name = _slug(metric or "metric_value")
+    row[metric_name] = "<computed>"
+    row["kpi_id"] = kpi_id
+    return _markdown_table([row])
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -422,6 +649,14 @@ def _source_label(path: str, repo_root: Path) -> str:
         return ""
     source_path = Path(path)
     return _rel(source_path, repo_root) if source_path.is_absolute() else path
+
+
+def _sql_table_label(path: str) -> str:
+    return Path(str(path or "")).stem or "source_table"
+
+
+def _sql_column_label(path: str, column: str) -> str:
+    return f"{_sql_table_label(path)}.{column or 'unknown'}"
 
 
 def _excel_cell_trace(source_path: str, source: dict[str, Any]) -> dict[str, Any]:
@@ -529,20 +764,151 @@ def _physical_column_options(items: list[dict[str, Any]]) -> list[dict[str, Any]
     return options
 
 
+def _profile_candidate_options(
+    items: list[dict[str, Any]],
+    workspace: Path,
+    repo_root: Path,
+    feature: str,
+) -> list[dict[str, Any]]:
+    if _norm(feature) in {"distinct", "disitnct"}:
+        return []
+    profile_index = _load_json(workspace / "interns" / "generated" / "profiles" / "profile_index.json")
+    profiles = profile_index.get("profiles") if isinstance(profile_index.get("profiles"), list) else []
+    scored: list[dict[str, Any]] = []
+    for profile in profiles:
+        dataset = str(profile.get("path") or "")
+        if not dataset:
+            continue
+        try:
+            if not WorkspaceLayout(workspace).is_dataset_allowed(Path(dataset)):
+                continue
+        except OSError:
+            continue
+        for column in profile.get("columns") or []:
+            column_name = str(column.get("name") or "")
+            score, reason = _profile_candidate_score(feature, dataset, column_name, items)
+            if score <= 0:
+                continue
+            scored.append(
+                {
+                    "feature_state": "profile_candidate",
+                    "resolution_type": "profile_inferred_physical_column",
+                    "kpi_id": items[0]["kpi"].get("kpi_id"),
+                    "kpi_name": items[0]["kpi"].get("name"),
+                    "kpi_metric": items[0]["kpi"].get("metric"),
+                    "dataset": _rel(Path(dataset), repo_root),
+                    "column": column_name,
+                    "dtype": column.get("dtype"),
+                    "row_count": profile.get("row_count"),
+                    "score": score,
+                    "profile_path": profile.get("profile_path"),
+                    "observed_values": _sample_values(column.get("sample_values")),
+                    "value_profile": {
+                        "sample_values": _sample_values(column.get("sample_values")),
+                        "sample_min": column.get("sample_min"),
+                        "sample_max": column.get("sample_max"),
+                        "null_count": column.get("null_count"),
+                        "source": column.get("source") or "sample_profile",
+                    },
+                    "semantic_meaning_sources": [
+                        {
+                            "source": profile.get("profile_path"),
+                            "evidence_type": "profile_index_column_sample",
+                            "reason": reason,
+                        }
+                    ],
+                    "mapping_proof": {
+                        "sample_query": (
+                            f'SELECT "{column_name}" AS "{_slug(column_name)}" '
+                            f'FROM "{Path(dataset).stem}" LIMIT 5;'
+                        ),
+                        "sample_output": [
+                            {_slug(column_name): value}
+                            for value in _sample_values(column.get("sample_values"))[:5]
+                        ],
+                        "source_files": [profile.get("profile_path")],
+                    },
+                    "evidence_state": "profile_scanned_candidate",
+                    "reason": reason,
+                }
+            )
+    scored.sort(
+        key=lambda item: (
+            -float(item.get("score") or 0),
+            str(item.get("dataset") or ""),
+            str(item.get("column") or ""),
+        )
+    )
+    return scored[:5]
+
+
+def _profile_candidate_score(
+    feature: str,
+    dataset: str,
+    column: str,
+    items: list[dict[str, Any]],
+) -> tuple[float, str]:
+    feature_norm = _norm(feature)
+    column_norm = _norm(column)
+    dataset_norm = _norm(Path(dataset).stem)
+    kpi_text = _norm(
+        " ".join(
+            str(value or "")
+            for item in items
+            for value in [item["kpi"].get("name"), item["kpi"].get("description"), item["kpi"].get("cuts")]
+        )
+    )
+    score = 0.0
+    reasons: list[str] = []
+    if feature_norm and feature_norm == column_norm:
+        score += 100
+        reasons.append("column name exactly matches unresolved feature")
+    elif feature_norm and (feature_norm in column_norm or column_norm in feature_norm):
+        score += 60
+        reasons.append("column name partially matches unresolved feature")
+
+    # Workspace-derived aliases live in the workspace lexicon; this scorer
+    # stays domain-agnostic. The previous _feature_synonyms() dict (which
+    # hardcoded "department"/"lob" healthcare-RCM vocabulary) has been removed.
+    if column_norm and column_norm in kpi_text:
+        score += 20
+        reasons.append("column name appears in KPI text")
+    if dataset_norm and dataset_norm.rstrip("s") in kpi_text:
+        score += 20
+        reasons.append("dataset name appears in KPI text")
+    if column_norm in {"id", "insertdate", "modifieddate"}:
+        score -= 30
+        reasons.append("generic technical column")
+    return score, "; ".join(reasons) or "profile column candidate"
+
+
+def _sample_values(raw: Any) -> list[Any]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw[:8]
+    text = str(raw).strip()
+    if not text:
+        return []
+    return text.split()[:8]
+
+
 def _physical_option_payload(
     option: dict[str, Any],
     idx: int,
     source_truth: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     option_id = f"option_{chr(ord('a') + idx - 1)}"
-    label = f"{option.get('dataset', 'unknown')}.{option.get('column', 'unknown')}"
+    dataset = str(option.get("dataset") or "")
+    source_label = _source_label(dataset, PROJECT_ROOT)
+    sql_label = _sql_column_label(dataset, str(option.get("column") or "unknown"))
     proof = _physical_option_proof(option, source_truth or [])
     return {
         "option_id": option_id,
-        "label": label,
+        "label": sql_label,
         "business_summary": (
-            f"Use `{option.get('column')}` from `{option.get('dataset')}` as the accepted "
-            "workspace mapping."
+            f"Use SQL column `{sql_label}` as the accepted workspace mapping "
+            f"(source evidence: `{source_label}`)."
         ),
         "json_backed": True,
         "evidence_state": option.get("evidence_state"),
@@ -559,6 +925,7 @@ def _physical_option_payload(
 def _physical_option_proof(option: dict[str, Any], source_truth: list[dict[str, Any]]) -> dict[str, Any]:
     column = str(option.get("column") or "")
     dataset = str(option.get("dataset") or "")
+    sql_table = _sql_table_label(dataset)
     samples = list(option.get("observed_values") or option.get("value_profile", {}).get("sample_values") or [])[:8]
     query = option.get("answer_demo", {}).get("query") or (
         f'SELECT "{column}", COUNT(*) AS row_count\n'
@@ -573,6 +940,8 @@ def _physical_option_proof(option: dict[str, Any], source_truth: list[dict[str, 
         "required_columns": [
             {
                 "business_field": str(source_truth[0]["business_question"] if source_truth else option.get("kpi_name") or ""),
+                "sql_table": sql_table,
+                "sql_column": _sql_column_label(dataset, column),
                 "physical_column": column,
                 "dataset": dataset,
                 "profile_path": option.get("profile_path"),
@@ -840,6 +1209,270 @@ def _custom_rule_option(feature: str) -> dict[str, Any]:
     }
 
 
+CLI_AGENT_EVIDENCE_COLUMN_CAP = 60
+CLI_AGENT_EVIDENCE_SAMPLE_CAP = 5
+CLI_AGENT_DICTIONARY_EXCERPT_CHARS = 2_000
+CLI_AGENT_DICTIONARY_DOCUMENT_CAP = 6
+
+
+def _cli_agent_evidence_pack(
+    feature: str,
+    items: list[dict[str, Any]],
+    workspace: Path,
+    repo_root: Path,
+) -> dict[str, Any]:
+    """Bounded evidence pack the orchestrating CLI agent reads to propose a mapping.
+
+    No raw datasets, no full profile payloads. Only:
+      - the feature term and the KPI context that needs it;
+      - up to ``CLI_AGENT_EVIDENCE_COLUMN_CAP`` profile columns across all
+        datasets, each with dtype, dataset path, and up to
+        ``CLI_AGENT_EVIDENCE_SAMPLE_CAP`` sample values;
+      - any workspace_feature_definitions already accepted, as worked examples;
+      - other features already resolved in kpi_feature_mapping, so the agent can
+        see the workspace's resolution style.
+    """
+    profile_index = _load_json(
+        workspace / "interns" / "generated" / "profiles" / "profile_index.json"
+    )
+    profiles = profile_index.get("profiles") if isinstance(profile_index.get("profiles"), list) else []
+    available_columns: list[dict[str, Any]] = []
+    layout = WorkspaceLayout(workspace)
+    for profile in profiles:
+        dataset_raw = str(profile.get("path") or "")
+        if not dataset_raw:
+            continue
+        try:
+            if not layout.is_dataset_allowed(Path(dataset_raw)):
+                continue
+        except OSError:
+            continue
+        dataset_rel = _rel(Path(dataset_raw), repo_root)
+        for column in profile.get("columns") or []:
+            if len(available_columns) >= CLI_AGENT_EVIDENCE_COLUMN_CAP:
+                break
+            name = str(column.get("name") or "")
+            if not name:
+                continue
+            sample_values = _sample_values(column.get("sample_values"))[:CLI_AGENT_EVIDENCE_SAMPLE_CAP]
+            available_columns.append(
+                {
+                    "dataset": dataset_rel,
+                    "column": name,
+                    "dtype": column.get("dtype"),
+                    "null_count": column.get("null_count"),
+                    "sample_values": sample_values,
+                    "profile_path": profile.get("profile_path"),
+                }
+            )
+        if len(available_columns) >= CLI_AGENT_EVIDENCE_COLUMN_CAP:
+            break
+
+    prior_definitions = _load_json(
+        workspace / "interns" / "generated" / "contracts" / "workspace_feature_definitions.json"
+    )
+    prior_accepted: list[dict[str, Any]] = []
+    raw_defs = prior_definitions.get("definitions") or prior_definitions.get("workspace_definitions") or {}
+    if isinstance(raw_defs, dict):
+        for term, definition in raw_defs.items():
+            if not isinstance(definition, dict):
+                continue
+            prior_accepted.append(
+                {
+                    "feature": term,
+                    "source_columns": definition.get("source_columns") or [],
+                    "formula": definition.get("formula") or definition.get("expression") or "",
+                    "evidence_note": definition.get("evidence_note") or "",
+                    "state": definition.get("state") or "user_confirmed",
+                }
+            )
+
+    feature_mapping = _load_json(
+        workspace / "interns" / "generated" / "contracts" / "kpi_feature_mapping.json"
+    )
+    prior_resolved: list[dict[str, Any]] = []
+    for kpi in feature_mapping.get("kpis") or []:
+        if not isinstance(kpi, dict):
+            continue
+        for resolved_feature in kpi.get("features") or []:
+            if not isinstance(resolved_feature, dict):
+                continue
+            if str(resolved_feature.get("state") or "") not in READY_STATES:
+                continue
+            term = str(resolved_feature.get("feature") or "")
+            if not term or term == feature:
+                continue
+            columns = [
+                {
+                    "dataset": col.get("dataset"),
+                    "column": col.get("column"),
+                }
+                for col in resolved_feature.get("source_columns") or []
+                if isinstance(col, dict)
+            ]
+            prior_resolved.append({"feature": term, "source_columns": columns})
+
+    kpi_context = []
+    seen_kpis: set[str] = set()
+    for item in items:
+        kpi = item["kpi"]
+        kpi_id = str(kpi.get("kpi_id") or "")
+        if kpi_id in seen_kpis:
+            continue
+        seen_kpis.add(kpi_id)
+        kpi_context.append(
+            {
+                "kpi_id": kpi_id,
+                "name": kpi.get("name"),
+                "description": kpi.get("description"),
+                "metric": kpi.get("metric"),
+                "cuts": kpi.get("cuts"),
+            }
+        )
+
+    # Data-dictionary excerpts: extracted by methodology_parser during
+    # onboarding from any PDF/DOCX data-model files. Bounded excerpts only —
+    # the CLI agent gets meaning context, not full PHI/PII text dumps.
+    dictionary_excerpts: list[dict[str, Any]] = []
+    dictionary_index = _load_json(
+        workspace / "interns" / "generated" / "data_dictionary" / "index.json"
+    )
+    for doc in (dictionary_index.get("documents") or [])[:CLI_AGENT_DICTIONARY_DOCUMENT_CAP]:
+        if not isinstance(doc, dict):
+            continue
+        text_rel = doc.get("text_path")
+        if not isinstance(text_rel, str) or not text_rel:
+            continue
+        text_path = (repo_root / text_rel).resolve()
+        if not text_path.exists():
+            continue
+        try:
+            raw = text_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if not raw.strip():
+            continue
+        excerpt = raw[:CLI_AGENT_DICTIONARY_EXCERPT_CHARS]
+        dictionary_excerpts.append(
+            {
+                "source_document": doc.get("path"),
+                "text_path": text_rel,
+                "char_count": doc.get("char_count"),
+                "excerpt": excerpt,
+                "excerpt_truncated": len(raw) > CLI_AGENT_DICTIONARY_EXCERPT_CHARS,
+            }
+        )
+
+    return {
+        "feature": feature,
+        "kpi_context": kpi_context,
+        "available_columns": available_columns,
+        "prior_accepted_definitions": prior_accepted[:20],
+        "prior_resolved_features": prior_resolved[:20],
+        "data_dictionary_excerpts": dictionary_excerpts,
+        "evidence_caps": {
+            "columns": CLI_AGENT_EVIDENCE_COLUMN_CAP,
+            "samples_per_column": CLI_AGENT_EVIDENCE_SAMPLE_CAP,
+            "prior_examples": 20,
+            "dictionary_documents": CLI_AGENT_DICTIONARY_DOCUMENT_CAP,
+            "dictionary_chars_per_document": CLI_AGENT_DICTIONARY_EXCERPT_CHARS,
+        },
+        "no_raw_data_policy": (
+            "Propose only from columns listed in available_columns. Do not invent column names. "
+            "Do not request raw dataset reads. If evidence is insufficient, return option_b (custom). "
+            "Data-dictionary excerpts are bounded and may contain partial context; ground every "
+            "proposed mapping in a profile column."
+        ),
+    }
+
+
+def _cli_agent_task_text(
+    feature: str,
+    applies_to: list[str],
+    evidence_pack: dict[str, Any],
+    workspace: Path,
+    repo_root: Path,
+) -> dict[str, Any]:
+    workspace_rel = _rel(workspace, repo_root)
+    apply_template = (
+        f"uv run apply-kpi-panel-answer --workspace {workspace_rel} "
+        f"--domain <domain> --answer custom --custom-definition '<JSON proposal>' "
+        f"--via-cli-agent"
+    )
+    confirm_template = (
+        f"uv run confirm-cli-agent-proposal --workspace {workspace_rel} "
+        f"--feature {feature} --decision confirm"
+    )
+    reject_template = (
+        f"uv run confirm-cli-agent-proposal --workspace {workspace_rel} "
+        f"--feature {feature} --decision reject"
+    )
+    return {
+        "for_cli_agent": True,
+        "instruction": (
+            f"You are the orchestrating CLI agent. Feature `{feature}` is unresolved for "
+            f"{len(applies_to)} KPI(s). Read `cli_agent_evidence_pack` and propose a single JSON "
+            "mapping in the shape of `options[0].expected_answer_shape`. Present the proposal to "
+            "the user in chat with the columns you chose and the reason. Apply with "
+            "`--via-cli-agent` so the decision is recorded as `cli_agent_proposed` (NOT "
+            "`user_confirmed`), then ask the user to run `confirm-cli-agent-proposal` to "
+            "finalize."
+        ),
+        "agent_steps": [
+            "Read the cli_agent_evidence_pack section in current.json.",
+            "Choose a column (or formula over multiple columns) from available_columns ONLY.",
+            "Fill option_a.expected_answer_shape with: feature, source_columns, formula or "
+            "expression if derived, evidence_source pointing to the profile_path used, and a "
+            "one-sentence reason that names the evidence you relied on.",
+            "Show the JSON to the user along with the columns and their sample values.",
+            "Wait for explicit user approval ('yes', 'apply it', or a modification request).",
+            f"On approval, run: {apply_template}",
+            f"After the user reviews the resulting mapping, run: {confirm_template}",
+            f"If the user rejects after seeing the recorded proposal, run: {reject_template}",
+        ],
+        "do_not": [
+            "Do not invent column names that are not in available_columns.",
+            "Do not request access to raw datasets.",
+            "Do not call apply-kpi-panel-answer before user approval.",
+            "Do not omit `--via-cli-agent` when applying — that skips the user-confirmation step.",
+            "Do not run confirm-cli-agent-proposal yourself without explicit user direction.",
+            "Do not summarize away the evidence pack when presenting to the user.",
+        ],
+        "apply_command_template": apply_template,
+        "confirm_command_template": confirm_template,
+        "reject_command_template": reject_template,
+    }
+
+
+def _cli_agent_proposal_option(
+    feature: str,
+    evidence_pack: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "option_id": "option_a",
+        "label": "Agent proposes a mapping from bounded evidence",
+        "business_summary": (
+            f"The orchestrating CLI agent reads the evidence pack and proposes a mapping for "
+            f"`{feature}`. User approval is required before the apply step runs."
+        ),
+        "expected_answer_shape": {
+            "feature": feature,
+            "source_columns": [
+                {"dataset": "<one of evidence_pack.available_columns[].dataset>",
+                 "column": "<one of evidence_pack.available_columns[].column>"}
+            ],
+            "formula": "<optional expression over the source columns; empty for direct mapping>",
+            "evidence_source": "<profile_path used to justify the choice>",
+            "reason": "<one sentence naming the evidence relied on>",
+            "agent_confidence": "<low|medium|high>",
+            "needs_user_confirmation": True,
+        },
+        "json_backed": True,
+        "evidence_column_count": len(evidence_pack.get("available_columns") or []),
+        "evidence_caps": evidence_pack.get("evidence_caps"),
+    }
+
+
 def _evidence_files(items: list[dict[str, Any]], repo_root: Path) -> list[str]:
     files = set()
     for item in items:
@@ -904,6 +1537,12 @@ def _render_markdown(panel: dict[str, Any]) -> str:
         f"- Answer type: `{panel.get('answer_type', '')}`",
         "",
     ]
+    if panel.get("feature_resolution_table"):
+        lines.extend(_render_feature_resolution_table(panel["feature_resolution_table"]))
+    if panel.get("sample_evidence"):
+        lines.extend(_render_sample_evidence(panel["sample_evidence"]))
+    if panel.get("kpi_preview"):
+        lines.extend(_render_kpi_preview(panel["kpi_preview"]))
     interaction = panel.get("interaction_contract") or {}
     if interaction:
         lines.extend(
@@ -965,6 +1604,72 @@ def _render_markdown(panel: dict[str, Any]) -> str:
                 "",
             ]
         )
+    if panel.get("output_dialect"):
+        dialect = panel.get("output_dialect") or {}
+        lines.extend(
+            [
+                "## Output Dialect",
+                "",
+                f"- Default: `{dialect.get('label', 'SQL (default)')}`",
+                "- Alternatives: " + ", ".join(f"`{item}`" for item in dialect.get("alternatives", [])),
+                f"- Rule: {dialect.get('rule', '')}",
+                "",
+            ]
+        )
+    if panel.get("immutable_kpi_policy"):
+        policy = panel.get("immutable_kpi_policy") or {}
+        lines.extend(
+            [
+                "## Immutable KPI Policy",
+                "",
+                str(policy.get("rule", "")),
+                "",
+                f"- Understanding is review context only: `{policy.get('understanding_is_review_context_only')}`",
+                f"- Placeholder SQL is non-executable: `{policy.get('placeholder_sql_is_non_executable')}`",
+                "",
+            ]
+        )
+    if panel.get("kpi_understanding"):
+        lines.extend(["## KPI Understanding Review", ""])
+        for item in panel.get("kpi_understanding") or []:
+            original = item.get("original_kpi") or {}
+            lines.extend(
+                [
+                    f"### {item.get('kpi_id', '')}",
+                    "",
+                    f"- Presentation level: `{item.get('presentation_level', '')}`",
+                    f"- Requires understanding approval: `{item.get('requires_understanding_approval')}`",
+                    f"- Affected unresolved feature: `{item.get('affected_unresolved_feature', '')}`",
+                    f"- Original KPI: {original.get('business_question', '')}",
+                    f"- Source metric: `{original.get('metric', '')}`",
+                    f"- Source cuts / filters: {', '.join(original.get('cuts') or [])}",
+                    "",
+                    "#### My Understanding",
+                    "",
+                    str(item.get("my_understanding", "")),
+                    "",
+                    str(item.get("understanding_warning", "")),
+                    "",
+                    f"#### Output Dialect: {item.get('output_dialect', 'SQL')}",
+                    "",
+                    "#### Strict Proven SQL",
+                    "",
+                    "```sql",
+                    str(item.get("strict_proven_sql", "")),
+                    "```",
+                    "",
+                    "#### Placeholder Intent SQL",
+                    "",
+                    "```sql",
+                    str(item.get("intent_sql_sketch", "")),
+                    "```",
+                    "",
+                    "#### Demo Result Table",
+                    "",
+                    str(item.get("demo_result_table", "")),
+                    "",
+                ]
+            )
     lines += [
         "## Required User-Facing Ask",
         "",
@@ -993,6 +1698,60 @@ def _render_markdown(panel: dict[str, Any]) -> str:
         "",
         str(panel.get("why", "")),
         "",
+    ]
+    cli_agent_task = panel.get("cli_agent_task") or {}
+    if cli_agent_task:
+        lines.extend(
+            [
+                "## CLI Agent Task",
+                "",
+                str(cli_agent_task.get("instruction", "")),
+                "",
+                "### Agent Steps",
+                "",
+            ]
+        )
+        for step in cli_agent_task.get("agent_steps") or []:
+            lines.append(f"- {step}")
+        lines.append("")
+        do_not = cli_agent_task.get("do_not") or []
+        if do_not:
+            lines.extend(["### Do Not", ""])
+            for rule in do_not:
+                lines.append(f"- {rule}")
+            lines.append("")
+        apply_template = cli_agent_task.get("apply_command_template")
+        if apply_template:
+            lines.extend(
+                [
+                    "### Apply Command Template (run only after user approval)",
+                    "",
+                    "```text",
+                    str(apply_template),
+                    "```",
+                    "",
+                ]
+            )
+    evidence_pack = panel.get("cli_agent_evidence_pack") or {}
+    if evidence_pack:
+        lines.extend(
+            [
+                "## CLI Agent Evidence Pack",
+                "",
+                f"- Feature: `{evidence_pack.get('feature', '')}`",
+                f"- Available columns: {len(evidence_pack.get('available_columns') or [])}",
+                f"- Prior accepted definitions: {len(evidence_pack.get('prior_accepted_definitions') or [])}",
+                f"- Prior resolved features: {len(evidence_pack.get('prior_resolved_features') or [])}",
+                "",
+                str(evidence_pack.get("no_raw_data_policy", "")),
+                "",
+                "```json",
+                json.dumps(evidence_pack, indent=2, default=str),
+                "```",
+                "",
+            ]
+        )
+    lines += [
         "## Options",
         "",
     ]
@@ -1010,6 +1769,8 @@ def _render_markdown(panel: dict[str, Any]) -> str:
         proof = option.get("proof_packet") or {}
         if proof:
             lines.extend(_render_option_proof(proof))
+        if option.get("executed_sample"):
+            lines.extend(_render_executed_sample(option["executed_sample"]))
         if option.get("json_backed"):
             evidence = option.get("derived_feature_option") or option.get("physical_column_option") or {}
             lines.extend(["```json", json.dumps(evidence, indent=2, default=str), "```", ""])
@@ -1019,6 +1780,123 @@ def _render_markdown(panel: dict[str, Any]) -> str:
             lines.append(f"- `{file}`")
         lines.append("")
     return "\n".join(lines)
+
+
+def _render_feature_resolution_table(rows: list[dict]) -> list[str]:
+    lines = ["## Feature Resolution", ""]
+    if not rows:
+        lines.extend(["(no features)", ""])
+        return lines
+    header_columns = ["Feature", "Resolves as", "Where it lands"]
+    lines.append("| " + " | ".join(header_columns) + " |")
+    lines.append("| " + " | ".join("---" for _ in header_columns) + " |")
+    for row in rows:
+        values = [
+            _table_cell(row.get("feature")),
+            _table_cell(row.get("resolves_as")),
+            _table_cell(row.get("where_it_lands")),
+        ]
+        lines.append("| " + " | ".join(values) + " |")
+    lines.append("")
+    return lines
+
+
+def _render_sample_evidence(rows: list[dict]) -> list[str]:
+    lines = ["## Sample Evidence", ""]
+    if not rows:
+        lines.extend(["(no samples)", ""])
+        return lines
+    header_columns = ["Feature", "Column", "First 5 samples"]
+    lines.append("| " + " | ".join(header_columns) + " |")
+    lines.append("| " + " | ".join("---" for _ in header_columns) + " |")
+    for row in rows:
+        samples = row.get("first_samples") or []
+        sample_text = ", ".join(str(value) for value in samples) if samples else "(no samples)"
+        values = [
+            _table_cell(row.get("feature")),
+            _table_cell(row.get("column")),
+            _table_cell(sample_text),
+        ]
+        lines.append("| " + " | ".join(values) + " |")
+    lines.append("")
+    return lines
+
+
+def _render_kpi_preview(preview: dict) -> list[str]:
+    kpi_id = str(preview.get("kpi_id") or "")
+    assumed_option_id = str(preview.get("assumed_option_id") or "")
+    caption = str(preview.get("caption") or "")
+    result = preview.get("preview_result") or {}
+    status = str(result.get("status") or "")
+    sql = str(result.get("sql") or "")
+    duration_ms = result.get("duration_ms")
+    error = result.get("error")
+
+    lines = ["## KPI Preview", ""]
+    if status == "ok":
+        lines.append(
+            f"`{kpi_id}` — preview assuming option `{assumed_option_id}` (the recommendation)."
+        )
+    else:
+        lines.append(
+            f"`{kpi_id}` — preview assuming option `{assumed_option_id}`."
+        )
+    lines.append("")
+    if status == "ok" and caption:
+        lines.extend([caption, ""])
+    lines.extend(["```sql", sql, "```", ""])
+    if status == "ok":
+        rows = result.get("rows") or []
+        columns = result.get("columns") or (list(rows[0].keys()) if rows else [])
+        if columns:
+            lines.append("| " + " | ".join(str(col) for col in columns) + " |")
+            lines.append("| " + " | ".join("---" for _ in columns) + " |")
+            for row in rows:
+                values = [_table_cell(row.get(col)) for col in columns]
+                lines.append("| " + " | ".join(values) + " |")
+            lines.append("")
+        lines.extend([f"> Executed in {duration_ms}ms via DuckDB.", ""])
+    elif status == "empty":
+        lines.extend(
+            [
+                f"> Query executed in {duration_ms}ms but returned 0 rows. "
+                "Check the filter scope (e.g., `LineOfBusiness = 'Medicare'`) "
+                "and the dataset paths.",
+                "",
+            ]
+        )
+    else:
+        reason = str(error) if error else status or "unknown error"
+        lines.extend(
+            [
+                f"> Preview unavailable: {reason}. The SQL above is still valid — "
+                "run it yourself or rerun the panel after fixing the underlying issue.",
+                "",
+            ]
+        )
+    return lines
+
+
+def _render_executed_sample(preview: dict) -> list[str]:
+    lines = ["#### Sample (DuckDB, LIMIT 5)", ""]
+    status = str(preview.get("status") or "")
+    if status == "ok":
+        rows = preview.get("rows") or []
+        columns = preview.get("columns") or (list(rows[0].keys()) if rows else [])
+        if columns:
+            lines.append("| " + " | ".join(str(col) for col in columns) + " |")
+            lines.append("| " + " | ".join("---" for _ in columns) + " |")
+            for row in rows:
+                values = [_table_cell(row.get(col)) for col in columns]
+                lines.append("| " + " | ".join(values) + " |")
+            lines.append("")
+        duration_ms = preview.get("duration_ms")
+        lines.extend([f"> Executed in {duration_ms}ms.", ""])
+    else:
+        error = preview.get("error")
+        reason = str(error) if error else status or "unknown error"
+        lines.extend([f"> Preview unavailable: {reason}.", ""])
+    return lines
 
 
 def _render_option_proof(proof: dict[str, Any]) -> list[str]:
@@ -1031,14 +1909,19 @@ def _render_option_proof(proof: dict[str, Any]) -> list[str]:
     if required:
         lines.extend(
             [
-                "Column and dataset proof:",
+                "SQL mapping and source evidence:",
                 "",
                 _markdown_table(
                     [
                         {
                             "Business field": row.get("business_field", ""),
-                            "Physical column": row.get("physical_column", ""),
-                            "Dataset": _source_label(str(row.get("dataset") or ""), PROJECT_ROOT),
+                            "SQL table": row.get("sql_table") or _sql_table_label(str(row.get("dataset") or "")),
+                            "SQL column": row.get("sql_column")
+                            or _sql_column_label(
+                                str(row.get("dataset") or ""),
+                                str(row.get("physical_column") or ""),
+                            ),
+                            "Source evidence": _source_label(str(row.get("dataset") or ""), PROJECT_ROOT),
                             "Evidence": row.get("evidence_state", ""),
                             "Sample values": ", ".join(str(value) for value in (row.get("sample_values") or [])[:5]),
                         }
@@ -1086,6 +1969,13 @@ def _rel(path: Path, root: Path) -> str:
 
 
 def main() -> None:
+    from core.onboarding.cli_deprecation import warn_soft_deprecated_cli
+
+    warn_soft_deprecated_cli(
+        "blocker-question-panel",
+        prefer="prepare-kpi-blocker-panel",
+        reason="the wrapper runs feature resolution, panel build, and validation atomically",
+    )
     parser = argparse.ArgumentParser(
         description="Generate a stakeholder-friendly blocker question panel."
     )
@@ -1113,3 +2003,264 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------------------
+# Preview composition helpers (wired into _question_for_cluster at runtime).
+#
+# These build the new panel sections introduced for the "real-ops-dashboard"
+# rendering: a feature_resolution_table summarizing every feature in the KPI,
+# a sample_evidence mini-table with the first observed values per feature
+# (PII columns redacted in the display), and per-option executed_sample blocks
+# carrying the DuckDB result of running each option's query against the
+# workspace data.
+# ---------------------------------------------------------------------------
+
+
+_RESOLVED_STATE_LABELS = {
+    "proven_direct": "proven_direct",
+    "proven_alias": "proven_alias",
+    "proven_join": "proven_join",
+    "proven_formula": "proven_formula",
+    "proven_taxonomy": "proven_taxonomy",
+    "user_confirmed": "user_confirmed",
+    "cli_agent_proposed": "cli_agent_proposed",
+    "blocked_missing_evidence": "blocked_missing_evidence",
+    "blocked_ambiguous": "blocked_ambiguous",
+    "rejected": "rejected",
+}
+
+
+def _where_it_lands(feature: dict[str, Any]) -> str:
+    """One-line description of where a feature maps to in the schema."""
+
+    state = str(feature.get("state") or "")
+    sources = feature.get("source_columns") or []
+    if state == "proven_join" and sources:
+        first = sources[0]
+        dataset_stem = Path(str(first.get("dataset") or "")).stem
+        column = str(first.get("column") or "?")
+        # Detect a join key by scanning source_columns for an *_id-shaped column
+        # that also appears on the parent table. Heuristic but useful.
+        for column_ref in sources:
+            col_name = str(column_ref.get("column") or "")
+            if col_name and col_name.lower().endswith("id"):
+                return f"{dataset_stem}.{column} via {col_name}"
+        return f"{dataset_stem}.{column} (join)"
+    if state.startswith("proven_") or state == "user_confirmed":
+        if sources:
+            first = sources[0]
+            return f"{Path(str(first.get('dataset') or '')).stem}.{first.get('column') or '?'}"
+        formula = feature.get("derived_formula") or feature.get("resolution_type") or ""
+        return f"derived ({formula})" if formula else "(resolved)"
+    if state == "cli_agent_proposed":
+        if sources:
+            first = sources[0]
+            return f"proposed: {Path(str(first.get('dataset') or '')).stem}.{first.get('column') or '?'} (awaiting confirmation)"
+        return "proposed (awaiting confirmation)"
+    # Blocked states: try to surface the most promising direction.
+    derived = feature.get("derived_feature_options") or []
+    if derived:
+        first = derived[0]
+        inputs = first.get("input_columns") or []
+        if inputs and isinstance(inputs[0], dict):
+            return f"derived from {Path(str(inputs[0].get('dataset') or '')).stem}.{inputs[0].get('column') or '?'}"
+        return "derived (no proven inputs)"
+    if sources:
+        first = sources[0]
+        return f"candidate: {Path(str(first.get('dataset') or '')).stem}.{first.get('column') or '?'}"
+    return "(no candidate)"
+
+
+def _build_feature_resolution_table(mapping: dict[str, Any]) -> list[dict[str, str]]:
+    """Build the 3-column feature-resolution table.
+
+    Features are deduplicated by name; the first occurrence's state wins.
+    Order: resolved features first (by KPI iteration order), then blocked ones.
+    """
+
+    seen: set[str] = set()
+    rows: list[dict[str, str]] = []
+    for kpi in mapping.get("kpis", []):
+        for feature in kpi.get("features", []):
+            name = str(feature.get("feature") or "")
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            state = str(feature.get("state") or "")
+            rows.append(
+                {
+                    "feature": name,
+                    "resolves_as": _RESOLVED_STATE_LABELS.get(state, state or "unknown"),
+                    "where_it_lands": _where_it_lands(feature),
+                }
+            )
+    rows.sort(key=lambda r: (0 if r["resolves_as"].startswith("proven_") or r["resolves_as"] == "user_confirmed" else 1, r["feature"]))
+    return rows
+
+
+def _build_sample_evidence(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build the sample-evidence mini-table.
+
+    For each feature that has source_columns with samples, emit one row with
+    `feature`, `column` (dataset_stem.column), and the first 5 observed values.
+    PII columns are redacted in the display values only.
+    """
+
+    seen: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for kpi in mapping.get("kpis", []):
+        for feature in kpi.get("features", []):
+            name = str(feature.get("feature") or "")
+            if not name or name in seen:
+                continue
+            for source in feature.get("source_columns") or []:
+                column = str(source.get("column") or "")
+                if not column:
+                    continue
+                samples = list(
+                    source.get("sample_values")
+                    or (source.get("value_profile") or {}).get("sample_values")
+                    or []
+                )[:5]
+                if not samples:
+                    continue
+                seen.add(name)
+                display_samples = redact_sample_values(column, samples)
+                rows.append(
+                    {
+                        "feature": name,
+                        "column": f"{Path(str(source.get('dataset') or '')).stem}.{column}",
+                        "first_samples": [str(value) for value in display_samples],
+                        "redacted": is_pii_column(column),
+                    }
+                )
+                break  # one row per feature
+    return rows
+
+
+def _executable_sql_for_option(option: dict[str, Any], repo_root: Path) -> tuple[str, list[Path]]:
+    """Return (sql, dataset_paths) for previewing an option.
+
+    Physical-column options become a small SELECT against ``read_csv_auto``.
+    Derived options compose the formula's input columns. Both cap with LIMIT 5.
+    Returns ``("", [])`` when no executable SQL can be derived.
+    """
+
+    physical = option.get("physical_column_option") or {}
+    if physical:
+        dataset = str(physical.get("dataset") or "")
+        column = str(physical.get("column") or "")
+        if not dataset or not column:
+            return "", []
+        path = Path(dataset)
+        if not path.is_absolute():
+            path = repo_root / path
+        sql = (
+            f'SELECT "{column}"\n'
+            f"FROM read_csv_auto('{dataset}')\n"
+            f"WHERE \"{column}\" IS NOT NULL\n"
+            f"LIMIT 5;"
+        )
+        return sql, [path]
+
+    derived = option.get("derived_feature_option") or {}
+    if derived:
+        formula = str(derived.get("formula") or "")
+        inputs = [col for col in derived.get("input_columns") or [] if isinstance(col, dict)]
+        if not formula or not inputs:
+            return "", []
+        first = inputs[0]
+        dataset = str(first.get("dataset") or "")
+        if not dataset:
+            return "", []
+        path = Path(dataset)
+        if not path.is_absolute():
+            path = repo_root / path
+        # Map "patients.DOB" -> '"DOB"' inside the formula (DuckDB sees the
+        # CSV as a single unqualified table when read via read_csv_auto).
+        sql_formula = formula
+        for col in inputs:
+            qualified = f"{Path(str(col.get('dataset') or '')).stem}.{col.get('column') or ''}"
+            bare = str(col.get("column") or "")
+            if qualified and bare:
+                sql_formula = sql_formula.replace(qualified, f'"{bare}"')
+        select_cols = ", ".join(f'"{str(c.get("column") or "")}"' for c in inputs if c.get("column"))
+        derived_name = str(derived.get("derived_column_name") or "derived")
+        sql = (
+            f"SELECT {select_cols}, {sql_formula} AS {derived_name}\n"
+            f"FROM read_csv_auto('{dataset}')\n"
+            f"LIMIT 5;"
+        )
+        return sql, [path]
+
+    return "", []
+
+
+def _execute_option_preview(
+    option: dict[str, Any],
+    workspace_path: Path,
+    repo_root: Path,
+) -> dict[str, Any] | None:
+    """Run an option's preview SQL (cache-first) and return a PreviewResult dict.
+
+    Returns None when no executable SQL can be derived for the option (e.g.
+    the ``custom`` placeholder option, or a CLI-agent-proposal option whose
+    SQL isn't decided yet).
+
+    Result rows have PII columns redacted for display.
+    """
+
+    sql, dataset_paths = _executable_sql_for_option(option, repo_root)
+    if not sql:
+        return None
+    cache_key = compute_preview_cache_key(sql, dataset_paths)
+    cached = load_cached_preview(workspace_path, cache_key)
+    if cached is not None:
+        return cached
+    result = execute_preview(
+        sql=sql,
+        repo_root=repo_root,
+        dataset_paths=dataset_paths,
+    )
+    payload = result.summary()
+    if payload.get("status") == "ok" and payload.get("rows"):
+        payload["rows"] = redact_rows(payload["rows"])
+    if payload.get("status") == "ok":
+        save_cached_preview(workspace_path, cache_key, payload)
+    return payload
+
+
+def _attach_preview_sections(
+    panel: dict[str, Any],
+    mapping: dict[str, Any],
+    workspace_path: Path,
+    repo_root: Path,
+) -> None:
+    """Mutate ``panel`` to add feature_resolution_table, sample_evidence, and
+    per-option executed_sample blocks. KPI-level preview is filled when the
+    recommended option has an executable preview that succeeded."""
+
+    panel["feature_resolution_table"] = _build_feature_resolution_table(mapping)
+    panel["sample_evidence"] = _build_sample_evidence(mapping)
+    recommended_option_id = str(panel.get("recommended_option_id") or "")
+    recommended_preview: dict[str, Any] | None = None
+    for option in panel.get("options") or []:
+        preview = _execute_option_preview(option, workspace_path, repo_root)
+        if preview is not None:
+            option["executed_sample"] = preview
+            if option.get("option_id") == recommended_option_id and preview.get("status") == "ok":
+                recommended_preview = preview
+    if recommended_preview is not None:
+        kpi_ids = panel.get("applies_to_kpis") or []
+        kpi_id = kpi_ids[0] if kpi_ids else ""
+        panel["kpi_preview"] = {
+            "kpi_id": kpi_id,
+            "assumed_option_id": recommended_option_id,
+            "caption": (
+                "Preview shows the recommended option's derivation/mapping over the "
+                "first 5 rows. The full KPI SQL is generated only after every blocker "
+                "is resolved."
+            ),
+            "preview_result": recommended_preview,
+        }

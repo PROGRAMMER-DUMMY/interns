@@ -127,12 +127,22 @@ def path_allowed_by_entries(path: Path, *, project_root: Path, settings: dict[st
     for entry in entries:
         allowed = Path(entry["path"]).expanduser()
         if entry["type"] == "workspace_relative":
-            allowed_path = (project_root / allowed).resolve()
+            allowed_path = _resolve_workspace_allowlist_path(allowed, project_root)
         else:
             allowed_path = allowed.resolve()
         if _is_relative_to(resolved, allowed_path):
             return True
     return False
+
+
+def _resolve_workspace_allowlist_path(path: Path, project_root: Path) -> Path:
+    if path.is_absolute():
+        return path.resolve()
+    workspace = project_root.resolve()
+    parts = path.parts
+    if len(parts) >= 3 and parts[0] == "workspaces" and parts[1] == workspace.name:
+        return (workspace / Path(*parts[2:])).resolve()
+    return (workspace / path).resolve()
 
 
 def _roots_from_local_config(data: dict[str, Any]) -> Iterable[Path]:

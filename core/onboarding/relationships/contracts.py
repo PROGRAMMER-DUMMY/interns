@@ -12,10 +12,14 @@ from pathlib import Path
 from typing import Any
 
 from core.storage.workspace_layout import WorkspaceLayout
+from core.contracts.versioning import register_contract
 
 
 EXECUTABLE_RELATIONSHIP_STATES = {"proven_data_model", "user_confirmed"}
+USER_DECIDED_RELATIONSHIP_STATES = {"user_confirmed", "rejected"}
 RELATIONSHIP_VERSION = 1
+
+register_contract("relationship_contracts.json", current_version=1)
 DEFAULT_REVIEW_DAYS = 180
 
 
@@ -24,6 +28,18 @@ class RelationshipContractResult:
     json_path: str
     markdown_path: str
     relationship_count: int
+    executable_relationship_count: int
+    candidate_relationship_count: int
+
+    def summary(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class RelationshipApprovalResult:
+    json_path: str
+    relationship_id: str
+    state: str
     executable_relationship_count: int
     candidate_relationship_count: int
 
@@ -57,6 +73,10 @@ class RelationshipContractBuilder:
             doc_relationships,
             profile_relationships,
             finalized_model_relationships,
+        )
+        relationships = _preserve_user_decided_relationships(
+            relationships,
+            self._load_existing_relationships(),
         )
         contract = {
             "artifact_type": "relationship_contracts.json",
@@ -97,6 +117,24 @@ class RelationshipContractBuilder:
             executable_relationship_count=summary["executable_relationship_count"],
             candidate_relationship_count=summary["candidate_relationship_count"],
         )
+
+    def _load_existing_relationships(self) -> dict[tuple[str, str, str, str], dict[str, Any]]:
+        path = self.layout.contracts_dir / "relationship_contracts.json"
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        existing: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        for relationship in data.get("relationships") or []:
+            if not isinstance(relationship, dict):
+                continue
+            try:
+                existing[_canonical_key(relationship)] = relationship
+            except Exception:
+                continue
+        return existing
 
     def _profile_index(self) -> dict[str, dict[str, Any]]:
         path = self.layout.profiles_dir / "profile_index.json"
@@ -167,6 +205,92 @@ def load_relationship_contracts(
     if error:
         raise ValueError(f"{_rel(path, root)}: {error}")
     return data.get("relationships", [])
+
+
+def apply_relationship_answer(
+    repo_root: str | Path,
+    workspace: str | Path,
+    *,
+    relationship_id: str,
+    answer: str,
+    evidence_note: str = "",
+) -> RelationshipApprovalResult:
+    root = Path(repo_root).resolve()
+    workspace_path = (root / workspace).resolve()
+    layout = WorkspaceLayout(project_root=workspace_path)
+    path = layout.contracts_dir / "relationship_contracts.json"
+    if not path.exists():
+        raise FileNotFoundError(f"relationship contracts not found: {_rel(path, root)}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    relationships = data.get("relationships")
+    if not isinstance(relationships, list):
+        raise ValueError("relationship_contracts.json `relationships` must be a list")
+    target = next(
+        (item for item in relationships if str(item.get("relationship_id") or "") == relationship_id),
+        None,
+    )
+    if target is None:
+        raise ValueError(f"relationship not found: {relationship_id}")
+    normalized_answer = answer.strip().lower()
+    if normalized_answer not in {"approve", "reject", "keep_blocked"}:
+        raise ValueError("--answer must be approve, reject, or keep_blocked")
+    now = _now()
+    if normalized_answer == "approve":
+        target["state"] = "user_confirmed"
+        target.setdefault("approval", {})
+        target["approval"].update(
+            {
+                "state": "approved",
+                "owner": "data_engineering",
+                "approved_at": now,
+            }
+        )
+        target["executable_usage_policy"] = {
+            "allowed_in_sql_generation": True,
+            "allowed_in_polars_generation": True,
+            "allowed_in_pyspark_generation": True,
+            "allowed_in_medallion_generation": True,
+            "block_reason": "",
+        }
+        history_state = "user_confirmed"
+    else:
+        target["state"] = "rejected" if normalized_answer == "reject" else target.get("state", "profile_validated")
+        target.setdefault("approval", {})
+        target["approval"]["state"] = "rejected" if normalized_answer == "reject" else "needs_review"
+        target.setdefault("executable_usage_policy", {})
+        for key in (
+            "allowed_in_sql_generation",
+            "allowed_in_polars_generation",
+            "allowed_in_pyspark_generation",
+            "allowed_in_medallion_generation",
+        ):
+            target["executable_usage_policy"][key] = False
+        target["executable_usage_policy"]["block_reason"] = (
+            "relationship rejected by user"
+            if normalized_answer == "reject"
+            else "candidate relationship requires data-model proof or user confirmation"
+        )
+        history_state = "rejected" if normalized_answer == "reject" else "needs_review"
+    target.setdefault("decision_history", []).append(
+        {
+            "state": history_state,
+            "note": evidence_note or f"Applied relationship answer `{normalized_answer}` through apply-relationship-answer.",
+            "timestamp": now,
+            "source": "apply-relationship-answer",
+        }
+    )
+    _recompute_summary(data)
+    data["generated_by"] = "build-relationship-contracts"
+    data["updated_by"] = "apply-relationship-answer"
+    data["updated_at"] = now
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return RelationshipApprovalResult(
+        json_path=_rel(path, root),
+        relationship_id=relationship_id,
+        state=str(target.get("state") or ""),
+        executable_relationship_count=int(data["summary"]["executable_relationship_count"]),
+        candidate_relationship_count=int(data["summary"]["candidate_relationship_count"]),
+    )
 
 
 def find_executable_relationship(
@@ -585,6 +709,45 @@ def _relationships_from_finalized_model(
     return relationships
 
 
+def _preserve_user_decided_relationships(
+    rebuilt: list[dict[str, Any]],
+    existing_by_key: dict[tuple[str, str, str, str], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not existing_by_key:
+        return rebuilt
+    now = _now()
+    preserved: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str, str, str]] = set()
+    for relationship in rebuilt:
+        try:
+            key = _canonical_key(relationship)
+        except Exception:
+            preserved.append(relationship)
+            continue
+        seen_keys.add(key)
+        prior = existing_by_key.get(key)
+        if prior and prior.get("state") in USER_DECIDED_RELATIONSHIP_STATES:
+            carried = json.loads(json.dumps(prior))
+            history = carried.setdefault("decision_history", [])
+            history.append(
+                {
+                    "state": carried.get("state"),
+                    "note": "Rebuild preserved prior user decision; refreshed evidence not applied.",
+                    "timestamp": now,
+                    "source": "build-relationship-contracts.preserve",
+                }
+            )
+            preserved.append(carried)
+        else:
+            preserved.append(relationship)
+    for key, prior in existing_by_key.items():
+        if key in seen_keys:
+            continue
+        if prior.get("state") in USER_DECIDED_RELATIONSHIP_STATES:
+            preserved.append(prior)
+    return sorted(preserved, key=lambda item: item.get("relationship_id", ""))
+
+
 def _merge_relationships(*relationship_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for group in relationship_groups:
@@ -605,6 +768,16 @@ def _merge_relationships(*relationship_groups: list[dict[str, Any]]) -> list[dic
         if _executable_allowed(item) or _dataset_pair_key(item) not in executable_pairs
     ]
     return sorted(relationships, key=lambda item: item["relationship_id"])
+
+
+def _recompute_summary(contract: dict[str, Any]) -> None:
+    relationships = contract.get("relationships") or []
+    executable = sum(1 for item in relationships if _executable_allowed(item))
+    contract["summary"] = {
+        "relationship_count": len(relationships),
+        "executable_relationship_count": executable,
+        "candidate_relationship_count": len(relationships) - executable,
+    }
 
 
 def _dataset_pair_key(relationship: dict[str, Any]) -> tuple[str, str]:
@@ -844,6 +1017,46 @@ def main(argv: list[str] | None = None) -> int:
     result = RelationshipContractBuilder(args.repo_root, args.workspace).build()
     print(json.dumps(result.summary(), indent=2))
     return 0
+
+
+def apply_main(argv: list[str] | None = None) -> int:
+    from core.onboarding.workspace.cli_runner import run_workspace_command
+    from core.onboarding.workspace.idempotency import fingerprint_paths
+
+    parser = argparse.ArgumentParser(description="Apply a governed relationship contract answer.")
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--relationship-id", required=True)
+    parser.add_argument("--answer", required=True, choices=["approve", "reject", "keep_blocked"])
+    parser.add_argument("--evidence-note", default="")
+    parser.add_argument("--allow-replay", action="store_true")
+    args = parser.parse_args(argv)
+    workspace_path = (Path(args.repo_root).resolve() / args.workspace).resolve()
+    layout = WorkspaceLayout(project_root=workspace_path)
+    state_fingerprint = fingerprint_paths(layout.relationship_contracts_path)
+    return run_workspace_command(
+        command="apply-relationship-answer",
+        workspace=args.workspace,
+        repo_root=args.repo_root,
+        fn=lambda: apply_relationship_answer(
+            args.repo_root,
+            args.workspace,
+            relationship_id=args.relationship_id,
+            answer=args.answer,
+            evidence_note=args.evidence_note,
+        ),
+        op_args={
+            "workspace": args.workspace,
+            "relationship_id": args.relationship_id,
+            "answer": args.answer,
+            "evidence_note": args.evidence_note,
+            "_state_fingerprint": state_fingerprint,
+        },
+        allow_replay=args.allow_replay,
+        decision=args.answer,
+        metadata={"relationship_id": args.relationship_id, "answer": args.answer},
+        record_idempotent=True,
+    )
 
 
 if __name__ == "__main__":

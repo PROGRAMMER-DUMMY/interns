@@ -91,6 +91,8 @@ class RunState:
     finished_at: str = ""
     elapsed_seconds: float = 0.0
     degraded_run: bool = False
+    fallback_reason: str = ""
+    compromise_history: list[dict[str, Any]] = field(default_factory=list)
     per_table_status: dict[str, TableRunStatus] = field(default_factory=dict)
     kpi_diff: dict[str, Any] = field(default_factory=dict)
     retry_history: list[dict] = field(default_factory=list)
@@ -106,6 +108,8 @@ class RunState:
             "finished_at": self.finished_at,
             "elapsed_seconds": round(self.elapsed_seconds, 3),
             "degraded_run": self.degraded_run,
+            "fallback_reason": self.fallback_reason,
+            "compromise_history": self.compromise_history,
             "per_table_status": {k: v.to_dict() for k, v in self.per_table_status.items()},
             "kpi_diff": self.kpi_diff,
             "retry_history": self.retry_history,

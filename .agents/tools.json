@@ -752,6 +752,28 @@
                                           ]
                   },
                   {
+                      "name":  "parse-data-model-images",
+                      "command":  "uv run parse-data-model-images --workspace \u003cworkspace\u003e",
+                      "use_when":  [
+                                       "workspace contains image-only data model evidence",
+                                       "ERD, star-schema, or medallion diagram sidecars need review",
+                                       "image-derived relationships must stay non-executable until proof or approval",
+                                       "local OCR can be auto-installed with --auto-install-ocr when missing"
+                                   ],
+                      "outputs":  [
+                                      "interns/generated/data_model_images/\u003cimage\u003e.model.json",
+                                      "interns/reports/data_model_images/\u003cimage\u003e.model.md",
+                                      "interns/reports/data_model_images/current.json",
+                                      "interns/reports/data_model_images/current.md"
+                                  ],
+                      "safety":  "local_safe_review_gated_no_remote_vision_without_explicit_sensitive_upload_confirmation",
+                      "required_skills":  [
+                                              "workspace-governance",
+                                              "domain-model",
+                                              "data-engineering-pipeline-design"
+                                          ]
+                  },
+                  {
                       "name":  "export-data-model-diagram",
                       "command":  "uv run export-data-model-diagram --workspace \u003cworkspace\u003e",
                       "use_when":  [
@@ -1133,6 +1155,26 @@
                                               "domain-model",
                                               "data-engineering-pipeline-design",
                                               "workspace-kpi-query-optimizer"
+                                          ]
+                  },
+                  {
+                      "name":  "apply-relationship-answer",
+                      "command":  "uv run apply-relationship-answer --workspace \u003cworkspace\u003e --relationship-id \u003crelationship_id\u003e --answer \u003capprove|reject|keep_blocked\u003e",
+                      "use_when":  [
+                                       "user approved or rejected a relationship contract",
+                                       "profile_validated relationship needs governed promotion",
+                                       "agent must not hand-edit relationship_contracts.json"
+                                   ],
+                      "outputs":  [
+                                      "updated interns/generated/contracts/relationship_contracts.json",
+                                      "recomputed executable and candidate relationship counts",
+                                      "decision_history entry with source apply-relationship-answer"
+                                  ],
+                      "safety":  "local_safe_validated_decision_write_prevents_manual_json_edits",
+                      "required_skills":  [
+                                              "workspace-governance",
+                                              "domain-model",
+                                              "data-engineering-pipeline-design"
                                           ]
                   },
                   {

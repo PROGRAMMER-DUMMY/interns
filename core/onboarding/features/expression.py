@@ -15,6 +15,7 @@ SQL_KEYWORDS = {
     "cast",
     "desc",
     "distinct",
+    "disitnct",
     "else",
     "end",
     "false",

@@ -1,9 +1,25 @@
+"""Schema-alias matching for KPI feature resolution.
+
+Column aliases come from two sources:
+
+1. **Structural** patterns that hold across any domain (suffix variants like
+   ``id``/``code``/``date``/``type``/``status``, and the ``id``/``identifier``
+   linguistic pair). These are computed from column names alone.
+2. **Workspace-derived** aliases from the [[WorkspaceLexicon]] — entries are
+   harvested from authored KPI registry cells, data-dictionary descriptions,
+   accepted user definitions, and prior resolved features. Each workspace
+   produces its own alias set.
+
+The previous module shipped a healthcare-RCM-specific ``BUSINESS_COLUMN_ALIASES``
+dictionary. That curated vocabulary has been removed; alias sourcing is now
+``derive don't curate``.
+"""
 from __future__ import annotations
 
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.onboarding.features.derived_evidence import (
     column_profile_summary,
@@ -12,18 +28,11 @@ from core.onboarding.features.derived_evidence import (
 )
 from core.onboarding.features.blockers import normalize, risk_class
 
+if TYPE_CHECKING:
+    from core.onboarding.lexicon import WorkspaceLexicon
+
 
 STRUCTURAL_ALIAS_SUFFIXES = ("id", "code", "date", "type", "status")
-BUSINESS_COLUMN_ALIASES = {
-    "paidamount": {"paid", "amountpaid", "amount"},
-    "payorid": {"payer", "payor"},
-    "payerid": {"payer", "payor"},
-    "lineofbusiness": {"lob", "lineofbusiness", "businessline"},
-    "visittype": {"visit", "visittype"},
-    "deptid": {"department", "departmentid"},
-    "departmentid": {"department", "dept", "deptid"},
-    "patientid": {"lives", "life", "member", "patient"},
-}
 
 
 def load_schema_index(profile_index_path: Path) -> dict[str, list[dict[str, Any]]]:
@@ -52,15 +61,27 @@ def schema_index_from_profiles(profiles: list[dict[str, Any]]) -> dict[str, list
     return index
 
 
-def alias_index(schema_index: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+def alias_index(
+    schema_index: dict[str, list[dict[str, Any]]],
+    lexicon: "WorkspaceLexicon | None" = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Build an alias index from a schema index.
+
+    Aliases come from two sources: universal structural patterns (suffix
+    variants, id/identifier) computed from each column name, plus
+    workspace-derived aliases supplied via ``lexicon`` when one is loaded.
+    Without a lexicon, only structural aliases fire.
+    """
     aliases: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for entries in schema_index.values():
         for entry in entries:
             column = entry["column"]
             normalized = normalize(column)
-            for alias in aliases_for_column(column):
+            for alias in aliases_for_column(column, lexicon=lexicon):
                 if alias != normalized:
-                    aliases[alias].append({**entry, "reason": "normalized_structural_alias"})
+                    aliases[alias].append(
+                        {**entry, "reason": "schema_alias"}
+                    )
     return dict(aliases)
 
 
@@ -166,10 +187,22 @@ def sample_output(evidence: dict[str, Any]) -> list[dict[str, Any]]:
     return [{alias: value} for value in values[:5]]
 
 
-def aliases_for_column(column: str) -> set[str]:
+def aliases_for_column(
+    column: str,
+    *,
+    lexicon: "WorkspaceLexicon | None" = None,
+) -> set[str]:
+    """Aliases for ``column`` from structural patterns and the workspace lexicon.
+
+    Structural patterns are universal: suffix variants (``id``/``code``/
+    ``date``/``type``/``status``) and the ``id``/``identifier`` pair.
+    Curated word-substitution rewrites that previously shipped here
+    (``dept``↔``department``, ``claim``↔``claims``, healthcare business
+    aliases) have been removed. Workspace-specific aliases are sourced from
+    ``lexicon.column_aliases`` when a lexicon is provided.
+    """
     normalized = normalize(column)
     aliases = {normalized}
-    aliases.update(BUSINESS_COLUMN_ALIASES.get(normalized, set()))
     compact = normalized
     for suffix in STRUCTURAL_ALIAS_SUFFIXES:
         if compact.endswith(suffix) and not compact.endswith(f"{suffix}{suffix}"):
@@ -178,22 +211,27 @@ def aliases_for_column(column: str) -> set[str]:
         base = normalized[:-2]
         aliases.add(base + "id")
         aliases.add(base + "identifier")
-    if "department" in normalized:
-        aliases.add(normalized.replace("department", "dept"))
-    if "dept" in normalized:
-        aliases.add(normalized.replace("dept", "department"))
-    if "claims" in normalized:
-        aliases.add(normalized.replace("claims", "claim"))
-    if "claim" in normalized:
-        aliases.add(normalized.replace("claim", "claims"))
+    if lexicon is not None:
+        try:
+            aliases.update(lexicon.aliases_for_column(column))
+        except Exception:
+            pass
     return {alias for alias in aliases if alias}
 
 
-def safe_structural_alias(feature: str, candidates: list[dict[str, Any]]) -> bool:
+def safe_structural_alias(
+    feature: str,
+    candidates: list[dict[str, Any]],
+    *,
+    lexicon: "WorkspaceLexicon | None" = None,
+) -> bool:
     feature_norm = normalize(feature)
     if risk_class(feature) != "structural":
         return False
-    return any(feature_norm in aliases_for_column(candidate["column"]) for candidate in candidates)
+    return any(
+        feature_norm in aliases_for_column(candidate["column"], lexicon=lexicon)
+        for candidate in candidates
+    )
 
 
 def candidate_labels(candidates: list[dict[str, Any]]) -> list[str]:

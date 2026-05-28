@@ -36,6 +36,7 @@ from core.onboarding.data_model.generation_workflow import DataModelGenerationWo
 from core.onboarding.relationships.contracts import RelationshipContractBuilder
 from core.onboarding.relationships.source_to_target_planner import SourceToTargetPlanner
 from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator
+from core.onboarding.kpi.execution_harness import _metric_input_columns
 from core.onboarding.workspace.kickstart import WorkspaceKickstarter
 from core.onboarding.features.derived_markdown import DerivedFeatureMarkdownConverter
 from core.onboarding.kpi.blocker_question_panel import BlockerQuestionPanelBuilder
@@ -426,7 +427,13 @@ diff --git a/model.sql b/model.sql
             self.assertEqual(settings["sample_rows"], 25_000)
             self.assertFalse(settings["exact_profile"])
 
-    def test_workspace_onboarding_infers_question_only_kpi_rows(self):
+    def test_workspace_onboarding_fills_question_only_rows_from_authored_evidence(self):
+        """A question-only KPI row gets its metric/cuts filled from the
+        workspace lexicon only when other rows in the same registry authored
+        the metric/cuts cells. The lexicon learns ``amount paid -> PaidAmount``
+        and ``payer -> Payer`` from the authored row and applies those phrases
+        to the question-only rows whose names mention them. Rows whose phrases
+        the lexicon never observed remain empty (no curated dictionary)."""
         try:
             import polars  # noqa: F401
         except ImportError:
@@ -443,12 +450,15 @@ diff --git a/model.sql b/model.sql
                 "C2,20.25,Medicare,P2,PT2,Inpatient,D2\n",
                 encoding="utf-8",
             )
+            # One authored row (Cuts + Metric filled) seeds the lexicon; the
+            # other rows are question-only and should be filled by the lexicon
+            # only for phrases learned from the authored row.
             (workspace / "docs" / "kpi_registry.csv").write_text(
-                "Key business question,Description,Unused,Unused2\n"
+                "Key business question,Description,Cuts,Metric\n"
                 "Which key business question is the KPI/metric/Feature meant to answer,Short description,,\n"
-                "\"What is trend for amount paid for medicare LOB across gender and payer for patients above 50 years of age\",Paid amount across LOB Gender Payer Age,,\n"
-                "\"What is percentage share of lives by gender, age, visit type, department\",Percentage of lives count,,\n"
-                "\"What are top 10 payers in Commercial LOB w.r.t. amount paid\",Top 10 Payers for LOB w.r.t. Amount Paid,,\n",
+                "\"Total amount paid by payer\",Paid claims grouped by payer,Payer,PaidAmount\n"
+                "\"What is trend for amount paid across payer over time\",Paid amount trend,,\n"
+                "\"What is percentage share of lives by visit type\",Share of lives,,\n",
                 encoding="utf-8",
             )
             (workspace / "docs" / "data_model.md").write_text("# Data Model\n", encoding="utf-8")
@@ -461,11 +471,35 @@ diff --git a/model.sql b/model.sql
                 .read_text(encoding="utf-8")
             )
             self.assertEqual(registry["generated_by"], "onboard-workspace")
-            self.assertNotIn("Which key business question", registry["kpis"][0]["name"])
-            self.assertEqual(registry["kpis"][0]["metric"], "amount paid")
-            self.assertIn("LOB = Medicare", registry["kpis"][0]["cuts"])
-            self.assertEqual(registry["kpis"][1]["metric"], "percentage share of lives")
-            self.assertIn("VisitType", registry["kpis"][1]["cuts"])
+            kpis_by_name = {kpi["name"]: kpi for kpi in registry["kpis"]}
+
+            # Authored row preserved exactly.
+            authored = kpis_by_name["Total amount paid by payer"]
+            self.assertEqual(authored["metric"], "PaidAmount")
+            self.assertEqual(authored["cuts"], "Payer")
+
+            # Question-only row whose name shares phrases with the authored
+            # row -> lexicon fills it. "amount paid" and "payer" were learned.
+            trend = kpis_by_name["What is trend for amount paid across payer over time"]
+            self.assertEqual(trend["metric"], "PaidAmount")
+            self.assertIn("Payer", trend["cuts"])
+
+            # Question-only row with phrases the lexicon never observed
+            # ("percentage share of lives", "visit type") stays empty. The
+            # blocker panel resolves these via user input, not curated rules.
+            share = kpis_by_name["What is percentage share of lives by visit type"]
+            self.assertEqual(share["metric"], "")
+            self.assertEqual(share["cuts"], "")
+
+            # The lexicon contract is generated alongside the registry.
+            lexicon_path = (
+                workspace / "interns" / "generated" / "contracts" / "workspace_lexicon.json"
+            )
+            self.assertTrue(lexicon_path.exists())
+            lexicon_payload = json.loads(lexicon_path.read_text(encoding="utf-8"))
+            self.assertEqual(lexicon_payload["artifact_type"], "workspace_lexicon.json")
+            metric_targets = {entry["metric"] for entry in lexicon_payload["metric_phrases"]}
+            self.assertIn("PaidAmount", metric_targets)
 
     def test_excel_kpi_reader_preserves_metric_and_continuation_cuts_as_truth(self):
         try:
@@ -524,15 +558,21 @@ diff --git a/model.sql b/model.sql
 
         kpis = _read_tabular_kpis(frame, "demo.xlsx")
 
+        # The reader preserves authored cells verbatim. Curated keyword-ladder
+        # overlays (LOB = Medicare, Age > 50, etc.) were removed; semantic
+        # constraints that the registry didn't author are not back-filled by
+        # the reader. The WorkspaceLexicon may add them later via
+        # _fill_kpi_gaps_with_lexicon only when authored evidence exists.
         self.assertEqual(kpis[0].metric, "sum(PaidAmount)")
         self.assertIn("Month (ServiceDate)", kpis[0].cuts)
         self.assertIn("LineOfBusiness", kpis[0].cuts)
         self.assertIn("PayorID", kpis[0].cuts)
         self.assertIn("Age(DOB)", kpis[0].cuts)
-        self.assertIn("LOB = Medicare", kpis[0].cuts)
-        self.assertIn("Age > 50", kpis[0].cuts)
+        self.assertNotIn("LOB = Medicare", kpis[0].cuts)
+        self.assertNotIn("Age > 50", kpis[0].cuts)
         self.assertEqual(kpis[1].metric, "sum(PaidAmount)")
-        self.assertIn("LOB = Commercial", kpis[1].cuts)
+        self.assertIn("LineOfBusiness", kpis[1].cuts)
+        self.assertNotIn("LOB = Commercial", kpis[1].cuts)
 
     def test_list_workspace_files_reports_all_paths_without_generating_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -776,6 +816,65 @@ diff --git a/model.sql b/model.sql
 
             self.assertNotIn("WS-BUG-003", {bug.bug_id for bug in report.bugs})
 
+    def test_workspace_bug_detector_ignores_stale_broad_history_when_current_kpis_covered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "hospital"
+            requirements_dir = workspace / "interns" / "generated" / "requirements"
+            contracts_dir = workspace / "interns" / "generated" / "contracts"
+            requirements_dir.mkdir(parents=True)
+            contracts_dir.mkdir(parents=True)
+            (requirements_dir / "requirements.json").write_text(
+                json.dumps(
+                    {
+                        "workspace_feature_definitions": [
+                            {
+                                "feature": "department",
+                                "definition": "legacy broad definition",
+                                "applies_to_kpis": [],
+                            },
+                            {
+                                "feature": "department",
+                                "definition": "departments.Name",
+                                "applies_to_kpis": ["kpi_002"],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (contracts_dir / "workspace_feature_definitions.json").write_text(
+                json.dumps(
+                    {
+                        "definitions": [
+                            {
+                                "feature": "department",
+                                "definition": "departments.Name",
+                                "applies_to_kpis": ["kpi_002"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (contracts_dir / "kpi_feature_mapping.json").write_text(
+                json.dumps(
+                    {
+                        "kpis": [
+                            {
+                                "kpi_id": "kpi_002",
+                                "features": [{"feature": "department"}],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = WorkspaceBugDetector(root, "workspaces/hospital").run()
+
+            self.assertNotIn("WS-BUG-003", {bug.bug_id for bug in report.bugs})
+
     def test_workspace_root_artifact_policy_flags_generated_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspaces" / "demo"
@@ -847,6 +946,13 @@ diff --git a/model.sql b/model.sql
         functions = {item["function"] for item in extracted.functions}
         self.assertIn("age", functions)
         self.assertIn("coalesce", functions)
+
+    def test_kpi_execution_harness_normalizes_distinct_typo_in_metric_inputs(self):
+        columns = _metric_input_columns(
+            "percentage of sum(distinct PatientID) / sum(disitnct PatientID) for departement"
+        )
+
+        self.assertEqual(columns, ["PatientID"])
 
     def test_derivation_search_returns_candidate_patterns_without_proof(self):
         searcher = DerivationPatternSearcher()
@@ -1155,7 +1261,16 @@ diff --git a/model.sql b/model.sql
             self.assertEqual(_resolve_answer(current, "yes")["option_id"], "custom")
             self.assertEqual(current["panel_contract"]["display_shape"], "full_kpi_truth_packet")
             self.assertEqual(current["default_code_preference"], "sql")
+            self.assertEqual(current["output_dialect"]["label"], "SQL (default)")
+            self.assertTrue(current["immutable_kpi_policy"]["understanding_is_review_context_only"])
             self.assertEqual(current["kpi_source_truth"][0]["business_question"], "What is average patient age?")
+            understanding = current["kpi_understanding"][0]
+            self.assertEqual(understanding["original_kpi"]["business_question"], "What is average patient age?")
+            self.assertIn("Answer the source KPI exactly as written", understanding["my_understanding"])
+            self.assertEqual(understanding["output_dialect"], "SQL")
+            self.assertIn("No strict proven SQL yet", understanding["strict_proven_sql"])
+            self.assertIn("NON-EXECUTABLE INTENT SKETCH", understanding["intent_sql_sketch"])
+            self.assertIn("kpi_id", understanding["demo_result_table"])
             self.assertEqual(current["options"][0]["json_backed"], True)
             self.assertIn("derived_feature_option", current["options"][0])
             self.assertIn("proof_packet", current["options"][0])
@@ -1165,6 +1280,15 @@ diff --git a/model.sql b/model.sql
             markdown = (root / result.current_markdown).read_text(encoding="utf-8")
             self.assertIn("# Blocker Question Panel: Age", markdown)
             self.assertIn("## KPI Source Truth", markdown)
+            self.assertIn("## Output Dialect", markdown)
+            self.assertIn("SQL (default)", markdown)
+            self.assertIn("## Immutable KPI Policy", markdown)
+            self.assertIn("## KPI Understanding Review", markdown)
+            self.assertIn("#### My Understanding", markdown)
+            self.assertIn("#### Strict Proven SQL", markdown)
+            self.assertIn("#### Placeholder Intent SQL", markdown)
+            self.assertIn("NON-EXECUTABLE INTENT SKETCH", markdown)
+            self.assertIn("#### Demo Result Table", markdown)
             self.assertIn("## Required User-Facing Ask", markdown)
             self.assertIn("Recommended option id: `custom`", markdown)
             self.assertIn("Do not state that another option is recommended", markdown)
@@ -1212,9 +1336,15 @@ diff --git a/model.sql b/model.sql
             self.assertIn("semantic_meaning_sources", paid_option)
             self.assertIn("profile_path", paid_option)
             labels = [option["label"] for option in current["options"]]
-            self.assertTrue(any("PaidAmount" in label for label in labels))
+            self.assertTrue(any(label == "transactions.PaidAmount" for label in labels))
+            self.assertFalse(
+                any("workspaces/demo/datasets/transactions.csv.PaidAmount" in label for label in labels)
+            )
             markdown = (root / result.question_panel_markdown_path).read_text(encoding="utf-8")
             self.assertIn("physical column candidates", markdown)
+            self.assertIn("SQL mapping and source evidence", markdown)
+            self.assertIn("transactions.PaidAmount", markdown)
+            self.assertIn("workspaces/demo/datasets/transactions.csv", markdown)
 
     def test_prepare_kpi_blocker_panel_blocks_parser_artifacts_and_validates(self):
         try:
@@ -1301,6 +1431,245 @@ diff --git a/model.sql b/model.sql
             self.assertEqual(definitions["definitions"][0]["resolution_type"], "physical_column")
             self.assertTrue(result.prepared_panel["validation"]["ok"])
 
+    def test_blocker_question_panel_does_not_recommend_placeholder_option(self):
+        mapping = {
+            "workspace": "workspaces/demo",
+            "summary": {"blocked_kpi_count": 1},
+            "kpis": [
+                {
+                    "kpi_id": "kpi_001",
+                    "name": "What is percentage share by department?",
+                    "description": "Department share",
+                    "metric": "count(distinct PatientID) by departement",
+                    "cuts": "Department Name",
+                    "source": "workspaces/demo/docs/kpi_registry.csv",
+                    "status": "blocked_questions_pending",
+                    "features": [
+                        {
+                            "feature": "departement",
+                            "state": "blocked_missing_evidence",
+                            "resolution_type": "unresolved",
+                            "source_columns": [],
+                            "evidence": [],
+                            "question": "What defines departement?",
+                        }
+                    ],
+                }
+            ],
+            "blocker_clusters": [{"feature": "departement", "count": 1, "risk": "business_semantics"}],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            (workspace / "interns" / "generated" / "contracts").mkdir(parents=True)
+            mapping_path = workspace / "interns" / "generated" / "contracts" / "kpi_feature_mapping.json"
+            mapping_path.write_text(json.dumps(mapping), encoding="utf-8")
+
+            result = BlockerQuestionPanelBuilder(root, "workspaces/demo").run()
+            current = json.loads((root / result.current_json).read_text(encoding="utf-8"))
+
+            self.assertEqual(current["answer_type"], "direct_mapping_or_business_rule")
+            self.assertEqual(current["recommended_option_id"], "custom")
+            self.assertEqual([option["option_id"] for option in current["options"]], ["custom"])
+            validation = WorkspaceArtifactValidator(root, "workspaces/demo").run()
+            self.assertNotIn("placeholder", "\n".join(validation.errors))
+
+    def test_blocker_question_panel_adds_profile_scanned_mapping_candidates(self):
+        mapping = {
+            "workspace": "workspaces/demo",
+            "summary": {"blocked_kpi_count": 1},
+            "kpis": [
+                {
+                    "kpi_id": "kpi_002",
+                    "name": "What is percentage share of lives by department?",
+                    "description": "Share of lives by department",
+                    "metric": "count(distinct PatientID)",
+                    "cuts": "Department Name",
+                    "source": "workspaces/demo/docs/kpi_registry.csv",
+                    "status": "blocked_questions_pending",
+                    "features": [
+                        {
+                            "feature": "departement",
+                            "state": "blocked_missing_evidence",
+                            "resolution_type": "unresolved",
+                            "source_columns": [],
+                            "evidence": [],
+                            "question": "What defines departement?",
+                        }
+                    ],
+                }
+            ],
+            "blocker_clusters": [{"feature": "departement", "count": 1, "risk": "business_semantics"}],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            contracts = workspace / "interns" / "generated" / "contracts"
+            profiles_dir = workspace / "interns" / "generated" / "profiles"
+            contracts.mkdir(parents=True)
+            profiles_dir.mkdir(parents=True)
+            (workspace / "datasets" / "EMR" / "hospital-a").mkdir(parents=True)
+            dataset = workspace / "datasets" / "EMR" / "hospital-a" / "departments.csv"
+            dataset.write_text("DeptID,Name\nDEPT001,Cardiology\n", encoding="utf-8")
+            (contracts / "kpi_feature_mapping.json").write_text(json.dumps(mapping), encoding="utf-8")
+            profile_path = profiles_dir / "departments.profile.json"
+            (profiles_dir / "profile_index.json").write_text(
+                json.dumps(
+                    {
+                        "profiles": [
+                            {
+                                "path": str(dataset),
+                                "row_count": 20,
+                                "profile_path": "workspaces/demo/interns/generated/profiles/departments.profile.json",
+                                "columns": [
+                                    {
+                                        "name": "DeptID",
+                                        "dtype": "String",
+                                        "sample_values": "DEPT001 DEPT002",
+                                        "source": "sample_profile",
+                                    },
+                                    {
+                                        "name": "Name",
+                                        "dtype": "String",
+                                        "sample_values": "Cardiology Surgery Pediatrics",
+                                        "source": "sample_profile",
+                                    },
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            profile_path.write_text("{}", encoding="utf-8")
+
+            result = BlockerQuestionPanelBuilder(root, "workspaces/demo").run()
+            current = json.loads((root / result.current_json).read_text(encoding="utf-8"))
+
+            self.assertEqual(current["recommended_option_id"], "option_a")
+            self.assertEqual(current["options"][0]["option_id"], "option_a")
+            self.assertEqual(current["options"][0]["physical_column_option"]["column"], "Name")
+            samples = current["options"][0]["proof_packet"]["required_columns"][0]["sample_values"]
+            self.assertIn("Cardiology", samples)
+            markdown = (root / result.current_markdown).read_text(encoding="utf-8")
+            self.assertIn("departments.Name", markdown)
+            self.assertIn("workspaces/demo/datasets/EMR/hospital-a/departments.csv", markdown)
+            self.assertIn("Cardiology", markdown)
+
+    def test_blocker_panel_falls_back_to_cli_agent_proposal_when_no_scored_options(self):
+        """When neither derived nor scored physical options can be produced
+        but profile evidence exists, the panel emits a cli_agent_proposal_needed
+        card. The orchestrating CLI agent reads the bounded evidence pack,
+        proposes a mapping, and asks the user to confirm before apply."""
+        mapping = {
+            "workspace": "workspaces/demo",
+            "summary": {"blocked_kpi_count": 1},
+            "kpis": [
+                {
+                    "kpi_id": "kpi_010",
+                    "name": "Some opaque metric across xyz",
+                    "description": "Unmappable from term alone",
+                    "metric": "abstractconcept",
+                    "cuts": "",
+                    "source": "workspaces/demo/docs/kpi_registry.csv",
+                    "status": "blocked_questions_pending",
+                    "features": [
+                        {
+                            "feature": "abstractconcept",
+                            "state": "blocked_missing_evidence",
+                            "resolution_type": "unresolved",
+                            "source_columns": [],
+                            "evidence": [],
+                            "question": "What defines abstractconcept?",
+                        }
+                    ],
+                }
+            ],
+            "blocker_clusters": [
+                {"feature": "abstractconcept", "count": 1, "risk": "business_semantics"}
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            contracts = workspace / "interns" / "generated" / "contracts"
+            profiles_dir = workspace / "interns" / "generated" / "profiles"
+            contracts.mkdir(parents=True)
+            profiles_dir.mkdir(parents=True)
+            (workspace / "datasets").mkdir(parents=True)
+            dataset = workspace / "datasets" / "transactions.csv"
+            dataset.write_text("Txn,Amt\nT001,12.50\n", encoding="utf-8")
+            (contracts / "kpi_feature_mapping.json").write_text(
+                json.dumps(mapping), encoding="utf-8"
+            )
+            (profiles_dir / "departments.profile.json").write_text("{}", encoding="utf-8")
+            (profiles_dir / "profile_index.json").write_text(
+                json.dumps(
+                    {
+                        "profiles": [
+                            {
+                                "path": str(dataset),
+                                "row_count": 1,
+                                "profile_path": "workspaces/demo/interns/generated/profiles/transactions.profile.json",
+                                "columns": [
+                                    {
+                                        "name": "Txn",
+                                        "dtype": "String",
+                                        "sample_values": ["T001"],
+                                        "source": "sample_profile",
+                                    },
+                                    {
+                                        "name": "Amt",
+                                        "dtype": "Float64",
+                                        "sample_values": ["12.50"],
+                                        "source": "sample_profile",
+                                    },
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = BlockerQuestionPanelBuilder(root, "workspaces/demo").run()
+            current = json.loads((root / result.current_json).read_text(encoding="utf-8"))
+
+            self.assertEqual(current["answer_type"], "cli_agent_proposal_needed")
+            self.assertEqual(current["recommended_option_id"], "option_a")
+            self.assertIn("cli_agent_evidence_pack", current)
+            evidence = current["cli_agent_evidence_pack"]
+            self.assertEqual(evidence["feature"], "abstractconcept")
+            # Profile columns are passed to the agent as bounded evidence.
+            column_names = {col["column"] for col in evidence["available_columns"]}
+            self.assertIn("Txn", column_names)
+            self.assertIn("Amt", column_names)
+            # Each column carries dtype and bounded sample values.
+            txn_col = next(c for c in evidence["available_columns"] if c["column"] == "Txn")
+            self.assertEqual(txn_col["dtype"], "String")
+            self.assertIn("T001", txn_col["sample_values"])
+            # The no-raw-data policy is explicit in the pack.
+            self.assertIn("Do not invent", evidence["no_raw_data_policy"])
+            # The agent task instructs the CLI agent, names the JSON shape,
+            # and surfaces the exact apply command template.
+            task = current["cli_agent_task"]
+            self.assertTrue(task["for_cli_agent"])
+            self.assertIn("expected_answer_shape", " ".join(task["agent_steps"]))
+            self.assertIn("apply-kpi-panel-answer", task["apply_command_template"])
+            self.assertIn("Wait for explicit user approval", " ".join(task["agent_steps"]))
+            # Options expose option_a (agent proposal) and custom (user fallback).
+            option_ids = [option["option_id"] for option in current["options"]]
+            self.assertEqual(option_ids, ["option_a", "custom"])
+            self.assertTrue(current["options"][0]["json_backed"])
+            self.assertIn("source_columns", current["options"][0]["expected_answer_shape"])
+            # The markdown card surfaces the agent instruction so any CLI
+            # reading current.md (Claude, Gemini, Codex) sees it verbatim.
+            markdown = (root / result.current_markdown).read_text(encoding="utf-8")
+            self.assertIn("## CLI Agent Task", markdown)
+            self.assertIn("## CLI Agent Evidence Pack", markdown)
+            self.assertIn("apply-kpi-panel-answer", markdown)
+            self.assertIn("Wait for explicit user approval", markdown)
+
     def test_workspace_artifact_validator_checks_generated_contract_shapes(self):
         try:
             import polars  # noqa: F401
@@ -1354,7 +1723,13 @@ diff --git a/model.sql b/model.sql
             self.assertFalse(invalid_version.ok)
             self.assertTrue(any("version=999 is not supported" in error for error in invalid_version.errors))
 
-    def test_kpi_feature_resolver_proves_structural_aliases_and_prioritizes_blockers(self):
+    def test_kpi_feature_resolver_proves_aliases_from_workspace_lexicon_evidence(self):
+        """Curated dept↔department rewrites were removed from
+        schema_alias_matching. Cross-name aliases like DepartmentID↔DeptID now
+        come from the workspace lexicon, which is built from accepted user
+        definitions and prior resolved features. With no evidence, DepartmentID
+        is correctly blocked; with a pre-existing workspace_feature_definitions
+        entry, it resolves as proven_alias via the lexicon path."""
         try:
             import polars  # noqa: F401
         except ImportError:
@@ -1374,6 +1749,37 @@ diff --git a/model.sql b/model.sql
                 "Which departments have burden?,Alias KPI,DepartmentID;RefundAmount,sum(ClaimID),Confirm refund source\n",
                 encoding="utf-8",
             )
+            # Pre-existing accepted definition (e.g., from a prior blocker
+            # resolution session) teaches the lexicon DeptID is the physical
+            # column behind the business term DepartmentID for this workspace.
+            contracts_dir = workspace / "interns" / "generated" / "contracts"
+            contracts_dir.mkdir(parents=True, exist_ok=True)
+            (contracts_dir / "workspace_feature_definitions.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "workspace_feature_definitions.json",
+                        "version": 1,
+                        "definitions": [
+                            {
+                                "feature": "DepartmentID",
+                                "state": "user_confirmed",
+                                "scope": "workspace",
+                                "resolution_type": "alias_column",
+                                "source_columns": [
+                                    {
+                                        "column": "DeptID",
+                                        "dataset": "workspaces/demo/datasets/transactions.csv",
+                                    }
+                                ],
+                                "evidence_note": "Workspace data dictionary maps DeptID as DepartmentID.",
+                                "applies_to_kpis": [],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
             WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
             KPIFeatureResolver(root, "workspaces/demo", domain="healthcare").run()
 
@@ -1385,7 +1791,15 @@ diff --git a/model.sql b/model.sql
                 feature["feature"]: feature
                 for feature in mapping["kpis"][0]["features"]
             }
-            self.assertEqual(by_feature["DepartmentID"]["state"], "proven_alias")
+            # Lexicon-driven alias resolution: DepartmentID -> DeptID via the
+            # accepted workspace definition. The resolver may surface this as
+            # either "proven_alias" (matched via the lexicon's column_aliases
+            # path) or "user_confirmed" (matched via direct definition apply),
+            # both of which are ready states.
+            self.assertIn(
+                by_feature["DepartmentID"]["state"],
+                {"proven_alias", "user_confirmed"},
+            )
             self.assertEqual(by_feature["RefundAmount"]["state"], "blocked_missing_evidence")
             self.assertEqual(mapping["blocker_clusters"][0]["feature"], "RefundAmount")
             self.assertEqual(mapping["blocker_clusters"][0]["risk"], "financial_correctness")
@@ -1649,6 +2063,16 @@ diff --git a/model.sql b/model.sql
             )
             self.assertGreaterEqual(draft["summary"]["relationship_count"], 1)
             self.assertEqual(draft["image_model_policy"]["state"], "review_gated")
+            self.assertIn("parse_contract", draft["image_model_policy"])
+            self.assertIn("architecture_reference", draft)
+            self.assertIn("star_schema", draft["architecture_reference"])
+            self.assertIn("medallion", draft["architecture_reference"])
+            self.assertEqual(
+                draft["tables"][0]["medallion_contract"]["silver"]["rule"],
+                "Apply technical normalization plus approved semantic conformance; keep KPI formulas out.",
+            )
+            self.assertIn("dimensional_model_role", draft["tables"][0])
+            self.assertIn("star_schema_candidate", draft["tables"][0])
             self.assertIn("readiness", draft)
             self.assertIn("pattern_library", draft)
 
@@ -1659,6 +2083,10 @@ diff --git a/model.sql b/model.sql
 
             finalized = workflow.finalize(approve_final_preview=True)
             self.assertTrue((root / finalized.data_model_markdown_path).exists())
+            data_model_md = (root / finalized.data_model_markdown_path).read_text(encoding="utf-8")
+            self.assertIn("## Architecture Reference", data_model_md)
+            self.assertIn("Star schema", data_model_md)
+            self.assertIn("Medallion", data_model_md)
             self.assertTrue((root / finalized.erd_markdown_path).exists())
             self.assertTrue((root / finalized.relationships_markdown_path).exists())
 
@@ -2374,6 +2802,11 @@ diff --git a/model.sql b/model.sql
             workspace = self._create_demo_workspace(root)
             (workspace / "interns" / "generated").mkdir(parents=True)
             (workspace / "interns" / "generated" / "stale.json").write_text("{}", encoding="utf-8")
+            (workspace / "interns" / "state").mkdir(parents=True, exist_ok=True)
+            (workspace / "interns" / "state" / "workspace_settings.json").write_text(
+                json.dumps({"dataset_allowlist": ["datasets"]}),
+                encoding="utf-8",
+            )
             (root / "config").mkdir()
             (root / "config" / "tasks.json").write_text(
                 json.dumps({
@@ -2439,6 +2872,10 @@ diff --git a/model.sql b/model.sql
 
             self.assertTrue(result.applied)
             self.assertFalse((workspace / "interns").exists())
+            self.assertEqual(
+                json.loads((workspace / "workspace_settings.json").read_text(encoding="utf-8")),
+                {"dataset_allowlist": ["datasets"]},
+            )
             self.assertTrue((workspace / "docs" / "data_model.md").exists())
             self.assertTrue((workspace / "datasets" / "transactions.csv").exists())
             self.assertFalse((root / "state" / "workspace.db").exists())

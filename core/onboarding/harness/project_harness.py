@@ -66,8 +66,8 @@ class ProjectHarness:
     def run(self) -> ProjectHarnessResult:
         self._validate_workspace()
         self.layout.ensure_runtime_dirs()
-        validation = WorkspaceArtifactValidator(self.repo_root, self.workspace_rel).run().summary()
         kpi_execution = self._run_kpi_execution()
+        validation = WorkspaceArtifactValidator(self.repo_root, self.workspace_rel).run().summary()
         benchmark = AgentBenchmarkScorecardBuilder(
             self.repo_root,
             self.workspace_rel,
@@ -79,6 +79,9 @@ class ProjectHarness:
         ai_cli_harness = self._run_ai_cli_harness()
         workflow_guardrails = self._run_workflow_guardrails()
         evidence_graph = self._run_evidence_graph_health()
+        layered_pipeline = self._run_layered_pipeline()
+        pipeline_execution_harness = self._run_pipeline_execution_harness()
+        data_quality_harness = self._run_data_quality_harness()
 
         checks = {
             "workspace_artifacts": validation,
@@ -92,6 +95,9 @@ class ProjectHarness:
             "ai_cli_harness": ai_cli_harness,
             "workflow_guardrails": workflow_guardrails,
             "evidence_graph": evidence_graph,
+            "layered_pipeline": layered_pipeline,
+            "pipeline_execution_harness": pipeline_execution_harness,
+            "data_quality_harness": data_quality_harness,
         }
         blockers = _collect_blockers(checks)
         warnings = _collect_warnings(checks)
@@ -194,6 +200,58 @@ class ProjectHarness:
                 "error": f"{type(exc).__name__}: {exc}",
             }
 
+    def _run_layered_pipeline(self) -> dict[str, Any]:
+        pipeline_sql = self.layout.generated_dir / "pipeline" / "pipeline_layers.sql"
+        if not pipeline_sql.exists():
+            return {"status": "skipped", "ok": True, "reason": "No generated pipeline SQL found."}
+        return {
+            "status": "present",
+            "ok": True,
+            "path": _rel(pipeline_sql, self.repo_root),
+        }
+
+    def _run_pipeline_execution_harness(self) -> dict[str, Any]:
+        pipeline_plan = self.layout.contracts_dir / "pipeline_plan.json"
+        pipeline_sql = self.layout.generated_dir / "pipeline" / "pipeline_layers.sql"
+        path = self.layout.evidence_dir / "pipeline_execution_harness" / "current.json"
+        if not pipeline_plan.exists() and not pipeline_sql.exists() and not path.exists():
+            return {"status": "skipped", "ok": True, "reason": "No pipeline plan or generated SQL found."}
+        if not path.exists():
+            return {
+                "status": "failed",
+                "ok": False,
+                "passed": 0,
+                "failed": 1,
+                "error": "pipeline_execution_harness/current.json is required for generated pipeline work.",
+            }
+        payload = _load_json(path)
+        summary = payload.get("summary") or {}
+        return {
+            "status": str(payload.get("status") or ("passed" if payload.get("ok") else "failed")),
+            "ok": payload.get("ok") is True,
+            "passed": int(summary.get("passed_count") or 0),
+            "failed": int(summary.get("failed_count") or 0),
+            "path": _rel(path, self.repo_root),
+        }
+
+    def _run_data_quality_harness(self) -> dict[str, Any]:
+        path = self.layout.evidence_dir / "data_quality_harness" / "current.json"
+        if not path.exists():
+            alt = self.layout.evidence_dir / "data_quality" / "current.json"
+            if alt.exists():
+                path = alt
+        if not path.exists():
+            return {"status": "skipped", "ok": True, "reason": "No data quality harness artifact found."}
+        payload = _load_json(path)
+        summary = payload.get("summary") or {}
+        return {
+            "status": str(payload.get("status") or ("passed" if payload.get("ok") else "failed")),
+            "ok": payload.get("ok") is True,
+            "passed": int(summary.get("passed_count") or payload.get("finding_count") or 0),
+            "failed": int(summary.get("failed_count") or payload.get("unresolved_finding_count") or 0),
+            "path": _rel(path, self.repo_root),
+        }
+
     def _validate_workspace(self) -> None:
         if not self.workspace.exists():
             raise FileNotFoundError(f"workspace not found: {self.workspace}")
@@ -242,6 +300,10 @@ def _hard_blockers(checks: dict[str, Any]) -> list[str]:
         blockers.append("workflow guardrails failed")
     if not checks.get("evidence_graph", {}).get("ok", True):
         blockers.append("evidence graph health failed")
+    if not checks.get("pipeline_execution_harness", {}).get("ok", True):
+        blockers.append("pipeline execution harness failed")
+    if not checks.get("data_quality_harness", {}).get("ok", True):
+        blockers.append("data quality harness failed")
     if not checks.get("ai_cli_harness", {}).get("ok", True):
         blockers.append("AI CLI harness failed")
     critical_gates = {"source_to_target_planning", "executable_sql_generation", "production_promotion"}
@@ -268,6 +330,12 @@ def _collect_blockers(checks: dict[str, Any]) -> list[str]:
     graph = checks.get("evidence_graph", {})
     if graph and graph.get("ok") is False:
         blockers.append(f"evidence graph: {graph.get('error') or graph.get('status')}")
+    pipeline = checks.get("pipeline_execution_harness", {})
+    if pipeline and pipeline.get("ok") is False:
+        blockers.append(f"pipeline execution harness `{pipeline.get('status')}`")
+    data_quality = checks.get("data_quality_harness", {})
+    if data_quality and data_quality.get("ok") is False:
+        blockers.append(f"data quality harness `{data_quality.get('status')}`")
     kpi = checks["kpi_execution"]
     for record in kpi.get("records") or []:
         for error in record.get("errors") or []:
@@ -310,6 +378,10 @@ def _next_commands(workspace: str, domain: str, checks: dict[str, Any]) -> list[
         commands.append(f"uv run validate-workflow-guardrails --workspace {workspace}")
     if checks.get("evidence_graph", {}).get("ok") is False:
         commands.append(f"uv run build-workspace-evidence-graph --workspace {workspace}")
+    if checks.get("pipeline_execution_harness", {}).get("ok") is False:
+        commands.append(f"uv run run-pipeline-execution-harness --workspace {workspace}")
+    if checks.get("data_quality_harness", {}).get("ok") is False:
+        commands.append(f"uv run run-data-quality-harness --workspace {workspace}")
     for route in (checks["agent_benchmark"].get("scorecard") or {}).get("blocker_routes") or []:
         command = str(route.get("next_command") or "")
         if command and command not in commands:
@@ -339,6 +411,9 @@ def _render_markdown(result: ProjectHarnessResult) -> str:
         f"- Git hygiene: `{checks['git_hygiene'].get('status')}`",
         f"- Workflow guardrails: `{checks.get('workflow_guardrails', {}).get('status', 'skipped')}`",
         f"- Evidence graph: `{checks.get('evidence_graph', {}).get('status', 'skipped')}`",
+        f"- Layered pipeline: `{checks.get('layered_pipeline', {}).get('status', 'skipped')}`",
+        f"- Pipeline execution harness: `{checks.get('pipeline_execution_harness', {}).get('status', 'skipped')}`",
+        f"- Data quality harness: `{checks.get('data_quality_harness', {}).get('status', 'skipped')}`",
         f"- AI CLI harness: `{checks.get('ai_cli_harness', {}).get('status', 'skipped')}`",
         "",
         "## Release Gates",

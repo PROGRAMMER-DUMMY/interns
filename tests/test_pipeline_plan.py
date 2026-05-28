@@ -52,6 +52,26 @@ class PipelinePlanTests(unittest.TestCase):
             self.assertEqual(route["catalog_object_count"], 1)
             self.assertEqual(route["remote_policy"]["mode"], "local_first")
             self.assertTrue(route["remote_policy"]["remote_mutation_requires_explicit_approval"])
+            self.assertEqual(route["quality_assessment"]["status"], "passed")
+            self.assertIn("Single-source KPI proof", route["route_reason"])
+
+    def test_route_auto_selects_medallion_for_multi_source_kpi_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._create_workspace(root)
+            (workspace / "datasets" / "patients.csv").write_text(
+                "PatientID,Gender\nP1,Female\nP2,Male\n",
+                encoding="utf-8",
+            )
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+
+            result = DataEngineeringRoutePlanner(root, "workspaces/demo").build()
+
+            self.assertEqual(result.selected_track, "medallion")
+            route = json.loads((root / result.json_path).read_text(encoding="utf-8"))
+            self.assertEqual(route["decision_inputs"]["catalog_object_count"], 2)
+            self.assertIn("Multiple raw source objects", route["route_reason"])
+            self.assertEqual(route["quality_assessment"]["status"], "passed")
 
     def test_route_auto_selects_medallion_for_external_profile_family_without_kpis(self):
         with tempfile.TemporaryDirectory() as tmp:

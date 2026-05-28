@@ -161,6 +161,9 @@ class Manifest:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Manifest":
         layers = d.get("layers", {})
+        bronze_entries = layers.get("bronze") or []
+        silver_entries = layers.get("silver") or []
+        gold_entries = layers.get("gold") or []
         return cls(
             workspace=d["workspace"],
             inputs_hash=d["inputs_hash"],
@@ -169,9 +172,9 @@ class Manifest:
             schema_version=int(d.get("schema_version", SCHEMA_VERSION)),
             generated_at=d.get("generated_at", datetime.now(timezone.utc).isoformat()),
             budget=Budget.from_dict(d.get("budget", {})),
-            bronze=[BronzeTable.from_dict(x) for x in layers.get("bronze", [])],
-            silver=[SilverTable.from_dict(x) for x in layers.get("silver", [])],
-            gold=[GoldTable.from_dict(x) for x in layers.get("gold", [])],
+            bronze=[BronzeTable.from_dict(x) for x in bronze_entries],
+            silver=[SilverTable.from_dict(x) for x in silver_entries],
+            gold=[GoldTable.from_dict(x) for x in gold_entries],
             kpi_regeneration=KpiRegeneration.from_dict(d.get("kpi_regeneration", {})),
         )
 

@@ -4,8 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from core.onboarding.lexicon.builder import ColumnAliasEntry, WorkspaceLexicon
 from core.onboarding.relationships.schema_alias_matching import (
     alias_index,
+    aliases_for_column,
     candidate_labels,
     load_schema_index,
     safe_structural_alias,
@@ -46,7 +48,10 @@ class SchemaAliasMatchingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             self.assertEqual(load_schema_index(Path(td) / "missing.json"), {})
 
-    def test_alias_index_supports_structural_aliases(self):
+    def test_alias_index_uses_structural_suffix_patterns_without_lexicon(self):
+        """Without a workspace lexicon only universal structural patterns
+        (suffix variants, id/identifier) fire. The previous curated
+        ``dept``↔``department`` rewrite has been removed."""
         index = schema_index_from_profiles(
             [
                 {
@@ -61,9 +66,61 @@ class SchemaAliasMatchingTests(unittest.TestCase):
 
         aliases = alias_index(index)
 
+        # Universal structural: id↔identifier still produces a deptidentifier alias.
+        self.assertIn("deptidentifier", aliases)
+        self.assertEqual(
+            candidate_labels(aliases["deptidentifier"]),
+            ["DeptID (datasets/transactions.csv)"],
+        )
+        # The healthcare-specific dept↔department curated rewrite is GONE.
+        self.assertNotIn("departmentid", aliases)
+
+    def test_alias_index_consumes_workspace_lexicon_aliases(self):
+        """When a workspace lexicon is supplied, its ``column_aliases``
+        contribute. This is how DeptID → departmentid is learned now: from the
+        workspace's own data dictionary or accepted user definitions, not from
+        a curated dictionary shipped in code."""
+        index = schema_index_from_profiles(
+            [
+                {
+                    "path": "datasets/transactions.csv",
+                    "row_count": 1,
+                    "profile_path": "profiles/transactions.profile.json",
+                    "schema": {"DeptID": "Utf8"},
+                    "columns": [{"name": "DeptID", "sample_values": ["D1"]}],
+                }
+            ]
+        )
+        lexicon = WorkspaceLexicon(
+            metric_phrases=[],
+            cut_phrases=[],
+            column_aliases={
+                "DeptID": ColumnAliasEntry(
+                    canonical="DeptID",
+                    normalized={"deptid"},
+                    from_user_definitions={"departmentid", "department"},
+                )
+            },
+            cuts_headers=[],
+        )
+
+        aliases = alias_index(index, lexicon=lexicon)
+
         self.assertIn("departmentid", aliases)
-        self.assertTrue(safe_structural_alias("DepartmentID", aliases["departmentid"]))
-        self.assertEqual(candidate_labels(aliases["departmentid"]), ["DeptID (datasets/transactions.csv)"])
+        self.assertTrue(
+            safe_structural_alias("DepartmentID", aliases["departmentid"], lexicon=lexicon)
+        )
+        self.assertEqual(
+            candidate_labels(aliases["departmentid"]),
+            ["DeptID (datasets/transactions.csv)"],
+        )
+
+    def test_aliases_for_column_without_lexicon_only_returns_structural(self):
+        """Pure structural aliases only: no healthcare-RCM business terms."""
+        result = aliases_for_column("PaidAmount")
+        self.assertEqual(result, {"paidamount"})
+        self.assertNotIn("paid", result)
+        self.assertNotIn("amount", result)
 
     def test_source_columns_include_profile_payload(self):
         columns = source_columns(

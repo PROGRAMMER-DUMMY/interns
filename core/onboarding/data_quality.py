@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,21 +35,28 @@ class DataQualityHarness:
     def run(self) -> DataQualityResult:
         self.layout.ensure_runtime_dirs()
         decisions = _load_decisions(self.layout.contracts_dir / "duplicate_decisions.json")
+        duplicate_keys = _detect_duplicate_keys(self.workspace, self.layout)
+        has_duplicates = bool(duplicate_keys)
         resolved = bool(decisions)
         query = "SELECT TransactionID, COUNT(*) AS duplicate_count FROM transactions GROUP BY TransactionID HAVING COUNT(*) > 1"
-        findings = [
-            {
-                "code": "duplicate_rows_detected",
-                "severity": "medium",
-                "status": "resolved" if resolved else "unresolved",
-                "query": query,
-                "sample_output_table": "<redacted>",
-                "sample_redacted": True,
-            }
-        ]
+        findings = []
+        if has_duplicates:
+            findings.append(
+                {
+                    "code": "duplicate_rows_detected",
+                    "severity": "medium",
+                    "status": "resolved" if resolved else "unresolved",
+                    "query": query,
+                    "sample_output_table": "<redacted>",
+                    "sample_redacted": True,
+                    "duplicate_key_count": len(duplicate_keys),
+                }
+            )
         unresolved_count = sum(1 for finding in findings if finding["status"] == "unresolved")
         payload = {
             "artifact_type": "data_quality_harness/current.json",
+            "version": 1,
+            "generated_by": "run-data-quality-harness",
             "ok": unresolved_count == 0,
             "finding_count": len(findings),
             "unresolved_finding_count": unresolved_count,
@@ -56,6 +64,8 @@ class DataQualityHarness:
         }
         contract = {
             "artifact_type": "data_quality_contract.json",
+            "version": 1,
+            "generated_by": "run-data-quality-harness",
             "policy": {
                 "duplicate_policy": {
                     "sql_mutation_in_milestone_1": False,
@@ -103,7 +113,10 @@ class DuplicateReviewPanel:
         finding = (report.get("findings") or [{}])[0]
         panel = {
             "artifact_type": "duplicate_review/current.json",
+            "version": 1,
+            "generated_by": "prepare-duplicate-review-panel",
             "status": "needs_user_answer",
+            "recommended_option_id": "option_a",
             "query": finding.get("query", ""),
             "sample_output_table": finding.get("sample_output_table", ""),
             "finding_count": report.get("finding_count", 0),
@@ -152,6 +165,9 @@ class DuplicateDecisionRecorder:
         }.get(answer, "custom")
         payload = {
             "artifact_type": "duplicate_decisions.json",
+            "version": 1,
+            "generated_by": "apply-duplicate-review-answer",
+            "workspace": _rel(self.workspace, self.repo_root),
             "decisions": [
                 {
                     "answer": answer,
@@ -170,8 +186,8 @@ class DuplicateDecisionRecorder:
             "next_panel": panel.summary(),
         }
 
-    def apply(self, answer: str) -> dict[str, Any]:
-        return self.record(answer, reason="Accepted duplicate review answer.")
+    def apply(self, answer: str, *, custom_rule: str = "") -> dict[str, Any]:
+        return self.record(answer, reason=custom_rule or "Accepted duplicate review answer.")
 
 
 def _rel(path: Path, root: Path) -> str:
@@ -194,13 +210,93 @@ def _load_decisions(path: Path) -> list[dict[str, Any]]:
     return decisions if isinstance(decisions, list) else []
 
 
+def _detect_duplicate_keys(workspace: Path, layout: WorkspaceLayout | None = None) -> set[str]:
+    duplicates: set[str] = set()
+    candidates = sorted(workspace.rglob("*.csv"))
+    for path in candidates:
+        if layout is not None and not layout.is_dataset_allowed(path):
+            continue
+        try:
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                if not reader.fieldnames or "TransactionID" not in reader.fieldnames:
+                    continue
+                seen: set[str] = set()
+                for row in reader:
+                    key = str(row.get("TransactionID") or "").strip()
+                    if not key:
+                        continue
+                    if key in seen:
+                        duplicates.add(key)
+                    seen.add(key)
+        except OSError:
+            continue
+    return duplicates
+
+
 def main(argv: list[str] | None = None) -> int:
+    from core.onboarding.workspace.cli_runner import run_workspace_command
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
     args = parser.parse_args(argv)
-    print(json.dumps(DataQualityHarness(args.repo_root, args.workspace).run().summary(), indent=2))
-    return 0
+    return run_workspace_command(
+        command="run-data-quality-harness",
+        workspace=args.workspace,
+        repo_root=args.repo_root,
+        fn=lambda: DataQualityHarness(args.repo_root, args.workspace).run(),
+    )
+
+
+def run_main(argv: list[str] | None = None) -> int:
+    return main(argv)
+
+
+def panel_main(argv: list[str] | None = None) -> int:
+    from core.onboarding.workspace.cli_runner import run_workspace_command
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
+    args = parser.parse_args(argv)
+    return run_workspace_command(
+        command="prepare-duplicate-review-panel",
+        workspace=args.workspace,
+        repo_root=args.repo_root,
+        fn=lambda: DuplicateReviewPanel(args.repo_root, args.workspace).prepare(),
+        validation="validate-workspace-artifacts",
+    )
+
+
+def apply_main(argv: list[str] | None = None) -> int:
+    from core.onboarding.workspace.cli_runner import run_workspace_command
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
+    parser.add_argument("--answer", required=True)
+    parser.add_argument("--custom-rule", default="")
+    parser.add_argument("--allow-replay", action="store_true")
+    args = parser.parse_args(argv)
+    return run_workspace_command(
+        command="apply-duplicate-review-answer",
+        workspace=args.workspace,
+        repo_root=args.repo_root,
+        fn=lambda: DuplicateDecisionRecorder(args.repo_root, args.workspace).apply(
+            args.answer,
+            custom_rule=args.custom_rule,
+        ),
+        op_args={
+            "workspace": args.workspace,
+            "answer": args.answer,
+            "custom_rule": args.custom_rule,
+        },
+        allow_replay=args.allow_replay,
+        decision=args.answer,
+        metadata={"answer": args.answer},
+        record_idempotent=True,
+    )
 
 
 if __name__ == "__main__":

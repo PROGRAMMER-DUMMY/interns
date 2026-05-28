@@ -10,6 +10,11 @@ from core.onboarding.kpi.text_parser import (
     infer_metric_and_cuts,
     is_template_kpi_row,
 )
+from core.onboarding.lexicon.builder import (
+    CutPhrase,
+    MetricPhrase,
+    WorkspaceLexicon,
+)
 
 
 class KPITextParserTests(unittest.TestCase):
@@ -17,30 +22,68 @@ class KPITextParserTests(unittest.TestCase):
         self.assertTrue(is_template_kpi_row("Key business question"))
         self.assertFalse(is_template_kpi_row("What is paid amount by payer?"))
 
-    def test_infer_metric_and_cuts(self):
-        metric, cuts = infer_metric_and_cuts("Paid amount by Medicare LOB and payer over 50")
+    def test_infer_without_lexicon_returns_empty(self):
+        """The hardcoded healthcare/e-commerce keyword ladders have been
+        removed. Without a workspace lexicon, infer_metric_and_cuts is empty —
+        derive don't curate."""
+        metric, cuts = infer_metric_and_cuts(
+            "Paid amount by Medicare LOB and payer over 50"
+        )
+        self.assertEqual(metric, "")
+        self.assertEqual(cuts, "")
 
-        self.assertEqual(metric, "amount paid")
-        self.assertIn("LOB = Medicare", cuts)
+    def test_infer_with_lexicon_returns_learned_metric_and_cuts(self):
+        """With a workspace lexicon (built from authored KPI cells, accepted
+        definitions, etc.) infer_metric_and_cuts surfaces the learned phrases.
+        This test seeds a small lexicon directly to validate the wiring."""
+        lexicon = WorkspaceLexicon(
+            metric_phrases=[
+                MetricPhrase(
+                    phrase="amount paid",
+                    metric="PaidAmount",
+                    source="kpi_registry",
+                    confidence="authored",
+                ),
+                MetricPhrase(
+                    phrase="paid amount",
+                    metric="PaidAmount",
+                    source="kpi_registry",
+                    confidence="authored",
+                ),
+            ],
+            cut_phrases=[
+                CutPhrase(
+                    phrase="payer",
+                    cut="Payer",
+                    source="kpi_registry",
+                    confidence="authored",
+                ),
+                CutPhrase(
+                    phrase="medicare",
+                    cut="LOB = Medicare",
+                    source="workspace_feature_definitions",
+                    confidence="user_confirmed",
+                ),
+            ],
+            column_aliases={},
+            cuts_headers=[],
+        )
+        metric, cuts = infer_metric_and_cuts(
+            "Paid amount by Medicare LOB and payer over 50",
+            lexicon=lexicon,
+        )
+        self.assertEqual(metric, "PaidAmount")
         self.assertIn("Payer", cuts)
-        self.assertIn("Age > 50", cuts)
+        self.assertIn("LOB = Medicare", cuts)
 
-    def test_infer_trend_does_not_invent_created_at(self):
+    def test_infer_does_not_invent_phrases_outside_lexicon(self):
+        """Without a learned phrase for 'created_at', it is never invented as
+        a cut. The previous "trend → Time" curated rule has been removed."""
         _metric, cuts = infer_metric_and_cuts(
             "What is trend for amount paid for medicare LOB across gender and payer"
         )
-
-        self.assertIn("Time", cuts)
+        self.assertEqual(cuts, "")
         self.assertNotIn("created_at", cuts)
-
-    def test_infer_ecommerce_metric_and_cuts(self):
-        metric, cuts = infer_metric_and_cuts(
-            "What is the session-to-order conversion rate by traffic source and campaign?"
-        )
-
-        self.assertEqual(metric, "website_session_id, order_id")
-        self.assertIn("utm_source", cuts)
-        self.assertIn("utm_campaign", cuts)
 
     def test_small_cell_helpers(self):
         self.assertEqual(first_existing({"a": "A"}, ["b", "a"]), "A")
@@ -49,11 +92,14 @@ class KPITextParserTests(unittest.TestCase):
 
     def test_sample_kpi_cuts_header_alias(self):
         lowered = {"cuts with drg(consolidated)": "Cuts with DRG(Consolidated)"}
-
-        self.assertEqual(first_existing(lowered, KPI_CUTS_HEADERS), "Cuts with DRG(Consolidated)")
+        self.assertEqual(
+            first_existing(lowered, KPI_CUTS_HEADERS),
+            "Cuts with DRG(Consolidated)",
+        )
 
     def test_extract_kpis_from_sql(self):
         from core.onboarding.kpi.text_parser import extract_kpis_from_sql
+
         sql_text = """-- Connect to database
 USE hospital_db;
 
@@ -70,7 +116,11 @@ USE hospital_db;
         self.assertEqual(len(kpis), 3)
         self.assertEqual(kpis[0]["name"], "How many total encounters occurred each year?")
         self.assertEqual(kpis[0]["description"], "OBJECTIVE 1: ENCOUNTERS OVERVIEW")
-        self.assertEqual(kpis[1]["name"], "For each year, what percentage of all encounters belonged to each encounter class (ambulatory, outpatient, wellness, urgent care, emergency, and inpatient)?")
+        self.assertEqual(
+            kpis[1]["name"],
+            "For each year, what percentage of all encounters belonged to each encounter class "
+            "(ambulatory, outpatient, wellness, urgent care, emergency, and inpatient)?",
+        )
 
 
 if __name__ == "__main__":

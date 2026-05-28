@@ -85,6 +85,28 @@ uv run prepare-bronze-silver-standards --workspace workspaces/<project> --domain
   - PySpark for distributed medallion pipelines or enterprise Spark environments.
 - Preserve semantic correctness over engine convenience.
 
+## Data Model Understanding
+
+- Treat KPI text and approved data-model evidence as hard truth. Do not rewrite a KPI to fit a
+  convenient schema.
+- Use star-schema vocabulary for Gold outputs:
+  - fact tables require explicit grain, measures, temporal anchor, and proven many-to-one
+    relationships to dimensions;
+  - dimensions require surrogate key policy, natural key candidates, descriptive attributes, and
+    SCD policy;
+  - bridge tables are required for many-to-many attribution before measures can be trusted.
+- Use medallion vocabulary for layer placement:
+  - Bronze preserves raw source shape plus ingestion metadata only;
+  - Silver performs technical normalization plus approved semantic conformance for reusable
+    entities/events;
+  - Gold applies KPI/business logic, aggregation, dimensional modeling, and BI-ready naming.
+- Image data-model diagrams are review-gated. Parse visual signals into a structured sidecar with
+  tables, columns, relationships, join columns, cardinality, confidence, and warnings; do not allow
+  image-derived joins to become executable until the sidecar is reviewed and approved.
+- Flag anti-patterns explicitly: Gold directly from Bronze, business logic in Bronze, KPI formulas
+  in Silver, missing fact grain, measures in dimensions, SCD2 without validity columns, and nullable
+  fact FKs without an unknown-member policy.
+
 ## Blockers
 
 Stop and ask through the blocker-panel workflow when any of these are unproven:

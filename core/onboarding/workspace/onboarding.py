@@ -10,7 +10,7 @@ import json
 import re
 import shutil
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -26,11 +26,20 @@ from core.onboarding.kpi.text_parser import (
     infer_metric_and_cuts,
     is_template_kpi_row,
 )
+from core.onboarding.lexicon import (
+    WorkspaceLexicon,
+    build_workspace_lexicon,
+)
+from core.observability.events import time_command
 from core.resource.manager import ResourceManager
 from core.profiling.data_model_profiler import DataModelProfiler
 from core.storage.external_data import is_external_path, load_external_data_policy
 from core.storage.metadata_store import MetadataStore, build_metadata_store
 from core.storage.workspace_layout import WorkspaceLayout
+from core.storage.workspace_lock import WorkspaceLockTimeout, workspace_lock
+from core.contracts.versioning import register_contract
+
+register_contract("kpi_registry.json", current_version=1)
 
 try:
     import polars as pl
@@ -109,6 +118,66 @@ class WorkspaceOnboarder:
     def run(self) -> OnboardingResult:
         self._validate_workspace()
         self.layout.ensure_runtime_dirs()
+        with workspace_lock(self.workspace):
+            return self._run_locked()
+
+    def _extract_data_model_documents(
+        self,
+        data_models: list[str],
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Run methodology_parser.parse_document() on PDF/DOCX data-model
+        files and write their extracted text under
+        ``interns/generated/data_dictionary/<safe_name>.txt``. Returns a list
+        of ``{path, text_path, char_count}`` entries plus any warnings.
+
+        Failures are non-fatal: a missing pdfplumber/python-docx dependency
+        produces a warning, never an error. The extracted text is downstream
+        evidence for the CLI-agent proposal panel and (in future) for
+        targeted lexicon harvesting.
+        """
+        try:
+            from tools.methodology_parser import parse_document
+        except Exception as exc:
+            return [], [f"methodology_parser_import_failed:{type(exc).__name__}:{exc}"]
+
+        supported_suffixes = {".pdf", ".docx"}
+        extracted: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        dictionary_dir = self.layout.generated_dir / "data_dictionary"
+        for rel in data_models:
+            path = self.repo_root / rel
+            if not path.exists() or not path.is_file():
+                continue
+            if path.suffix.lower() not in supported_suffixes:
+                continue
+            try:
+                text = parse_document(str(path))
+            except ImportError as exc:
+                warnings.append(
+                    f"data_model_document_skipped:{rel}:missing_dependency:{exc}"
+                )
+                continue
+            except Exception as exc:
+                warnings.append(
+                    f"data_model_document_extraction_failed:{rel}:{type(exc).__name__}:{exc}"
+                )
+                continue
+            if not text or not text.strip():
+                continue
+            dictionary_dir.mkdir(parents=True, exist_ok=True)
+            safe_stem = _safe_stem(path, self.workspace)
+            text_path = dictionary_dir / f"{safe_stem}.txt"
+            text_path.write_text(text, encoding="utf-8")
+            extracted.append(
+                {
+                    "path": _rel(path, self.repo_root),
+                    "text_path": _rel(text_path, self.repo_root),
+                    "char_count": len(text),
+                }
+            )
+        return extracted, warnings
+
+    def _run_locked(self) -> OnboardingResult:
         self._clear_onboarding_artifacts()
         inputs = self.discover_inputs()
         estimated_profile_bytes = _total_existing_bytes(inputs.data_files, self.repo_root)
@@ -130,22 +199,74 @@ class WorkspaceOnboarder:
             expensive_checks=profiling_settings.expensive_checks,
             resource_mode=profiling_settings.mode,
         )
-
-        artifacts = {
-            "input_inventory": self._write_json(
-                self.layout.requirements_dir / "input_inventory.json",
-                asdict(inputs),
-            ),
-            "kpi_registry": self._write_json(
-                self.layout.contracts_dir / "kpi_registry.json",
+        # Extract dictionary text from PDF/DOCX data-model files. The text is
+        # downstream evidence for the CLI-agent proposal panel; failures
+        # (missing pdfplumber/docx) are warnings, not errors.
+        data_dictionary_documents, dictionary_warnings = self._extract_data_model_documents(
+            inputs.data_models
+        )
+        if data_dictionary_documents:
+            self._write_json(
+                self.layout.generated_dir / "data_dictionary" / "index.json",
                 {
-                    "artifact_type": "kpi_registry.json",
+                    "artifact_type": "data_dictionary_index.json",
                     "version": 1,
                     "generated_by": "onboard-workspace",
                     "workspace": _rel(self.workspace, self.repo_root),
-                    "source_registries": inputs.kpi_registries,
-                    "kpis": [asdict(kpi) for kpi in kpis],
+                    "documents": data_dictionary_documents,
                 },
+            )
+
+        # Two-phase write so the workspace lexicon can be derived from this
+        # workspace's own evidence rather than a curated dictionary.
+        #   1. write input_inventory, profile_index, and a draft kpi_registry
+        #      containing only the authored cells from the registry files;
+        #   2. build the workspace lexicon (reads profile_index + kpi_registry +
+        #      any previously accepted feature definitions/mappings);
+        #   3. fill empty metric/cuts cells from the lexicon;
+        #   4. rewrite kpi_registry with the filled values, then write the
+        #      remaining contracts (semantic, baseline_sql, open_questions,
+        #      etc.) using those filled KPIs.
+        input_inventory_path = self._write_json(
+            self.layout.requirements_dir / "input_inventory.json",
+            asdict(inputs),
+        )
+        profile_index = self._write_json(
+            self.layout.profiles_dir / "profile_index.json",
+            {
+                "artifact_type": "profile_index.json",
+                "version": 1,
+                "generated_by": "onboard-workspace",
+                "workspace": _rel(self.workspace, self.repo_root),
+                "profiles": profiles,
+                "resource_profile_settings": profiling_settings.to_dict(),
+            },
+        )
+        kpi_registry_payload = {
+            "artifact_type": "kpi_registry.json",
+            "version": 1,
+            "generated_by": "onboard-workspace",
+            "workspace": _rel(self.workspace, self.repo_root),
+            "source_registries": inputs.kpi_registries,
+            "kpis": [asdict(kpi) for kpi in kpis],
+        }
+        self._write_json(
+            self.layout.contracts_dir / "kpi_registry.json",
+            kpi_registry_payload,
+        )
+
+        lexicon = build_workspace_lexicon(self.layout, self.repo_root)
+        kpis = self._fill_kpi_gaps_with_lexicon(kpis, lexicon)
+        kpi_registry_payload["kpis"] = [asdict(kpi) for kpi in kpis]
+
+        artifacts = {
+            "input_inventory": input_inventory_path,
+            "kpi_registry": self._write_json(
+                self.layout.contracts_dir / "kpi_registry.json",
+                kpi_registry_payload,
+            ),
+            "workspace_lexicon": str(
+                self.layout.contracts_dir / "workspace_lexicon.json"
             ),
             "domain_model": self._write_json(
                 self.layout.contracts_dir / "domain_model.json",
@@ -161,20 +282,9 @@ class WorkspaceOnboarder:
             "experiment": self._write_experiment_script(),
             "evaluator": self._write_evaluator_script(),
             "onboarding_report": self._write_report(inputs, kpis, profiles),
+            "profile_index": profile_index,
             **resource_artifacts,
         }
-        profile_index = self._write_json(
-            self.layout.profiles_dir / "profile_index.json",
-            {
-                "artifact_type": "profile_index.json",
-                "version": 1,
-                "generated_by": "onboard-workspace",
-                    "workspace": _rel(self.workspace, self.repo_root),
-                    "profiles": profiles,
-                    "resource_profile_settings": profiling_settings.to_dict(),
-                },
-            )
-        artifacts["profile_index"] = profile_index
         artifacts["generated_file_readability"] = self._write_generated_file_readability()
 
         return OnboardingResult(
@@ -186,7 +296,7 @@ class WorkspaceOnboarder:
             artifacts=artifacts,
             next_step=_onboarding_next_step(inputs, kpis, profiles),
             next_command=_onboarding_next_command(inputs, kpis, profiles),
-            warnings=kpi_warnings + profile_warnings,
+            warnings=kpi_warnings + profile_warnings + dictionary_warnings,
         )
 
     def discover_inputs(self) -> WorkspaceInputs:
@@ -261,6 +371,40 @@ class WorkspaceOnboarder:
                     f"{type(exc).__name__}:{exc}"
                 )
         return kpis, warnings
+
+    def _fill_kpi_gaps_with_lexicon(
+        self,
+        kpis: list[KpiDefinition],
+        lexicon: WorkspaceLexicon | None,
+    ) -> list[KpiDefinition]:
+        """Apply lexicon inference only to KPI rows whose cells were left empty.
+
+        Authored cells are preserved exactly. When the lexicon proposes a metric
+        for a KPI whose ``metric`` cell is empty, fill it. Same for ``cuts``.
+        An empty or absent lexicon produces no changes; sparse workspaces
+        correctly leave KPIs in ``needs_mapping`` rather than confidently
+        inferring from nothing.
+        """
+        if lexicon is None or lexicon.is_empty():
+            return list(kpis)
+        filled: list[KpiDefinition] = []
+        for kpi in kpis:
+            metric = kpi.metric
+            cuts = kpi.cuts
+            if metric and cuts:
+                filled.append(kpi)
+                continue
+            inferred_metric, inferred_cuts = lexicon.infer_metric_and_cuts(
+                kpi.name, kpi.description
+            )
+            filled.append(
+                replace(
+                    kpi,
+                    metric=metric or inferred_metric,
+                    cuts=cuts or inferred_cuts,
+                )
+            )
+        return filled
 
     def profile_inputs(
         self,
@@ -709,6 +853,7 @@ if __name__ == "__main__":
             self.layout.contracts_dir / "kpi_registry.json",
             self.layout.contracts_dir / "domain_model.json",
             self.layout.contracts_dir / "semantic_contract.json",
+            self.layout.contracts_dir / "workspace_lexicon.json",
             self.layout.solutions_dir / "kpi_metrics.sql",
             self.layout.evaluation_dir / "experiment.py",
             self.layout.evaluation_dir / "evaluator.py",
@@ -725,6 +870,11 @@ if __name__ == "__main__":
         delta_root = self.layout.state_dir / "delta_metadata"
         if delta_root.exists():
             shutil.rmtree(delta_root)
+        # Clear extracted data-dictionary text from prior runs so a fresh
+        # onboarding re-extracts from whatever PDFs/DOCX are present today.
+        dictionary_root = self.layout.generated_dir / "data_dictionary"
+        if dictionary_root.exists():
+            shutil.rmtree(dictionary_root)
 
     def _store_metadata(
         self,
@@ -800,20 +950,14 @@ def _read_tabular_kpis(frame: Any, source: str) -> list[KpiDefinition]:
         nonlocal current
         if not current:
             return
-        name = current["name"]
-        description = current["description"]
-        metric = current["metric"]
-        cuts = current["cuts"]
-        inferred_metric, inferred_cuts = _infer_metric_and_cuts(name, description)
-        if not metric:
-            metric = inferred_metric
-        cuts = _merge_kpi_cuts(cuts, _source_truth_constraints(inferred_cuts)) if cuts else inferred_cuts
+        # Authored cells only: inference is applied later by
+        # _fill_kpi_gaps_with_lexicon once a workspace lexicon has been built.
         kpis.append(
             KpiDefinition(
-                name=name,
-                description=description,
-                cuts=cuts,
-                metric=metric,
+                name=current["name"],
+                description=current["description"],
+                cuts=current["cuts"],
+                metric=current["metric"],
                 refinement_required=current["refinement_required"],
                 source=source,
             )
@@ -872,18 +1016,14 @@ def _read_xlsx_xml_kpis(path: Path) -> list[KpiDefinition]:
         name = _cell_at(row, name_idx)
         if not name or _is_template_kpi_row(name):
             continue
-        metric = _cell_at(row, metric_idx)
-        cuts = _cell_at(row, cuts_idx)
-        inferred_metric, inferred_cuts = _infer_metric_and_cuts(name, _cell_at(row, desc_idx))
-        if not metric:
-            metric = inferred_metric
-        cuts = _merge_kpi_cuts(cuts, _source_truth_constraints(inferred_cuts)) if cuts else inferred_cuts
+        # Authored cells only: inference is applied later by
+        # _fill_kpi_gaps_with_lexicon once a workspace lexicon has been built.
         kpis.append(
             KpiDefinition(
                 name=name,
                 description=_cell_at(row, desc_idx),
-                cuts=cuts,
-                metric=metric,
+                cuts=_cell_at(row, cuts_idx),
+                metric=_cell_at(row, metric_idx),
                 refinement_required=_cell_at(row, refine_idx),
                 source=str(path),
             )
@@ -903,8 +1043,8 @@ def _read_json_kpis(path: Path, repo_root: Path) -> list[KpiDefinition]:
             description = _clean_cell(item.get("description") or item.get("definition"))
             cuts = _clean_cell(item.get("cuts") or item.get("grain") or item.get("dimensions"))
             metric = _clean_cell(item.get("metric") or item.get("formula"))
-            if not metric and not cuts:
-                metric, cuts = _infer_metric_and_cuts(name, description)
+            # Authored cells only: inference is applied later by
+            # _fill_kpi_gaps_with_lexicon once a workspace lexicon has been built.
             kpis.append(
                 KpiDefinition(
                     name=name,
@@ -1102,7 +1242,16 @@ def main(argv: list[str] | None = None) -> int:
         exact_profile=args.exact_profile,
         sample_rows=args.sample_rows,
     )
-    result = onboarder.run()
+    workspace_path = (Path(args.repo_root) / args.workspace).resolve()
+    try:
+        with time_command(workspace_path, "onboard-workspace") as event_details:
+            result = onboarder.run()
+            event_details["kpi_count"] = result.kpi_count
+            event_details["profile_count"] = result.profile_count
+            event_details["warnings"] = len(result.warnings)
+    except WorkspaceLockTimeout as exc:
+        print(json.dumps({"error": "workspace_lock_timeout", "detail": str(exc)}, indent=2))
+        return 2
     print(json.dumps(result.summary(), indent=2))
     return 0
 

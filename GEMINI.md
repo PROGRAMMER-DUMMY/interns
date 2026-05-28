@@ -2,6 +2,8 @@
 
 Read `AGENTS.md` first and follow it as the canonical operating guide for this repo.
 Then inspect `TOOLS.md` and `.agents/tools.json` before inventing workflows or helper scripts.
+For Gemini CLI command, configuration, policy, tool, and memory behavior, use
+`docs/agents/gemini-cli-reference.md` as the repo-local reference.
 
 For startup commands such as `set <workspace>`, `set current workspace to ...`, or a bare project
 name, treat the message as workspace selection only. Do not create, edit, or write files from that
@@ -78,10 +80,13 @@ hand.
 
 KPI blocker UI rules:
 
-- If the user asks for Markdown mode, show or summarize `current.md`; do not open an interactive
-  picker.
-- If using an interactive picker, load choices directly from `current.json` and preserve the option
-  labels, option ids, ordering, recommended option, and business summaries.
+- For blocker, approval, KPI-generation, data-model, duplicate-review, and pipeline-format panels,
+  render the generated `current.md` verbatim as the human-facing card before asking for an answer.
+- Do not replace `current.md` with Gemini's generic `Ask User` / `Answer Questions` input box.
+- Do not summarize away KPI source truth, AI understanding, evidence, SQL preview, result demo, or
+  actions.
+- Use `current.json` only for exact option/button rendering and answer application. Preserve the
+  option labels, option ids, ordering, recommended option, and business summaries.
 - Do not invent, rename, reorder, or simplify blocker options outside the panel artifact.
 - Do not ask from hidden command output. If output is truncated, read the relevant `current.md` or
   `current.json` file explicitly before asking.

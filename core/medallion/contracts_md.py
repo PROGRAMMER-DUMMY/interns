@@ -294,4 +294,35 @@ def render_lineage_md(lineage: Lineage) -> str:
         rsn = e.reasoning if e.reasoning else "—"
         lines.append(f"| `{e.from_node}` | {fc} | `{e.to_node}` | {tc} | `{e.transform_type}` | {rsn} |")
     lines.append("")
+
+    lines.append("## Gold Column Traces")
+    lines.append("")
+    gold_nodes = [n for n in lineage.nodes if n.layer == "gold"]
+    if not gold_nodes:
+        lines.append("_No Gold nodes declared._")
+        lines.append("")
+        return "\n".join(lines) + "\n"
+
+    for node in sorted(gold_nodes, key=lambda x: x.table):
+        lines.append(f"### `{node.qualified}`")
+        lines.append("")
+        columns = list(node.columns)
+        if not columns:
+            columns = sorted({
+                col
+                for edge in lineage.edges
+                if edge.to_node == node.qualified
+                for col in edge.to_columns
+            })
+        if not columns:
+            lines.append("_No Gold columns declared._")
+            lines.append("")
+            continue
+        lines.append("| Gold column | Bronze source columns |")
+        lines.append("|---|---|")
+        for column in columns:
+            sources = lineage.trace_to_sources("gold", node.table, column)
+            source_text = ", ".join(f"`{src}.{col}`" for src, col in sources) if sources else "—"
+            lines.append(f"| `{column}` | {source_text} |")
+        lines.append("")
     return "\n".join(lines) + "\n"
