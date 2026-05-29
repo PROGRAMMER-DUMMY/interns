@@ -44,7 +44,7 @@ class WorkspaceWorkflowOrchestrator:
         repo_root: str | Path,
         workspace: str | Path,
         *,
-        domain: str = "healthcare",
+        domain: str = "generic",
         mode: str = "local-safe",
     ) -> None:
         if mode not in MODES:
@@ -466,7 +466,7 @@ def prepare_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare a governed workspace workflow checkpoint.")
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--domain", default="healthcare")
+    parser.add_argument("--domain", default="generic")
     parser.add_argument("--mode", choices=sorted(MODES), default="local-safe")
     args = parser.parse_args(argv)
     result = WorkspaceWorkflowOrchestrator(

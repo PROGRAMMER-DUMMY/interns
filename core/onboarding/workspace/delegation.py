@@ -43,6 +43,29 @@ class DelegationVerdict:
 
 
 @dataclass(frozen=True)
+class DelegationRequest:
+    """Briefing the orchestrator can paste directly into a subagent spawn.
+
+    Lifts a delegation from "verdict recorded programmatically" to
+    "ready-to-invoke subagent prompt" — the orchestrator no longer has
+    to construct the brief itself.
+    """
+
+    agent: str
+    prompt: str
+    context_keys: list[str]
+    expected_return: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent": self.agent,
+            "prompt": self.prompt,
+            "context_keys": self.context_keys,
+            "expected_return": self.expected_return,
+        }
+
+
+@dataclass(frozen=True)
 class DelegationEvent:
     """One specialist delegation, recorded at a workflow stage."""
 
@@ -52,9 +75,10 @@ class DelegationEvent:
     started_at: str
     completed_at: str
     verdict: DelegationVerdict
+    delegation_request: DelegationRequest | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "agent": self.agent,
             "stage": self.stage,
             "reason": self.reason,
@@ -62,6 +86,9 @@ class DelegationEvent:
             "completed_at": self.completed_at,
             "verdict": asdict(self.verdict),
         }
+        if self.delegation_request is not None:
+            out["delegation_request"] = self.delegation_request.to_dict()
+        return out
 
     def to_trajectory_event(self, *, workspace_rel: str) -> dict[str, Any]:
         return {
@@ -85,6 +112,103 @@ class DelegationEvent:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_STAGE_BRIEFS: dict[str, dict[str, Any]] = {
+    "relationship_review": {
+        "context_keys": [
+            "summary.diff.executable_relationship_ids",
+            "summary.diff.pending_relationship_ids",
+            "interns/generated/contracts/relationship_contracts.json",
+        ],
+        "expected_return": "verdict: ok / needs_review / blocked + specific relationship_ids that still need approval",
+        "prompt_template": (
+            "Act as the data-engineer specialist. Review the relationship contracts for workspace "
+            "`{workspace}`. Programmatic verdict already captured: `{verdict_status}` — {verdict_summary}. "
+            "Use `interns/generated/contracts/relationship_contracts.json` as the source of truth. "
+            "Return either (a) confirmation that the programmatic verdict is correct, or (b) a list of "
+            "relationship_ids that need additional review beyond what the verdict captured."
+        ),
+    },
+    "source_to_target_review": {
+        "context_keys": [
+            "summary.kpi_count",
+            "summary.blocked_kpi_count",
+            "interns/generated/contracts/source_to_target_plan.json",
+        ],
+        "expected_return": "verdict: ok / blocked + per-KPI blocker codes for any kpi the verdict flagged",
+        "prompt_template": (
+            "Act as the source-to-target-reviewer specialist. Review the plan for workspace "
+            "`{workspace}`. Programmatic verdict: `{verdict_status}` — {verdict_summary}. Inspect "
+            "`interns/generated/contracts/source_to_target_plan.json` and confirm each KPI's "
+            "selected_source_datasets + join_plan + grain match the KPI's cuts. Surface anything the "
+            "programmatic verdict missed."
+        ),
+    },
+    "artifact_validation": {
+        "context_keys": [
+            "summary.validation.error_count",
+            "summary.validation.warning_count",
+            "interns/reports/open_questions.md",
+        ],
+        "expected_return": "verdict: ok / warning / error + specific artifact paths to fix",
+        "prompt_template": (
+            "Act as the validation-gatekeeper specialist. Review artifact validation for workspace "
+            "`{workspace}`. Programmatic verdict: `{verdict_status}` — {verdict_summary}. Confirm "
+            "the verdict or list any cross-artifact inconsistencies the static validator might have "
+            "missed (e.g. a KPI references a column not present in profile_index)."
+        ),
+    },
+    "kpi_completion_review": {
+        "context_keys": [
+            "summary.completed_kpis[*].kpi_id",
+            "summary.completed_kpis[*].definition",
+            "summary.completed_kpis[*].sql_text",
+            "summary.completed_kpis[*].preview_markdown",
+        ],
+        "expected_return": "verdict: ok / partial + per-KPI interpretation issues (e.g. SQL aggregates the wrong column)",
+        "prompt_template": (
+            "Act as the kpi-analyst specialist. Review every completed KPI in workspace `{workspace}`. "
+            "Programmatic verdict: `{verdict_status}` — {verdict_summary}. For each KPI under "
+            "`summary.completed_kpis`, confirm the SQL matches the business_question + metric + cuts. "
+            "Flag any KPI where the rendered result table would mislead a stakeholder."
+        ),
+    },
+    "dashboard_refresh": {
+        "context_keys": [
+            "summary.kpi_count",
+            "workspaces/<ws>/dashboard/*.json",
+        ],
+        "expected_return": "verdict: ok / partial + per-KPI chart issues (e.g. chart type doesn't match metric shape)",
+        "prompt_template": (
+            "Act as the dashboard-engineer specialist. Review dashboard specs for workspace `{workspace}`. "
+            "Programmatic verdict: `{verdict_status}` — {verdict_summary}. For each spec under "
+            "`dashboard/*.json`, confirm the inferred chart_type matches the KPI shape and the spec "
+            "preserves any user_overrides already set."
+        ),
+    },
+}
+
+
+def _build_delegation_request(
+    agent: str, stage: str, workspace: str, verdict: DelegationVerdict
+) -> DelegationRequest:
+    brief = _STAGE_BRIEFS.get(stage) or {}
+    template = str(brief.get("prompt_template") or
+                   f"Act as the `{agent}` specialist for workspace `{workspace}`. "
+                   f"Verdict: `{verdict.status}` — {verdict.summary}. "
+                   "Review the relevant artifacts and confirm or extend the verdict.")
+    prompt = template.format(
+        workspace=workspace,
+        verdict_status=verdict.status,
+        verdict_summary=verdict.summary,
+    )
+    return DelegationRequest(
+        agent=agent,
+        prompt=prompt,
+        context_keys=list(brief.get("context_keys") or []),
+        expected_return=str(brief.get("expected_return") or "verdict + actionable next step"),
+    )
 
 
 def record_delegation(
@@ -118,6 +242,7 @@ def record_delegation(
         started_at=started,
         completed_at=completed,
         verdict=verdict,
+        delegation_request=_build_delegation_request(agent, stage, workspace_rel, verdict),
     )
     _append_trajectory(layout, event.to_trajectory_event(workspace_rel=workspace_rel))
     return event

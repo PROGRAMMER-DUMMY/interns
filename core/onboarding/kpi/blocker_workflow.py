@@ -67,7 +67,7 @@ def prepare_kpi_blocker_panel(
     repo_root: str | Path,
     workspace: str | Path,
     *,
-    domain: str = "healthcare",
+    domain: str = "generic",
     onboard_if_missing: bool = True,
     force_onboard: bool = False,
 ) -> PreparedPanelResult:
@@ -119,7 +119,7 @@ def apply_kpi_panel_answer(
     workspace: str | Path,
     *,
     answer: str,
-    domain: str = "healthcare",
+    domain: str = "generic",
     custom_definition: str = "",
     evidence_note: str = "",
     via_cli_agent: bool = False,

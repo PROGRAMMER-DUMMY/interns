@@ -216,44 +216,57 @@ def _summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _render_markdown(report: dict[str, Any]) -> str:
     summary = report.get("summary") or {}
-    rows = [
-        {"Metric": "Events", "Value": report.get("event_count", 0)},
-        {"Metric": "Commands", "Value": summary.get("commands", 0)},
-        {"Metric": "Failures", "Value": summary.get("failures", 0)},
-        {"Metric": "Recoveries", "Value": summary.get("recoveries", 0)},
-        {"Metric": "Validations", "Value": summary.get("validations", 0)},
-        {"Metric": "Last status", "Value": summary.get("last_status", "empty")},
-    ]
-    recent = []
-    for item in (report.get("events") or [])[-20:]:
-        recent.append(
-            {
-                "Time": str(item.get("timestamp") or "")[:19],
-                "Type": item.get("event_type", ""),
-                "Status": item.get("status", ""),
-                "Summary": item.get("summary", ""),
-            }
-        )
+    events = report.get("events") or []
+    failures = summary.get("failures", 0)
+    status_icon = "FAILED" if failures else "OK"
+
     lines = [
         "# Workspace Trajectory",
         "",
-        f"- Workspace: `{report.get('workspace')}`",
-        f"- Generated at: `{report.get('generated_at')}`",
-        "",
-        "## Summary",
-        "",
-        render_markdown_table(["Metric", "Value"], [[row["Metric"], row["Value"]] for row in rows]),
-        "",
-        "## Recent Events",
-        "",
-        render_markdown_table(
-            ["Time", "Type", "Status", "Summary"],
-            [[row["Time"], row["Type"], row["Status"], row["Summary"]] for row in recent],
-        )
-        if recent
-        else "_No events recorded._",
+        f"- **Workspace:** `{report.get('workspace')}`",
+        f"- **Generated at:** `{report.get('generated_at')}`",
+        f"- **Status:** {status_icon} | Events: {report.get('event_count', 0)} | Failures: {failures}",
         "",
     ]
+
+    # Decisions section — feature mappings and relationship approvals
+    decision_events = [e for e in events if e.get("decision")]
+    if decision_events:
+        lines += ["## Decisions Made", ""]
+        for e in decision_events:
+            ts = str(e.get("timestamp") or "")[:10]
+            lines.append(f"- **{ts}** {e['decision']}")
+        lines.append("")
+
+    # KPI / artifact events
+    artifact_events = [e for e in events if e.get("artifact")]
+    if artifact_events:
+        lines += ["## Artifacts Generated", ""]
+        for e in artifact_events:
+            ts = str(e.get("timestamp") or "")[:10]
+            lines.append(f"- **{ts}** `{e['artifact']}` — {e.get('summary', '')}")
+        lines.append("")
+
+    # Failures
+    failure_events = [e for e in events if _is_failure(e)]
+    if failure_events:
+        lines += ["## Failures", ""]
+        for e in failure_events:
+            ts = str(e.get("timestamp") or "")[:19]
+            lines.append(f"- **{ts}** {e.get('summary', '')} (exit={e.get('exit_code', '?')})")
+        lines.append("")
+
+    # Recent event log (last 20, only if no dedicated sections covered them)
+    recent = [e for e in events[-20:] if not e.get("decision") and not e.get("artifact")]
+    if recent:
+        lines += ["## Recent Events", ""]
+        lines.append(render_markdown_table(
+            ["Time", "Type", "Status", "Summary"],
+            [[str(e.get("timestamp") or "")[:19], e.get("event_type", ""),
+              e.get("status", ""), e.get("summary", "")] for e in recent],
+        ))
+        lines.append("")
+
     return "\n".join(lines)
 
 

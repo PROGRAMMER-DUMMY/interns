@@ -686,15 +686,17 @@ def _semantic_key_root(column_norm: str) -> str:
 
 
 def _compatible_dimension_root(key_root: str, dim_suffix: str) -> bool:
-    if key_root == dim_suffix:
-        return True
-    aliases = {
-        "dept": "department",
-        "department": "dept",
-        "diagnosis": "icd",
-        "icd": "diagnosis",
-    }
-    return aliases.get(key_root) == dim_suffix
+    """Compare dimension key roots.
+
+    Generic equality only. Workspace-specific synonyms (e.g. dept↔department,
+    diagnosis↔icd) used to live in a hardcoded healthcare-leaning dict; they
+    should now come from the workspace lexicon (via
+    `workspace_feature_definitions.json` or accepted aliases in
+    `workspace_vocabulary.json`). Image-parsed relationships still require
+    user review, so a missed alias here lands as a blocker panel — the
+    correct behavior — not as silently-wrong inference.
+    """
+    return key_root == dim_suffix
 
 
 def _canonical_key_for_dimension(dimension: str, fallback_column: str) -> str:

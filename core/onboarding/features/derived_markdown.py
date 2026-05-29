@@ -129,10 +129,12 @@ class DerivedFeatureMarkdownConverter:
             _mark_stale_review(stale_path)
             stale_files.append(_rel(stale_path, self.repo_root))
 
+        index_content = _render_index(markdown_files, json_files, stale_files)
         index_path = self.output_dir / "index.md"
-        index_path.write_text(_render_index(markdown_files, json_files, stale_files), encoding="utf-8")
-        written.append(_rel(index_path, self.repo_root))
-        markdown_files.append(_rel(index_path, self.repo_root))
+        if index_content:
+            index_path.write_text(index_content, encoding="utf-8")
+            written.append(_rel(index_path, self.repo_root))
+            markdown_files.append(_rel(index_path, self.repo_root))
         return DerivedFeatureMarkdownResult(
             output_dir=_rel(self.output_dir, self.repo_root),
             files=written,
@@ -298,10 +300,9 @@ def _review_json(
 
 
 def _render_index(markdown_files: list[str], json_files: list[str], stale_files: list[str] | None = None) -> str:
+    if not markdown_files and not json_files:
+        return ""  # nothing to show — caller skips writing the file
     lines = ["# Derived Feature Review Index", ""]
-    if not markdown_files:
-        lines.append("- No derived feature review files were generated.")
-        return "\n".join(lines) + "\n"
     if stale_files:
         lines.extend(
             [

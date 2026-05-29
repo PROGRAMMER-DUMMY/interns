@@ -34,19 +34,19 @@ _DESCRIPTION = (
 _EPILOG = """\
 examples:
   # full pipeline run:
-  uv run build-medallion --workspace workspaces/Healthcare-RCM-Data-Platform
+  uv run build-medallion --workspace workspaces/<your-workspace>
 
   # bronze only (skip silver/gold/kpi):
-  uv run build-medallion --workspace workspaces/Healthcare-RCM-Data-Platform --only-layer bronze
+  uv run build-medallion --workspace workspaces/<your-workspace> --only-layer bronze
 
   # single table:
-  uv run build-medallion --workspace workspaces/Healthcare-RCM-Data-Platform --only-table patient
+  uv run build-medallion --workspace workspaces/<your-workspace> --only-table patient
 
   # resume a partial run:
-  uv run build-medallion --workspace workspaces/Healthcare-RCM-Data-Platform --resume 20260516T103045Z-7bcda0fa
+  uv run build-medallion --workspace workspaces/<your-workspace> --resume 20260516T103045Z-7bcda0fa
 
   # proceed even if design panel has unresolved entries (use carefully):
-  uv run build-medallion --workspace workspaces/Healthcare-RCM-Data-Platform --force-with-blockers
+  uv run build-medallion --workspace workspaces/<your-workspace> --force-with-blockers
 
 exit codes:
   0                      success
@@ -66,7 +66,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--workspace", required=True,
-        help="Workspace path relative to repo root, e.g. workspaces/Healthcare-RCM-Data-Platform",
+        help="Workspace path relative to repo root, e.g. workspaces/<your-workspace>",
     )
     parser.add_argument(
         "--repo-root", default=None,

@@ -201,7 +201,11 @@ class KPIFeatureResolver:
         cuts = str(kpi.get("cuts", "") or "")
         expression_context = " ".join(value for value in [metric, cuts] if value)
         full_context = _kpi_context(kpi)
-        extracted = extract_expression(expression_context)
+        from core.onboarding.lexicon.vocabulary import terms_for as _vocab_terms_for
+        extracted = extract_expression(
+            expression_context,
+            workspace_filter_terms=_vocab_terms_for(self.layout, "filter_terms"),
+        )
         if _requires_kpi_definition(kpi, expression_context, extracted):
             feature = _kpi_definition_feature(kpi)
             return {
@@ -357,20 +361,20 @@ class KPIFeatureResolver:
 
     def _write_open_questions(self, mapping: dict[str, Any]) -> str:
         path = self.layout.reports_dir / "open_questions.md"
-        existing = path.read_text(encoding="utf-8") if path.exists() else "# Open Questions\n"
-        lines = [existing.rstrip(), "", "## KPI Feature Resolution Questions", ""]
-        added = 0
-        for kpi in mapping.get("kpis", []):
-            questions = kpi.get("open_questions", [])
-            if not questions:
-                continue
-            lines.append(f"### {kpi.get('kpi_id')} - {kpi.get('name')}")
-            for question in questions:
-                lines.append(f"- {question}")
-                added += 1
-            lines.append("")
-        if not added:
-            lines.append("- No blocking KPI feature questions detected.")
+        lines = ["# Open Questions", ""]
+        blocked_kpis = [
+            kpi for kpi in mapping.get("kpis", [])
+            if kpi.get("open_questions") and kpi.get("status") != "ready_for_sql"
+        ]
+        if blocked_kpis:
+            lines += ["## Unresolved KPI Feature Questions", ""]
+            for kpi in blocked_kpis:
+                lines.append(f"### {kpi.get('kpi_id')} — {kpi.get('name')}")
+                for question in kpi.get("open_questions", []):
+                    lines.append(f"- {question}")
+                lines.append("")
+        else:
+            lines.append("All KPI features resolved — no open questions.")
         path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
         return _rel(path, self.repo_root)
 
@@ -436,8 +440,12 @@ class KPIFeatureResolver:
         return rows
 
 
-def extract_expression(expression: str) -> ExtractedExpression:
-    return parse_feature_expression(expression)
+def extract_expression(
+    expression: str,
+    *,
+    workspace_filter_terms: list[str] | set[str] | None = None,
+) -> ExtractedExpression:
+    return parse_feature_expression(expression, workspace_filter_terms=workspace_filter_terms)
 
 
 def prioritize_blockers(mapping: dict[str, Any]) -> list[dict[str, Any]]:
@@ -484,20 +492,15 @@ def contextual_column_candidates(
     full_context: str,
     schema_index: dict[str, list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
+    """Score columns against a feature using the surrounding KPI context.
+
+    Previously gated on a curated healthcare/finance term list. Now runs for
+    any non-trivial feature name; lexical filtering happens via
+    `_semantic_tokens` against actual context evidence rather than against
+    a hardcoded vocabulary.
+    """
     feature_norm = normalize_blocker(feature)
     if not feature_norm or feature_norm in {"year", "quarter", "month", "day", "duration"}:
-        return []
-    if feature_norm not in {
-        "cost",
-        "amount",
-        "paid",
-        "coverage",
-        "claim",
-        "charge",
-        "revenue",
-        "procedure",
-        "encounter",
-    }:
         return []
     context_tokens = _semantic_tokens(full_context)
     if not context_tokens:
@@ -529,7 +532,7 @@ def contextual_column_candidates(
     second = float(scored[1].get("score", 0)) if len(scored) > 1 else 0.0
     top_score = float(top.get("score", 0))
     auto_proven = top_score >= 14 and (len(scored) == 1 or top_score - second >= 4)
-    limit = 1 if auto_proven else 5
+    limit = 1 if auto_proven else 10
     candidates = scored[:limit]
     if auto_proven:
         candidates[0]["auto_proven"] = True
@@ -596,33 +599,40 @@ def _contextual_score(
     dictionary_field = str(entry.get("dictionary_field") or column)
     column_norm = normalize_blocker(column)
     dataset_norm = normalize_blocker(dataset)
-    if feature_norm == "encounter":
-        if dataset_norm != "encounters" or column_norm != "id":
-            return 0.0, []
-        score = 24.0
-        reasons = [
-            "KPI asks for total encounters, so the encounter table primary key is the correct grain",
-        ]
-        if entry.get("dictionary_description"):
-            reasons.append("data dictionary identifies encounters.Id as the encounter primary key")
-        return score, reasons
-    if feature_norm == "procedure":
-        if dataset_norm not in {"procedure", "procedures"}:
-            return 0.0, []
-        if "reason" in column_norm or column_norm not in {"code", "description"}:
-            return 0.0, []
+    if feature_norm and dataset_norm and dataset_norm.rstrip("s") == feature_norm.rstrip("s"):
+        if column_norm in {"id", "code", f"{feature_norm}id", f"{feature_norm}_id"}:
+            score = 24.0
+            reasons = [
+                f"KPI feature `{feature_norm}` aligns with table `{dataset_norm}` PK column `{column_norm}`",
+            ]
+            if entry.get("dictionary_description"):
+                reasons.append("data dictionary corroborates the primary key choice")
+            return score, reasons
     description_tokens = _semantic_tokens(dictionary_description)
     column_tokens = _semantic_tokens(_split_identifier(column))
     field_tokens = _semantic_tokens(_split_identifier(dictionary_field))
     dataset_tokens = _semantic_tokens(dataset)
     reasons: list[str] = []
     score = 0.0
+    # Direct table-feature alignment: a table named after the feature is the
+    # strongest non-lexical signal — apply before KPI-text bonuses so it
+    # isn't drowned out by unrelated context matches.
+    if feature_norm and dataset_norm and feature_norm == dataset_norm.rstrip("s"):
+        score += 30.0
+        reasons.append(f"table `{dataset}` directly aligns with feature `{feature_norm}`")
     if feature_norm in column_norm:
         score += 6.0
         reasons.append(f"`{feature_norm}` appears in column `{column}`")
     if column_norm and column_norm in context_norm:
         score += 8.0
         reasons.append(f"KPI context explicitly contains column phrase `{column}`")
+    # Penalise surrogate/foreign-key columns (ending in "id") when the feature
+    # name isn't embedded in the column — they identify records but don't
+    # describe the feature dimension.
+    if column_norm.endswith("id") and len(column_norm) > 2:
+        if not (feature_norm and feature_norm in column_norm):
+            score -= 30.0
+            reasons.append("column is a key/ID column not matching the feature")
     if feature_norm == "procedure" and column_norm == "description":
         score += 4.0
         reasons.append("procedure grouping can use the procedure description label")
@@ -645,7 +655,8 @@ def _contextual_score(
         score += 6.0
         reasons.append(f"context matches dataset/table `{dataset}`")
     dtype = str(entry.get("dtype") or "").lower()
-    if feature_norm in {"cost", "amount", "paid", "coverage", "claim"} and any(
+    from core.onboarding.lexicon.vocabulary import GENERIC_FINANCIAL_SEED
+    if any(seed in feature_norm for seed in GENERIC_FINANCIAL_SEED) and any(
         token in dtype for token in ("int", "float", "double", "decimal")
     ):
         score += 2.0

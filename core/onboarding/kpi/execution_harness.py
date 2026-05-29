@@ -231,12 +231,18 @@ class KPIExecutionHarness:
             for column in _metric_input_columns(metric):
                 if column.lower() not in lowered_sql:
                     errors.append(f"SQL does not reference metric input `{column}` from `{metric}`")
-        if "commercial" in cuts.lower() and "commercial" not in lowered_sql:
-            errors.append("SQL does not implement Commercial LOB filter from KPI cuts")
-        if "medicare" in cuts.lower() and "medicare" not in lowered_sql:
-            errors.append("SQL does not implement Medicare LOB filter from KPI cuts")
-        if "top 10" in name.lower() and not re.search(r"\blimit\s+10\b", lowered_sql):
-            errors.append("SQL does not implement top 10 ranking limit from KPI name")
+        for cut_token in _quoted_cut_filter_tokens(cuts):
+            if cut_token.lower() not in lowered_sql:
+                errors.append(
+                    f"SQL does not implement filter token `{cut_token}` from KPI cuts"
+                )
+        top_n_match = re.search(r"\btop\s+(\d+)\b", name.lower())
+        if top_n_match:
+            limit_value = top_n_match.group(1)
+            if not re.search(rf"\blimit\s+{limit_value}\b", lowered_sql):
+                errors.append(
+                    f"SQL does not implement top {limit_value} ranking limit from KPI name"
+                )
         return errors
 
     def _kpi_registry_by_id(self) -> dict[str, dict[str, Any]]:
@@ -306,6 +312,26 @@ def _rel(path: Path, root: Path) -> str:
         return str(path.resolve().relative_to(root.resolve())).replace("\\", "/")
     except ValueError:
         return str(path)
+
+
+def _quoted_cut_filter_tokens(cuts: str) -> list[str]:
+    """Extract literal filter values from a KPI cuts string.
+
+    Generic — looks for quoted literals or equality clauses inside the cuts
+    text rather than hardcoding any domain word. Examples it picks up:
+      "LineOfBusiness = 'Medicare'"  -> ["Medicare"]
+      "status = \"open\""             -> ["open"]
+      "region IN ('NA', 'EU')"        -> ["NA", "EU"]
+    Returns [] for cuts that only list dimension names (no literal filter).
+    """
+    if not cuts:
+        return []
+    tokens: list[str] = []
+    for match in re.finditer(r"['\"]([^'\"]{1,80})['\"]", cuts):
+        value = match.group(1).strip()
+        if value:
+            tokens.append(value)
+    return tokens
 
 
 def _metric_input_columns(metric: str) -> list[str]:

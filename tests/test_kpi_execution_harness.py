@@ -50,36 +50,32 @@ class KPIExecutionHarnessTests(unittest.TestCase):
             )
             self.assertTrue(manifest["ok"])
 
-    def test_ecommerce_sql_pattern_is_schema_based_not_workspace_name_based(self):
+    def test_sql_generator_produces_generic_aggregation_from_metric_and_cuts(self):
+        """The result-view SQL is now built by a workspace-agnostic generic
+        builder that parses `kpi.metric` + `kpi.cuts` into structural SQL.
+        No domain vocabulary should appear; a SUM/GROUP BY shape should be
+        derived for any KPI with `sum(...)` metric + dimensional cuts."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            workspace = root / "workspaces" / "shop"
+            workspace = root / "workspaces" / "demo"
             workspace.mkdir(parents=True)
-            generator = DuckDBKPISQLGenerator(root, "workspaces/shop")
-            profile_map = {
-                f"workspaces/shop/{name}.csv": {"format": "csv", "schema": {}}
-                for name in (
-                    "orders",
-                    "order_items",
-                    "order_item_refunds",
-                    "products",
-                    "website_pageviews",
-                    "website_sessions",
-                )
-            }
+            generator = DuckDBKPISQLGenerator(root, "workspaces/demo")
 
-            sql = generator._workspace_specific_result_sql(
-                {"name": "What is the session-to-order conversion rate by traffic source and campaign?"},
+            sql = generator._result_view_sql(
+                {"name": "Anything", "metric": "sum(x)", "cuts": "y, z", "features": []},
                 "kpi_001",
-                {},
-                profile_map,
             )
+            self.assertIn('CREATE OR REPLACE VIEW "kpi_001_results"', sql)
+            self.assertIn('SUM("x")', sql)
+            self.assertIn('"y", "z"', sql)
+            self.assertIn("GROUP BY", sql)
+            for healthcare_word in ("medicare", "patient", "encounter", "payor", "claim"):
+                self.assertNotIn(healthcare_word, sql.lower())
 
-            self.assertIn('"kpi_001_results"', sql)
-            self.assertIn("conversion_rate_pct", sql)
-            self.assertIn("workspaces/shop/orders.csv", sql)
-
-    def test_sql_generator_uses_workbook_sum_paidamount_semantics(self):
+    def test_sql_generator_falls_back_for_unparseable_metric(self):
+        """When a metric is genuinely unparseable (free-form prose, no agg
+        function), the platform emits a clearly-commented SELECT * fallback
+        rather than silently-wrong SQL."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             workspace = root / "workspaces" / "demo"
@@ -88,54 +84,15 @@ class KPIExecutionHarnessTests(unittest.TestCase):
 
             sql = generator._result_view_sql(
                 {
-                    "name": "What is trend for amount paid for medicare LOB across gender and payer for patients above 50 years of age",
-                    "metric": "sum(PaidAmount)",
-                    "cuts": "Month (ServiceDate), LineOfBusiness, PayorID, Gender, Age(DOB), LOB = Medicare, Age > 50",
-                    "features": [
-                        {"feature": "paid", "source_columns": [{"column": "PaidAmount"}]},
-                        {"feature": "LOB", "source_columns": [{"column": "LineOfBusiness"}]},
-                        {"feature": "Payer", "source_columns": [{"column": "PayorID"}]},
-                        {"feature": "Gender", "source_columns": [{"column": "Gender"}]},
-                        {"feature": "Age"},
-                        {"feature": "Time", "source_columns": [{"column": "ServiceDate"}]},
-                    ],
+                    "name": "Free-form goal",
+                    "metric": "a narrative metric description without any agg fn",
+                    "cuts": "",
+                    "features": [],
                 },
-                "kpi_001",
+                "kpi_complex",
             )
-
-            self.assertIn('SUM("paid") AS paid_amount', sql)
-            self.assertIn("date_trunc('month'", sql)
-            self.assertIn("medicare", sql.lower())
-            self.assertIn('"Age" > 50', sql)
-            self.assertNotIn("encounter_count", sql)
-
-    def test_sql_generator_uses_department_name_when_workbook_requires_it(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            workspace = root / "workspaces" / "demo"
-            workspace.mkdir(parents=True)
-            generator = DuckDBKPISQLGenerator(root, "workspaces/demo")
-
-            sql = generator._result_view_sql(
-                {
-                    "name": "What is percentage share of lives by gender, age, visit type, department",
-                    "metric": "percentage of sum(distinct PatientID) / sum(distinct PatientID) for department",
-                    "cuts": "Department Name, VisitType, Gender, Age (DOB)",
-                    "features": [
-                        {"feature": "PatientID"},
-                        {"feature": "Department"},
-                        {"feature": "Name"},
-                        {"feature": "VisitType"},
-                        {"feature": "Gender"},
-                        {"feature": "Age"},
-                    ],
-                },
-                "kpi_002",
-            )
-
-            self.assertIn('"Name" AS department', sql)
-            self.assertIn('GROUP BY "Gender", "Age", "VisitType", "Name"', sql)
-            self.assertNotIn('"Department" AS department', sql)
+            self.assertIn("-- Generic builder fallback:", sql)
+            self.assertIn('SELECT * FROM "kpi_complex_features"', sql)
 
     def test_harness_rejects_feature_view_without_final_result_view(self):
         try:

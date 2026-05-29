@@ -11,18 +11,26 @@ def dataset_name_key(dataset: dict[str, Any]) -> str:
 
 
 def logical_entity_from_path(path: str) -> str:
+    """Derive a logical entity name from a dataset path. Workspace-agnostic.
+
+    Strips trailing `_data` (a common generic suffix) and a trailing `s`
+    plural marker. Does NOT apply domain-specific stem cleanup — callers
+    that need to strip workspace-specific source-system prefixes from the
+    stem should normalize the path before calling.
+    """
     stem = Path(path).stem.lower()
-    stem = re.sub(r"(_hospital_[a-z0-9]+|hospital\d+_|_data)$", "", stem)
-    stem = re.sub(r"^hospital\d+_", "", stem)
+    stem = re.sub(r"_data$", "", stem)
     stem = stem.rstrip("s") if stem.endswith("s") else stem
     return stem or "entity"
 
 
 def source_system_from_path(path: str) -> str:
-    posix_path = Path(path).as_posix().lower()
-    match = re.search(r"(hospital[-_ ]?[a-z0-9]+)", posix_path)
-    if match:
-        return match.group(1).replace(" ", "_").replace("-", "_")
+    """Derive a source-system identifier from a dataset path. Workspace-agnostic.
+
+    Uses the parent directory name as the source system. For paths like
+    `workspaces/<ws>/datasets/<source_system>/<table>.csv` this returns
+    `<source_system>`. Falls back to `default` for shallow paths.
+    """
     parts = Path(path).parts
     if len(parts) >= 2:
         return parts[-2].lower().replace("-", "_").replace(" ", "_")

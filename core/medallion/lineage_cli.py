@@ -26,7 +26,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     trace = sub.add_parser("trace", help="Trace a column back to its source CSV columns.")
     trace.add_argument("--workspace", required=True,
-                       help="Workspace path, e.g. workspaces/Healthcare-RCM-Data-Platform")
+                       help="Workspace path, e.g. workspaces/<your-workspace>")
     trace.add_argument("--repo-root", default=None)
     trace.add_argument(
         "--column", required=True,

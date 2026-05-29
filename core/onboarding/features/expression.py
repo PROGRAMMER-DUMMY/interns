@@ -37,17 +37,17 @@ SQL_KEYWORDS = {
     "when",
     "where",
 }
+# Generic English/business stopwords. Workspace-specific filter values
+# (e.g. "Medicare", "Commercial") used to live here; they now come in via
+# the `workspace_filter_terms` parameter to `extract_expression`, derived
+# from `interns/generated/contracts/workspace_vocabulary.json` per
+# workspace. Zero domain vocabulary hardcoded.
 BUSINESS_TEXT_STOPWORDS = {
-    "across",
     "above",
+    "across",
     "average",
-    "base",
-    "claim",
-    "commercial",
     "for",
     "highest",
-    "medicaid",
-    "medicare",
     "number",
     "of",
     "percentage",
@@ -85,9 +85,25 @@ class ExtractedExpression:
     functions: list[dict[str, Any]] = field(default_factory=list)
 
 
-def extract_expression(expression: str) -> ExtractedExpression:
+def extract_expression(
+    expression: str,
+    *,
+    workspace_filter_terms: list[str] | set[str] | None = None,
+) -> ExtractedExpression:
+    """Extract identifiers from a metric/cut expression.
+
+    `workspace_filter_terms` is the workspace-derived filter vocabulary
+    (e.g., `LineOfBusiness` values like "Medicare", "Commercial" for one
+    workspace; "Retail", "Wholesale" for another). Callers pass it from
+    `core.onboarding.lexicon.vocabulary.terms_for(layout, "filter_terms")`.
+    None or empty means no workspace research has been done yet — the
+    extractor still works, it just won't filter out filter-value tokens.
+    """
     cleaned = strip_literals(expression)
     function_names = _function_names(cleaned)
+    extra_stopwords: set[str] = set()
+    if workspace_filter_terms:
+        extra_stopwords = {str(term).lower() for term in workspace_filter_terms if term}
     identifiers = []
     seen = set()
     for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", cleaned):
@@ -96,6 +112,7 @@ def extract_expression(expression: str) -> ExtractedExpression:
             token_norm in SQL_KEYWORDS
             or token_norm in COMMON_FUNCTIONS
             or token_norm in BUSINESS_TEXT_STOPWORDS
+            or token_norm in extra_stopwords
             or token in function_names
         ):
             continue

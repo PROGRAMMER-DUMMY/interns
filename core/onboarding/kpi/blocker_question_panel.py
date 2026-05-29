@@ -274,8 +274,8 @@ def _question_for_cluster(
                     "option_id": "option_a",
                     "label": "Provide KPI definition",
                     "business_summary": (
-                        "Replace the seed KPI with a concrete metric, for example a denial rate, "
-                        "paid amount trend, AR aging, or claim volume KPI with defined grain."
+                        "Replace the seed KPI with a concrete metric — a rate, trend, "
+                        "aging, or count — with a defined business question and grain."
                     ),
                     "expected_answer_shape": {
                         "business_question": "",
@@ -328,8 +328,20 @@ def _question_for_cluster(
             + [_custom_rule_option(feature)],
         }
     if physical_options:
+        top_options = physical_options[:3]
+        overflow_count = max(0, len(physical_options) - len(top_options))
+        top_choice = top_options[0]
+        top_reason = str(top_choice.get("reason") or "highest profile-evidence score")
+        kpi_list = ", ".join(str(k) for k in applies_to[:3])
+        kpi_suffix = f" (+{len(applies_to)-3} more)" if len(applies_to) > 3 else ""
         return {
             **base,
+            "preamble": (
+                f"Resolving `{feature}` for KPI(s): {kpi_list}{kpi_suffix}. "
+                "The platform scanned every profiled column and ranked candidates "
+                "by name match, KPI-text overlap, and dataset-name overlap. "
+                f"Showing top {len(top_options)} of {len(physical_options)} candidates."
+            ),
             "blocker": (
                 f"`{feature}` is unresolved for {len(applies_to)} KPI(s), and multiple "
                 "profile-backed physical column candidates are available."
@@ -338,17 +350,28 @@ def _question_for_cluster(
             "answer_type": "select_physical_column_or_custom_rule",
             "recommended_option_id": "option_a",
             "recommended_answer": (
-                "Review Option A and accept it only if the source and grain match the KPI intent."
+                f"Accept Option A — `{_sql_column_label(str(top_choice.get('dataset') or ''), str(top_choice.get('column') or ''))}` — "
+                f"because: {top_reason}."
             ),
             "why": (
                 "These options come from schema/profile alias evidence. They are candidate mappings, "
                 "not accepted business truth until confirmed."
             ),
+            "overflow_options_count": overflow_count,
+            "overflow_options_pointer": (
+                f"+ {overflow_count} more lower-scoring options in `current.json` under "
+                "`hidden_overflow_options`. Pass --answer with the explicit option_id to pick one."
+                if overflow_count else ""
+            ),
             "options": [
-                _physical_option_payload(option, idx, source_truth)
-                for idx, option in enumerate(physical_options, start=1)
+                _physical_option_payload(option, idx, source_truth, is_recommended=(idx == 1))
+                for idx, option in enumerate(top_options, start=1)
             ]
             + [_custom_rule_option(feature)],
+            "hidden_overflow_options": [
+                _physical_option_payload(option, idx + len(top_options), source_truth, is_recommended=False)
+                for idx, option in enumerate(physical_options[len(top_options):], start=1)
+            ],
         }
     evidence_pack = _cli_agent_evidence_pack(feature, items, workspace, repo_root)
     if evidence_pack["available_columns"]:
@@ -511,30 +534,31 @@ def _is_semantic_blocker(
     kpi: dict[str, Any],
 ) -> bool:
     haystack = " ".join([feature, metric, question, ", ".join(cuts)]).lower()
+    # Generic semantic tokens — math/SQL/temporal vocabulary common to every
+    # business domain. Domain-specific filter terms (payer, LOB, etc.) used
+    # to live here; they now come from `workspace_vocabulary.json` filter_terms.
     semantic_tokens = {
-        "percentage",
-        "share",
-        "denominator",
-        "grain",
-        "age",
-        "dob",
-        "date",
-        "month",
-        "quarter",
-        "year",
-        "top",
-        "payer",
-        "lob",
-        "medicare",
-        "commercial",
-        "join",
-        "distinct",
-        "sum(",
-        "avg(",
-        "count(",
+        "percentage", "share", "denominator", "grain",
+        "age", "date", "month", "quarter", "year",
+        "top", "join", "distinct",
+        "sum(", "avg(", "count(", "min(", "max(",
     }
     if any(token in haystack for token in semantic_tokens):
         return True
+    # Pick up workspace-derived filter literals as additional semantic tokens
+    # (e.g., "Medicare" for healthcare, "Wholesale" for retail).
+    try:
+        from core.onboarding.lexicon.vocabulary import terms_for as _vt
+        from core.storage.workspace_layout import WorkspaceLayout
+        from core.paths import PROJECT_ROOT as _ROOT
+        workspace_path = kpi.get("workspace") or ""
+        if workspace_path:
+            layout = WorkspaceLayout(project_root=(_ROOT / str(workspace_path)).resolve())
+            for term in _vt(layout, "filter_terms"):
+                if str(term).lower() in haystack:
+                    return True
+    except Exception:
+        pass
     return any(
         feature_item.get("resolution_type") in {"derived_formula", "kpi_definition_required"}
         for feature_item in kpi.get("features", [])
@@ -839,7 +863,7 @@ def _profile_candidate_options(
             str(item.get("column") or ""),
         )
     )
-    return scored[:5]
+    return scored[:20]
 
 
 def _profile_candidate_score(
@@ -867,6 +891,12 @@ def _profile_candidate_score(
         score += 60
         reasons.append("column name partially matches unresolved feature")
 
+    # Direct feature-dataset alignment: table named after the feature is the
+    # strongest non-lexical signal that this dataset is the right one.
+    if feature_norm and dataset_norm and feature_norm == dataset_norm.rstrip("s"):
+        score += 30
+        reasons.append("dataset name directly aligns with feature term")
+
     # Workspace-derived aliases live in the workspace lexicon; this scorer
     # stays domain-agnostic. The previous _feature_synonyms() dict (which
     # hardcoded "department"/"lob" healthcare-RCM vocabulary) has been removed.
@@ -879,6 +909,13 @@ def _profile_candidate_score(
     if column_norm in {"id", "insertdate", "modifieddate"}:
         score -= 30
         reasons.append("generic technical column")
+    # Penalise columns that are clearly surrogate/foreign keys (end in "id",
+    # e.g. "patientid", "claimid") when the feature name doesn't appear in
+    # the column name — they identify records but don't describe the feature.
+    elif column_norm.endswith("id") and len(column_norm) > 2:
+        if not (feature_norm and feature_norm in column_norm):
+            score -= 30
+            reasons.append("column is a key/ID column not matching the feature")
     return score, "; ".join(reasons) or "profile column candidate"
 
 
@@ -897,22 +934,38 @@ def _physical_option_payload(
     option: dict[str, Any],
     idx: int,
     source_truth: list[dict[str, Any]] | None = None,
+    *,
+    is_recommended: bool = False,
 ) -> dict[str, Any]:
     option_id = f"option_{chr(ord('a') + idx - 1)}"
     dataset = str(option.get("dataset") or "")
     source_label = _source_label(dataset, PROJECT_ROOT)
     sql_label = _sql_column_label(dataset, str(option.get("column") or "unknown"))
     proof = _physical_option_proof(option, source_truth or [])
+    score = float(option.get("score") or 0)
+    reason_text = str(option.get("reason") or "profile column candidate")
+    confidence = "high" if score >= 6 else ("medium" if score >= 3 else "low")
+    samples = list(option.get("observed_values") or [])[:3]
+    sample_phrase = (
+        f"Sample values: {', '.join(repr(s) for s in samples)}."
+        if samples else "No sample values recorded for this column."
+    )
+    summary = (
+        f"`{sql_label}` — {reason_text}. {sample_phrase} "
+        f"Source: `{source_label}`."
+    )
+    if is_recommended:
+        summary = "RECOMMENDED. " + summary
     return {
         "option_id": option_id,
         "label": sql_label,
-        "business_summary": (
-            f"Use SQL column `{sql_label}` as the accepted workspace mapping "
-            f"(source evidence: `{source_label}`)."
-        ),
+        "business_summary": summary,
+        "evidence_summary": reason_text,
         "json_backed": True,
         "evidence_state": option.get("evidence_state"),
-        "confidence": "medium",
+        "confidence": confidence,
+        "confidence_score": round(score, 2),
+        "is_recommended": is_recommended,
         "needs_user_confirmation": True,
         "physical_column_option": option,
         "proof_packet": proof,
@@ -983,7 +1036,8 @@ def _answer_demo(
         for source in other.get("source_columns") or []
         if str(source.get("dataset") or "") == dataset and source.get("column")
     ]
-    cost_column = _first_matching_source_column(kpi, dataset, {"cost", "amount", "base", "claim"})
+    from core.onboarding.lexicon.vocabulary import GENERIC_FINANCIAL_SEED as _FIN_SEED
+    cost_column = _first_matching_source_column(kpi, dataset, set(_FIN_SEED))
     select_items = [f'"{column}" AS "{feature_label}"']
     group_by = f'"{column}"'
     order_by = f'"{feature_label}"'
@@ -991,9 +1045,7 @@ def _answer_demo(
         select_items.append("COUNT(*) AS row_count")
         order_by = "row_count DESC"
     if cost_column:
-        cost_alias = "average_base_cost" if "base cost" in metric_text else "average_cost"
-        if "total claim cost" in metric_text:
-            cost_alias = "average_total_claim_cost"
+        cost_alias = "average_value"
         select_items.append(f'AVG("{cost_column.get("column")}") AS {cost_alias}')
         if order_by == f'"{feature_label}"' and "highest" in metric_text:
             order_by = f"{cost_alias} DESC"
@@ -1060,10 +1112,7 @@ def _demo_output_rows(
         if "top" in metric_text or "frequent" in metric_text or "number of times" in metric_text:
             row["row_count"] = "<computed from grouped rows>"
         if cost_column:
-            alias = "average_base_cost" if "base cost" in metric_text else "average_cost"
-            if "total claim cost" in metric_text:
-                alias = "average_total_claim_cost"
-            row[alias] = cost_values[idx] if idx < len(cost_values) else "<computed average>"
+            row["average_value"] = cost_values[idx] if idx < len(cost_values) else "<computed average>"
         rows.append(row)
     return rows
 
@@ -1473,34 +1522,47 @@ def _cli_agent_proposal_option(
     }
 
 
-def _evidence_files(items: list[dict[str, Any]], repo_root: Path) -> list[str]:
-    files = set()
+def _evidence_files(items: list[dict[str, Any]], repo_root: Path) -> list[dict[str, str]]:
+    # Keyed by normalised path so each file appears once with its first-seen purpose.
+    seen: dict[str, str] = {}
+
+    def _add(raw: str, purpose: str) -> None:
+        if not raw:
+            return
+        p = Path(raw)
+        key = str(_rel(p, repo_root) if p.is_absolute() else raw)
+        if key not in seen:
+            seen[key] = purpose
+
     for item in items:
         source = item["kpi"].get("source")
         if source:
-            files.add(str(source))
+            _add(str(source), "kpi_source")
         for option in item["feature"].get("derived_feature_options") or []:
             for source_item in option.get("evidence_sources") or []:
                 file = source_item.get("file")
                 if file:
-                    files.add(str(file))
+                    _add(str(file), "derivation_evidence")
             for column in option.get("input_columns") or []:
                 profile = column.get("profile_path")
                 if profile:
-                    files.add(str(profile))
+                    _add(str(profile), "input_column_profile")
         for column in item["feature"].get("source_columns") or []:
             profile = column.get("profile_path")
             if profile:
-                files.add(str(profile))
+                _add(str(profile), "source_column_profile")
             proof = column.get("mapping_proof") or {}
             for file in proof.get("source_files") or []:
                 if file:
-                    files.add(str(file))
+                    _add(str(file), "mapping_proof")
             for meaning in column.get("semantic_meaning_sources") or []:
                 file = meaning.get("file")
                 if file:
-                    files.add(str(file))
-    return sorted(_rel(Path(file), repo_root) if Path(file).is_absolute() else file for file in files)
+                    _add(str(file), "semantic_meaning_source")
+    return sorted(
+        [{"file": k, "purpose": v} for k, v in seen.items()],
+        key=lambda x: (x["purpose"], x["file"]),
+    )
 
 
 def _empty_panel(mapping: dict[str, Any], workspace: Path, repo_root: Path) -> dict[str, Any]:
@@ -1776,8 +1838,11 @@ def _render_markdown(panel: dict[str, Any]) -> str:
             lines.extend(["```json", json.dumps(evidence, indent=2, default=str), "```", ""])
     if panel.get("evidence_files"):
         lines.extend(["## Evidence Files", ""])
-        for file in panel["evidence_files"]:
-            lines.append(f"- `{file}`")
+        for entry in panel["evidence_files"]:
+            if isinstance(entry, dict):
+                lines.append(f"- `{entry['file']}` ({entry.get('purpose', '')})")
+            else:
+                lines.append(f"- `{entry}`")
         lines.append("")
     return "\n".join(lines)
 
@@ -1860,7 +1925,7 @@ def _render_kpi_preview(preview: dict) -> list[str]:
         lines.extend(
             [
                 f"> Query executed in {duration_ms}ms but returned 0 rows. "
-                "Check the filter scope (e.g., `LineOfBusiness = 'Medicare'`) "
+                "Check the filter scope (e.g., quoted literal filters in the KPI cuts) "
                 "and the dataset paths.",
                 "",
             ]

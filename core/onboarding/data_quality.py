@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,23 +36,27 @@ class DataQualityHarness:
     def run(self) -> DataQualityResult:
         self.layout.ensure_runtime_dirs()
         decisions = _load_decisions(self.layout.contracts_dir / "duplicate_decisions.json")
-        duplicate_keys = _detect_duplicate_keys(self.workspace, self.layout)
-        has_duplicates = bool(duplicate_keys)
         resolved = bool(decisions)
-        query = "SELECT TransactionID, COUNT(*) AS duplicate_count FROM transactions GROUP BY TransactionID HAVING COUNT(*) > 1"
+        duplicate_findings = _detect_duplicate_pk_candidates(self.workspace, self.layout)
         findings = []
-        if has_duplicates:
+        for finding in duplicate_findings:
             findings.append(
                 {
                     "code": "duplicate_rows_detected",
                     "severity": "medium",
                     "status": "resolved" if resolved else "unresolved",
-                    "query": query,
+                    "dataset": finding["dataset"],
+                    "column": finding["column"],
+                    "query": finding["query"],
+                    "duplicate_key_count": finding["duplicate_key_count"],
                     "sample_output_table": "<redacted>",
                     "sample_redacted": True,
-                    "duplicate_key_count": len(duplicate_keys),
                 }
             )
+        query = findings[0]["query"] if findings else (
+            "-- No candidate primary-key columns found in profiled datasets; "
+            "no generic duplicate query to run."
+        )
         unresolved_count = sum(1 for finding in findings if finding["status"] == "unresolved")
         payload = {
             "artifact_type": "data_quality_harness/current.json",
@@ -210,28 +215,142 @@ def _load_decisions(path: Path) -> list[dict[str, Any]]:
     return decisions if isinstance(decisions, list) else []
 
 
-def _detect_duplicate_keys(workspace: Path, layout: WorkspaceLayout | None = None) -> set[str]:
-    duplicates: set[str] = set()
-    candidates = sorted(workspace.rglob("*.csv"))
-    for path in candidates:
+def _detect_duplicate_pk_candidates(
+    workspace: Path,
+    layout: WorkspaceLayout | None = None,
+) -> list[dict[str, Any]]:
+    """Generic duplicate detection across every profiled dataset in the workspace.
+
+    Iterates over the profile_index, picks PK candidate columns per dataset
+    (columns named like *ID / *Id / Id whose values are unique, OR the first
+    column when no convention applies), and reports any dataset+column pair
+    where duplicate values exist.
+
+    Workspace-agnostic by design — no table or column name is hardcoded.
+    """
+    findings: list[dict[str, Any]] = []
+    candidate_datasets = _profiled_datasets(layout) if layout is not None else []
+    if not candidate_datasets:
+        candidate_datasets = [
+            (path, _infer_pk_candidates_from_csv_header(path))
+            for path in sorted(workspace.rglob("*.csv"))
+            if layout is None or layout.is_dataset_allowed(path)
+        ]
+    for path, candidate_columns in candidate_datasets:
+        if not candidate_columns:
+            continue
+        for column in candidate_columns:
+            duplicate_count = _count_duplicate_values(path, column)
+            if duplicate_count <= 0:
+                continue
+            table_alias = path.stem
+            findings.append(
+                {
+                    "dataset": str(path),
+                    "column": column,
+                    "duplicate_key_count": duplicate_count,
+                    "query": (
+                        f'SELECT "{column}", COUNT(*) AS duplicate_count '
+                        f'FROM read_csv_auto(\'{path.as_posix()}\') AS "{table_alias}" '
+                        f'GROUP BY "{column}" HAVING COUNT(*) > 1'
+                    ),
+                }
+            )
+    return findings
+
+
+_PK_COLUMN_PATTERN = re.compile(r"(?:^|[_\W])(id)$|^id$|^_?key$", re.IGNORECASE)
+
+
+def _looks_like_pk_column(column: str) -> bool:
+    if not column:
+        return False
+    cleaned = column.strip()
+    if cleaned.lower() == "id":
+        return True
+    return bool(_PK_COLUMN_PATTERN.search(cleaned))
+
+
+def _profiled_datasets(layout: WorkspaceLayout) -> list[tuple[Path, list[str]]]:
+    """Return [(dataset_path, candidate_pk_columns), ...] from the profile_index."""
+    index_path = layout.profile_index_path
+    if not index_path.exists():
+        return []
+    try:
+        data = _load_json(index_path)
+    except Exception:
+        return []
+    out: list[tuple[Path, list[str]]] = []
+    for profile in data.get("profiles") or []:
+        if not isinstance(profile, dict):
+            continue
+        raw_path = str(profile.get("path") or "")
+        if not raw_path:
+            continue
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = (layout.project_root.parent.parent / raw_path).resolve()
+        if not path.exists():
+            continue
         if layout is not None and not layout.is_dataset_allowed(path):
             continue
-        try:
-            with path.open("r", encoding="utf-8-sig", newline="") as handle:
-                reader = csv.DictReader(handle)
-                if not reader.fieldnames or "TransactionID" not in reader.fieldnames:
-                    continue
-                seen: set[str] = set()
-                for row in reader:
-                    key = str(row.get("TransactionID") or "").strip()
-                    if not key:
-                        continue
-                    if key in seen:
-                        duplicates.add(key)
-                    seen.add(key)
-        except OSError:
+        columns = _columns_from_profile(profile)
+        if not columns:
             continue
-    return duplicates
+        pk_candidates = [c for c in columns if _looks_like_pk_column(c)]
+        if not pk_candidates and columns:
+            pk_candidates = [columns[0]]
+        out.append((path, pk_candidates))
+    return out
+
+
+def _columns_from_profile(profile: dict[str, Any]) -> list[str]:
+    schema = profile.get("schema")
+    if isinstance(schema, dict):
+        return list(schema.keys())
+    columns = profile.get("columns")
+    if isinstance(columns, list):
+        names: list[str] = []
+        for entry in columns:
+            if isinstance(entry, dict):
+                name = entry.get("name") or entry.get("column")
+                if name:
+                    names.append(str(name))
+            elif entry:
+                names.append(str(entry))
+        return names
+    return []
+
+
+def _infer_pk_candidates_from_csv_header(path: Path) -> list[str]:
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.reader(handle)
+            header = next(reader, [])
+    except OSError:
+        return []
+    pk_candidates = [col for col in header if _looks_like_pk_column(col)]
+    return pk_candidates or ([header[0]] if header else [])
+
+
+def _count_duplicate_values(path: Path, column: str) -> int:
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if not reader.fieldnames or column not in reader.fieldnames:
+                return 0
+            seen: set[str] = set()
+            duplicates: set[str] = set()
+            for row in reader:
+                value = str(row.get(column) or "").strip()
+                if not value:
+                    continue
+                if value in seen:
+                    duplicates.add(value)
+                seen.add(value)
+            return len(duplicates)
+    except OSError:
+        return 0
 
 
 def main(argv: list[str] | None = None) -> int:

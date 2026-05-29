@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,7 +84,7 @@ class WorkspaceFlow:
         repo_root: str | Path,
         workspace: str | Path,
         *,
-        domain: str = "healthcare",
+        domain: str = "generic",
         session_id: str = "",
         orchestration_mode: str = "local-safe",
     ) -> None:
@@ -1166,20 +1167,33 @@ def _source_of_truth(kpis: list[dict[str, Any]]) -> str:
 
 
 def _extract_source_filters(question: str, cuts: str) -> list[str]:
-    filters = []
+    """Extract filter expressions from KPI cuts + the business question.
+
+    Generic — picks up:
+      - Comparison expressions in `cuts` (anything containing `=`, `>`, `<`)
+      - Quoted literals in either `cuts` or `question` (e.g., `'Medicare'`,
+        `'Wholesale'`, `'Refunded'`) as `<context> = '<literal>'`
+      - `top N` phrases as ranking limits
+    No domain words hardcoded.
+    """
+    filters: list[str] = []
     for part in str(cuts).split(","):
         cleaned = part.strip()
         if any(token in cleaned for token in ("=", ">", "<")):
             filters.append(cleaned)
+    for source_text in (str(cuts), str(question)):
+        for match in re.finditer(r"['\"]([^'\"]{1,80})['\"]", source_text):
+            literal = match.group(1).strip()
+            if not literal:
+                continue
+            if not any(literal.lower() in item.lower() for item in filters):
+                filters.append(f"`'{literal}'`")
     lowered = str(question).lower()
-    if "medicare" in lowered and not any("medicare" in item.lower() for item in filters):
-        filters.append("LOB = Medicare")
-    if "commercial" in lowered and not any("commercial" in item.lower() for item in filters):
-        filters.append("LOB = Commercial")
-    if "above 50" in lowered and not any("age" in item.lower() and "50" in item for item in filters):
-        filters.append("Age > 50")
-    if "top 10" in lowered and not any("top 10" in item.lower() for item in filters):
-        filters.append("Top 10")
+    top_match = re.search(r"\btop\s+(\d+)\b", lowered)
+    if top_match:
+        top_n = top_match.group(1)
+        if not any(f"top {top_n}" in item.lower() for item in filters):
+            filters.append(f"Top {top_n}")
     return filters
 
 
@@ -1581,7 +1595,7 @@ def main(argv: list[str] | None = None) -> int:
 
     start = sub.add_parser("start")
     start.add_argument("--workspace", required=True)
-    start.add_argument("--domain", default="healthcare")
+    start.add_argument("--domain", default="generic")
     start.add_argument("--intent", choices=sorted(INTENTS), default="kpi_generation")
     start.add_argument("--mode", choices=sorted(ORCHESTRATION_MODES), default="local-safe")
     start.add_argument(
@@ -1620,6 +1634,32 @@ def main(argv: list[str] | None = None) -> int:
         "--print-gitignore",
         action="store_true",
         help="Print suggested .gitignore patterns for non-source-of-truth artifacts.",
+    )
+
+    handoff = sub.add_parser("handoff")
+    handoff.add_argument("--workspace", required=True)
+    handoff.add_argument(
+        "--session",
+        default="",
+        help="Specific session to compact. Defaults to the latest open session.",
+    )
+
+    context = sub.add_parser("context-status")
+    context.add_argument("--workspace", required=True)
+    context.add_argument("--session", default="")
+    context.add_argument(
+        "--budget-kb",
+        type=int,
+        default=180,
+        help="Approximate orchestrator context budget in KB (default 180).",
+    )
+
+    excerpt = sub.add_parser("skill-excerpt")
+    excerpt.add_argument("--skill", required=True, help="Skill name (folder under skills/).")
+    excerpt.add_argument(
+        "--section",
+        default="",
+        help="Section heading to extract (fuzzy match). Empty returns the whole body.",
     )
 
     gc = sub.add_parser("gc")
@@ -1733,6 +1773,70 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(inv, indent=2))
         else:
             print(render_artifact_inventory_markdown(inv))
+        return 0
+    elif args.cmd == "handoff":
+        repo_root = Path(args.repo_root).resolve()
+        session_id = args.session or latest_open_session(repo_root, args.workspace)
+        if not session_id:
+            print(
+                json.dumps(
+                    {
+                        "status": "no_open_session",
+                        "workspace": args.workspace,
+                        "note": (
+                            "No open session found for this workspace. "
+                            "Nothing to hand off. Start a fresh session with "
+                            "`workspace-flow start --workspace ... --new-session`."
+                        ),
+                    },
+                    indent=2,
+                )
+            )
+            return 0
+        handoff_path = write_session_handoff(repo_root, args.workspace, session_id)
+        print(
+            json.dumps(
+                {
+                    "status": "handoff_written",
+                    "session_id": session_id,
+                    "handoff_path": handoff_path,
+                    "note": (
+                        "Compact handoff written. Read it, then start a fresh session with "
+                        "`workspace-flow start --workspace <ws> --new-session`. The new session "
+                        "auto-loads this handoff at startup."
+                    ),
+                },
+                indent=2,
+            )
+        )
+        return 0
+    elif args.cmd == "context-status":
+        from tools.context_status import estimate_context
+
+        repo_root = Path(args.repo_root).resolve()
+        layout = WorkspaceLayout(project_root=(repo_root / args.workspace).resolve())
+        session_id = args.session or (latest_open_session(repo_root, args.workspace) or "")
+        status = estimate_context(layout, session_id=session_id, budget_kb=args.budget_kb)
+        print(json.dumps(status.to_dict(), indent=2))
+        return 0
+    elif args.cmd == "skill-excerpt":
+        from tools.skill_excerpt import get_skill_excerpt
+
+        try:
+            excerpt = get_skill_excerpt(args.skill, args.section)
+        except FileNotFoundError as exc:
+            print(json.dumps({"error": "skill_not_found", "detail": str(exc)}, indent=2))
+            return 2
+        if args.json:
+            print(json.dumps(excerpt.to_dict(), indent=2))
+        else:
+            print(excerpt.frontmatter)
+            print()
+            if excerpt.matched_section:
+                print(f"<!-- excerpt: {excerpt.skill} :: {excerpt.matched_section} "
+                      f"({excerpt.excerpt_size_bytes}/{excerpt.full_size_bytes} bytes) -->")
+                print()
+            print(excerpt.body)
         return 0
     elif args.cmd == "gc":
         repo_root = Path(args.repo_root).resolve()

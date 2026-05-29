@@ -284,6 +284,12 @@ def apply_relationship_answer(
     data["updated_by"] = "apply-relationship-answer"
     data["updated_at"] = now
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    _append_relationship_decision(
+        WorkspaceLayout(project_root=Path(root) / workspace),
+        relationship_id=relationship_id,
+        state=history_state,
+        note=evidence_note or f"Answer: {normalized_answer}",
+    )
     return RelationshipApprovalResult(
         json_path=_rel(path, root),
         relationship_id=relationship_id,
@@ -834,19 +840,20 @@ def _dataset_terms(source: str) -> set[str]:
             terms.add(clean)
             if clean.endswith("s"):
                 terms.add(clean[:-1])
-    if "transaction" in normalized:
-        terms.update({"transaction", "transactions", "facttransactions"})
-    if "patient" in normalized:
-        terms.update({"patient", "patients", "dimpatient"})
-    if "department" in normalized:
-        terms.update({"department", "departments", "dimdepartment"})
-    if "provider" in normalized:
-        terms.update({"provider", "providers", "dimprovider"})
-    if "claim" in normalized:
-        terms.update({"claim", "claims", "factclaims"})
-    if "encounter" in normalized:
-        terms.update({"encounter", "encounters"})
-    return terms
+    # Generic medallion-prefix expansion. No domain words hardcoded.
+    # For every token already in `terms`, also seed common medallion-layer
+    # prefixes (dim*, fact*) so naming conventions across workspaces are
+    # recognized regardless of which entity name appears.
+    expanded = set(terms)
+    for token in tuple(terms):
+        if not token or len(token) < 3:
+            continue
+        expanded.update({f"dim{token}", f"fact{token}", f"stg{token}"})
+        if token.endswith("s"):
+            expanded.add(token[:-1])
+        else:
+            expanded.add(token + "s")
+    return expanded
 
 
 def _resolve_dataset(value: str, lookup: dict[str, str]) -> str:
@@ -1057,6 +1064,27 @@ def apply_main(argv: list[str] | None = None) -> int:
         metadata={"relationship_id": args.relationship_id, "answer": args.answer},
         record_idempotent=True,
     )
+
+
+def _append_relationship_decision(
+    layout: WorkspaceLayout,
+    *,
+    relationship_id: str,
+    state: str,
+    note: str,
+) -> None:
+    path = layout.memory_dir / "decision_history.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    today = datetime.now(timezone.utc).date()
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("\n".join([
+            f"## {today} Relationship Decision",
+            "",
+            f"- Relationship: `{relationship_id}`",
+            f"- State: `{state}`",
+            f"- Note: {note}",
+            "",
+        ]))
 
 
 if __name__ == "__main__":

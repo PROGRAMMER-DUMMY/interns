@@ -1161,7 +1161,9 @@ def _infer_table_pattern(name: str, columns: list[dict[str, Any]], patterns: dic
         pattern_id = "dimension_scd2"
         role = "dimension"
         evidence = ["mostly descriptive columns", "no obvious additive measures"]
-    elif measure_count > 0 or any(token in norm_name for token in ("fact", "transaction", "claim", "order")):
+    elif measure_count > 0 or "fact" in norm_name or any(
+        token in norm_name for token in ("transaction", "order", "event", "log", "record", "entry")
+    ):
         pattern_id = "transaction_fact"
         role = "fact"
         evidence = ["measure columns detected" if measure_count else "table name suggests transactional fact"]

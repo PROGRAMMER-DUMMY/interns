@@ -100,7 +100,7 @@ class WorkspaceKickstarter:
         *,
         task_id: str | None = None,
         name: str | None = None,
-        domain: str = "healthcare",
+        domain: str = "generic",
         set_active: bool = True,
         sample_rows: int = 100_000,
         cfg: Config | None = None,
@@ -497,7 +497,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo-root", default=".", help="Repository root. Defaults to current directory.")
     parser.add_argument("--task-id", help="Task id to create or update. Defaults to workspace folder name.")
     parser.add_argument("--name", help="Task display name. Defaults to '<workspace> KPI Optimization'.")
-    parser.add_argument("--domain", default="healthcare", help="Task domain.")
+    parser.add_argument("--domain", default="generic", help="Task domain.")
     parser.add_argument("--sample-rows", type=int, default=100_000, help="Sample rows for profiling.")
     parser.add_argument("--no-set-active", action="store_true", help="Do not set this task active.")
     args = parser.parse_args(argv)

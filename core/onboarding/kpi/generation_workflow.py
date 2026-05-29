@@ -732,12 +732,23 @@ def _competitive_review(session: dict[str, Any]) -> dict[str, Any]:
     files = session.get("detected_files", {}).get("files", [])
     dataset_text = " ".join(files).lower()
     suggestions = []
-    if "paid" in dataset_text or "amount" in dataset_text:
-        suggestions.append("Add paid/allowed/denied amount KPIs with payer, LOB, and time cuts.")
-    if "patient" in dataset_text or "member" in dataset_text:
-        suggestions.append("Add lives/member coverage KPIs with denominator and eligibility rules.")
-    if "encounter" in dataset_text or "claim" in dataset_text:
-        suggestions.append("Add volume and leakage KPIs by encounter/claim status and service period.")
+    # Generic suggestions driven by structural shape of dataset names — no
+    # domain vocabulary hardcoded. Workspace-specific suggestions should come
+    # from `workspace_vocabulary.json` (entity_terms + financial_terms) in a
+    # follow-up; this fallback keeps cold-start helpful without leaking
+    # healthcare/retail/etc. defaults.
+    from core.onboarding.lexicon.vocabulary import (
+        GENERIC_FINANCIAL_SEED,
+        GENERIC_TEMPORAL_SEED,
+    )
+    if any(seed in dataset_text for seed in GENERIC_FINANCIAL_SEED):
+        suggestions.append(
+            "Add amount/cost/revenue trend KPIs with categorical cuts and time grain."
+        )
+    if any(seed in dataset_text for seed in GENERIC_TEMPORAL_SEED):
+        suggestions.append(
+            "Add volume / rate / aging KPIs anchored to the date column with defined grain."
+        )
     if not suggestions:
         suggestions.append("Add at least one decision-linked KPI with owner, grain, and acceptance tests.")
     return {

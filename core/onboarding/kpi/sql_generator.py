@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,9 @@ class DuckDBKPISQLGenerator:
         kpi = next((item for item in mapping.get("kpis", []) if item.get("kpi_id") == kpi_id), None)
         if not kpi:
             raise ValueError(f"KPI not found: {kpi_id}")
+        if not kpi.get("description"):
+            kpi = dict(kpi)
+            kpi["description"] = self._registry_description(kpi_id)
         blocked = [
             feature
             for feature in kpi.get("features", [])
@@ -75,23 +79,6 @@ class DuckDBKPISQLGenerator:
             raise ValueError(
                 "Local DuckDB SQL generation blocked by resource plan; "
                 "generate Databricks SQL or reduce local workload."
-            )
-        override_sql = self._workspace_specific_result_sql(
-            kpi,
-            kpi_id,
-            resource_settings,
-            profile_map,
-        )
-        if override_sql:
-            suffix = "" if self.dialect == "duckdb" else f"_{self.dialect}"
-            output = self.layout.solutions_dir / f"{kpi_id}{suffix}.sql"
-            output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_text(override_sql, encoding="utf-8")
-            return SQLGenerationResult(
-                path=_rel(output, self.repo_root),
-                kpi_id=kpi_id,
-                status="generated",
-                dialect=self.dialect,
             )
         relationships = load_relationship_contracts(
             self.repo_root,
@@ -171,6 +158,7 @@ class DuckDBKPISQLGenerator:
         output = self.layout.solutions_dir / f"{kpi_id}{suffix}.sql"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(sql, encoding="utf-8")
+        self._write_run_report(kpi_id, kpi, sql)
         return SQLGenerationResult(
             path=_rel(output, self.repo_root),
             kpi_id=kpi_id,
@@ -178,311 +166,52 @@ class DuckDBKPISQLGenerator:
             dialect=self.dialect,
         )
 
-    def _workspace_specific_result_sql(
-        self,
-        kpi: dict[str, Any],
-        kpi_id: str,
-        resource_settings: dict[str, Any],
-        profile_map: dict[str, dict[str, Any]],
-    ) -> str:
-        if self.dialect != "duckdb":
-            return ""
-        name = str(kpi.get("name") or "").lower()
-        header = "\n".join(
-            [
-                "-- Authoritative KPI SQL generated only from ready feature mappings.",
-                f"-- Dialect: {self.dialect}",
-                f"-- KPI: {kpi.get('name', kpi_id)}",
-                f"-- Resource mode: {resource_settings.get('mode', 'unknown') if resource_settings else 'unknown'}",
-                f"-- SQL strategy: {resource_settings.get('sql_strategy', 'standard_local') if resource_settings else 'standard_local'}",
+    def _write_run_report(self, kpi_id: str, kpi: dict[str, Any], sql: str) -> None:
+        run_dir = self.layout.runs_dir / date.today().isoformat()
+        run_dir.mkdir(parents=True, exist_ok=True)
+        results_path = run_dir / "results.md"
+
+        lines: list[str] = []
+        if not results_path.exists():
+            workspace_name = Path(self.layout.project_root).name
+            scope = _derive_scope(Path(self.layout.project_root))
+            lines += [
+                f"# KPI Results — {workspace_name}",
+                f"**Date:** {date.today().isoformat()} | **Scope:** {scope}",
+                "",
+                "---",
                 "",
             ]
-        )
-        result_view = self.quote_ident(kpi_id + "_results")
-        if "zero payer coverage" in name:
-            return header + "\n".join(
-                [
-                    'CREATE OR REPLACE VIEW "stage_001_encounters" AS',
-                    "SELECT \"Id\", \"PAYER_COVERAGE\" FROM read_csv_auto('workspaces/Hospital_Patient_Records/encounters.csv', union_by_name=true);",
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    "SELECT",
-                    "  SUM(CASE WHEN COALESCE(\"PAYER_COVERAGE\", 0) = 0 THEN 1 ELSE 0 END) AS zero_payer_coverage_encounters,",
-                    "  COUNT(*) AS total_encounters,",
-                    "  ROUND(100.0 * SUM(CASE WHEN COALESCE(\"PAYER_COVERAGE\", 0) = 0 THEN 1 ELSE 0 END) / COUNT(*), 2) AS zero_payer_coverage_percentage",
-                    'FROM "stage_001_encounters";',
-                    "",
-                ]
-            )
-        if "average base cost" in name and "procedure" in name:
-            order_by = "average_base_cost DESC, procedure_count DESC" if "highest" in name else "procedure_count DESC"
-            return header + "\n".join(
-                [
-                    'CREATE OR REPLACE VIEW "stage_001_procedures" AS',
-                    "SELECT \"DESCRIPTION\", \"BASE_COST\" FROM read_csv_auto('workspaces/Hospital_Patient_Records/procedures.csv', union_by_name=true);",
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    "SELECT",
-                    "  \"DESCRIPTION\" AS procedure,",
-                    "  COUNT(*) AS procedure_count,",
-                    "  ROUND(AVG(\"BASE_COST\"), 2) AS average_base_cost",
-                    'FROM "stage_001_procedures"',
-                    "GROUP BY \"DESCRIPTION\"",
-                    f"ORDER BY {order_by}",
-                    "LIMIT 10;",
-                    "",
-                ]
-            )
-        if "average total claim cost" in name and "payer" in name:
-            return header + "\n".join(
-                [
-                    'CREATE OR REPLACE VIEW "stage_001_encounters" AS',
-                    "SELECT \"PAYER\", \"TOTAL_CLAIM_COST\" FROM read_csv_auto('workspaces/Hospital_Patient_Records/encounters.csv', union_by_name=true);",
-                    'CREATE OR REPLACE VIEW "stage_002_payers" AS',
-                    "SELECT \"Id\", \"NAME\" FROM read_csv_auto('workspaces/Hospital_Patient_Records/payers.csv', union_by_name=true);",
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    "SELECT",
-                    "  COALESCE(p.\"NAME\", e.\"PAYER\") AS payer,",
-                    "  ROUND(AVG(e.\"TOTAL_CLAIM_COST\"), 2) AS average_total_claim_cost",
-                    'FROM "stage_001_encounters" e',
-                    'LEFT JOIN "stage_002_payers" p ON e."PAYER" = p."Id"',
-                    "GROUP BY COALESCE(p.\"NAME\", e.\"PAYER\")",
-                    "ORDER BY average_total_claim_cost DESC;",
-                    "",
-                ]
-            )
-        if "readmitted within 30 days" in name:
-            return header + self._readmission_sql(kpi_id, aggregate="count_patients")
-        if "most readmissions" in name:
-            return header + self._readmission_sql(kpi_id, aggregate="top_patients")
-        if _has_ecommerce_web_sources(profile_map):
-            return header + self._ecommerce_web_analytics_sql(kpi_id, name)
-        return ""
 
-    def _ecommerce_web_analytics_sql(self, kpi_id: str, name: str) -> str:
-        result_view = self.quote_ident(kpi_id + "_results")
-        workspace = _rel(self.workspace, self.repo_root)
-        orders = f"{workspace}/orders.csv"
-        order_items = f"{workspace}/order_items.csv"
-        refunds = f"{workspace}/order_item_refunds.csv"
-        products = f"{workspace}/products.csv"
-        sessions = f"{workspace}/website_sessions.csv"
-        pageviews = f"{workspace}/website_pageviews.csv"
-        common_views = [
-            'CREATE OR REPLACE VIEW "stage_orders" AS',
-            f"SELECT * FROM read_csv_auto('{orders}', union_by_name=true);",
-            'CREATE OR REPLACE VIEW "stage_order_items" AS',
-            f"SELECT * FROM read_csv_auto('{order_items}', union_by_name=true);",
-            'CREATE OR REPLACE VIEW "stage_refunds" AS',
-            f"SELECT * FROM read_csv_auto('{refunds}', union_by_name=true);",
-            'CREATE OR REPLACE VIEW "stage_products" AS',
-            f"SELECT * FROM read_csv_auto('{products}', union_by_name=true);",
-            'CREATE OR REPLACE VIEW "stage_sessions" AS',
-            f"SELECT * FROM read_csv_auto('{sessions}', union_by_name=true);",
-            'CREATE OR REPLACE VIEW "stage_pageviews" AS',
-            f"SELECT * FROM read_csv_auto('{pageviews}', union_by_name=true);",
+        label = kpi_id.upper().replace("_", " ")
+        lines += [
+            f"## {label}",
+            f"**{kpi.get('name', '')}**",
+            f"- Description: {kpi.get('description', '')}",
+            f"- Metric: `{kpi.get('metric', '')}`",
+            f"- Cuts: {kpi.get('cuts', '')}",
+            "",
+            "```sql",
+            sql.strip(),
+            "```",
+            "",
         ]
 
-        if "session-to-order conversion rate" in name:
-            body = [
-                f"CREATE OR REPLACE VIEW {result_view} AS",
-                "SELECT",
-                "  COALESCE(s.utm_source, '(direct)') AS utm_source,",
-                "  COALESCE(s.utm_campaign, '(none)') AS utm_campaign,",
-                "  COUNT(DISTINCT s.website_session_id) AS sessions,",
-                "  COUNT(DISTINCT o.order_id) AS orders,",
-                "  ROUND(100.0 * COUNT(DISTINCT o.order_id) / NULLIF(COUNT(DISTINCT s.website_session_id), 0), 2) AS conversion_rate_pct",
-                'FROM "stage_sessions" s',
-                'LEFT JOIN "stage_orders" o ON s.website_session_id = o.website_session_id',
-                "GROUP BY 1, 2",
-                "ORDER BY conversion_rate_pct DESC, sessions DESC;",
-            ]
-        elif "most revenue and order volume" in name:
-            body = [
-                f"CREATE OR REPLACE VIEW {result_view} AS",
-                "SELECT",
-                "  p.product_name,",
-                "  COUNT(DISTINCT oi.order_id) AS order_count,",
-                "  COUNT(*) AS item_count,",
-                "  ROUND(SUM(oi.price_usd), 2) AS gross_revenue",
-                'FROM "stage_order_items" oi',
-                'LEFT JOIN "stage_products" p ON oi.product_id = p.product_id',
-                "GROUP BY 1",
-                "ORDER BY gross_revenue DESC, order_count DESC;",
-            ]
-        elif "refund rate by product" in name:
-            body = [
-                f"CREATE OR REPLACE VIEW {result_view} AS",
-                "SELECT",
-                "  p.product_name,",
-                "  COUNT(DISTINCT oi.order_item_id) AS sold_items,",
-                "  COUNT(DISTINCT r.order_item_refund_id) AS refunded_items,",
-                "  ROUND(100.0 * COUNT(DISTINCT r.order_item_refund_id) / NULLIF(COUNT(DISTINCT oi.order_item_id), 0), 2) AS refund_rate_pct,",
-                "  ROUND(COALESCE(SUM(r.refund_amount_usd), 0), 2) AS refund_amount",
-                'FROM "stage_order_items" oi',
-                'LEFT JOIN "stage_refunds" r ON oi.order_item_id = r.order_item_id',
-                'LEFT JOIN "stage_products" p ON oi.product_id = p.product_id',
-                "GROUP BY 1",
-                "ORDER BY refund_rate_pct DESC, refunded_items DESC;",
-            ]
-        elif "average order value" in name:
-            body = [
-                f"CREATE OR REPLACE VIEW {result_view} AS",
-                "SELECT",
-                "  date_trunc('month', CAST(created_at AS timestamp))::DATE AS order_month,",
-                "  COUNT(*) AS orders,",
-                "  ROUND(AVG(price_usd), 2) AS average_order_value,",
-                "  ROUND(SUM(price_usd), 2) AS gross_revenue",
-                'FROM "stage_orders"',
-                "GROUP BY 1",
-                "ORDER BY order_month;",
-            ]
-        elif "landing pages convert" in name:
-            body = [
-                'CREATE OR REPLACE VIEW "landing_pages" AS',
-                "SELECT website_session_id, pageview_url AS landing_page",
-                "FROM (",
-                "  SELECT website_session_id, pageview_url,",
-                "         ROW_NUMBER() OVER (PARTITION BY website_session_id ORDER BY CAST(created_at AS timestamp), website_pageview_id) AS rn",
-                '  FROM "stage_pageviews"',
-                ")",
-                "WHERE rn = 1;",
-                f"CREATE OR REPLACE VIEW {result_view} AS",
-                "SELECT",
-                "  lp.landing_page,",
-                "  COUNT(DISTINCT s.website_session_id) AS sessions,",
-                "  COUNT(DISTINCT o.order_id) AS orders,",
-                "  ROUND(100.0 * COUNT(DISTINCT o.order_id) / NULLIF(COUNT(DISTINCT s.website_session_id), 0), 2) AS conversion_rate_pct",
-                'FROM "landing_pages" lp',
-                'JOIN "stage_sessions" s ON lp.website_session_id = s.website_session_id',
-                'LEFT JOIN "stage_orders" o ON s.website_session_id = o.website_session_id',
-                "GROUP BY 1",
-                "ORDER BY conversion_rate_pct DESC, sessions DESC;",
-            ]
-        elif "conversion rate trend by month" in name:
-            body = [
-                f"CREATE OR REPLACE VIEW {result_view} AS",
-                "SELECT",
-                "  date_trunc('month', CAST(s.created_at AS timestamp))::DATE AS session_month,",
-                "  COUNT(DISTINCT s.website_session_id) AS sessions,",
-                "  COUNT(DISTINCT o.order_id) AS orders,",
-                "  ROUND(100.0 * COUNT(DISTINCT o.order_id) / NULLIF(COUNT(DISTINCT s.website_session_id), 0), 2) AS conversion_rate_pct",
-                'FROM "stage_sessions" s',
-                'LEFT JOIN "stage_orders" o ON s.website_session_id = o.website_session_id',
-                "GROUP BY 1",
-                "ORDER BY session_month;",
-            ]
-        elif "share of sessions reach product" in name:
-            body = [
-                'CREATE OR REPLACE VIEW "session_funnel" AS',
-                "SELECT",
-                "  website_session_id,",
-                "  MAX(CASE WHEN lower(pageview_url) LIKE '%product%' THEN 1 ELSE 0 END) AS reached_product,",
-                "  MAX(CASE WHEN lower(pageview_url) LIKE '%cart%' THEN 1 ELSE 0 END) AS reached_cart,",
-                "  MAX(CASE WHEN lower(pageview_url) LIKE '%billing%' THEN 1 ELSE 0 END) AS reached_billing,",
-                "  MAX(CASE WHEN lower(pageview_url) LIKE '%thank%' THEN 1 ELSE 0 END) AS reached_thank_you",
-                'FROM "stage_pageviews"',
-                "GROUP BY 1;",
-                f"CREATE OR REPLACE VIEW {result_view} AS",
-                "SELECT 'product' AS step, ROUND(100.0 * SUM(reached_product) / COUNT(*), 2) AS session_share_pct FROM session_funnel",
-                "UNION ALL SELECT 'cart', ROUND(100.0 * SUM(reached_cart) / COUNT(*), 2) FROM session_funnel",
-                "UNION ALL SELECT 'billing', ROUND(100.0 * SUM(reached_billing) / COUNT(*), 2) FROM session_funnel",
-                "UNION ALL SELECT 'thank_you', ROUND(100.0 * SUM(reached_thank_you) / COUNT(*), 2) FROM session_funnel;",
-            ]
-        elif "highest revenue per session" in name:
-            body = [
-                f"CREATE OR REPLACE VIEW {result_view} AS",
-                "SELECT",
-                "  COALESCE(s.utm_source, '(direct)') AS utm_source,",
-                "  COALESCE(s.utm_campaign, '(none)') AS utm_campaign,",
-                "  COUNT(DISTINCT s.website_session_id) AS sessions,",
-                "  ROUND(COALESCE(SUM(o.price_usd), 0), 2) AS gross_revenue,",
-                "  ROUND(COALESCE(SUM(o.price_usd), 0) / NULLIF(COUNT(DISTINCT s.website_session_id), 0), 2) AS revenue_per_session",
-                'FROM "stage_sessions" s',
-                'LEFT JOIN "stage_orders" o ON s.website_session_id = o.website_session_id',
-                "GROUP BY 1, 2",
-                "ORDER BY revenue_per_session DESC, gross_revenue DESC;",
-            ]
-        elif "gross revenue" in name and "net revenue" in name:
-            body = [
-                f"CREATE OR REPLACE VIEW {result_view} AS",
-                "SELECT",
-                "  date_trunc('month', CAST(o.created_at AS timestamp))::DATE AS order_month,",
-                "  ROUND(SUM(o.price_usd), 2) AS gross_revenue,",
-                "  ROUND(COALESCE(SUM(r.refund_amount_usd), 0), 2) AS refund_amount,",
-                "  ROUND(SUM(o.price_usd) - COALESCE(SUM(r.refund_amount_usd), 0), 2) AS net_revenue",
-                'FROM "stage_orders" o',
-                'LEFT JOIN "stage_refunds" r ON o.order_id = r.order_id',
-                "GROUP BY 1",
-                "ORDER BY order_month;",
-            ]
-        elif "refund-adjusted revenue" in name:
-            body = [
-                f"CREATE OR REPLACE VIEW {result_view} AS",
-                "SELECT",
-                "  p.product_name,",
-                "  ROUND(SUM(oi.price_usd), 2) AS gross_revenue,",
-                "  ROUND(COALESCE(SUM(r.refund_amount_usd), 0), 2) AS refund_amount,",
-                "  ROUND(SUM(oi.price_usd) - COALESCE(SUM(r.refund_amount_usd), 0), 2) AS refund_adjusted_revenue",
-                'FROM "stage_order_items" oi',
-                'LEFT JOIN "stage_refunds" r ON oi.order_item_id = r.order_item_id',
-                'LEFT JOIN "stage_products" p ON oi.product_id = p.product_id',
-                "GROUP BY 1",
-                "ORDER BY refund_adjusted_revenue DESC;",
-            ]
-        else:
-            return ""
-        return "\n".join([*common_views, *body, ""])
+        try:
+            import duckdb
+            con = duckdb.connect()
+            for stmt in re.split(r";\s*\n", sql):
+                stmt = stmt.strip()
+                if stmt and not all(ln.startswith("--") for ln in stmt.splitlines() if ln.strip()):
+                    con.execute(stmt)
+            df = con.execute(f'SELECT * FROM "{kpi_id}_results" LIMIT 50').fetchdf()
+            lines.append(_df_to_md(df))
+        except Exception as e:
+            lines.append(f"_(Execution skipped: {e})_")
 
-    def _readmission_sql(self, kpi_id: str, *, aggregate: str) -> str:
-        result_view = self.quote_ident(kpi_id + "_results")
-        final_select = (
-            "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    "SELECT",
-                    "  COUNT(DISTINCT PATIENT) AS readmitted_patient_count,",
-                    "  COUNT(*) AS readmission_count",
-                    "FROM readmissions;",
-                ]
-            )
-            if aggregate == "count_patients"
-            else "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    "SELECT",
-                    "  PATIENT AS patient,",
-                    "  COUNT(*) AS readmission_count",
-                    "FROM readmissions",
-                    "GROUP BY PATIENT",
-                    "ORDER BY readmission_count DESC",
-                    "LIMIT 10;",
-                ]
-            )
-        )
-        return "\n".join(
-            [
-                'CREATE OR REPLACE VIEW "stage_001_encounters" AS',
-                "SELECT \"Id\", \"PATIENT\", \"START\", \"STOP\" FROM read_csv_auto('workspaces/Hospital_Patient_Records/encounters.csv', union_by_name=true);",
-                'CREATE OR REPLACE VIEW "ordered_encounters" AS',
-                "SELECT",
-                "  \"Id\" AS encounter_id,",
-                "  \"PATIENT\" AS PATIENT,",
-                "  CAST(\"START\" AS timestamp) AS encounter_start,",
-                "  CAST(\"STOP\" AS timestamp) AS encounter_stop,",
-                "  LAG(CAST(\"STOP\" AS timestamp)) OVER (",
-                "    PARTITION BY \"PATIENT\"",
-                "    ORDER BY CAST(\"START\" AS timestamp)",
-                "  ) AS previous_encounter_stop",
-                'FROM "stage_001_encounters"',
-                "WHERE \"START\" IS NOT NULL AND \"STOP\" IS NOT NULL;",
-                'CREATE OR REPLACE VIEW "readmissions" AS',
-                "SELECT *",
-                'FROM "ordered_encounters"',
-                "WHERE previous_encounter_stop IS NOT NULL",
-                "  AND date_diff('day', previous_encounter_stop, encounter_start) BETWEEN 0 AND 30;",
-                final_select,
-                "",
-            ]
-        )
+        lines += ["", "---", ""]
+        with results_path.open("a", encoding="utf-8") as f:
+            f.write("\n".join(lines))
 
     def _profile_map(self) -> dict[str, dict[str, Any]]:
         profile_index = self.layout.profiles_dir / "profile_index.json"
@@ -782,6 +511,23 @@ class DuckDBKPISQLGenerator:
                 return f"{alias}.{self.quote_ident(column)}"
         return None
 
+    def _registry_description(self, kpi_id: str) -> str:
+        path = self.layout.contracts_dir / "kpi_registry.json"
+        if not path.exists():
+            return ""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            for entry in data.get("kpis", []):
+                if entry.get("kpi_id") == kpi_id or entry.get("id") == kpi_id:
+                    return entry.get("description", "")
+            idx = int(kpi_id.split("_")[-1]) - 1
+            entries = data.get("kpis", [])
+            if 0 <= idx < len(entries):
+                return entries[idx].get("description", "")
+        except Exception:
+            pass
+        return ""
+
     def _load_mapping(self) -> dict[str, Any]:
         path = self.layout.contracts_dir / "kpi_feature_mapping.json"
         if not path.exists():
@@ -789,224 +535,24 @@ class DuckDBKPISQLGenerator:
         return json.loads(path.read_text(encoding="utf-8"))
 
     def _result_view_sql(self, kpi: dict[str, Any], kpi_id: str) -> str:
+        """Build the result-view SQL for a KPI. Workspace-agnostic.
+
+        Delegates to the generic builder which parses `kpi.metric` + `kpi.cuts`
+        + `kpi.features` and composes SELECT/GROUP BY/WHERE/ORDER BY. For
+        complex shapes the builder returns a clearly-commented `SELECT *`
+        fallback so the pipeline still produces a valid view but the
+        reviewer sees the gap.
+        """
+        from core.onboarding.kpi.result_view_builder import build_result_view_sql
+
         feature_view = self.quote_ident(kpi_id + "_features")
         result_view = self.quote_ident(kpi_id + "_results")
-        available = {str(feature.get("feature") or "") for feature in kpi.get("features", [])}
-        lower_name = str(kpi.get("name") or "").lower()
-        metric = str(kpi.get("metric") or "").lower()
-        cuts = str(kpi.get("cuts") or "").lower()
-
-        def q(name: str) -> str:
-            return self.quote_ident(name)
-
-        paid_feature = "PaidAmount" if "PaidAmount" in available else ("paid" if "paid" in available else "")
-        lob_feature = "LineOfBusiness" if "LineOfBusiness" in available else ("LOB" if "LOB" in available else "")
-        payer_feature = "PayorID" if "PayorID" in available else ("Payer" if "Payer" in available else "")
-        service_date_feature = "ServiceDate" if "ServiceDate" in available else ("Time" if "Time" in available else "")
-        age_filter = ""
-        if "Age" in available:
-            age_filter = f"{q('Age')} > 50"
-        elif "DOB" in available and service_date_feature:
-            age_filter = f"date_diff('year', CAST({q('DOB')} AS DATE), CAST({q(service_date_feature)} AS DATE)) > 50"
-        if (
-            paid_feature
-            and lob_feature
-            and payer_feature
-            and service_date_feature
-            and "Gender" in available
-            and age_filter
-            and "medicare" in cuts
-            and "50" in cuts
-            and "sum" in metric
-        ):
-            paid_alias = "paid_amount" if paid_feature == "paid" else "TotalPaidAmount"
-            return "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    "SELECT",
-                    f"  date_trunc('month', CAST({q(service_date_feature)} AS DATE)) AS ServiceMonth,",
-                    f"  {q(payer_feature)} AS PayorID,",
-                    f"  {q('Gender')} AS Gender,",
-                    f"  SUM({q(paid_feature)}) AS {paid_alias}",
-                    f"FROM {feature_view}",
-                    f"WHERE {q(lob_feature)} = 'Medicare'",
-                    f"  AND {age_filter}",
-                    "GROUP BY 1, 2, 3",
-                    "ORDER BY 1 ASC, 4 DESC;",
-                ]
-            )
-        if (
-            "percentage" in metric
-            and "PatientID" in available
-            and "VisitType" in available
-            and "Gender" in available
-            and ("DOB" in available or "Age" in available)
-            and ("departement" in available or "Department" in available or "Name" in available)
-        ):
-            department_feature = "departement" if "departement" in available else ("Name" if "Name" in available else "Department")
-            if "Age" in available and "DOB" not in available:
-                return "\n".join(
-                    [
-                        f"CREATE OR REPLACE VIEW {result_view} AS",
-                        "SELECT",
-                        f"  {q(department_feature)} AS department,",
-                        f"  {q('VisitType')} AS visit_type,",
-                        f"  {q('Gender')} AS gender,",
-                        f"  {q('Age')} AS age,",
-                        f"  COUNT(DISTINCT {q('PatientID')}) AS patient_count,",
-                        f"  ROUND(COUNT(DISTINCT {q('PatientID')}) * 100.0 / SUM(COUNT(DISTINCT {q('PatientID')})) OVER (), 2) AS percentage_share",
-                        f"FROM {feature_view}",
-                        f"GROUP BY {q('Gender')}, {q('Age')}, {q('VisitType')}, {q(department_feature)}",
-                        "ORDER BY department, percentage_share DESC;",
-                    ]
-                )
-            return "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    "WITH base AS (",
-                    "  SELECT",
-                    f"    {q(department_feature)} AS DepartmentName,",
-                    f"    {q('VisitType')} AS VisitType,",
-                    f"    {q('Gender')} AS Gender,",
-                    f"    date_diff('year', CAST({q('DOB')} AS DATE), CURRENT_DATE) AS Age,",
-                    f"    COUNT(DISTINCT {q('PatientID')}) AS PatientCount",
-                    f"  FROM {feature_view}",
-                    "  GROUP BY 1, 2, 3, 4",
-                    ")",
-                    "SELECT",
-                    "  DepartmentName,",
-                    "  VisitType,",
-                    "  Gender,",
-                    "  Age,",
-                    "  PatientCount,",
-                    "  ROUND((PatientCount * 100.0) / SUM(PatientCount) OVER (), 2) AS PercentageShare",
-                    "FROM base",
-                    "ORDER BY DepartmentName, PercentageShare DESC;",
-                ]
-            )
-        if (
-            {"PaidAmount", "LineOfBusiness", "PayorID"}.issubset(available)
-            and "commercial" in cuts
-            and "top 10" in lower_name
-            and "sum" in metric
-        ):
-            return "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    "SELECT",
-                    f"  {q('PayorID')} AS PayorID,",
-                    f"  {q('LineOfBusiness')} AS LineOfBusiness,",
-                    f"  SUM({q('PaidAmount')}) AS TotalPaidAmount",
-                    f"FROM {feature_view}",
-                    f"WHERE {q('LineOfBusiness')} = 'Commercial'",
-                    "GROUP BY 1, 2",
-                    "ORDER BY 3 DESC",
-                    "LIMIT 10;",
-                ]
-            )
-        if "encounter count" in metric and "Year" in available and "encounter" in available:
-            return "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    f"SELECT {q('Year')} AS year, COUNT(DISTINCT {q('encounter')}) AS total_encounters",
-                    f"FROM {feature_view}",
-                    f"GROUP BY {q('Year')}",
-                    "ORDER BY year;",
-                ]
-            )
-        if "percentage" in metric and "EncounterClass" in available and "Year" in available:
-            return "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    "WITH counts AS (",
-                    f"  SELECT {q('Year')} AS year, {q('EncounterClass')} AS encounter_class, COUNT(*) AS encounter_count",
-                    f"  FROM {feature_view}",
-                    f"  GROUP BY {q('Year')}, {q('EncounterClass')}",
-                    ")",
-                    "SELECT year, encounter_class, encounter_count,",
-                    "       ROUND(100.0 * encounter_count / SUM(encounter_count) OVER (PARTITION BY year), 2) AS encounter_percentage",
-                    "FROM counts",
-                    "ORDER BY year, encounter_class;",
-                ]
-            )
-        if "percentage" in metric and "EncounterDurationBucket" in available:
-            return "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    f"SELECT {q('EncounterDurationBucket')} AS duration_bucket, COUNT(*) AS encounter_count,",
-                    "       ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS encounter_percentage",
-                    f"FROM {feature_view}",
-                    f"GROUP BY {q('EncounterDurationBucket')}",
-                    "ORDER BY duration_bucket;",
-                ]
-            )
-        if "average base cost" in metric and "Procedure" in available and "cost" in available:
-            order_expr = "average_base_cost DESC" if "highest" in lower_name else "procedure_count DESC"
-            return "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    f"SELECT {q('Procedure')} AS procedure, COUNT(*) AS procedure_count, AVG({q('cost')}) AS average_base_cost",
-                    f"FROM {feature_view}",
-                    f"GROUP BY {q('Procedure')}",
-                    f"ORDER BY {order_expr}",
-                    "LIMIT 10;",
-                ]
-            )
-        if "average total claim cost" in metric and "Payer" in available and "cost" in available:
-            return "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    f"SELECT {q('Payer')} AS payer, AVG({q('cost')}) AS average_total_claim_cost",
-                    f"FROM {feature_view}",
-                    f"GROUP BY {q('Payer')}",
-                    "ORDER BY average_total_claim_cost DESC;",
-                ]
-            )
-        if "unique patient count" in metric and "Quarter" in available:
-            patient_feature = "patient" if "patient" in available else "Patient"
-            return "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    f"SELECT {q('Quarter')} AS quarter, COUNT(DISTINCT {q(patient_feature)}) AS unique_patients",
-                    f"FROM {feature_view}",
-                    f"GROUP BY {q('Quarter')}",
-                    "ORDER BY quarter;",
-                ]
-            )
-        if "readmission" in metric and "Patient" in available:
-            if "most readmissions" in lower_name:
-                return "\n".join(
-                    [
-                        f"CREATE OR REPLACE VIEW {result_view} AS",
-                        f"SELECT {q('Patient')} AS patient, COUNT(*) AS readmission_count",
-                        f"FROM {feature_view}",
-                        f"GROUP BY {q('Patient')}",
-                        "ORDER BY readmission_count DESC",
-                        "LIMIT 10;",
-                    ]
-                )
-            return "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    f"SELECT COUNT(DISTINCT {q('Patient')}) AS patient_count",
-                    f"FROM {feature_view};",
-                ]
-            )
-        if "payer" in cuts and "Payer" in available:
-            return "\n".join(
-                [
-                    f"CREATE OR REPLACE VIEW {result_view} AS",
-                    f"SELECT {q('Payer')} AS payer, COUNT(*) AS encounter_count",
-                    f"FROM {feature_view}",
-                    f"GROUP BY {q('Payer')}",
-                    "ORDER BY encounter_count DESC;",
-                ]
-            )
-        return "\n".join(
-            [
-                f"CREATE OR REPLACE VIEW {result_view} AS",
-                f"SELECT * FROM {feature_view};",
-            ]
+        return build_result_view_sql(
+            kpi,
+            kpi_id=kpi_id,
+            feature_view=feature_view,
+            result_view=result_view,
+            dialect=self.dialect,
         )
 
     def quote_ident(self, value: str) -> str:
@@ -1079,15 +625,20 @@ def _choose_base_source(
     refs: list[dict[str, str]],
     profile_map: dict[str, dict[str, Any]],
 ) -> str:
-    scores: dict[str, int] = {}
+    # Count refs per source first, then apply per-source bonuses exactly once.
+    ref_counts: dict[str, int] = {}
     for ref in refs:
         source = ref["dataset"]
-        scores[source] = scores.get(source, 0) + 1
+        ref_counts[source] = ref_counts.get(source, 0) + 1
+    scores: dict[str, int] = {}
+    for source, count in ref_counts.items():
+        score = count
         name = source.lower()
         if any(token in name for token in ("transactions", "claim_data", "claims", "encounters")):
-            scores[source] += 3
+            score += 3
         if source in profile_map:
-            scores[source] += 1
+            score += 1
+        scores[source] = score
     if not scores:
         return ""
     return sorted(scores, key=lambda source: (-scores[source], source))[0]
@@ -1162,18 +713,6 @@ def _source_group(source: str) -> str:
     return normalized
 
 
-def _has_ecommerce_web_sources(profile_map: dict[str, dict[str, Any]]) -> bool:
-    sources = {Path(source.replace("\\", "/")).stem for source in profile_map}
-    return {
-        "orders",
-        "order_items",
-        "order_item_refunds",
-        "products",
-        "website_pageviews",
-        "website_sessions",
-    }.issubset(sources)
-
-
 def _unique_preserve_order(values: list[str]) -> list[str]:
     seen = set()
     result = []
@@ -1182,6 +721,40 @@ def _unique_preserve_order(values: list[str]) -> list[str]:
             result.append(value)
             seen.add(value)
     return result
+
+
+def _derive_scope(workspace_path: Path) -> str:
+    settings_file = workspace_path / "workspace_settings.json"
+    if settings_file.exists():
+        try:
+            settings = json.loads(settings_file.read_text(encoding="utf-8"))
+            paths = [
+                e["path"]
+                for e in settings.get("dataset_allowlist", [])
+                if e.get("type") == "workspace_relative" and "datasets" in e.get("path", "")
+            ]
+            if paths:
+                parts = [Path(p).parts[-2:] for p in paths]
+                return " / ".join("/".join(p) for p in parts[:1])
+        except Exception:
+            pass
+    return workspace_path.name
+
+
+def _df_to_md(df: Any) -> str:
+    def _fmt(v: Any) -> str:
+        if isinstance(v, float):
+            return f"{v:.2f}"
+        return str(v)
+
+    cols   = list(df.columns)
+    header = "| " + " | ".join(str(c) for c in cols) + " |"
+    sep    = "| " + " | ".join("---" for _ in cols) + " |"
+    rows   = [
+        "| " + " | ".join(_fmt(v) for v in row) + " |"
+        for row in df.itertuples(index=False)
+    ]
+    return "\n".join([header, sep] + rows)
 
 
 def _norm(value: str) -> str:

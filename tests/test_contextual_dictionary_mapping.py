@@ -174,8 +174,9 @@ class ContextualDictionaryMappingTests(unittest.TestCase):
             panel_result = BlockerQuestionPanelBuilder(root, "workspaces/hospital").run()
             panel = json.loads((root / panel_result.current_json).read_text(encoding="utf-8"))
 
-            self.assertTrue(any(file.endswith("docs/data_dictionary.csv") for file in panel["evidence_files"]))
-            self.assertTrue(any(file.endswith("procedures.csv.profile.json") for file in panel["evidence_files"]))
+            ef_paths = [e["file"] if isinstance(e, dict) else e for e in panel["evidence_files"]]
+            self.assertTrue(any(f.endswith("docs/data_dictionary.csv") for f in ef_paths))
+            self.assertTrue(any(f.endswith("procedures.csv.profile.json") for f in ef_paths))
             physical_option = next(option for option in panel["options"] if option.get("physical_column_option"))
             self.assertEqual(
                 physical_option["physical_column_option"]["mapping_proof"]["proof_state"],

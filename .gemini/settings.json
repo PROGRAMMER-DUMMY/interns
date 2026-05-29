@@ -65,7 +65,7 @@
     ]
   },
   "experimental": {
-    "jitContext": false,
+    "jitContext": true,
     "enableAgents": true
   }
 }

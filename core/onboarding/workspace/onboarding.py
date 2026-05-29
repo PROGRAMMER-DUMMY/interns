@@ -531,32 +531,32 @@ class WorkspaceOnboarder:
         inputs: WorkspaceInputs,
         kpis: list[KpiDefinition],
     ) -> str:
+        from pathlib import Path as _Path
         lines = [
             "# Stakeholder Interview Summary",
             "",
-            "## Detected Inputs",
+            f"- **Workspace:** `{inputs.workspace}`",
+            f"- **KPI registries:** {len(inputs.kpi_registries)}",
+            f"- **Data model files:** {len(inputs.data_models)}",
+            f"- **Data files:** {len(inputs.data_files)}",
             "",
-            f"- Workspace: `{inputs.workspace}`",
-            f"- KPI registries: {len(inputs.kpi_registries)}",
-            f"- Data model files: {len(inputs.data_models)}",
-            f"- Data files: {len(inputs.data_files)}",
-            "",
-            "## Recommended Task Options",
-            "",
-            "1. Build and optimize KPI/query logic from registry, data model, and datasets. Recommended.",
-            "2. Profile datasets and extract schema/metadata.",
-            "3. Generate semantic contracts, assumptions, and open questions.",
-            "4. Validate an existing solution/evaluator.",
-            "",
-            "## Accepted Defaults",
-            "",
-            "- Use Polars for dataframe/file work.",
-            "- Keep all generated outputs under `interns/`.",
-            "- Generate baseline before optimization.",
-            "- Record ambiguous KPI mappings for review.",
-            "",
-            f"## KPI Count\n\n{kpis.__len__()}",
         ]
+        if inputs.data_files:
+            lines += ["## Source Files", ""]
+            for f in inputs.data_files:
+                lines.append(f"- `{_Path(f).name}`")
+            lines.append("")
+        if kpis:
+            lines += ["## KPI Definitions", ""]
+            for i, kpi in enumerate(kpis, 1):
+                lines.append(f"### {i}. {kpi.name}")
+                if kpi.description:
+                    lines.append(f"- **Description:** {kpi.description}")
+                lines.append(f"- **Metric:** `{kpi.metric}`")
+                lines.append(f"- **Cuts:** {kpi.cuts}")
+                if kpi.refinement_required:
+                    lines.append(f"- **Needs clarification:** {kpi.refinement_required}")
+                lines.append("")
         path = self.layout.requirements_dir / "stakeholder_interview.md"
         return self._write_text(path, "\n".join(lines).rstrip() + "\n")
 
@@ -686,42 +686,65 @@ if __name__ == "__main__":
         kpis: list[KpiDefinition],
         profiles: list[dict[str, Any]],
     ) -> str:
-        if not kpis and profiles:
-            baseline_status = (
-                "profile metadata generated; no KPI registry was provided, so the next step is "
-                "source-family/schema-drift planning before medallion or ETL design."
-            )
-            next_steps = [
-                "1. Review `open_questions.md` and source discovery reports.",
-                "2. Run `uv run build-source-family-contracts --workspace "
-                f"{inputs.workspace}`.",
-                "3. Review `interns/reports/source_family_contracts.md` for schema drift and bronze table strategy.",
-                "4. Run `uv run prepare-data-engineering-route --workspace "
-                f"{inputs.workspace} --track medallion --target-engine sql` after approving the source-family view.",
-            ]
-        else:
-            baseline_status = (
-                "manifest generated; executable KPI-specific SQL needs mapping approval."
-            )
-            next_steps = [
-                "1. Review `open_questions.md`.",
-                "2. Approve or refine KPI-to-column mappings.",
-                "3. Replace manifest rows with executable KPI SQL.",
-                "4. Run baseline evaluator before optimization.",
-            ]
+        from pathlib import Path as _Path
         lines = [
             "# Workspace Onboarding Report",
             "",
-            f"- Workspace: `{inputs.workspace}`",
-            f"- KPI definitions: {len(kpis)}",
-            f"- Profiled datasets: {len(profiles)}",
-            f"- Baseline status: {baseline_status}",
+            f"- **Workspace:** `{inputs.workspace}`",
+            f"- **KPIs:** {len(kpis)}",
+            f"- **Datasets profiled:** {len(profiles)}",
             "",
-            "## Next Steps",
-            "",
-            *next_steps,
         ]
-        return self._write_text(self.layout.reports_dir / "onboarding_report.md", "\n".join(lines) + "\n")
+
+        if profiles:
+            lines += ["## Datasets", ""]
+            header = "| Dataset | Rows | Columns |"
+            sep    = "|---------|------|---------|"
+            lines += [header, sep]
+            for p in profiles:
+                name = _Path(p.get("path", "")).name
+                rows = p.get("row_count", "?")
+                cols = ", ".join(p.get("schema", {}).keys())
+                lines.append(f"| `{name}` | {rows} | {cols} |")
+            lines.append("")
+            warnings = [w for p in profiles for w in (p.get("warnings") or [])]
+            if warnings:
+                lines += ["### Data Quality Warnings", ""]
+                for w in warnings:
+                    lines.append(f"- {w}")
+                lines.append("")
+
+        if kpis:
+            lines += ["## KPIs", ""]
+            header = "| # | Name | Metric | Cuts |"
+            sep    = "|---|------|--------|------|"
+            lines += [header, sep]
+            for i, kpi in enumerate(kpis, 1):
+                lines.append(f"| {i} | {kpi.name} | `{kpi.metric}` | {kpi.cuts} |")
+            lines.append("")
+            unresolved = [kpi for kpi in kpis if kpi.refinement_required]
+            if unresolved:
+                lines += ["### KPIs Needing Clarification", ""]
+                for kpi in unresolved:
+                    lines.append(f"- **{kpi.name}:** {kpi.refinement_required}")
+                lines.append("")
+
+        if not kpis and profiles:
+            lines += [
+                "## Next Steps", "",
+                "1. Run `uv run build-source-family-contracts --workspace " + inputs.workspace + "`.",
+                "2. Review `interns/reports/source_family_contracts.md`.",
+                "",
+            ]
+        else:
+            lines += [
+                "## Next Steps", "",
+                "1. Run `uv run resolve-kpi-features --workspace " + inputs.workspace + " --domain <domain>`.",
+                "2. If `blocked_kpi_count > 0`, review `interns/reports/blocker_question_panel/current.md`.",
+                "3. Run `uv run generate-kpi-sql --workspace " + inputs.workspace + " --kpi-id <id>` per ready KPI.",
+                "",
+            ]
+        return self._write_text(self.layout.reports_dir / "onboarding_report.md", "\n".join(lines))
 
     def _write_generated_file_readability(self) -> str:
         workspace = _rel(self.workspace, self.repo_root)

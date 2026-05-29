@@ -8,7 +8,17 @@ from typing import Any
 JOIN_KEY_SUFFIXES = ("id", "code")
 
 
-def prioritize_blockers(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+def prioritize_blockers(
+    mapping: dict[str, Any],
+    *,
+    structural_hints: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Cluster blocked features by name and assign risk classes.
+
+    `structural_hints` lets the caller pass workspace evidence (typically
+    profiled table names) so domain words classify as `structural` without
+    any hardcoded vocabulary.
+    """
     counts: Counter[str] = Counter()
     examples: dict[str, list[str]] = defaultdict(list)
     for kpi in mapping.get("kpis", []):
@@ -22,7 +32,7 @@ def prioritize_blockers(mapping: dict[str, Any]) -> list[dict[str, Any]]:
 
     clusters = []
     for feature, count in counts.items():
-        risk = risk_class(feature)
+        risk = risk_class(feature, structural_hints=structural_hints)
         clusters.append(
             {
                 "feature": feature,
@@ -61,31 +71,57 @@ def infer_join_candidates(features: list[dict[str, Any]]) -> list[dict[str, Any]
     return joins
 
 
-def risk_class(feature: str) -> str:
+# Generic starter terms. NOT workspace-specific (every business has costs,
+# dates, etc.). Domain-specific terms (e.g., "encounter", "claim") must come
+# in via `structural_hints` derived from the workspace's profiled table names.
+GENERIC_FINANCIAL_TERMS = (
+    "amount",
+    "paid",
+    "balance",
+    "cost",
+    "revenue",
+    "margin",
+    "refund",
+    "charge",
+    "price",
+    "fee",
+    "spend",
+    "income",
+    "profit",
+    "loss",
+)
+GENERIC_TEMPORAL_TERMS = (
+    "date",
+    "day",
+    "month",
+    "year",
+    "week",
+    "quarter",
+    "age",
+    "aging",
+    "timestamp",
+)
+
+
+def risk_class(feature: str, *, structural_hints: set[str] | None = None) -> str:
+    """Classify a feature's risk class.
+
+    Structural classification is evidence-driven: the caller passes
+    `structural_hints` derived from the workspace (typically the profiled
+    table names). Without hints, structural classification falls back to
+    the join-key-suffix check alone. No domain vocabulary is hardcoded.
+    """
     value = normalize(feature)
-    financial_terms = (
-        "amount",
-        "paid",
-        "payor",
-        "payer",
-        "denied",
-        "allowed",
-        "balance",
-        "cost",
-        "revenue",
-        "margin",
-        "refund",
-        "charge",
-    )
-    temporal_terms = ("date", "day", "month", "age", "aging", "admit", "discharge")
-    if any(term in value for term in financial_terms):
+    if any(term in value for term in GENERIC_FINANCIAL_TERMS):
         return "financial_correctness"
-    if any(term in value for term in temporal_terms):
+    if any(term in value for term in GENERIC_TEMPORAL_TERMS):
         return "temporal_correctness"
-    if value.endswith(JOIN_KEY_SUFFIXES) or any(
-        term in value for term in ("department", "dept", "provider", "patient", "claim", "encounter")
-    ):
+    if value.endswith(JOIN_KEY_SUFFIXES):
         return "structural"
+    if structural_hints:
+        normalized_hints = {normalize(hint) for hint in structural_hints if hint}
+        if any(hint and hint in value for hint in normalized_hints):
+            return "structural"
     return "business_semantics"
 
 

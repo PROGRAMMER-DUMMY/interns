@@ -42,13 +42,13 @@ _DESCRIPTION = (
 _EPILOG = """\
 examples:
   # cheap dry-run (computes inputs_hash, no LLM, no writes):
-  uv run design-medallion --workspace workspaces/Healthcare-RCM-Data-Platform --cheap --dry-run
+  uv run design-medallion --workspace workspaces/<your-workspace> --cheap --dry-run
 
   # full design pass against an LLM-backed agent (default):
-  uv run design-medallion --workspace workspaces/Healthcare-RCM-Data-Platform
+  uv run design-medallion --workspace workspaces/<your-workspace>
 
   # force regeneration even if inputs_hash matches the prior manifest:
-  uv run design-medallion --workspace workspaces/Healthcare-RCM-Data-Platform --force
+  uv run design-medallion --workspace workspaces/<your-workspace> --force
 
 exit codes:
   0                          success
@@ -72,7 +72,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--workspace", required=True,
-        help="Workspace path relative to repo root, e.g. workspaces/Healthcare-RCM-Data-Platform",
+        help="Workspace path relative to repo root, e.g. workspaces/<your-workspace>",
     )
     parser.add_argument(
         "--repo-root", default=None,

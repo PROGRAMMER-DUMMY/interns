@@ -59,6 +59,40 @@ Do not use yolo mode or bypass permissions for this workflow.
 - A panel JSON's `summary.recovery_commands` and `summary.suggested_skills` arrays are
   the source of truth for the next step. Render them inline; do not paraphrase.
 
+# Confirmation rules (hard rule — never ask for confirmation on deterministic next-steps)
+
+After the user confirms a workspace selection, AUTO-CHAIN the deterministic
+next-steps until you reach a panel that requires a SEMANTIC decision. Do NOT
+ask "Should I run X?" between those steps.
+
+**Auto-run without asking, in sequence:**
+1. `onboard-workspace` (generates profiles + contracts; no user data mutated)
+2. `prepare-kpi-blocker-panel` (generates panel artifacts; no user data mutated)
+3. Any subsequent `prepare-*-panel` command
+4. `validate-workspace-artifacts` after any artifact write
+5. `build-relationship-contracts` (state-preserving; no user data mutated)
+6. `workspace-flow status --diff` (read-only)
+7. `workspace-flow artifacts --write-manifest` (read-only manifest write)
+8. `workspace-flow gc` (when no --apply; dry-run only)
+
+**ALWAYS prompt the user before running these** (semantic decisions):
+- `apply-kpi-panel-answer` — accepting a blocker option
+- `apply-relationship-answer` — approving a relationship
+- `apply-duplicate-review-answer` — duplicate-resolution policy
+- `apply-data-model-answer` / `finalize-data-model-generation`
+- `apply-pipeline-format-answer` / `apply-pipeline-decision`
+- `workspace-flow gc --apply` — actual deletion
+- Any command that runs remote/Databricks execution
+- Any `--force` flag
+
+**Render rule for panels with options:**
+- Show `summary.preamble` (the "Why this question?" sentence) first.
+- Show ONLY the top 3 options + Custom by default. Mention overflow count
+  (e.g. "+ 2 more options in `current.json`") rather than listing all.
+- Bold the `recommended_option_id` with its specific reasoning from the
+  option's `business_summary` and `evidence_summary` fields.
+- Render evidence files with their `purpose` annotation, not as bare paths.
+
 # Subagent delegation
 
 - The Gemini subagents under `.gemini/agents/` ARE available. Delegate narrow

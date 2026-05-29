@@ -109,13 +109,14 @@ def merge_refinement(existing: str, missing: list[str]) -> str:
 
 def suggest_seed_kpi(session: dict[str, Any]) -> dict[str, Any]:
     files = " ".join(session.get("detected_files", {}).get("files", [])).lower()
-    if "paid" in files or "amount" in files:
+    from core.onboarding.lexicon.vocabulary import GENERIC_FINANCIAL_SEED
+    if any(seed in files for seed in GENERIC_FINANCIAL_SEED):
         return {
-            "name": "What is paid amount trend by key business dimensions?",
-            "description": "Seed KPI suggested from available amount-like data.",
-            "cuts": "time period, payer or line of business when available",
-            "metric": "sum(PaidAmount)",
-            "refinement_required": "Confirm owner, temporal anchor, filters, and acceptance tests.",
+            "name": "What is the trend of the workspace's primary monetary measure across business dimensions?",
+            "description": "Seed KPI suggested from amount-shaped columns detected in the workspace.",
+            "cuts": "time period and a categorical dimension; confirm specifics during refinement",
+            "metric": "sum(<measure>)",
+            "refinement_required": "Confirm the specific measure column, owner, temporal anchor, filters, and acceptance tests.",
             "source": "generated_from_workspace_data",
         }
     return {
@@ -142,15 +143,15 @@ def column_like_token_overlap(text: str, data_files: list[str]) -> bool:
         for token in re.split(r"[^a-z0-9]+", Path(file).stem.lower())
         if len(token) > 3
     }
-    common_aliases = {
-        "paid": {"paid", "amount", "payment"},
-        "payer": {"payer", "payor"},
-        "lob": {"line", "business"},
-        "claim": {"claim", "claims"},
-    }
+    # Generic alias rules: plural<->singular only. Domain-specific synonyms
+    # (e.g. payer<->payor) used to live here and got removed; they now come
+    # from `workspace_feature_definitions.json` accepted aliases.
     expanded = set(tokens)
     for token in tokens:
-        expanded.update(common_aliases.get(token, set()))
+        if token.endswith("s"):
+            expanded.add(token[:-1])
+        else:
+            expanded.add(token + "s")
     return bool(expanded.intersection(file_tokens))
 
 
