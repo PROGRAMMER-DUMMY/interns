@@ -43,6 +43,60 @@ OPTIONAL_SCOPES = [
 ]
 
 
+# Scope each setup step exercises -> named when that step hits a permission error.
+STEP_SCOPE = {
+    "validate": "settings",
+    "mlflow": "mlflow",
+    "schema": "unity-catalog",
+    "query": "sql",
+}
+
+
+def required_scopes_for_config(db) -> list[tuple[str, str]]:
+    """Minimum token scopes for the CURRENT config/lock.toml [databricks] settings.
+
+    Drives dynamic scope suggestion: the set is derived from the configured
+    execution mode and target catalog/schema, not hardcoded. See
+    docs/databricks_token_scopes.md for the full catalog and per-task mapping.
+    """
+    scopes = [
+        ("settings", "current_user.me() -- connection health check"),
+        ("unity-catalog", f"schema {db.catalog}.{db.schema} + Delta tables"),
+        ("mlflow", "MLflow experiment tracking"),
+    ]
+    mode = (db.execution or "").lower()
+    if mode == "warehouse" or db.http_path:
+        scopes.append(("sql", "statement_execution on the SQL warehouse"))
+    if mode == "jobs":
+        scopes += [
+            ("jobs", "submit/get/cancel job runs"),
+            ("clusters", "auto-provisioned cluster per job run"),
+            ("command-execution", "run commands on the cluster"),
+        ]
+    if mode == "connect":
+        scopes += [
+            ("databricks-connect", "Databricks Connect session"),
+            ("clusters", "remote cluster for Connect"),
+        ]
+    seen, out = set(), []
+    for scope, why in scopes:
+        if scope not in seen:
+            seen.add(scope)
+            out.append((scope, why))
+    return out
+
+
+def print_required_scopes(cfg) -> None:
+    """Print the config-tailored minimum scope set (dynamic suggestion)."""
+    db = cfg.databricks
+    print(f"\n  Minimum token scopes for execution = \"{db.execution}\":")
+    for scope, why in required_scopes_for_config(db):
+        print(f"    [x] {scope:<18} {why}")
+    print("    Optional:    files (Volumes upload) | secrets | query-history")
+    print("    Deploy-only: workspace, files, jobs, dashboards, genie  (deploy-databricks-workspace)")
+    print("    Full catalog + per-task mapping: docs/databricks_token_scopes.md")
+
+
 def print_scope_guide() -> None:
     print("\n  When generating your Databricks Personal Access Token,")
     print("  select ONLY these scopes (leave everything else unchecked):\n")
@@ -112,6 +166,8 @@ def step_validate_connection(cfg) -> bool:
         print(f"  Connection: OK — {msg}")
     else:
         print(f"  Connection: FAILED — {msg}")
+        if "403" in msg or "permission" in msg.lower():
+            print(f"  -> if this is a permission error, add token scope: {STEP_SCOPE['validate']}")
         if "401" in msg:
             print("\n  Tip: Generate a new Personal Access Token in your Databricks workspace:")
             print("  User Settings → Access Tokens → Generate New Token")
@@ -129,6 +185,7 @@ def step_create_mlflow_experiment(cfg) -> bool:
         return True
     except Exception as exc:
         print(f"  MLflow experiment setup failed: {exc}")
+        print(f"  -> if this is a permission error, add token scope: {STEP_SCOPE['mlflow']}")
         return False
 
 
@@ -143,7 +200,8 @@ def step_create_delta_schema(cfg) -> bool:
         return True
     except Exception as exc:
         print(f"  Delta schema creation failed (non-fatal): {exc}")
-        print("  You may need Unity Catalog permissions on your workspace.")
+        print(f"  -> if this is a permission error, add token scope: {STEP_SCOPE['schema']}")
+        print("  (also requires UC grants on the catalog: USE CATALOG, CREATE SCHEMA)")
         return False
 
 
@@ -169,6 +227,7 @@ def step_test_query(cfg) -> bool:
         return ok
     except Exception as exc:
         print(f"  Test query failed: {exc}")
+        print(f"  -> if this is a permission error, add token scope: {STEP_SCOPE['query']}")
         return False
 
 
@@ -219,6 +278,9 @@ def main() -> None:
     except Exception as exc:
         print(f"  ERROR loading config: {exc}")
         sys.exit(1)
+
+    print("\n[scopes] Token scopes required for your config:")
+    print_required_scopes(cfg)
 
     print("\n[3/6] Validating Databricks connection...")
     if not step_validate_connection(cfg):
