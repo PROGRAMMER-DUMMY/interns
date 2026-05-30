@@ -100,7 +100,11 @@ env/
 .idea/
 .vscode/
 .ipynb_checkpoints/
-.claude/
+# Ignore local Claude state by default, but share the project hooks + their config.
+# settings.local.json (personal allow-list) and generated agents stay local.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 .agents/sessions/
 .memory/
 .code-review-graph/
