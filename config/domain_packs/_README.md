@@ -1,5 +1,15 @@
 # Domain Packs
 
+> **[deprecated] NOT WIRED — do not add packs here.**
+> This curated-JSON design was never implemented: there is no
+> `core/onboarding/domain_packs.py` loader, and nothing reads `config/domain_packs/`.
+> It was superseded by **derivation from workspace evidence** — metric/cut inference
+> now comes from the workspace lexicon (`core/onboarding/kpi/text_parser.py` ->
+> `lexicon.infer_metric_and_cuts`), which learns terms from KPI rows, the data
+> dictionary, and profiles rather than from a hand-curated pack
+> ("derive, don't curate"). Adding a `*.json` pack here has **no effect**.
+> The spec below is kept only for historical context.
+
 Domain packs replace the hardcoded keyword inference that previously lived in
 `core/onboarding/kpi/text_parser.py` and the column-alias dictionary in
 `core/onboarding/relationships/schema_alias_matching.py`.

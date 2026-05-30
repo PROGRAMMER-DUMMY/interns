@@ -106,6 +106,9 @@ env/
 !.claude/settings.json
 !.claude/hooks/
 .agents/sessions/
+
+# Local runtime config — real values stay local; commit only the .example template.
+config/lock.toml
 .memory/
 .code-review-graph/
 *.swp
