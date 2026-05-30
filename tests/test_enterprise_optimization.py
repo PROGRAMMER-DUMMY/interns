@@ -383,8 +383,11 @@ diff --git a/model.sql b/model.sql
             self.assertTrue((workspace / "interns" / "evaluation" / "evaluator.py").exists())
             self.assertTrue((workspace / "interns" / "generated" / "contracts" / "semantic_contract.json").exists())
             self.assertTrue((workspace / "interns" / "generated" / "profiles" / "profile_index.json").exists())
-            self.assertTrue((workspace / "interns" / "state" / "delta_metadata" / "contracts" / "_delta_log").exists())
-            self.assertTrue((workspace / "interns" / "state" / "delta_metadata" / "profiles" / "_delta_log").exists())
+            # Metadata persistence defaults to the local JSON store (Delta is opt-in);
+            # onboarding writes the contracts and profiles collections under it.
+            metadata_root = workspace / "interns" / "state" / "metadata_store"
+            self.assertTrue(any((metadata_root / "contracts").glob("*.json")))
+            self.assertTrue(any((metadata_root / "profiles").glob("*.json")))
             self.assertTrue((workspace / "interns" / "reports" / "open_questions.md").exists())
             readability_report = workspace / "interns" / "reports" / "generated_file_readability.md"
             self.assertTrue(readability_report.exists())
@@ -3120,14 +3123,17 @@ diff --git a/model.sql b/model.sql
                 else:
                     os.environ["AUTORESEARCH_MONGO_URI"] = old_uri
 
-    def test_build_metadata_store_defaults_to_delta(self):
+    def test_build_metadata_store_defaults_to_local(self):
+        # The default backend is `local`: the Delta backend emits hundreds of KB of
+        # Delta-log + parquet per workspace, pure overhead unless the workspace targets
+        # Databricks/Spark. Delta is opt-in via env var or workspace settings.
         with tempfile.TemporaryDirectory() as tmp:
             old_backend = os.environ.get("AUTORESEARCH_METADATA_BACKEND")
             try:
                 os.environ.pop("AUTORESEARCH_METADATA_BACKEND", None)
                 layout = WorkspaceLayout(project_root=Path(tmp) / "workspaces" / "demo")
                 layout.ensure_runtime_dirs()
-                self.assertIsInstance(build_metadata_store(layout), DeltaMetadataStore)
+                self.assertIsInstance(build_metadata_store(layout), LocalMetadataStore)
             finally:
                 if old_backend is None:
                     os.environ.pop("AUTORESEARCH_METADATA_BACKEND", None)

@@ -224,7 +224,14 @@ class KPIFeatureResolver:
         for token in extracted.identifiers:
             norm = normalize_blocker(token)
             contextual_candidates = contextual_column_candidates(token, full_context, schema_index)
-            if contextual_candidates and contextual_candidates[0].get("auto_proven"):
+            # An exact physical-column hit is a direct mapping, not an alias: let the
+            # schema_index branch below classify it as proven_direct. The contextual
+            # auto-proven path only applies when the token is NOT a literal column name.
+            if (
+                norm not in schema_index
+                and contextual_candidates
+                and contextual_candidates[0].get("auto_proven")
+            ):
                 features.append(_contextual_feature(token, contextual_candidates, proven=True))
                 continue
             if norm in schema_index:
