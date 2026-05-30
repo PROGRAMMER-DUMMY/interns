@@ -1,8 +1,0 @@
-{
-  "artifact_type": "kpi_results/current.json",
-  "version": 1,
-  "workspace": "workspaces/Healthcare-RCM-Data-Platform",
-  "generated_at": "2026-05-28T12:02:46.799014+00:00",
-  "preview_rows": 20,
-  "kpis": []
-}

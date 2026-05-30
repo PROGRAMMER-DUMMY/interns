@@ -125,8 +125,14 @@ class SourceToTargetPlanner:
                 for kpi in mapping.get("kpis", [])
             ],
         }
+        complexity_recs = self._complexity_engine_recommendations(
+            local_blocked=not transformation_settings.local_execution_allowed
+        )
         for kpi_plan in plan["kpis"]:
             kpi_plan["engine_evolution_recommendation"] = engine_recommendation
+            rec = complexity_recs.get(kpi_plan.get("kpi_id"))
+            if rec:
+                kpi_plan["complexity_engine_recommendation"] = rec
         ready = [kpi for kpi in plan["kpis"] if kpi["status"] == "ready_for_generation"]
         plan["summary"] = {
             "kpi_count": len(plan["kpis"]),
@@ -154,6 +160,18 @@ class SourceToTargetPlanner:
             blocked_kpi_count=plan["summary"]["blocked_kpi_count"],
             target_engine=self.target_engine,
         )
+
+    def _complexity_engine_recommendations(self, *, local_blocked: bool) -> dict[str, dict[str, Any]]:
+        """Per-KPI complexity-aware engine advice (SQL default; Polars/hybrid/PySpark for scale)."""
+        try:
+            from core.onboarding.kpi.engine_recommender import KPIEngineRecommender
+
+            recs = KPIEngineRecommender(
+                self.repo_root, _rel(self.workspace, self.repo_root)
+            ).recommend_all(local_blocked=local_blocked)
+        except Exception:
+            return {}
+        return {rec.kpi_id: rec.summary() for rec in recs}
 
     def _plan_kpi(
         self,
@@ -546,6 +564,17 @@ def _estimated_profile_bytes(profiles: dict[str, dict[str, Any]]) -> int:
     return sum(int(profile.get("size_bytes") or 0) for profile in profiles.values())
 
 
+def _engine_reco_line(rec: dict[str, Any] | None) -> str:
+    if not rec:
+        return "- Engine: `sql` (default)"
+    recommended = rec.get("recommended_engine", "sql")
+    why = "; ".join(rec.get("reasons", [])) or "small/simple"
+    return (
+        f"- Engine: default `{rec.get('default_engine', 'sql')}`, recommended **`{recommended}`** "
+        f"(size `{rec.get('size_tier', '')}`, complexity {rec.get('complexity_score', '')}) — {why}"
+    )
+
+
 def _render_markdown(plan: dict[str, Any]) -> str:
     lines = [
         "# Source To Target Plan",
@@ -571,6 +600,7 @@ def _render_markdown(plan: dict[str, Any]) -> str:
                 f"- Grain: {kpi.get('grain', {}).get('description', '')}",
                 f"- Selected sources: {', '.join(kpi.get('selected_source_datasets') or []) or 'none'}",
                 f"- Target output: `{kpi.get('medallion_layers', {}).get('gold_output', {}).get('name', '')}`",
+                _engine_reco_line(kpi.get("complexity_engine_recommendation")),
                 "",
                 "### Feature Mappings",
                 "",

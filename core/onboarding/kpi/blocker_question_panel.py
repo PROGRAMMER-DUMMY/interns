@@ -105,6 +105,13 @@ class BlockerQuestionPanelBuilder:
             # silently; the rest of the panel still renders.
             current.setdefault("preview_compose_error", str(exc))
 
+        # Conform to the canonical decision-panel contract (non-destructive: the
+        # blocker panel keeps its own artifact_type, options, and evidence sections).
+        from core.onboarding.panel_contract import normalize_decision_panel
+
+        current.setdefault("stage", "blocker_question")
+        normalize_decision_panel(current, workspace=self.workspace)
+
         current_json = self.output_dir / "current.json"
         current_markdown = self.output_dir / "current.md"
         index_json = self.output_dir / "index.json"

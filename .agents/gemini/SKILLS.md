@@ -622,6 +622,11 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Path: `skills/data-engineering-pipeline-design/SKILL.md`
 - Description: Design source-to-target SQL, Polars, PySpark, ETL/ELT, and medallion-layer workflows from KPI requirements, data model evidence, profiles, and accepted workspace definitions.
 
+### data-model-creation
+
+- Path: `skills/data-model-creation/SKILL.md`
+- Description: Create a data model WITH the user through conversation, not by guessing from column names. Interview for grain, entities, keys, facts/dimensions, relationships, cardinality, temporal anchors, and SCD policy; score how well the model is understood; then produce a governed model + ERD/SVG. Use when a workspace needs a data model created, refined, or proven before SQL/pipeline generation, or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[clarify-ambiguity]], [[domain-model]], [[stakeholder-memory]], and [[dashboard-design]] (for the diagram export).
+
 ### databricks-access-gates
 
 - Path: `skills/databricks-access-gates/SKILL.md`

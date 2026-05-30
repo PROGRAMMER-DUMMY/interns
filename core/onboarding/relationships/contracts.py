@@ -800,19 +800,14 @@ def _shared_join_columns(
     right_schema = _schema(right_profile)
     left_by_norm = {_norm(column): column for column in left_schema}
     right_by_norm = {_norm(column): column for column in right_schema}
-    preferred = ["patientid", "encounterid", "transactionid", "claimid", "deptid", "providerid"]
-    matches = [
-        (left_by_norm[key], right_by_norm[key])
-        for key in preferred
-        if key in left_by_norm and key in right_by_norm
-    ]
-    matches.extend(
+    # Workspace-agnostic: any shared column whose name reads like a key (id/code).
+    # Downstream relationship contracts score these candidates by cardinality,
+    # uniqueness, and referential integrity — no hardcoded domain key names.
+    return [
         (left_by_norm[key], right_by_norm[key])
         for key in sorted(set(left_by_norm).intersection(right_by_norm))
-        if (key.endswith("id") or key.endswith("code"))
-        and (left_by_norm[key], right_by_norm[key]) not in matches
-    )
-    return matches
+        if key.endswith("id") or key.endswith("code")
+    ]
 
 
 def _dataset_lookup(profiles: dict[str, dict[str, Any]]) -> dict[str, str]:

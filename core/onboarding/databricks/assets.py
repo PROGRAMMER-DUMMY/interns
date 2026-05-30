@@ -25,6 +25,9 @@ class DatabricksAssetManifestResult:
     schema: str
 
     def summary(self) -> dict[str, Any]:
+        from core.onboarding.workspace.delegation import routing_for
+
+        _routing = routing_for("remote_execution")
         return {
             "path": self.path,
             "dataset_count": self.dataset_count,
@@ -34,6 +37,8 @@ class DatabricksAssetManifestResult:
             "workspace_path": self.workspace_path,
             "catalog": self.catalog,
             "schema": self.schema,
+            "required_specialists": _routing["agents"],
+            "suggested_skills": _routing["skills"],
         }
 
 

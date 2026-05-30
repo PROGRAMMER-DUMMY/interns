@@ -51,7 +51,7 @@ def _kpi_blocker_card_html(kpi_id: str, gap: dict[str, Any]) -> str:
         recovery_html = "<p>No recovery commands surfaced. Run <code>workspace-flow status --diff</code>.</p>"
     return (
         f'<div class="kpi-card blocker"><h2>{kpi_id}</h2>'
-        f'<div class="meta">⚠️ {blocker_summary}</div>{recovery_html}</div>'
+        f'<div class="meta">[~] {blocker_summary}</div>{recovery_html}</div>'
     )
 
 

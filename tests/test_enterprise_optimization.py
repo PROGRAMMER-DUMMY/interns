@@ -2368,6 +2368,10 @@ diff --git a/model.sql b/model.sql
             workflow.apply_answer(answer="option_c")
             result = workflow.apply_answer(answer="option_c")
 
+            # New: choose a result-table format before the final preview.
+            self.assertEqual(result.stage, "result_format_selection")
+            result = workflow.apply_answer(answer="option_a")
+
             self.assertEqual(result.stage, "final_preview")
             draft_path = (
                 root
@@ -2405,6 +2409,10 @@ diff --git a/model.sql b/model.sql
             workflow.apply_answer(answer="option_b")
             workflow.apply_answer(answer="option_c")
             result = workflow.apply_answer(answer="option_b")
+
+            # New: choose a result-table format before the final preview.
+            self.assertEqual(result.stage, "result_format_selection")
+            result = workflow.apply_answer(answer="option_a")
 
             self.assertEqual(result.stage, "final_preview")
             panel = json.loads((root / result.current_json_path).read_text(encoding="utf-8"))

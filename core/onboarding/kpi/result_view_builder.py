@@ -172,9 +172,35 @@ def _column_lookup(kpi: dict[str, Any]) -> dict[str, str]:
 
 
 def _resolve_column(name: str, lookup: dict[str, str]) -> str:
+    """Resolve a KPI cut/term to an underlying column.
+
+    Beyond an exact feature-label match, handles the common case where a cut is
+    phrased more verbosely than the feature label (e.g. cut `Department Name`
+    vs feature `Department`). Resolution order:
+      1. exact label (lowercased)
+      2. normalized label (ignoring spaces/punctuation)
+      3. word-subset: the feature label's words are all contained in the cut's
+         words — the most specific (longest) such label wins.
+    Falls back to the original name when nothing matches, so the verifier still
+    blocks if it does not exist as a real column.
+    """
     if not name:
         return name
-    return lookup.get(name.lower(), name)
+    key = name.lower()
+    if key in lookup:
+        return lookup[key]
+    norm = re.sub(r"[^a-z0-9]+", "", key)
+    for label, column in lookup.items():
+        if re.sub(r"[^a-z0-9]+", "", label) == norm:
+            return column
+    cut_words = set(re.findall(r"[a-z0-9]+", key))
+    best: tuple[int, str] | None = None
+    for label, column in lookup.items():
+        label_words = set(re.findall(r"[a-z0-9]+", label))
+        if label_words and label_words <= cut_words:
+            if best is None or len(label_words) > best[0]:
+                best = (len(label_words), column)
+    return best[1] if best else name
 
 
 def _detect_time_bucket(token: str) -> tuple[str, str, str] | None:
@@ -374,6 +400,11 @@ def parse_kpi(kpi: dict[str, Any]) -> ParsedKPI:
                         )
                     )
                     continue
+                date_exprs = _detect_date_arithmetic(token, lookup)
+                if date_exprs:
+                    for expr, alias in date_exprs:
+                        parsed.dimensions.append(Dimension(expression=expr, alias=alias))
+                    continue
                 clean = re.sub(r"\(.*?\)", "", token).strip()
                 if clean:
                     col = _resolve_column(clean, lookup)
@@ -480,6 +511,9 @@ def parse_kpi(kpi: dict[str, Any]) -> ParsedKPI:
             expr = f"date_trunc('{unit}', CAST({_quote(source_col)} AS DATE))"
             parsed.dimensions.append(Dimension(expression=expr, alias=_norm_alias(alias)))
             continue
+        # Skip tokens that will be handled by _detect_date_arithmetic (age/days-since)
+        if _AGE_PATTERN.search(token) or _DAYS_SINCE_PATTERN.search(token):
+            continue
         clean_token = re.sub(r"\(.*?\)", "", token).strip()
         if not clean_token:
             continue
@@ -488,10 +522,53 @@ def parse_kpi(kpi: dict[str, Any]) -> ParsedKPI:
             Dimension(expression=_quote(column), alias=_norm_alias(column))
         )
 
+    # Prose categorical filter: "for <value> <lob_col>" pattern.
+    # Strategy: find any dimension whose source column name appears AFTER "for <value>"
+    # in the name text. Limits match to single capitalised or quoted words to
+    # avoid grabbing multi-word phrases.
+    # e.g. "for Medicare LOB" → col=LineOfBusiness, val=Medicare
+    #      "for Commercial segment" → col=Segment, val=Commercial
+    for dim in parsed.dimensions:
+        if dim.alias in {"month", "quarter", "year", "week", "day", "age"}:
+            continue
+        col = dim.expression.strip('"').strip('`')
+        col_label = col.lower().replace("_", "").replace(" ", "")
+        # Match: "for <SingleWord> <col_label>" where SingleWord starts with uppercase
+        prose_match = re.search(
+            rf"\bfor\s+([A-Z][a-z]+)\s+{re.escape(col_label)}\b",
+            name_text, re.IGNORECASE,
+        )
+        if prose_match:
+            val = prose_match.group(1).strip()
+            if val and not any(f.value.strip("'").lower() == val.lower() for f in parsed.filters):
+                parsed.filters.append(FilterClause(column=col, op="=", value=f"'{val}'"))
+
+    # Prose age threshold: "above 50", "over 50 years", "patients above 50"
+    age_threshold_match = re.search(
+        r"\b(?:above|over|older\s+than|greater\s+than|>\s*=?)\s*(\d+)\s*(?:years?(?:\s+of\s+age)?)?",
+        name_text, re.IGNORECASE,
+    )
+    if age_threshold_match:
+        threshold = age_threshold_match.group(1)
+        # Find the age expression already added as a dimension
+        age_dim = next(
+            (d for d in parsed.dimensions if d.alias == "age" and "date_diff" in d.expression),
+            None,
+        )
+        if age_dim:
+            parsed.filters.append(
+                FilterClause(column=age_dim.expression, op=">", value=threshold, is_literal=False)
+            )
+
     for source_text in (cuts_text, name_text):
         for match in re.finditer(r"['\"]([^'\"]{1,80})['\"]", source_text):
             literal = match.group(1).strip()
             if not literal:
+                continue
+            # Reject prose fragments: a real categorical value is short and not a
+            # multi-word phrase scraped out of the KPI text (guards the
+            # `= 'amount paid for medicare LOB across'` class of bug).
+            if len(literal.split()) > 2 or len(literal) > 40:
                 continue
             anchor = ""
             for dim in parsed.dimensions:
@@ -514,12 +591,51 @@ def parse_kpi(kpi: dict[str, Any]) -> ParsedKPI:
         except (TypeError, ValueError):
             parsed.limit = None
 
-    # Date arithmetic (age, days-since) becomes extra SELECT expressions.
+    # Date arithmetic (age, days-since) — must run BEFORE prose filter detection
+    # so the date_diff dimension exists when we look for it.
     for expr, alias in _detect_date_arithmetic(cuts_text + " " + name_text, lookup):
         parsed.extra_select_exprs.append((expr, alias))
-        # Date-arithmetic expressions also need to participate in GROUP BY when
-        # other aggregations exist (otherwise they would error).
         parsed.dimensions.append(Dimension(expression=expr, alias=alias))
+
+    # Prose categorical filter: "for <Value> <col_ref>" where col_ref matches the
+    # column name, its alias, OR a first-letter abbreviation (e.g. LOB → LineOfBusiness).
+    for dim in parsed.dimensions:
+        if dim.alias in {"month", "quarter", "year", "week", "day", "age"}:
+            continue
+        col = dim.expression.strip('"').strip('`')
+        # Build reference names: column name, alias, and first-letter abbreviation
+        ref_words = {col.lower(), dim.alias.lower()}
+        # Split on underscore/space AND camelCase boundaries for abbreviation
+        camel_words = re.sub(r"([A-Z])", r"_\1", col).strip("_").split("_")
+        abbrev = "".join(w[0] for w in camel_words if w).lower()
+        if len(abbrev) > 1:
+            ref_words.add(abbrev)  # e.g. LineOfBusiness → "lob"
+        for ref in ref_words:
+            prose_match = re.search(
+                rf"\b(?:for|in)\s+([A-Za-z]\w*)\s+{re.escape(ref)}\b",
+                name_text, re.IGNORECASE,
+            )
+            if prose_match:
+                val = prose_match.group(1).strip().title()
+                if val and not any(f.value.strip("'").lower() == val.lower() for f in parsed.filters):
+                    parsed.filters.append(FilterClause(column=col, op="=", value=f"'{val}'"))
+                break
+
+    # Prose age threshold: "above 50", "over 50 years", "patients above 50"
+    age_threshold_match = re.search(
+        r"\b(?:above|over|older\s+than|greater\s+than|>\s*=?)\s*(\d+)\s*(?:years?(?:\s+of\s+age)?)?",
+        name_text, re.IGNORECASE,
+    )
+    if age_threshold_match:
+        threshold = age_threshold_match.group(1)
+        age_dim = next(
+            (d for d in parsed.dimensions if d.alias == "age" and "date_diff" in d.expression),
+            None,
+        )
+        if age_dim:
+            parsed.filters.append(
+                FilterClause(column=age_dim.expression, op=">", value=threshold, is_literal=False)
+            )
 
     # HAVING — aggregate filters parsed from KPI text.
     parsed.having.extend(_detect_having(metric_text + " " + name_text, parsed.aggregations))
@@ -538,6 +654,8 @@ def _window_sql(window: WindowSpec) -> str:
     return "OVER (" + " ".join(parts) + ")"
 
 
+_ROUND_FNS = {"sum", "avg"}
+
 def _agg_sql(agg: Aggregation, dialect: str = "duckdb") -> str:
     quoted_col = _quote(agg.column, dialect) if agg.column else ""
     if agg.fn == "row_number":
@@ -549,15 +667,17 @@ def _agg_sql(agg: Aggregation, dialect: str = "duckdb") -> str:
     elif agg.distinct and agg.fn in {"count", "sum"}:
         body = f"COUNT(DISTINCT {quoted_col})"
     else:
-        body = f"{agg.fn.upper()}({quoted_col})"
+        raw = f"{agg.fn.upper()}({quoted_col})"
+        body = f"ROUND({raw}, 2)" if agg.fn in _ROUND_FNS and agg.window is None else raw
     if agg.window is not None:
         return f"{body} {_window_sql(agg.window)} AS {agg.alias}"
     return f"{body} AS {agg.alias}"
 
 
 def _filter_sql(filt: FilterClause, dialect: str = "duckdb") -> str:
-    quoted = _quote(filt.column, dialect)
-    return f"{quoted} {filt.op} {filt.value}"
+    # If column is an expression (contains parens/spaces) use it as-is; otherwise quote it
+    col = filt.column if ("(" in filt.column or " " in filt.column) else _quote(filt.column, dialect)
+    return f"{col} {filt.op} {filt.value}"
 
 
 def build_result_view_sql(

@@ -134,6 +134,11 @@ class DuckDBKPISQLGenerator:
         if not select_items:
             select_items.append("    1 AS ready_marker")
 
+        # Build staging SQL — use Delta tables if they exist, fall back to CSV
+        staging_sql_final = self._staging_with_delta(
+            staging_sql, profile_map, required_sources
+        )
+
         sql = "\n".join(
             [
                 "-- Authoritative KPI SQL generated only from ready feature mappings.",
@@ -142,7 +147,7 @@ class DuckDBKPISQLGenerator:
                 f"-- Resource mode: {resource_settings.get('mode', 'unknown') if resource_settings else 'unknown'}",
                 f"-- SQL strategy: {resource_settings.get('sql_strategy', 'standard_local') if resource_settings else 'standard_local'}",
                 "",
-                staging_sql.rstrip(),
+                staging_sql_final.rstrip(),
                 "",
                 f"CREATE OR REPLACE VIEW {self.quote_ident(kpi_id + '_features')} AS",
                 "SELECT",
@@ -152,12 +157,14 @@ class DuckDBKPISQLGenerator:
                 "",
                 self._result_view_sql(kpi, kpi_id).rstrip(),
                 "",
+                self._delta_write_sql(kpi_id),
             ]
         )
         suffix = "" if self.dialect == "duckdb" else f"_{self.dialect}"
         output = self.layout.solutions_dir / f"{kpi_id}{suffix}.sql"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(sql, encoding="utf-8")
+        self._ingest_bronze_delta(profile_map, required_sources)
         self._write_run_report(kpi_id, kpi, sql)
         return SQLGenerationResult(
             path=_rel(output, self.repo_root),
@@ -169,22 +176,17 @@ class DuckDBKPISQLGenerator:
     def _write_run_report(self, kpi_id: str, kpi: dict[str, Any], sql: str) -> None:
         run_dir = self.layout.runs_dir / date.today().isoformat()
         run_dir.mkdir(parents=True, exist_ok=True)
-        results_path = run_dir / "results.md"
 
-        lines: list[str] = []
-        if not results_path.exists():
-            workspace_name = Path(self.layout.project_root).name
-            scope = _derive_scope(Path(self.layout.project_root))
-            lines += [
-                f"# KPI Results — {workspace_name}",
-                f"**Date:** {date.today().isoformat()} | **Scope:** {scope}",
-                "",
-                "---",
-                "",
-            ]
+        # Self-grill gate: execute (warehouse-aware) and cross-check intent before
+        # showing anything. A misleading or non-executable result is BLOCKED, never shown.
+        from core.onboarding.kpi.verify_kpi_output import KPIOutputVerifier
+
+        record = KPIOutputVerifier(
+            self.repo_root, _rel(self.workspace, self.repo_root), sample_limit=50
+        ).verify_sql_text(kpi_id, sql)
 
         label = kpi_id.upper().replace("_", " ")
-        lines += [
+        section: list[str] = [
             f"## {label}",
             f"**{kpi.get('name', '')}**",
             f"- Description: {kpi.get('description', '')}",
@@ -196,22 +198,132 @@ class DuckDBKPISQLGenerator:
             "```",
             "",
         ]
+        if record.ok and record.sample_output_table:
+            section += [
+                f"_Verified via `{record.engine}` — {record.row_count} rows; "
+                "metric, cuts, and name-derived filters aligned with KPI intent._",
+                "",
+                record.sample_output_table,
+            ]
+        else:
+            section += ["**[blocked] BLOCKED by self-grill — not a trustworthy result.**", ""]
+            section += [f"- [x] {e}" for e in record.errors] or ["- (no detail captured)"]
+            section += [f"- [~] {w}" for w in record.warnings]
+        section += [""]
 
+        # Current-state per KPI: overwrite this KPI's file (no append graveyard),
+        # then rebuild the combined results.md from all per-KPI files.
+        (run_dir / f"{kpi_id}.md").write_text("\n".join(section), encoding="utf-8")
+        self._rebuild_results_index(run_dir)
+
+    def _rebuild_results_index(self, run_dir: Path) -> None:
+        workspace_name = Path(self.layout.project_root).name
+        scope = _derive_scope(Path(self.layout.project_root))
+        lines = [
+            f"# KPI Results — {workspace_name}",
+            f"**Date:** {date.today().isoformat()} | **Scope:** {scope}",
+            "",
+            "---",
+            "",
+        ]
+        for kpi_file in sorted(run_dir.glob("kpi_*.md")):
+            lines.append(kpi_file.read_text(encoding="utf-8").rstrip())
+            lines += ["", "---", ""]
+        (run_dir / "results.md").write_text("\n".join(lines), encoding="utf-8")
+
+    def _staging_with_delta(
+        self,
+        staging_sql: str,
+        profile_map: dict[str, dict[str, Any]],
+        required_sources: list[str],
+    ) -> str:
+        """Replace read_csv_auto() with warehouse table refs or delta_scan()."""
+        if self.dialect != "duckdb":
+            return staging_sql
+
+        warehouse_path = self.layout.state_dir / "warehouse.duckdb"
+        result = staging_sql
+        any_delta = False
+
+        # Resolve fact/dim classification once
+        fact_sources: set[str] = set()
+        warehouse_exists = warehouse_path.exists()
+        if warehouse_exists:
+            try:
+                from core.onboarding.kpi.local_warehouse import warehouse_table_name
+                mapping = self._load_mapping()
+                for kpi in mapping.get("kpis", []):
+                    refs = [r for f in kpi.get("features", [])
+                            for r in _feature_source_refs(f, self.repo_root)]
+                    base = _choose_base_source(refs, profile_map)
+                    if base:
+                        fact_sources.add(base)
+            except Exception:
+                warehouse_exists = False
+
+        for source in required_sources:
+            stem = _safe_name(Path(source).stem)
+            bronze_path = self.layout.bronze_dir / stem
+            if not (bronze_path / "_delta_log").exists():
+                continue
+            any_delta = True
+            old_reader = f"read_csv_auto('{source}', union_by_name=true)"
+            if warehouse_exists:
+                # Staging view reads FROM the warehouse table — clean table names, no paths
+                tname = warehouse_table_name(source, fact_sources)
+                result = result.replace(old_reader, f'"{tname}"')
+            else:
+                # No warehouse yet — read directly from Bronze Delta
+                result = result.replace(old_reader, f"delta_scan('{bronze_path.as_posix()}')")
+
+        if any_delta:
+            if warehouse_exists:
+                header = (
+                    f"-- Warehouse: {_rel(warehouse_path, self.repo_root)}\n"
+                    f"-- Staging views below proxy to registered fact/dim tables.\n"
+                    f"-- Run this SQL inside the warehouse:\n"
+                    f"--   uv run warehouse query --workspace {_rel(self.workspace, self.repo_root)} --sql @kpi.sql\n\n"
+                )
+            else:
+                header = "INSTALL delta;\nLOAD delta;\n\n"
+            result = header + result
+        return result
+
+    def _delta_write_sql(self, kpi_id: str) -> str:
+        """Emit COPY statement to write Gold results to Parquet (delta written via Python)."""
+        gold_path = self.layout.gold_dir / f"{kpi_id}_results"
+        return "\n".join([
+            "-- Gold results → Parquet (use deltalake Python lib to wrap as Delta)",
+            f"-- COPY (SELECT * FROM {self.quote_ident(kpi_id + '_results')})",
+            f"--   TO '{gold_path.as_posix()}/data.parquet' (FORMAT PARQUET);",
+        ])
+
+    def _ingest_bronze_delta(
+        self,
+        profile_map: dict[str, dict[str, Any]],
+        required_sources: list[str],
+    ) -> None:
+        """Write each required CSV source to a Bronze Delta table if not already present."""
+        if self.dialect != "duckdb":
+            return
         try:
-            import duckdb
-            con = duckdb.connect()
-            for stmt in re.split(r";\s*\n", sql):
-                stmt = stmt.strip()
-                if stmt and not all(ln.startswith("--") for ln in stmt.splitlines() if ln.strip()):
-                    con.execute(stmt)
-            df = con.execute(f'SELECT * FROM "{kpi_id}_results" LIMIT 50').fetchdf()
-            lines.append(_df_to_md(df))
-        except Exception as e:
-            lines.append(f"_(Execution skipped: {e})_")
-
-        lines += ["", "---", ""]
-        with results_path.open("a", encoding="utf-8") as f:
-            f.write("\n".join(lines))
+            import deltalake
+            import pyarrow.csv as pa_csv
+        except ImportError:
+            return  # deltalake/pyarrow not installed — skip silently
+        for source in required_sources:
+            bronze_path = self.layout.bronze_dir / _safe_name(Path(source).stem)
+            if (bronze_path / "_delta_log").exists():
+                continue  # already ingested
+            full_path = self.repo_root / source
+            if not full_path.exists():
+                continue
+            bronze_path.mkdir(parents=True, exist_ok=True)
+            try:
+                table = pa_csv.read_csv(str(full_path))
+                deltalake.write_deltalake(str(bronze_path), table, mode="overwrite")
+            except Exception:
+                pass  # ingestion failure must not break SQL generation
 
     def _profile_map(self) -> dict[str, dict[str, Any]]:
         profile_index = self.layout.profiles_dir / "profile_index.json"
@@ -625,23 +737,32 @@ def _choose_base_source(
     refs: list[dict[str, str]],
     profile_map: dict[str, dict[str, Any]],
 ) -> str:
-    # Count refs per source first, then apply per-source bonuses exactly once.
+    # Pick the base/fact source from workspace evidence, not hardcoded table names:
+    #   - ref count: how many of the KPI's features map to the source;
+    #   - size: the largest referenced table by row count is the fact (high-volume
+    #     transaction/event table that dimensions join into) — this replaces the old
+    #     domain-noun bonus with a structural, workspace-agnostic signal;
+    #   - profile membership: a light tiebreaker.
     ref_counts: dict[str, int] = {}
     for ref in refs:
         source = ref["dataset"]
         ref_counts[source] = ref_counts.get(source, 0) + 1
+    if not ref_counts:
+        return ""
+
+    def _rows(source: str) -> int:
+        return int((profile_map.get(source) or {}).get("row_count") or 0)
+
+    max_rows = max((_rows(source) for source in ref_counts), default=0)
     scores: dict[str, int] = {}
     for source, count in ref_counts.items():
         score = count
-        name = source.lower()
-        if any(token in name for token in ("transactions", "claim_data", "claims", "encounters")):
-            score += 3
         if source in profile_map:
             score += 1
+        if max_rows > 0 and _rows(source) == max_rows:
+            score += 3  # the largest referenced table is the fact
         scores[source] = score
-    if not scores:
-        return ""
-    return sorted(scores, key=lambda source: (-scores[source], source))[0]
+    return sorted(scores, key=lambda source: (-scores[source], -_rows(source), source))[0]
 
 
 def _source_for_column(

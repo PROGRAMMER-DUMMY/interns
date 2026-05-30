@@ -27,12 +27,12 @@ from core.dashboard import refresh_workspace_dashboard
 from core.onboarding.workspace.delegation import (
     DelegationEvent,
     record_delegation,
-    render_delegation_markdown,
     verdict_from_dashboard_summary,
     verdict_from_kpi_completion,
     verdict_from_relationship_summary,
     verdict_from_source_to_target_summary,
     verdict_from_validation_summary,
+    verdict_from_verification,
 )
 from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator
 from core.onboarding.pipeline_plan import DataEngineeringRoutePlanner
@@ -489,6 +489,26 @@ class WorkspaceFlow:
             reason="completed KPIs must be reviewed for definition+sql+result-row coverage",
             verdict_fn=lambda: verdict_from_kpi_completion(kpi_entries),
         )
+        # Self-grill: actually EXECUTE the generated KPI SQL and cross-check each result
+        # against its metric/cuts/filters before declaring done — then hand the kpi-analyst
+        # a ready-to-invoke review brief. This makes "self-grill" a real gate, not a suggestion.
+        from core.onboarding.kpi.verify_kpi_output import KPIOutputVerifier
+
+        verification = KPIOutputVerifier(self.repo_root, self.workspace_rel).verify()
+        self._record_step(
+            state,
+            "verify_kpi_output",
+            "ok" if verification.ok else "blocked",
+            verification.summary(),
+            validation="verify-kpi-output",
+        )
+        self._delegate_and_record(
+            state,
+            agent="kpi-analyst",
+            stage="kpi_output_verification",
+            reason="self-grill: execute generated KPI SQL and cross-check results+intent before completion",
+            verdict_fn=lambda: verdict_from_verification(verification.summary()),
+        )
         completed_kpis = [
             {
                 "kpi_id": entry.get("kpi_id"),
@@ -527,16 +547,18 @@ class WorkspaceFlow:
                     self.workspace_rel + "/interns/generated/solutions",
                     preview["json_path"],
                     preview["markdown_path"],
+                    self.workspace_rel + "/interns/reports/kpi_output_verification.md",
                 ],
                 "summary": {
                     "generated_kpi_count": len(generated),
                     "orchestration": orchestration_context,
                     "validation": validation.summary(),
+                    "self_grill": verification.summary(),
                     "results": preview_summary,
                     "completed_kpis": completed_kpis,
                     "suggested_skills": [
                         {"name": "kpi-analyst", "why": "Validate generated SQL and result samples against KPI intent."},
-                        {"name": "self-grill", "why": "Cross-check completed KPIs before declaring the workflow done."},
+                        {"name": "self-grill", "why": "EXECUTED — see summary.self_grill and the delegation brief for kpi_output_verification."},
                     ],
                     "required_specialists": [
                         "data-engineer",
@@ -716,6 +738,8 @@ class WorkspaceFlow:
         source: str,
     ) -> WorkspaceFlowResult:
         panel = {**panel, "source": source, "session_id": self.session_id, "workspace": self.workspace_rel}
+        from core.onboarding.panel_contract import normalize_decision_panel
+        normalize_decision_panel(panel, workspace=self.workspace_rel)
         state["updated_at"] = _now()
         state["stage"] = panel.get("stage", "")
         state["status"] = panel.get("status", "")

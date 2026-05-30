@@ -19,6 +19,7 @@ from core.onboarding.kpi.generation_quality import (
     looks_like_business_question as quality_looks_like_business_question,
     merge_refinement as quality_merge_refinement,
     missing_discussion_points as quality_missing_discussion_points,
+    result_format_candidates as quality_result_format_candidates,
     score_kpis as quality_score_kpis,
     suggest_seed_kpi as quality_suggest_seed_kpi,
     unique_sorted as quality_unique_sorted,
@@ -149,7 +150,7 @@ class KPIGenerationWorkflow:
         )
 
         stage = str(panel.get("stage") or session.get("current_stage") or "")
-        next_panel = self._advance(session, stage, option)
+        next_panel = self._advance(session, stage, option, custom_note=custom_note)
         self._write_draft_if_present(session)
         self._write_session(session)
         return self._write_panel(session, next_panel)
@@ -193,6 +194,7 @@ class KPIGenerationWorkflow:
             "workspace": _rel(self.workspace, self.repo_root),
             "approved_at": _now(),
             "format": session.get("preferences", {}).get("kpi_format", "simple_progressive"),
+            "result_format": session.get("result_format", {}),
             "kpis": draft_kpis,
         }
         output_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
@@ -228,6 +230,7 @@ class KPIGenerationWorkflow:
         session: dict[str, Any],
         stage: str,
         option: dict[str, Any],
+        custom_note: str = "",
     ) -> dict[str, Any]:
         option_id = str(option.get("option_id") or "")
         if stage == "route_selection":
@@ -255,6 +258,12 @@ class KPIGenerationWorkflow:
         if stage == "format_selection":
             session["preferences"]["kpi_format"] = option.get("value", "simple_progressive")
             session["draft_kpis"] = _build_draft_kpis(session, self.repo_root)
+            session["result_format_candidates"] = _result_format_candidates(session)
+            session["current_stage"] = "result_format_selection"
+            session["status"] = "awaiting_user_answer"
+            return _result_format_panel(session)
+        if stage == "result_format_selection":
+            self._record_result_format(session, option, custom_note)
             session["draft_proofs"] = _draft_proofs(session)
             session["competitive_review"] = _competitive_review(session)
             session["current_stage"] = "final_preview"
@@ -263,6 +272,58 @@ class KPIGenerationWorkflow:
         if stage in {"final_preview", "usual_workflow_selected"}:
             return _terminal_panel(session)
         raise ValueError(f"Unsupported KPI generation stage: {stage}")
+
+    def _record_result_format(
+        self,
+        session: dict[str, Any],
+        option: dict[str, Any],
+        custom_note: str = "",
+    ) -> None:
+        """Record the chosen result-table layout in the session/draft, supporting
+        a custom layout supplied via --custom-note. The choice is echoed back in
+        the panel so the user keeps control and can re-pick."""
+        value = str(option.get("value") or "")
+        note = str(custom_note or "").strip()
+        if value == "custom" or note:
+            chosen = {
+                "layout_id": "custom",
+                "label": "Custom layout",
+                "source": "user_custom",
+                "description": note or "User-supplied custom result layout.",
+                "columns": [],
+                "example_markdown": note,
+            }
+        else:
+            # result_format_candidates is keyed by kpi_id -> {candidates: [...]}.
+            # The chosen layout comes from the resolved panel option; enrich columns/
+            # example from the first KPI whose candidate shares this option_id.
+            chosen = {
+                "layout_id": value or option.get("option_id", "") or "unspecified",
+                "label": option.get("label", ""),
+                "source": "selected_candidate",
+                "description": option.get("description", ""),
+                "columns": [],
+                "example_markdown": "",
+            }
+            for payload in (session.get("result_format_candidates") or {}).values():
+                match = next(
+                    (c for c in payload.get("candidates", []) if c.get("option_id") == option.get("option_id")),
+                    None,
+                )
+                if match:
+                    chosen["columns"] = match.get("columns", [])
+                    chosen["example_markdown"] = match.get("example_markdown", "")
+                    break
+        session["result_format"] = chosen
+        session.setdefault("preferences", {})["result_format_layout"] = chosen.get("layout_id", "")
+        # Echo the chosen format onto each draft KPI so finalize records it and
+        # the user can re-pick by re-running the result_format_selection stage.
+        for kpi in session.get("draft_kpis", []):
+            kpi["result_format"] = {
+                "layout_id": chosen.get("layout_id", ""),
+                "label": chosen.get("label", ""),
+                "columns": chosen.get("columns", []),
+            }
 
     def _load_existing_kpis(self) -> tuple[list[KpiDefinition], list[str]]:
         onboarder = WorkspaceOnboarder(self.repo_root, _rel(self.workspace, self.repo_root))
@@ -297,6 +358,7 @@ class KPIGenerationWorkflow:
             "generated_by": "kpi-generation-draft",
             "workspace": _rel(self.workspace, self.repo_root),
             "format": session.get("preferences", {}).get("kpi_format", "simple_progressive"),
+            "result_format": session.get("result_format", {}),
             "draft_status": "requires_final_preview_approval",
             "kpis": session.get("draft_kpis", []),
             "proofs": session.get("draft_proofs", []),
@@ -320,6 +382,14 @@ class KPIGenerationWorkflow:
         return json.loads(path.read_text(encoding="utf-8"))
 
     def _write_panel(self, session: dict[str, Any], panel: dict[str, Any]) -> KPIGenerationResult:
+        # Route the orchestrating CLI agent to the right conversation skill for this
+        # turn, driven by the understanding score (grill while low, clarify the few
+        # high-impact gaps, remember accepted decisions).
+        panel.setdefault("suggested_skills", _conversation_skills(session))
+        from core.onboarding.panel_contract import normalize_decision_panel
+        normalize_decision_panel(
+            panel, workspace=_rel(self.workspace, self.repo_root), routing_stage="kpi_definition"
+        )
         current_json = self._current_json_path()
         current_md = self._current_markdown_path()
         current_json.parent.mkdir(parents=True, exist_ok=True)
@@ -396,6 +466,26 @@ class KPIGenerationWorkflow:
             raise FileNotFoundError(f"workspace not found: {self.workspace}")
         if self.workspace == self.repo_root or not self.workspace.is_relative_to(self.repo_root):
             raise ValueError(f"workspace must be inside repo root: {self.workspace}")
+
+
+def _conversation_skills(session: dict[str, Any]) -> list[dict[str, Any]]:
+    """Skill routing for the orchestrating CLI agent, by understanding score.
+
+    Realizes the conversation-first design: grill while understanding is low,
+    clarify the few high-impact ambiguities once the obvious gaps are filled,
+    and remember accepted decisions. The agent activates the `active` ones.
+    """
+    score = int((session.get("quality_score") or {}).get("understanding_score") or 0)
+    return [
+        {"name": "grill-requirements", "active": score < 85,
+         "why": "Interview the user one decision at a time to resolve KPI question, metric, grain, cuts, and filters."},
+        {"name": "clarify-ambiguity", "active": score >= 60,
+         "why": "Resolve the few high-impact ambiguities the understanding score still flags before finalizing."},
+        {"name": "stakeholder-memory", "active": True,
+         "why": "Save accepted KPI definitions, formats, and preferences as durable decisions."},
+        {"name": "to-solution-brief", "active": score >= 85,
+         "why": "Turn the confirmed KPI set into an implementation brief once approved."},
+    ]
 
 
 def _route_panel(session: dict[str, Any], recommended_option_id: str) -> dict[str, Any]:
@@ -535,6 +625,61 @@ def _format_panel(session: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _result_format_candidates(session: dict[str, Any]) -> dict[str, Any]:
+    """Build example result-table layouts for each draft KPI. Keyed by kpi_id so
+    the panel can render concrete example tables per KPI."""
+    by_kpi: dict[str, Any] = {}
+    for kpi in session.get("draft_kpis", []):
+        kpi_id = kpi.get("kpi_id", "")
+        by_kpi[kpi_id] = {
+            "business_question": kpi.get("business_question", ""),
+            "candidates": quality_result_format_candidates(kpi),
+        }
+    return by_kpi
+
+
+def _result_format_panel(session: dict[str, Any]) -> dict[str, Any]:
+    candidates_by_kpi = session.get("result_format_candidates", {})
+    # Options are layout-level so a single answer (option_a/b/c) applies the same
+    # layout family across KPIs; the example tables show each KPI's own shape.
+    first = next(iter(candidates_by_kpi.values()), {"candidates": []})
+    base_options = first.get("candidates", [])
+    options = [
+        {
+            "option_id": cand.get("option_id", ""),
+            "label": cand.get("label", ""),
+            "value": cand.get("layout_id", ""),
+            "description": cand.get("description", ""),
+        }
+        for cand in base_options
+    ]
+    options.append(
+        {
+            "option_id": "option_custom",
+            "label": "Custom layout",
+            "value": "custom",
+            "description": "Supply your own layout with --custom-note (columns/markdown).",
+        }
+    )
+    current = session.get("result_format", {})
+    return {
+        "version": SESSION_VERSION,
+        "workspace": session["workspace"],
+        "stage": "result_format_selection",
+        "question": "Which result-table layout should each KPI output use?",
+        "options": options,
+        "recommended_option_id": "option_a",
+        "recommended_answer": "Time-series when a temporal cut exists; otherwise ranked or grouped.",
+        "why": "The chosen layout defines exactly how KPI results are shaped; review the example tables.",
+        "result_format_examples": candidates_by_kpi,
+        "chosen_result_format": current,
+        "next_step": (
+            "Apply option_a/b/c (or option_custom with --custom-note) to record the layout. "
+            "Re-run this stage to re-pick."
+        ),
+    }
+
+
 def _final_preview_panel(session: dict[str, Any]) -> dict[str, Any]:
     draft_kpis = session.get("draft_kpis", [])
     placeholder_only = _is_placeholder_only_draft(draft_kpis)
@@ -580,6 +725,7 @@ def _final_preview_panel(session: dict[str, Any]) -> dict[str, Any]:
         "draft_kpis": draft_kpis,
         "draft_proofs": session.get("draft_proofs", []),
         "competitive_review": session.get("competitive_review", {}),
+        "chosen_result_format": session.get("result_format", {}),
         "next_step": (
             "Add context or revise KPI requirements, then regenerate the draft preview."
             if placeholder_only
@@ -843,18 +989,95 @@ def _render_panel_markdown(panel: dict[str, Any]) -> str:
         ]
     )
     if panel.get("quality_score"):
-        lines.extend(["## KPI Quality Score", "", "```json"])
-        lines.append(json.dumps(panel["quality_score"], indent=2))
-        lines.extend(["```", ""])
+        lines.extend(_render_understanding_markdown(panel["quality_score"]))
+        quality = panel["quality_score"]
+        missing = quality.get("missing_discussion_points") or []
+        lines.extend(
+            [
+                "## KPI Quality Score",
+                "",
+                f"- Implementation readiness: **{quality.get('implementation_readiness', '')}/100** | "
+                f"Business quality: **{quality.get('business_quality', '')}/100** | "
+                f"Overall: **{quality.get('overall_score', '')}/100**",
+                f"- Missing across KPIs: {', '.join(missing) if missing else 'none'}",
+                "- Full per-KPI scores are in `current.json`.",
+                "",
+            ]
+        )
+    if panel.get("result_format_examples"):
+        lines.extend(_render_result_format_markdown(panel["result_format_examples"]))
+    if panel.get("chosen_result_format"):
+        chosen = panel["chosen_result_format"]
+        lines.extend(
+            [
+                "## Chosen Result Format",
+                "",
+                f"- Layout: `{chosen.get('layout_id', '')}` ({chosen.get('label', '')})",
+                "",
+                "Re-run the `result_format_selection` stage to re-pick.",
+                "",
+            ]
+        )
     if panel.get("draft_kpis"):
-        lines.extend(["## Draft KPI Registry Preview", "", "```json"])
-        lines.append(json.dumps(panel["draft_kpis"], indent=2))
-        lines.extend(["```", ""])
+        lines.extend(["## Draft KPI Registry Preview", "", "| KPI | Business question | Metric | Status |", "| --- | --- | --- | --- |"])
+        for kpi in panel["draft_kpis"]:
+            lines.append(
+                f"| {kpi.get('kpi_id', '')} | {kpi.get('business_question', '')} | "
+                f"`{kpi.get('metric', '')}` | {kpi.get('status', '')} |"
+            )
+        lines.extend(["", "Full draft (proofs, source columns) is in `current.json`.", ""])
     if panel.get("competitive_review"):
-        lines.extend(["## Competitive Review", "", "```json"])
-        lines.append(json.dumps(panel["competitive_review"], indent=2))
-        lines.extend(["```", ""])
+        review = panel["competitive_review"]
+        suggestions = review.get("ranked_suggestions") or []
+        lines.extend(["## Competitive Review", ""])
+        lines.extend(f"- {item}" for item in suggestions[:5])
+        if not suggestions:
+            lines.append("- (no advisor suggestions)")
+        lines.append("")
     return "\n".join(lines)
+
+
+def _render_understanding_markdown(quality: dict[str, Any]) -> list[str]:
+    lines = [
+        "## Understanding Score",
+        "",
+        f"Workspace understanding score: **{quality.get('understanding_score', 0)}/100**",
+        "",
+    ]
+    for kpi in quality.get("kpis", []):
+        understanding = kpi.get("understanding", {})
+        if not understanding:
+            continue
+        question = kpi.get("business_question", "") or kpi.get("kpi_id", "")
+        lines.append(
+            f"- `{kpi.get('kpi_id', '')}` {understanding.get('score', 0)}/100 "
+            f"({understanding.get('label', '')}) — {question}"
+        )
+        for dim in understanding.get("dimensions", []):
+            lines.append(
+                f"    - {dim.get('icon', '')} {dim.get('dimension', '')}: {dim.get('confidence', 0)}/100"
+            )
+        lines.append(
+            f"    - Next question (lowest `{understanding.get('lowest_dimension', '')}`): "
+            f"{understanding.get('next_question', '')}"
+        )
+    lines.append("")
+    return lines
+
+
+def _render_result_format_markdown(examples_by_kpi: dict[str, Any]) -> list[str]:
+    lines = ["## Result Format Examples", ""]
+    for kpi_id, payload in examples_by_kpi.items():
+        lines.append(f"### {kpi_id}: {payload.get('business_question', '')}")
+        lines.append("")
+        for cand in payload.get("candidates", []):
+            lines.append(f"**{cand.get('option_id', '')} — {cand.get('label', '')}**")
+            lines.append("")
+            lines.append(str(cand.get("description", "")))
+            lines.append("")
+            lines.append(str(cand.get("example_markdown", "")))
+            lines.append("")
+    return lines
 
 
 def _render_production_proof_markdown(proof: dict[str, Any]) -> str:

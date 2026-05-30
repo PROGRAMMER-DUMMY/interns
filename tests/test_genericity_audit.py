@@ -17,8 +17,6 @@ import re
 from pathlib import Path
 from typing import Iterator
 
-import pytest
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -59,6 +57,13 @@ VIOLATION_PATTERNS = {
     ),
     "hardcoded_healthcare_word_literal": re.compile(
         r"[\"'](medicare|medicaid|payor|payer|encounter|claim|patient|diagnosis|icd)[\"']\s*(?:in|==)\s+\w",
+        re.IGNORECASE,
+    ),
+    # A tuple/list of domain-entity id names baked into prod code (e.g. a
+    # PREFERRED_JOIN_KEYS = ("patientid", "encounterid", ...)). Derive keys from
+    # workspace evidence (identifier roles, profiles) instead.
+    "hardcoded_domain_join_keys": re.compile(
+        r"(?:[\"'](?:patient|encounter|claim|provider|member|payor|payer|diagnosis|admission|visit|dept|department|transaction)\w*(?:id|code)[\"']\s*,\s*){2,}",
         re.IGNORECASE,
     ),
 }
@@ -171,6 +176,17 @@ def test_no_hardcoded_healthcare_word_literal():
         "Hardcoded healthcare-word literal comparison found:\n"
         + "\n".join(f"  {p}:{ln}  {snippet}" for p, ln, snippet in hits)
         + "\n\nReplace with workspace-vocabulary lookup."
+    )
+
+
+def test_no_hardcoded_domain_join_keys():
+    """Join-key preference must derive from workspace evidence (identifier roles,
+    profiles), never a hardcoded tuple of domain entity ids."""
+    hits = _scan(VIOLATION_PATTERNS["hardcoded_domain_join_keys"])
+    assert not hits, (
+        "Hardcoded domain-entity join-key list found in production code:\n"
+        + "\n".join(f"  {p}:{ln}  {snippet}" for p, ln, snippet in hits)
+        + "\n\nDerive preferred join keys from the model's `identifier` roles or profile evidence."
     )
 
 

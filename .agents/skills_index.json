@@ -24,6 +24,11 @@
       "path": "skills/data-engineering-pipeline-design/SKILL.md"
     },
     {
+      "name": "data-model-creation",
+      "description": "Create a data model WITH the user through conversation, not by guessing from column names. Interview for grain, entities, keys, facts/dimensions, relationships, cardinality, temporal anchors, and SCD policy; score how well the model is understood; then produce a governed model + ERD/SVG. Use when a workspace needs a data model created, refined, or proven before SQL/pipeline generation, or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[clarify-ambiguity]], [[domain-model]], [[stakeholder-memory]], and [[dashboard-design]] (for the diagram export).",
+      "path": "skills/data-model-creation/SKILL.md"
+    },
+    {
       "name": "databricks-access-gates",
       "description": "Use when Databricks work hits or may hit missing permissions, token scopes, Unity Catalog grants, workspace API access, SQL warehouse paths, storage policies, compute policies, Genie/dashboard/job creation permissions, data registration approvals, or any remote mutation gate. Ask the user for the exact missing access or approval before retrying remote Databricks actions.",
       "path": "skills/databricks-access-gates/SKILL.md"

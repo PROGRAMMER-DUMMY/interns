@@ -26,6 +26,20 @@ WINDOWS_UNIX_COMMANDS = {"cat", "head", "tail", "grep", "sed", "awk"}
 RAW_DATA_READ_COMMANDS = {"cat", "type", "get-content", "import-csv"}
 DATA_SUFFIXES = {".csv", ".parquet", ".json", ".jsonl", ".xlsx", ".xls"}
 GENERIC_TEMPORAL_PLACEHOLDERS = {"created_at", "updated_at", "timestamp", "event_time"}
+SLOW_STEP_THRESHOLD_MS = 120000
+# Generic shell, git, and runner executables that are always allowed regardless of
+# the project tool roster. Kept domain-agnostic on purpose.
+GENERIC_COMMANDS = {
+    "git", "uv", "python", "python3", "py", "pip", "ruff", "pytest",
+    "rg", "ls", "dir", "cd", "echo", "type", "get-content", "get-childitem",
+    "select-object", "select-string", "measure-object", "where-object",
+    "foreach-object", "test-path", "new-item", "remove-item", "set-content",
+    "out-file", "mkdir", "node", "npm", "npx", "pwsh", "powershell", "bash",
+    "sh", "cmd", "set-location",
+}
+# Workflow stages that mean the session is still awaiting work / not terminal.
+TERMINAL_STAGE_KEYWORDS = ("complete", "done", "finished", "closed", "passed", "terminal")
+AWAITING_STAGE_KEYWORDS = ("await", "pending", "blocked", "needs_", "in_progress", "waiting")
 
 
 @dataclass(frozen=True)
@@ -55,12 +69,14 @@ class WorkflowGuardHarness:
         workspace: str | Path,
         *,
         command_log: str | Path | None = None,
+        roster_severity: str = "warning",
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
         self.workspace_rel = _rel(self.workspace, self.repo_root)
         self.layout = WorkspaceLayout(project_root=self.workspace)
         self.command_log = self._resolve_optional(command_log)
+        self.roster_severity = roster_severity if roster_severity in {"error", "warning"} else "warning"
 
     def run(self) -> WorkflowGuardResult:
         self._validate_workspace()
@@ -69,6 +85,12 @@ class WorkflowGuardHarness:
         findings.extend(self._check_artifacts())
         findings.extend(self._check_trajectory())
         findings.extend(self._check_command_log())
+        findings.extend(self._check_roster_utilization())
+        findings.extend(self._check_stalled_steps())
+        findings.extend(self._check_unsupported_commands())
+        findings.extend(self._check_failed_without_retry())
+        findings.extend(self._check_incomplete_workflow())
+        findings.extend(self._check_session_monitored())
         error_count = sum(1 for item in findings if item["severity"] == "error")
         warning_count = sum(1 for item in findings if item["severity"] == "warning")
         report = {
@@ -348,6 +370,249 @@ class WorkflowGuardHarness:
         commands.append(f"uv run validate-workflow-guardrails --workspace {self.workspace_rel}")
         return commands
 
+    def _check_roster_utilization(self) -> list[dict[str, Any]]:
+        """Warn when a generation panel ships without routing any agent/skill — the
+        runtime complement to the roster-coverage unit test. Keeps the available
+        agents/skills from sitting idle in the actual workflow output."""
+        findings: list[dict[str, Any]] = []
+        for label, path in _roster_panels(self.layout):
+            if not path.exists():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not (data.get("suggested_skills") or data.get("required_specialists")):
+                findings.append(
+                    _finding(
+                        self.roster_severity,
+                        "roster_not_routed",
+                        f"{label} panel routes no agent or skill; the available roster is idle here.",
+                        artifact=_rel(path, self.repo_root),
+                        recommendation=(
+                            "Attach routing_for(<stage>) so the panel carries required_specialists "
+                            "and suggested_skills for the orchestrator to activate."
+                        ),
+                    )
+                )
+        return findings
+
+    def _check_stalled_steps(self) -> list[dict[str, Any]]:
+        """Catch CLI-agent tool calls that never produced a result (stalled) and
+        steps whose recorded duration crossed the slow-step threshold. Both point
+        at a hung or runaway tool invocation around the governed workflow."""
+        trajectory_path = self.layout.state_dir / "trajectory.jsonl"
+        if not trajectory_path.exists():
+            return []
+        records = load_trajectory(trajectory_path)
+        findings: list[dict[str, Any]] = []
+
+        open_starts: dict[str, dict[str, Any]] = {}
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            event_type = str(record.get("event_type") or "").lower()
+            tool_id = _tool_id(record)
+            if event_type == "tool_start" and tool_id:
+                open_starts[tool_id] = record
+            elif event_type == "tool_result" and tool_id:
+                open_starts.pop(tool_id, None)
+
+            duration = _duration_ms(record)
+            if duration is not None and duration > SLOW_STEP_THRESHOLD_MS:
+                findings.append(
+                    _finding(
+                        "warning",
+                        "slow_step",
+                        f"Trajectory step ran for {int(duration)} ms, above the {SLOW_STEP_THRESHOLD_MS} ms slow-step threshold.",
+                        artifact=_rel(trajectory_path, self.repo_root),
+                        command=str(record.get("command") or ""),
+                        recommendation="Investigate the long-running tool call; split or bound the work, or record why it is expected.",
+                        details={
+                            "event_type": record.get("event_type"),
+                            "duration_ms": duration,
+                            "summary": record.get("summary"),
+                        },
+                    )
+                )
+
+        for tool_id, record in open_starts.items():
+            findings.append(
+                _finding(
+                    "warning",
+                    "stalled_step",
+                    f"Tool start `{tool_id}` has no matching tool_result; the step appears stalled.",
+                    artifact=_rel(trajectory_path, self.repo_root),
+                    command=str(record.get("command") or ""),
+                    recommendation="Record a tool_result/recovery event for the call or rerun it through the proper project tool.",
+                    details={
+                        "tool_id": tool_id,
+                        "summary": record.get("summary"),
+                    },
+                )
+            )
+        return findings
+
+    def _check_session_monitored(self) -> list[dict[str, Any]]:
+        """Flag a session that clearly DID work but recorded no trajectory, so the
+        reliability checks (stalls, retries, tool calls) can't see it. Makes session
+        monitoring effectively mandatory — silent, unmonitored runs are surfaced."""
+        trajectory_path = self.layout.state_dir / "trajectory.jsonl"
+        has_trajectory = bool(load_trajectory(trajectory_path)) if trajectory_path.exists() else False
+        if has_trajectory:
+            return []
+        # Evidence that a governed workflow actually ran in this workspace.
+        activity: list[str] = []
+        for label, path in (
+            ("applied_ops", self.layout.state_dir / "applied_ops.jsonl"),
+            ("events", self.layout.state_dir / "events.jsonl"),
+        ):
+            try:
+                if path.exists() and path.stat().st_size > 0:
+                    activity.append(label)
+            except OSError:
+                continue
+        if self.layout.solutions_dir.exists() and any(self.layout.solutions_dir.glob("kpi_*")):
+            activity.append("generated_solutions")
+        if not activity:
+            return []  # nothing ran -> nothing to monitor
+        return [
+            _finding(
+                "warning",
+                "session_not_monitored",
+                "Workflow activity occurred (" + ", ".join(activity) + ") but no session trajectory "
+                "was recorded; stalls, retries, and tool calls in this session are not monitored.",
+                artifact=_rel(trajectory_path, self.repo_root),
+                command=f"uv run record-workspace-trajectory --workspace {self.workspace_rel} --render-only",
+                recommendation=(
+                    "Record session steps with record-workspace-trajectory (workspace-flow / apply-* "
+                    "do this automatically) so reliability checks can see this session."
+                ),
+            )
+        ]
+
+    def _check_unsupported_commands(self) -> list[dict[str, Any]]:
+        """Flag recorded commands that invoke an executable which is neither a known
+        project tool nor a generic shell/git command. Catches the CLI agent reaching
+        for an unsupported or hallucinated tool."""
+        trajectory_path = self.layout.state_dir / "trajectory.jsonl"
+        if not trajectory_path.exists():
+            return []
+        records = load_trajectory(trajectory_path)
+        if not records:
+            return []
+        allowed_tools = _allowed_tool_names(self.repo_root)
+        if not allowed_tools:
+            return []  # no tool roster discoverable -> cannot judge; degrade safely
+        findings: list[dict[str, Any]] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            command = str(record.get("command") or "")
+            if not command:
+                continue
+            name = _invoked_tool_name(command)
+            if not name:
+                continue
+            if name in allowed_tools or name in GENERIC_COMMANDS:
+                continue
+            findings.append(
+                _finding(
+                    "warning",
+                    "unsupported_command",
+                    f"Command invokes `{name}`, which is not a known project tool or generic shell/git command.",
+                    artifact=_rel(trajectory_path, self.repo_root),
+                    command=command,
+                    recommendation="Use a documented project tool from .agents/tools.json or a generic shell/git command.",
+                )
+            )
+        return findings
+
+    def _check_failed_without_retry(self) -> list[dict[str, Any]]:
+        """Promote a clearly unrecovered failure to an error. ``_check_trajectory``
+        already warns on failed-without-recovery; this raises the severity to a
+        blocker when the same command/step is not retried and no recovery or
+        validation event follows within a short window."""
+        trajectory_path = self.layout.state_dir / "trajectory.jsonl"
+        if not trajectory_path.exists():
+            return []
+        records = load_trajectory(trajectory_path)
+        if not records:
+            return []
+        commands = [str(item.get("command") or "") for item in records if isinstance(item, dict)]
+        findings: list[dict[str, Any]] = []
+        for index, record in enumerate(records):
+            if not isinstance(record, dict):
+                continue
+            status = str(record.get("status") or "")
+            exit_code = record.get("exit_code")
+            if not _failed(status, exit_code):
+                continue
+            window = records[index + 1 : index + 5]
+            window_commands = commands[index + 1 : index + 5]
+            command = str(record.get("command") or "")
+            retried = bool(command) and any(
+                command.strip() and command.strip() == other.strip() for other in window_commands
+            )
+            if retried or _trajectory_has_recovery(window, window_commands):
+                continue
+            findings.append(
+                _finding(
+                    "error",
+                    "failed_without_recovery",
+                    "Trajectory step failed and was not retried, recovered, or validated within the following steps.",
+                    artifact=_rel(trajectory_path, self.repo_root),
+                    command=command,
+                    recommendation="Retry the step, route to a recovery/validation tool, or record why the failure is terminal.",
+                    details={
+                        "event_type": record.get("event_type"),
+                        "status": status,
+                        "summary": record.get("summary"),
+                    },
+                )
+            )
+        return findings
+
+    def _check_incomplete_workflow(self) -> list[dict[str, Any]]:
+        """Conservatively flag a workflow session whose latest stage is a non-terminal
+        awaiting stage while the trajectory shows no later progress. Only clear cases
+        are reported to avoid false positives on in-flight work."""
+        findings: list[dict[str, Any]] = []
+        panels = _workflow_stage_panels(self.layout)
+        if not panels:
+            return []
+
+        trajectory_path = self.layout.state_dir / "trajectory.jsonl"
+        records = load_trajectory(trajectory_path) if trajectory_path.exists() else []
+        progressed = _has_progress_after_panels(records, panels)
+
+        for path, data in panels:
+            stage = str(data.get("stage") or "").strip()
+            if not stage or not _is_awaiting_stage(stage, data):
+                continue
+            if progressed:
+                continue
+            findings.append(
+                _finding(
+                    "warning",
+                    "workflow_incomplete",
+                    f"Workflow session is parked at non-terminal stage `{stage}` with no further trajectory progress.",
+                    artifact=_rel(path, self.repo_root),
+                    recommendation="Advance the workflow with the stage's next tool, or close the session if it is intentionally paused.",
+                    details={"stage": stage, "status": data.get("status")},
+                )
+            )
+        return findings
+
+
+def _roster_panels(layout) -> list[tuple[str, Any]]:
+    reports = layout.reports_dir
+    return [
+        ("KPI generation", reports / "kpi_generation" / "current.json"),
+        ("data model generation", reports / "data_model_generation" / "current.json"),
+        ("engine generation", reports / "engine_generation" / "current.json"),
+    ]
+
 
 def _finding(
     severity: str,
@@ -477,6 +742,176 @@ def _trajectory_has_recovery(next_records: list[dict[str, Any]], next_commands: 
     return _has_retry_or_recovery(next_commands)
 
 
+def _tool_id(record: dict[str, Any]) -> str:
+    """Stable id used to pair a tool_start with its tool_result. Prefers an explicit
+    id in metadata, then a tool name, so the pairing tolerates either convention."""
+    metadata = record.get("metadata")
+    if isinstance(metadata, dict):
+        for field in ("tool_id", "id", "call_id", "tool_call_id", "tool_use_id", "tool", "tool_name", "name"):
+            value = metadata.get(field)
+            if value not in (None, ""):
+                return str(value)
+    for field in ("tool_id", "tool", "tool_name"):
+        value = record.get(field)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _duration_ms(record: dict[str, Any]) -> float | None:
+    metadata = record.get("metadata")
+    source = metadata if isinstance(metadata, dict) else record
+    value = source.get("duration_ms")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _allowed_tool_names(repo_root: Path) -> set[str]:
+    """Known project tool names, sourced from .agents/tools.json when present, else
+    from the pyproject [project.scripts] table. Both are optional; an empty set is a
+    safe degrade (the generic-command allowlist still suppresses false positives)."""
+    names = _tool_names_from_agents_json(repo_root / ".agents" / "tools.json")
+    if names:
+        return names
+    names = _tool_names_from_pyproject(repo_root / "pyproject.toml")
+    if names:
+        return names
+    # Fallback: the tool roster is a property of the installed package, not the
+    # workspace — locate the real repo pyproject relative to this module so the
+    # check still works under a workspace-relative or sandboxed repo_root.
+    module_repo = Path(__file__).resolve().parents[3]
+    return _tool_names_from_pyproject(module_repo / "pyproject.toml")
+
+
+def _tool_names_from_agents_json(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    names: set[str] = set()
+    if isinstance(data, dict):
+        tools = data.get("tools")
+        if isinstance(tools, dict):
+            names.update(str(key) for key in tools)
+        elif isinstance(tools, list):
+            for item in tools:
+                if isinstance(item, dict):
+                    name = item.get("name") or item.get("id")
+                    if name:
+                        names.add(str(name))
+                elif isinstance(item, str):
+                    names.add(item)
+    return {name.lower() for name in names if name}
+
+
+def _tool_names_from_pyproject(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    names: set[str] = set()
+    in_scripts = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            in_scripts = stripped == "[project.scripts]"
+            continue
+        if in_scripts and "=" in stripped and not stripped.startswith("#"):
+            name = stripped.split("=", 1)[0].strip().strip('"')
+            if name:
+                names.add(name.lower())
+    return names
+
+
+def _invoked_tool_name(command: str) -> str:
+    """Return the effective executable/tool name for a command. Handles `uv run
+    <name>` by returning <name>; otherwise returns the first token. Returns "" when
+    no meaningful name can be extracted."""
+    tokens = [token for token in _command_tokens(command) if token]
+    if not tokens:
+        return ""
+    first = tokens[0].lower()
+    if first == "uv" and len(tokens) >= 3 and tokens[1].lower() == "run":
+        candidate = tokens[2]
+        if candidate.startswith("-"):
+            return "uv"
+        return candidate.lower()
+    return first
+
+
+def _workflow_stage_panels(layout) -> list[tuple[Path, dict[str, Any]]]:
+    """Workflow session panels that carry a `stage` field, from workflow_sessions and
+    the reports tree. Only panels with a stage are returned."""
+    panels: list[tuple[Path, dict[str, Any]]] = []
+    seen: set[Path] = set()
+    candidates: list[Path] = []
+    sessions_dir = layout.workflow_sessions_dir
+    if sessions_dir.exists():
+        candidates.extend(sorted(sessions_dir.glob("*/current.json")))
+    reports_dir = layout.reports_dir
+    if reports_dir.exists():
+        candidates.extend(sorted(reports_dir.glob("**/current.json")))
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and str(data.get("stage") or "").strip():
+            panels.append((path, data))
+    return panels
+
+
+def _is_awaiting_stage(stage: str, data: dict[str, Any]) -> bool:
+    key = _key(stage)
+    status = _key(data.get("status"))
+    if any(term in key for term in TERMINAL_STAGE_KEYWORDS):
+        return False
+    if any(term in status for term in TERMINAL_STAGE_KEYWORDS):
+        return False
+    return any(term.strip("_") in key for term in AWAITING_STAGE_KEYWORDS) or any(
+        term.strip("_") in status for term in AWAITING_STAGE_KEYWORDS
+    )
+
+
+def _has_progress_after_panels(records: list[dict[str, Any]], panels: list[tuple[Path, dict[str, Any]]]) -> bool:
+    """Conservative progress signal: treat the workflow as still moving if the
+    trajectory's newest event is later than the newest panel timestamp. Without
+    comparable timestamps we assume progress (no flag) to avoid false positives."""
+    panel_times = [
+        _parse_ts(data.get("generated_at") or data.get("updated_at") or data.get("timestamp"))
+        for _, data in panels
+    ]
+    panel_times = [value for value in panel_times if value is not None]
+    if not panel_times:
+        return True
+    latest_panel = max(panel_times)
+    event_times = [
+        _parse_ts(record.get("timestamp"))
+        for record in records
+        if isinstance(record, dict)
+    ]
+    event_times = [value for value in event_times if value is not None]
+    if not event_times:
+        return False
+    return max(event_times) > latest_panel
+
+
+def _parse_ts(value: Any) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
 def _render_markdown(report: dict[str, Any]) -> str:
     lines = [
         "# Workflow Guard Harness",
@@ -525,11 +960,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--command-log")
+    parser.add_argument(
+        "--roster-severity",
+        choices=("warning", "error"),
+        default="warning",
+        help="Severity for the roster_not_routed finding (default: warning).",
+    )
     args = parser.parse_args(argv)
     result = WorkflowGuardHarness(
         args.repo_root,
         args.workspace,
         command_log=args.command_log,
+        roster_severity=args.roster_severity,
     ).run()
     print(json.dumps(result.summary(), indent=2))
     return 0 if result.ok else 1

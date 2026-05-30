@@ -162,6 +162,12 @@ priority       = 100
 
 [[rule]]
 toolName       = "run_shell_command"
+commandPrefix  = "uv run build-source-family-contracts"
+decision       = "allow"
+priority       = 100
+
+[[rule]]
+toolName       = "run_shell_command"
 commandPrefix  = "uv run onboard-workspace"
 decision       = "allow"
 priority       = 100

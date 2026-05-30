@@ -143,6 +143,22 @@ class WorkspaceLayout:
     def dashboard_index_path(self) -> Path:
         return self.dashboard_dir / "index.json"
 
+    @property
+    def medallion_dir(self) -> Path:
+        return self.state_dir / "medallion"
+
+    @property
+    def bronze_dir(self) -> Path:
+        return self.medallion_dir / "bronze"
+
+    @property
+    def silver_dir(self) -> Path:
+        return self.medallion_dir / "silver"
+
+    @property
+    def gold_dir(self) -> Path:
+        return self.medallion_dir / "gold"
+
     def ensure_runtime_dirs(self) -> None:
         for path in [
             self.state_dir,

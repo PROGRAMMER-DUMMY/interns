@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install ruff
+      - name: Lint (touched modules)
+        run: ruff check core/onboarding/kpi core/onboarding/harness core/onboarding/workspace/delegation.py
+        continue-on-error: true
+      - name: Unit tests (curated, deterministic suite)
+        run: |
+          python -m unittest -v \
+            tests.test_parser_parity \
+            tests.test_kpi_engine_generators \
+            tests.test_verify_kpi_output \
+            tests.test_engine_recommender \
+            tests.test_generate_kpi_engines \
+            tests.test_engine_generation_harness \
+            tests.test_kpi_generation_quality \
+            tests.test_data_model_generation \
+            tests.test_agent_skill_routing \
+            tests.test_delegation_handoff \
+            tests.test_handoff_cli \
+            tests.test_workflow_guard_reliability \
+            tests.test_workflow_guard_roster \
+            tests.test_workflow_guard_monitoring \
+            tests.test_project_harness_gates
+
+  pyspark-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"   # Spark 3.5 supports Java 8/11/17 only
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install (Spark 3.5 / Scala 2.12 + Delta 3.2)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install "pyspark==3.5.3" "delta-spark==3.2.0"
+      - name: SQL == Polars == PySpark parity
+        env:
+          CI_RUN_SPARK: "1"
+        run: python -m unittest -v tests.test_ci_pyspark_parity
