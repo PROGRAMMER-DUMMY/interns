@@ -14,10 +14,13 @@ import json
 import re
 import sys
 
+# Template/sample env files hold placeholders, not real secrets -- never block them.
+_NOT_TEMPLATE = r"(?!\.(?:example|sample|template|dist|defaults)(?:$|[\"'\s]))"
+
 # Filename patterns that name a secret/credential artifact.
 SECRET_PATTERNS = (
-    r"(^|[\\/])\.env(\.[\w.-]+)?$",       # .env, .env.local, .env.prod
-    r"(^|[\\/])\.env(\.[\w.-]+)?[\"'\s]",  # .env referenced mid-command
+    rf"(^|[\\/])\.env{_NOT_TEMPLATE}(\.[\w.-]+)?$",       # .env, .env.local, .env.prod
+    rf"(^|[\\/])\.env{_NOT_TEMPLATE}(\.[\w.-]+)?[\"'\s]",  # .env referenced mid-command
     r"\.databrickscfg\b",
     r"(^|[\\/])id_rsa\b",
     r"\.pem\b",
