@@ -49,6 +49,11 @@
       "path": "skills/feature-derivation-library/SKILL.md"
     },
     {
+      "name": "green-gate",
+      "description": "Run the project's portable green gate -- the curated CI suite plus the enterprise suite, the same way ci.yml does -- and report pass/fail with any failures. Use before claiming work is done, before commit, or when the user asks to \"run the tests\", \"check it's green\", or \"run the green gate\". With a sweep, also classify broader blast-radius failures as new vs. known-baseline.",
+      "path": "skills/green-gate/SKILL.md"
+    },
+    {
       "name": "grill-requirements",
       "description": "Interview stakeholders to understand what they want optimized, what must not change, how success is measured, and what preferences or constraints should shape the solution. Use for new workspace onboarding, KPI/data model discovery, product scoping, or when business/data/platform requirements are incomplete.",
       "path": "skills/grill-requirements/SKILL.md"

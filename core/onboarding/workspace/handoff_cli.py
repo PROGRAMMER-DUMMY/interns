@@ -27,7 +27,15 @@ def _latest(directory: Path, stage: str) -> Path | None:
     if not directory.exists():
         return None
     pattern = f"{stage}*.md" if stage else "*.md"
-    files = sorted(directory.glob(pattern), key=lambda f: f.stat().st_mtime, reverse=True)
+    # Sort by nanosecond mtime, then by name as a deterministic tiebreaker: two files
+    # written within the same coarse mtime tick must not resolve to an arbitrary
+    # glob order (that made "latest" flaky). On an exact mtime tie the lexicographically
+    # greater name wins.
+    files = sorted(
+        directory.glob(pattern),
+        key=lambda f: (f.stat().st_mtime_ns, f.name),
+        reverse=True,
+    )
     return files[0] if files else None
 
 

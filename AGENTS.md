@@ -615,15 +615,29 @@ missing, ask for it and save the request under the active workspace's `interns/r
 
 ## Verification
 
-Run focused checks before commit:
+Run the portable green gate before claiming done or committing. It runs the curated
+CI suite plus the enterprise suite the same way `.github/workflows/ci.yml` does:
 
 ```powershell
-uv run python -m unittest tests.test_enterprise_optimization
-uv run python -m compileall core interns tools tests dashboard.py
-uv run ruff check core interns\base.py interns\insights.py tools\databricks_setup.py tools\methodology_parser.py tests\test_enterprise_optimization.py dashboard.py
+green-gate            # curated + enterprise suites (strict gate)
+green-gate --sweep    # also sweep blast-radius modules; flag NEW vs known failures
 ```
 
-Use broader lint only if you are ready to clean legacy tools too.
+Hard rule: run tests with the venv interpreter, NOT `uv run`. `uv run` resyncs and
+reinstalls pre-release pyspark 4.1.1 (no Delta), which breaks the pyspark-backed
+tests. If `green-gate` is not on PATH, call it via the venv interpreter:
+
+```powershell
+.venv\Scripts\python.exe -m core.dev.green_gate --sweep
+.venv\Scripts\python.exe -m unittest tests.test_enterprise_optimization
+.venv\Scripts\python.exe -m compileall core interns tools tests dashboard.py
+.venv\Scripts\python.exe -m ruff check core
+```
+
+Governed `uv run` wrappers (onboard-workspace, resolve-kpi-features, ...) are still
+the right entry points for workspace flows -- the venv rule applies to tests, pyspark,
+and engine generation only. Use broader lint only if you are ready to clean legacy
+tools too.
 
 ## Git
 

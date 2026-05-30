@@ -250,6 +250,10 @@ STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
         "agents": ["validation-gatekeeper"],
         "skills": ["workspace-governance"],
     },
+    "regression_review": {
+        "agents": ["regression-sweep"],
+        "skills": ["green-gate"],
+    },
     "kpi_completion_review": {
         "agents": ["kpi-analyst"],
         "skills": ["kpi-analyst", "self-grill"],

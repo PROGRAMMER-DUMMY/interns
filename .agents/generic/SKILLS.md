@@ -515,6 +515,11 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Path: `skills/feature-derivation-library/SKILL.md`
 - Description: Use when KPI/query work needs reusable derived-feature patterns, candidate formulas, temporal anchors, join-derived features, taxonomy-derived features, or SQL/Polars derivation templates. This skill helps propose derivations while preserving the rule that candidates are not proof.
 
+### green-gate
+
+- Path: `skills/green-gate/SKILL.md`
+- Description: Run the project's portable green gate -- the curated CI suite plus the enterprise suite, the same way ci.yml does -- and report pass/fail with any failures. Use before claiming work is done, before commit, or when the user asks to "run the tests", "check it's green", or "run the green gate". With a sweep, also classify broader blast-radius failures as new vs. known-baseline.
+
 ### grill-requirements
 
 - Path: `skills/grill-requirements/SKILL.md`

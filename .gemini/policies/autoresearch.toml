@@ -22,6 +22,66 @@
 # When workspace policies start being read, the symlink can be removed
 # and this file alone will govern the project's allowlist.
 
+# --- Guardrails (deny wins via higher priority) ---
+#
+# Mirror of the Claude Code PreToolUse hooks so the same rules apply under Gemini.
+# `uv run` for tests / pyspark / engine generation reinstalls pre-release pyspark
+# 4.1.1 (no Delta) and breaks them -- use the venv interpreter or `green-gate`.
+# Governed `uv run` wrappers below are still allowed (lower priority).
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run pytest"
+decision       = "deny"
+priority       = 200
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run python -m unittest"
+decision       = "deny"
+priority       = 200
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run python -m pytest"
+decision       = "deny"
+priority       = 200
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run generate-kpi-pyspark"
+decision       = "deny"
+priority       = 200
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "uv run generate-kpi-engines"
+decision       = "deny"
+priority       = 200
+
+# Secret/credential display hard stop (see AGENTS.md "Secret And Environment Display
+# Guardrail"). Deny printing the common credential files outright.
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "Get-Content .env"
+decision       = "deny"
+priority       = 200
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "Get-Content .databrickscfg"
+decision       = "deny"
+priority       = 200
+
+# --- Portable green gate ---
+
+[[rule]]
+toolName       = "run_shell_command"
+commandPrefix  = "green-gate"
+decision       = "allow"
+priority       = 100
+
 # --- Governed KPI / data-engineering wrappers (preferred entry points) ---
 
 [[rule]]
