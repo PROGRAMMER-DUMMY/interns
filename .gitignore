@@ -16,6 +16,7 @@ docs/project_sections.local.md
 !docs/data_workflow_medallion_reference.md
 !docs/databricks_production_practices.md
 !docs/databricks_token_scopes.md
+!docs/PRODUCTION_ROADMAP.md
 !docs/session_snapshot.md
 
 # Local data dumps and generated warehouse artifacts
