@@ -17,8 +17,14 @@ Suggest the minimum set for the configured execution mode, then add per-feature 
 | `execution = "connect"` (Databricks Connect) | above **+** `databricks-connect`, `clusters` |
 | Uploading artifacts to Volumes/DBFS | **+** `files` |
 | Reading creds from Databricks Secret Store | **+** `secrets` |
-| Genie workspace deploy (`prepare-genie-workspace`) | **+** `genie`, `dashboards` |
+| `deploy-databricks-workspace` (folder/file upload) | **+** `workspace`, `files` |
 | Query-history / cost analysis | **+** `query-history` |
+
+> **Spec-only (no scope needed):** Genie (`prepare-genie-workspace`), dashboards, and
+> jobs/UC *registration* in the deployer are **spec-gated** — the platform generates a
+> reviewable spec/runbook and does NOT call those APIs. So `genie`/`dashboards` are not
+> required by the token. (Warehouse `sql`, UC schema/table writes, MLflow, and jobs
+> *execution* DO call APIs and need their scopes.)
 
 Detection rule: on a permission error during `tools/databricks_setup.py`, map the failing
 API to its scope (tables below) and report it as the missing scope to add.

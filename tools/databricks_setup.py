@@ -93,7 +93,8 @@ def print_required_scopes(cfg) -> None:
     for scope, why in required_scopes_for_config(db):
         print(f"    [x] {scope:<18} {why}")
     print("    Optional:    files (Volumes upload) | secrets | query-history")
-    print("    Deploy-only: workspace, files, jobs, dashboards, genie  (deploy-databricks-workspace)")
+    print("    Deploy-only: workspace, files  (deploy-databricks-workspace folder/file upload)")
+    print("    Spec-only (NO scope/API call): genie, dashboards, jobs-registration are spec-gated")
     print("    Full catalog + per-task mapping: docs/databricks_token_scopes.md")
 
 
