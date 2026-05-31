@@ -269,16 +269,162 @@ class WorkspaceFlowTests(unittest.TestCase):
 
             result = WorkspaceFlow(root, "workspaces/demo").start(intent="full_kpi_sql")
 
+            # Hard gate: completion now requires a recorded kpi-analyst semantic
+            # review. The flow stops at the review gate first.
+            self.assertEqual(result.status, "needs_specialist_review")
+            self.assertEqual(result.stage, "kpi_analyst_review")
+            # Orchestrator invokes kpi-analyst and posts the verdict back.
+            result = WorkspaceFlow.from_session(root, result.session_id).review(
+                verdict="ok", summary="all 1 KPI answers its intent",
+            )
+
             self.assertEqual(result.status, "complete")
             panel = json.loads((root / result.current_panel_path).read_text(encoding="utf-8"))
             self.assertEqual(panel["source"], "complete")
             self.assertEqual(panel["summary"]["generated_kpi_count"], 1)
+            self.assertEqual(panel["summary"]["kpi_analyst_review"]["verdict"], "ok")
             result_md = workspace / "interns" / "reports" / "kpi_results" / "current.md"
             self.assertTrue(result_md.exists())
             self.assertIn("kpi_001", result_md.read_text(encoding="utf-8"))
             harness = workspace / "interns" / "generated" / "evidence" / "kpi_execution_harness.json"
             self.assertTrue(harness.exists())
             self.assertTrue(json.loads(harness.read_text(encoding="utf-8"))["ok"])
+
+            # The dated runs/<date>/ snapshot is written by the executor and must
+            # mirror the live results exactly — same combined body, per-KPI file present.
+            from datetime import date
+
+            runs_dir = workspace / "interns" / "runs" / date.today().isoformat()
+            self.assertTrue((runs_dir / "results.md").exists())
+            self.assertEqual(
+                (runs_dir / "results.md").read_text(encoding="utf-8"),
+                result_md.read_text(encoding="utf-8"),
+            )
+            self.assertTrue((runs_dir / "kpi_001.md").exists())
+            self.assertIn("kpi_001", (runs_dir / "kpi_001.md").read_text(encoding="utf-8"))
+
+    def test_completion_is_gated_on_kpi_analyst_review(self):
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets").mkdir()
+            (workspace / "datasets" / "encounters.csv").write_text(
+                "Id,START,ENCOUNTERCLASS\nE1,2024-01-01,ambulatory\nE2,2024-01-02,inpatient\n",
+                encoding="utf-8",
+            )
+            (workspace / "docs" / "kpi_registry.csv").write_text(
+                "Key business question,Description,Cuts / grain hints,Metric,Data model refinement required\n"
+                "How many encounters are recorded?,Count encounters,,count(Id),\n",
+                encoding="utf-8",
+            )
+
+            # 1. Without a review, the flow stops at the blocking gate (not complete).
+            result = WorkspaceFlow(root, "workspaces/demo").start(intent="full_kpi_sql")
+            self.assertEqual(result.status, "needs_specialist_review")
+            self.assertEqual(result.stage, "kpi_analyst_review")
+            session_id = result.session_id
+            panel = json.loads((root / result.current_panel_path).read_text(encoding="utf-8"))
+            self.assertIn("kpi-analyst", panel["summary"]["required_specialists"])
+            self.assertIn("kpi_signature", panel["summary"])
+
+            # 2. A 'blocked' verdict keeps the workflow blocked (does not complete).
+            blocked = WorkspaceFlow.from_session(root, session_id).review(
+                verdict="blocked", summary="kpi_001 aggregates the wrong column",
+            )
+            self.assertEqual(blocked.status, "blocked")
+            self.assertEqual(blocked.stage, "kpi_analyst_review_blocked")
+
+            # 3. An 'ok' verdict releases the gate and the workflow completes.
+            done = WorkspaceFlow.from_session(root, session_id).review(
+                verdict="ok", summary="kpi_001 answers its intent",
+            )
+            self.assertEqual(done.status, "complete")
+            panel = json.loads((root / done.current_panel_path).read_text(encoding="utf-8"))
+            self.assertEqual(panel["summary"]["kpi_analyst_review"]["verdict"], "ok")
+
+    def test_every_stage_panel_auto_attaches_its_specialist_and_skill_roster(self):
+        from core.onboarding.workspace.delegation import routing_for
+        from core.onboarding.workspace.flow import _attach_stage_routing
+
+        # A panel that historically carried NO roster now gets the kpi_definition
+        # roster attached automatically (every agent + skill that owns the stage).
+        panel = {"stage": "kpi_blocker", "summary": {}}
+        _attach_stage_routing(panel)
+        expected = routing_for("kpi_definition")
+        self.assertEqual(
+            set(panel["summary"]["required_specialists"]), set(expected["agents"])
+        )
+        for skill in expected["skills"]:
+            self.assertIn(skill, panel["summary"]["suggested_skills"])
+
+        # An unmapped stage attaches nothing (never a wrong roster).
+        bare = {"stage": "totally_unknown_stage"}
+        _attach_stage_routing(bare)
+        self.assertNotIn("summary", bare)
+
+    def test_data_understanding_gate_emits_artifact_with_tier_schema_and_options(self):
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets").mkdir()
+            (workspace / "datasets" / "encounters.csv").write_text(
+                "Id,START,ENCOUNTERCLASS\nE1,2024-01-01,ambulatory\nE2,2024-01-02,inpatient\n",
+                encoding="utf-8",
+            )
+            (workspace / "docs" / "kpi_registry.csv").write_text(
+                "Key business question,Description,Cuts / grain hints,Metric,Data model refinement required\n"
+                "How many encounters are recorded?,Count encounters,,count(Id),\n",
+                encoding="utf-8",
+            )
+
+            result = WorkspaceFlow(root, "workspaces/demo").start(intent="full_kpi_sql")
+
+            # Existing full_kpi_sql end-to-end behavior still completes once the
+            # kpi-analyst review gate is satisfied.
+            self.assertEqual(result.status, "needs_specialist_review")
+            result = WorkspaceFlow.from_session(root, result.session_id).review(
+                verdict="ok", summary="reviewed",
+            )
+            self.assertEqual(result.status, "complete")
+
+            du_json = workspace / "interns" / "reports" / "data_understanding" / "current.json"
+            du_md = workspace / "interns" / "reports" / "data_understanding" / "current.md"
+            self.assertTrue(du_json.exists())
+            self.assertTrue(du_md.exists())
+
+            payload = json.loads(du_json.read_text(encoding="utf-8"))
+            self.assertIn("quality_tier", payload)
+            self.assertTrue(payload["quality_tier"]["tier"])
+            self.assertTrue(payload["quality_tier"]["evidence"])
+            self.assertIn("schema_type", payload)
+            self.assertTrue(payload["schema_type"]["schema_type"])
+            self.assertTrue(payload["schema_type"]["evidence"])
+            option_ids = [o["option_id"] for o in payload["top_level_options"]]
+            self.assertEqual(option_ids, ["option_generate", "option_forward"])
+            self.assertIsInstance(payload["scoped_processing_options"], list)
+
+            markdown = du_md.read_text(encoding="utf-8")
+            self.assertIn("Detected Quality Tier", markdown)
+            self.assertIn(payload["quality_tier"]["tier"], markdown)
+            self.assertIn("Detected Schema Type", markdown)
+            self.assertIn(payload["schema_type"]["schema_type"], markdown)
+            self.assertIn("Generate KPI", markdown)
+            self.assertIn("Move forward with the current workflow", markdown)
+            self.assertIn("Scoped Processing Options", markdown)
 
     def test_result_preview_requires_exact_result_view(self):
         try:

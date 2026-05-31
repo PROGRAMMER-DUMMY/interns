@@ -7,15 +7,21 @@ panels instead of streaming every lower-level command to the main chat.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from core.paths import PROJECT_ROOT
 from core.onboarding.bronze_silver_standards import BronzeSilverStandardsBuilder
+from core.onboarding.data_model.data_understanding import (
+    classify_quality_tier,
+    classify_schema_type,
+    scoped_processing_options,
+)
 from core.onboarding.data_quality import DataQualityHarness, DuplicateDecisionRecorder, DuplicateReviewPanel
 from core.onboarding.harness.trajectory_recorder import record_trajectory_event_safe
 from core.onboarding.kpi.blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
@@ -26,7 +32,10 @@ from core.wiki import WikiLayout, build_kpi_completion_scaffold, upsert_kpi_note
 from core.dashboard import refresh_workspace_dashboard
 from core.onboarding.workspace.delegation import (
     DelegationEvent,
+    DelegationVerdict,
+    STAGE_ROUTING,
     record_delegation,
+    routing_for,
     verdict_from_dashboard_summary,
     verdict_from_kpi_completion,
     verdict_from_relationship_summary,
@@ -210,6 +219,51 @@ class WorkspaceFlow:
 
         raise ValueError("current workflow stage is not waiting for a supported answer")
 
+    def review(
+        self,
+        *,
+        verdict: str,
+        summary: str = "",
+        per_kpi: list[dict[str, Any]] | None = None,
+    ) -> WorkspaceFlowResult:
+        """Record the kpi-analyst's SEMANTIC verdict and re-advance the flow.
+
+        This is the record-back half of the completion hard gate: the orchestrator
+        invokes the kpi-analyst agent/skill, judges whether each generated KPI
+        actually answers its intent, then posts the verdict here. The verdict is
+        bound to a signature of the CURRENT generated KPIs, so a later regeneration
+        that changes the SQL invalidates a stale review and re-gates completion.
+        """
+        if verdict not in {"ok", "blocked"}:
+            raise ValueError("review verdict must be 'ok' or 'blocked'")
+        state = self._load_state()
+        completed = ((state.get("current_panel") or {}).get("summary") or {}).get("completed_kpis") or []
+        recorded = {
+            "verdict": verdict,
+            "summary": summary,
+            "per_kpi": per_kpi or [],
+            "kpi_signature": _kpi_review_signature(completed),
+            "recorded_at": _now(),
+        }
+        state["kpi_analyst_review"] = recorded
+        self._record_step(
+            state, "record_kpi_analyst_review", verdict, recorded, decision=verdict,
+        )
+        # Stamp a delegation event carrying the ACTUAL kpi-analyst verdict (not a
+        # programmatic stand-in), so the trajectory shows the specialist fired.
+        self._delegate_and_record(
+            state,
+            agent="kpi-analyst",
+            stage="kpi_output_verification",
+            reason="kpi-analyst semantic review posted back by orchestrator",
+            verdict_fn=lambda: DelegationVerdict(
+                status=verdict,
+                summary=summary or "kpi-analyst semantic review recorded",
+                details={"per_kpi": per_kpi or []},
+            ),
+        )
+        return self._advance_until_stop(state)
+
     def status(self) -> WorkspaceFlowResult:
         state = self._load_state()
         return self._result_from_state(state)
@@ -247,6 +301,12 @@ class WorkspaceFlow:
         if not (self.layout.contracts_dir / "kpi_registry.json").exists():
             onboarding = WorkspaceOnboarder(self.repo_root, self.workspace_rel).run()
             self._record_step(state, "onboard_workspace", "ok", onboarding.summary())
+
+        # BUG-010 data-understanding gate: classify the data quality tier + schema type
+        # from generated profiles BEFORE any irreversible KPI/SQL generation, and surface
+        # scoped processing options. Additive and non-blocking — it records its decision
+        # and lets the existing flow proceed.
+        self._run_data_understanding_gate(state)
 
         if self.orchestration_mode == "plan":
             return self._workflow_checkpoint(state, mode="plan")
@@ -530,6 +590,99 @@ class WorkspaceFlow:
             for entry in kpi_entries
         ]
         preview_summary = {k: v for k, v in preview.items() if k != "kpis"}
+
+        # HARD GATE: a kpi-analyst SEMANTIC review must actually happen before the
+        # workflow can report `complete`. The programmatic verdicts and the
+        # mechanical self-grill above only prove execution + token-matching, not
+        # business intent — a subtly mis-interpreted metric (wrong denominator,
+        # wrong grain) passes them while being wrong. Completion therefore
+        # requires a recorded kpi-analyst verdict that matches the CURRENT
+        # generated KPIs; until one is posted back (via `workspace-flow review`),
+        # the flow stops at a blocking review gate carrying the ready-to-invoke
+        # brief. This converts the advisory required-specialist into an enforced
+        # step (closes the "advisory != enforced" gap).
+        review = state.get("kpi_analyst_review") or {}
+        kpi_signature = _kpi_review_signature(completed_kpis)
+        review_current = bool(review) and review.get("kpi_signature") == kpi_signature
+        if not review_current:
+            review_event = self._delegate_and_record(
+                state,
+                agent="kpi-analyst",
+                stage="kpi_output_verification",
+                reason="semantic review gate: kpi-analyst must judge intent before completion",
+                verdict_fn=lambda: verdict_from_verification(verification.summary()),
+            )
+            stale = bool(review) and not review_current
+            return self._save_panel(
+                state,
+                panel={
+                    "stage": "kpi_analyst_review",
+                    "status": "needs_specialist_review",
+                    "instruction": (
+                        "KPI SQL generated and mechanically self-grilled, but completion is "
+                        "GATED on a kpi-analyst semantic review. Invoke the `kpi-analyst` agent/skill: "
+                        "for each KPI under `summary.completed_kpis`, judge whether the SQL + result rows "
+                        "actually answer the business_question + metric + cuts (denominator, grain, "
+                        "filters), not merely that they ran. Then post the verdict back with "
+                        f"`workspace-flow review --session {self.session_id} --verdict <ok|blocked> "
+                        "--summary \"...\" [--kpi-notes '<json>']`. The workflow cannot reach `complete` "
+                        "until that verdict is recorded."
+                        + (" (A prior review is stale — the generated KPIs changed since it was recorded.)" if stale else "")
+                    ),
+                    "question": "",
+                    "options": [],
+                    "recommended_option_id": "",
+                    "artifact_paths": [
+                        self.workspace_rel + "/interns/generated/solutions",
+                        preview["json_path"],
+                        preview["markdown_path"],
+                        self.workspace_rel + "/interns/reports/kpi_output_verification.md",
+                    ],
+                    "summary": {
+                        "generated_kpi_count": len(generated),
+                        "self_grill": verification.summary(),
+                        "completed_kpis": completed_kpis,
+                        "kpi_signature": kpi_signature,
+                        "record_command": (
+                            f"workspace-flow review --session {self.session_id} "
+                            "--verdict <ok|blocked> --summary \"<one line>\""
+                        ),
+                        "suggested_skills": [
+                            {"name": "kpi-analyst", "why": "Judge whether each result answers its KPI intent."},
+                            {"name": "kpi-clarification", "why": "Decompose any ambiguous metric (denominator/grain/output-type) before judging."},
+                        ],
+                        "required_specialists": ["kpi-analyst"],
+                        "delegations": list(state.get("delegations") or []),
+                    },
+                },
+                source="kpi_analyst_review",
+            )
+        if str(review.get("verdict")) == "blocked":
+            return self._save_panel(
+                state,
+                panel={
+                    "stage": "kpi_analyst_review_blocked",
+                    "status": "blocked",
+                    "instruction": (
+                        "kpi-analyst flagged one or more KPIs as not answering their intent. "
+                        "See `summary.kpi_analyst_review`. Fix the flagged KPIs, regenerate, then "
+                        "re-review before the workflow can complete."
+                    ),
+                    "question": "",
+                    "options": [],
+                    "recommended_option_id": "",
+                    "artifact_paths": [
+                        self.workspace_rel + "/interns/generated/solutions",
+                        self.workspace_rel + "/interns/reports/kpi_output_verification.md",
+                    ],
+                    "summary": {
+                        "generated_kpi_count": len(generated),
+                        "kpi_analyst_review": review,
+                        "completed_kpis": completed_kpis,
+                    },
+                },
+                source="kpi_analyst_review_blocked",
+            )
         return self._save_panel(
             state,
             panel={
@@ -554,6 +707,7 @@ class WorkspaceFlow:
                     "orchestration": orchestration_context,
                     "validation": validation.summary(),
                     "self_grill": verification.summary(),
+                    "kpi_analyst_review": review,
                     "results": preview_summary,
                     "completed_kpis": completed_kpis,
                     "suggested_skills": [
@@ -624,6 +778,104 @@ class WorkspaceFlow:
             "blocked_before": "kpi_blocker",
         }
         return result
+
+    def _load_profiles(self) -> list[dict[str, Any]]:
+        """Load generated profiles as a list of profile dicts.
+
+        Reuses the ``profile_index.json`` shape written by onboarding (the same
+        index ``RelationshipContractBuilder`` consumes). Each entry already
+        carries ``columns``/``schema``/``row_count``/``path`` — exactly the shape
+        the data-understanding classifier expects. Falls back to reading the
+        per-table ``*.profile.json`` files if the index is absent.
+        """
+        index_path = self.layout.profile_index_path
+        if index_path.exists():
+            index = _read_json(index_path)
+            profiles = [p for p in (index.get("profiles") or []) if isinstance(p, dict)]
+            if profiles:
+                return profiles
+        profiles: list[dict[str, Any]] = []
+        if self.layout.profiles_dir.exists():
+            for path in sorted(self.layout.profiles_dir.glob("*.profile.json")):
+                data = _read_json(path)
+                if data:
+                    profiles.append({**data, "path": data.get("path") or str(path)})
+        return profiles
+
+    def _run_data_understanding_gate(self, state: dict[str, Any]) -> dict[str, Any]:
+        """BUG-010 gate: classify quality tier + schema type and surface scoped options.
+
+        Reads generated profiles + relationship contracts (if present), runs the
+        side-effect-free classifier, persists a decision artifact under
+        ``interns/reports/data_understanding/current.{json,md}``, and saves the
+        classification onto the session state. Never hard-blocks: an
+        unclassifiable tier still surfaces as options rather than halting the flow.
+        """
+        profiles = self._load_profiles()
+        relationships = _read_json(self.layout.relationship_contracts_path)
+
+        tier_result = classify_quality_tier(profiles)
+        schema_result = classify_schema_type(profiles, relationships)
+        tier = str(tier_result.get("tier") or "")
+        schema_type = str(schema_result.get("schema_type") or "")
+        options = scoped_processing_options(tier, profiles, schema_type)
+
+        current_data_model = _summarize_current_data_model(profiles, relationships)
+        current_kpi_set = _summarize_current_kpi_set(self.layout)
+
+        top_level_options = [
+            {
+                "option_id": "option_generate",
+                "label": "Generate KPI and/or data model artifacts",
+                "description": (
+                    "Run the governed onboarding -> feature resolution -> KPI/SQL generation "
+                    "pipeline to produce new KPI and data-model artifacts for this workspace."
+                ),
+            },
+            {
+                "option_id": "option_forward",
+                "label": "Move forward with the current workflow",
+                "description": (
+                    "Proceed using the current data model and existing KPI set (echoed below) "
+                    "without regenerating artifacts."
+                ),
+            },
+        ]
+
+        understanding = {
+            "artifact_type": "data_understanding/current.json",
+            "version": FLOW_VERSION,
+            "workspace": self.workspace_rel,
+            "generated_at": _now(),
+            "profile_count": len(profiles),
+            "quality_tier": tier_result,
+            "schema_type": schema_result,
+            "scoped_processing_options": options,
+            "top_level_options": top_level_options,
+            "current_data_model": current_data_model,
+            "current_kpi_set": current_kpi_set,
+        }
+
+        report_dir = self.layout.reports_dir / "data_understanding"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        json_path = report_dir / "current.json"
+        md_path = report_dir / "current.md"
+        json_path.write_text(json.dumps(understanding, indent=2, default=str) + "\n", encoding="utf-8")
+        md_path.write_text(_render_data_understanding_markdown(understanding), encoding="utf-8")
+
+        summary = {
+            "quality_tier": tier,
+            "tier_confidence": tier_result.get("confidence"),
+            "schema_type": schema_type,
+            "schema_confidence": schema_result.get("confidence"),
+            "scoped_option_count": len(options),
+            "profile_count": len(profiles),
+            "json_path": _rel(json_path, self.repo_root),
+            "markdown_path": _rel(md_path, self.repo_root),
+        }
+        self._record_step(state, "data_understanding_gate", "ok", summary)
+        state["data_understanding"] = summary
+        return summary
 
     def _prepare_layer_route(self, state: dict[str, Any], *, data_quality: dict[str, Any]) -> dict[str, Any]:
         route = DataEngineeringRoutePlanner(
@@ -704,7 +956,9 @@ class WorkspaceFlow:
             "kpis": entries,
         }
         json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
-        md_path.write_text(_render_results_markdown(payload), encoding="utf-8")
+        results_markdown = _render_results_markdown(payload)
+        md_path.write_text(results_markdown, encoding="utf-8")
+        self._write_runs_snapshot(payload, results_markdown)
         return {
             "json_path": _rel(json_path, self.repo_root),
             "markdown_path": _rel(md_path, self.repo_root),
@@ -712,6 +966,24 @@ class WorkspaceFlow:
             "error_count": sum(1 for item in entries if item.get("status") != "ok"),
             "kpis": entries,
         }
+
+    def _write_runs_snapshot(self, payload: dict[str, Any], results_markdown: str) -> None:
+        """Mirror the just-executed results into a dated runs/<date>/ snapshot.
+
+        The snapshot is written here — by the executor that re-runs the on-disk
+        SQL — so the dated record always reflects what was actually executed,
+        not what the generator first emitted. Per-KPI files plus a combined
+        results.md, both overwritten on each run (no append graveyard).
+        """
+        run_dir = self.layout.runs_dir / date.today().isoformat()
+        run_dir.mkdir(parents=True, exist_ok=True)
+        for entry in payload.get("kpis", []):
+            kpi_id = entry.get("kpi_id")
+            if not kpi_id:
+                continue
+            section = "\n".join(render_kpi_block(entry, heading_level=2)).rstrip() + "\n"
+            (run_dir / f"{kpi_id}.md").write_text(section, encoding="utf-8")
+        (run_dir / "results.md").write_text(results_markdown, encoding="utf-8")
 
     def _base_state(self, intent: str) -> dict[str, Any]:
         return {
@@ -738,6 +1010,7 @@ class WorkspaceFlow:
         source: str,
     ) -> WorkspaceFlowResult:
         panel = {**panel, "source": source, "session_id": self.session_id, "workspace": self.workspace_rel}
+        _attach_stage_routing(panel)
         from core.onboarding.panel_contract import normalize_decision_panel
         normalize_decision_panel(panel, workspace=self.workspace_rel)
         state["updated_at"] = _now()
@@ -1253,6 +1526,165 @@ def _term_rows(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def _summarize_current_data_model(
+    profiles: list[dict[str, Any]],
+    relationships: dict[str, Any],
+) -> dict[str, Any]:
+    """Compact, workspace-agnostic view of the current data model from profiles + relationships."""
+    tables = []
+    for prof in profiles:
+        if not isinstance(prof, dict):
+            continue
+        name = Path(str(prof.get("path") or prof.get("table") or prof.get("name") or "")).name or str(
+            prof.get("table") or prof.get("name") or "table"
+        )
+        columns = prof.get("columns")
+        if isinstance(columns, list):
+            col_count = len(columns)
+        elif isinstance(prof.get("schema"), dict):
+            col_count = len(prof["schema"])
+        else:
+            col_count = 0
+        tables.append(
+            {
+                "table": name,
+                "row_count": prof.get("row_count"),
+                "column_count": col_count,
+            }
+        )
+    rels = []
+    for rel in (relationships.get("relationships") or []):
+        if not isinstance(rel, dict):
+            continue
+        rels.append(
+            {
+                "relationship_id": rel.get("relationship_id"),
+                "left": rel.get("left_dataset"),
+                "right": rel.get("right_dataset"),
+                "state": rel.get("state"),
+            }
+        )
+    return {"tables": tables, "relationships": rels}
+
+
+def _summarize_current_kpi_set(layout: WorkspaceLayout) -> list[dict[str, Any]]:
+    """Echo the current KPI set (id + question + status) from the registry/mapping, if present."""
+    mapping = _read_json(layout.kpi_feature_mapping_path)
+    registry = _read_json(layout.kpi_registry_path)
+    source_kpis = mapping.get("kpis") or registry.get("kpis") or []
+    kpis = []
+    for idx, kpi in enumerate(source_kpis, start=1):
+        if not isinstance(kpi, dict):
+            continue
+        kpis.append(
+            {
+                "kpi_id": str(kpi.get("kpi_id") or f"kpi_{idx:03d}"),
+                "question": str(kpi.get("name") or kpi.get("business_question") or ""),
+                "metric": str(kpi.get("metric") or ""),
+                "status": str(kpi.get("status") or "unknown"),
+            }
+        )
+    return kpis
+
+
+def _render_data_understanding_markdown(payload: dict[str, Any]) -> str:
+    tier = payload.get("quality_tier") or {}
+    schema = payload.get("schema_type") or {}
+    lines = [
+        "# Data Understanding Gate",
+        "",
+        f"- Workspace: `{payload.get('workspace', '')}`",
+        f"- Profiles analyzed: {payload.get('profile_count', 0)}",
+        "",
+        "## Detected Quality Tier",
+        "",
+        f"- Tier: `{tier.get('tier', '')}` (confidence {tier.get('confidence', '')})",
+        "",
+        "### Evidence",
+        "",
+    ]
+    for item in tier.get("evidence") or []:
+        lines.append(f"- {item}")
+    lines.extend(
+        [
+            "",
+            "## Detected Schema Type",
+            "",
+            f"- Schema type: `{schema.get('schema_type', '')}` (confidence {schema.get('confidence', '')})",
+            "",
+            "### Evidence",
+            "",
+        ]
+    )
+    for item in schema.get("evidence") or []:
+        lines.append(f"- {item}")
+    lines.extend(["", "## Choose How To Proceed", ""])
+    for option in payload.get("top_level_options") or []:
+        lines.extend(
+            [
+                f"### {option.get('option_id', '')}: {option.get('label', '')}",
+                "",
+                str(option.get("description") or ""),
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            f"## Scoped Processing Options (tier `{tier.get('tier', '')}`)",
+            "",
+        ]
+    )
+    for option in payload.get("scoped_processing_options") or []:
+        lines.extend(
+            [
+                f"### {option.get('id', '')}: {option.get('label', '')}",
+                "",
+                str(option.get("description") or ""),
+                f"_Applies when:_ `{option.get('applies_when', '')}`",
+                "",
+            ]
+        )
+    data_model = payload.get("current_data_model") or {}
+    lines.extend(["## Current Data Model", ""])
+    tables = data_model.get("tables") or []
+    if tables:
+        lines.append(
+            render_markdown_table(
+                ["Table", "Rows", "Columns"],
+                [[t.get("table", ""), t.get("row_count", ""), t.get("column_count", "")] for t in tables],
+            )
+        )
+    else:
+        lines.append("- (no profiled tables)")
+    rels = data_model.get("relationships") or []
+    if rels:
+        lines.extend(
+            [
+                "",
+                render_markdown_table(
+                    ["Relationship", "Left", "Right", "State"],
+                    [
+                        [r.get("relationship_id", ""), r.get("left", ""), r.get("right", ""), r.get("state", "")]
+                        for r in rels
+                    ],
+                ),
+            ]
+        )
+    lines.extend(["", "## Current KPI Set", ""])
+    kpis = payload.get("current_kpi_set") or []
+    if kpis:
+        lines.append(
+            render_markdown_table(
+                ["KPI", "Question", "Metric", "Status"],
+                [[k.get("kpi_id", ""), k.get("question", ""), k.get("metric", ""), k.get("status", "")] for k in kpis],
+            )
+        )
+    else:
+        lines.append("- (no KPI registry/mapping present yet)")
+    lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _render_results_markdown(payload: dict[str, Any]) -> str:
     lines = [
         "# KPI Query Results",
@@ -1611,10 +2043,106 @@ def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
     print(f"- Markdown: `{result.current_markdown_path}`")
 
 
+# Maps a flow PANEL stage to the canonical STAGE_ROUTING key whose specialist +
+# skill roster owns it. This is what makes every stage automatically present its
+# full relevant roster to the orchestrator (required_specialists + suggested_skills),
+# instead of a few panels hand-listing them and the rest going idle. Unmapped
+# panel stages attach no roster (rather than a wrong one).
+_PANEL_STAGE_TO_ROUTING: dict[str, str] = {
+    "start": "flow_entry",
+    "workflow_checkpoint": "flow_entry",
+    "kpi_generation_route": "kpi_definition",
+    "kpi_blocker": "kpi_definition",
+    "kpi_format_confirmation": "kpi_definition",
+    "data_quality_duplicate_review": "artifact_validation",
+    "relationship_blocked": "relationship_review",
+    "source_to_target_blocked": "source_to_target_review",
+    "kpi_analyst_review": "kpi_output_verification",
+    "kpi_analyst_review_blocked": "kpi_output_verification",
+    "complete": "kpi_completion_review",
+    "results": "result_review",
+}
+
+
+def _routing_stage_for_panel(stage: str) -> str:
+    if stage in _PANEL_STAGE_TO_ROUTING:
+        return _PANEL_STAGE_TO_ROUTING[stage]
+    if stage.startswith("kpi_generation"):
+        return "kpi_definition"
+    return stage if stage in STAGE_ROUTING else ""
+
+
+def _attach_stage_routing(panel: dict[str, Any]) -> None:
+    """Attach the stage's full agent + skill roster to the panel so the
+    orchestrator activates the right specialists/skills at every stage — not only
+    the handful of panels that used to hand-list them. Existing panel-specific
+    entries are preserved; the routed roster is merged in (union, de-duplicated).
+    """
+    routing_stage = _routing_stage_for_panel(str(panel.get("stage") or ""))
+    if not routing_stage:
+        return
+    roster = routing_for(routing_stage)
+    if not roster["agents"] and not roster["skills"]:
+        return
+    summary = panel.setdefault("summary", {})
+
+    agents = list(summary.get("required_specialists") or [])
+    for agent in roster["agents"]:
+        if agent not in agents:
+            agents.append(agent)
+    if agents:
+        summary["required_specialists"] = agents
+
+    skills = list(summary.get("suggested_skills") or panel.get("suggested_skills") or [])
+    have = {s.get("name") if isinstance(s, dict) else s for s in skills}
+    for skill in roster["skills"]:
+        if skill not in have:
+            skills.append(skill)
+            have.add(skill)
+    if skills:
+        summary["suggested_skills"] = skills
+
+
+def _kpi_review_signature(completed_kpis: list[dict[str, Any]]) -> str:
+    """Stable fingerprint of the KPI INTENT a review is bound to.
+
+    Keyed on each KPI's definition fields that determine intent — metric, cuts,
+    filters, business question — NOT the generated SQL text. The SQL legitimately
+    evolves across runs (e.g. a CSV reader becomes a delta_scan once the medallion
+    bronze layer materializes) without the intent changing, so binding to SQL
+    would re-gate spuriously. Binding to intent means a recorded kpi-analyst
+    verdict stays valid until the metric/cuts/filters actually change, which is
+    exactly when a re-review is warranted. Workspace-agnostic: hashes only
+    structural definition fields already present on each entry.
+    """
+    def _intent(entry: dict[str, Any]) -> tuple[str, ...]:
+        defn = entry.get("definition") if isinstance(entry.get("definition"), dict) else {}
+
+        def field(key: str) -> str:
+            value = defn.get(key) if defn.get(key) is not None else entry.get(key)
+            return str(value or "")
+
+        return (
+            str(entry.get("kpi_id") or defn.get("kpi_id") or ""),
+            field("metric"),
+            field("cuts"),
+            field("filters"),
+            field("business_question") or field("name"),
+        )
+
+    basis = sorted(_intent(k) for k in (completed_kpis or []))
+    payload = json.dumps(basis, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="workspace-flow")
     parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
     parser.add_argument("--json", action="store_true", help="Print the machine-readable result summary only.")
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="For status --diff: print a compact KPI-readiness summary + artifact paths instead of the full diff JSON.",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     start = sub.add_parser("start")
@@ -1646,6 +2174,18 @@ def main(argv: list[str] | None = None) -> int:
     results = sub.add_parser("results")
     results.add_argument("--session", required=True)
     results.add_argument("--preview-rows", type=int, default=20)
+
+    review_p = sub.add_parser("review")
+    review_p.add_argument("--session", required=True)
+    review_p.add_argument(
+        "--verdict", choices=["ok", "blocked"], required=True,
+        help="kpi-analyst's semantic verdict: ok = every KPI answers its intent; blocked = at least one does not.",
+    )
+    review_p.add_argument("--summary", default="", help="One-line summary of the kpi-analyst review.")
+    review_p.add_argument(
+        "--kpi-notes", default="",
+        help="Optional JSON list of per-KPI judgements, e.g. '[{\"kpi_id\":\"kpi_002\",\"status\":\"ok\",\"note\":\"...\"}]'.",
+    )
 
     artifacts = sub.add_parser("artifacts")
     artifacts.add_argument("--workspace", required=True)
@@ -1763,7 +2303,25 @@ def main(argv: list[str] | None = None) -> int:
             layout = WorkspaceLayout(project_root=(repo_root / args.workspace).resolve())
             diff = compute_workflow_diff(repo_root, args.workspace)
             diff["manifest_paths"] = write_artifact_manifest(layout)
-            print(json.dumps(diff, indent=2))
+            if args.quiet:
+                ready = diff.get("ready_kpi_count", 0)
+                blocked = diff.get("blocked_kpi_count", 0)
+                gaps = diff.get("kpi_gaps") or []
+                print(f"[ok] workflow-diff: {args.workspace} - ready {ready}, blocked {blocked}, gaps {len(gaps)}")
+                for gap in gaps[:20]:
+                    if isinstance(gap, dict):
+                        kpi_id = gap.get("kpi_id", "?")
+                        status = gap.get("status", "")
+                        blockers = gap.get("blockers") or gap.get("missing_features") or []
+                        suffix = f" - {'; '.join(str(b) for b in blockers)}" if blockers else ""
+                        print(f"  [~] {kpi_id}: {status}{suffix}")
+                    else:
+                        print(f"  [~] {gap}")
+                manifest = diff.get("manifest_paths", {})
+                if manifest.get("markdown_path"):
+                    print(f"detail: {manifest['markdown_path']}")
+            else:
+                print(json.dumps(diff, indent=2))
             return 0
         if not args.session:
             raise SystemExit("workspace-flow status requires --session (or use --diff with --workspace)")
@@ -1777,6 +2335,13 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "results":
         result = WorkspaceFlow.from_session(args.repo_root, args.session).results(
             preview_rows=args.preview_rows,
+        )
+    elif args.cmd == "review":
+        per_kpi = json.loads(args.kpi_notes) if args.kpi_notes else []
+        result = WorkspaceFlow.from_session(args.repo_root, args.session).review(
+            verdict=args.verdict,
+            summary=args.summary,
+            per_kpi=per_kpi,
         )
     elif args.cmd == "artifacts":
         repo_root = Path(args.repo_root).resolve()

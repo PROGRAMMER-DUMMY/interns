@@ -223,8 +223,8 @@ STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
     },
     "kpi_definition": {
         "agents": ["business-analyst", "kpi-analyst"],
-        "skills": ["grill-requirements", "clarify-ambiguity", "stakeholder-memory",
-                   "to-solution-brief", "workspace-kpi-query-optimizer"],
+        "skills": ["grill-requirements", "clarify-ambiguity", "kpi-clarification",
+                   "stakeholder-memory", "to-solution-brief", "workspace-kpi-query-optimizer"],
     },
     "data_model_design": {
         "agents": ["data-engineer", "source-to-target-reviewer"],
