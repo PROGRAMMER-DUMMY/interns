@@ -69,6 +69,11 @@
       "path": "skills/kpi-analyst/SKILL.md"
     },
     {
+      "name": "kpi-clarification",
+      "description": "Converts ambiguous or loosely written KPI descriptions into precise, unambiguous business metric definitions. Use this skill whenever a user mentions a KPI, metric, business measure, or indicator that needs to be defined, clarified, structured, or documented \u2014 even if they don't use the word \"KPI\" explicitly. Trigger examples: \"define this metric\", \"what does this KPI mean\", \"help me document our conversion rate\", \"clarify this measure for our BI team\", \"we track X, can you write it up properly\", \"our dashboard shows Y, not sure what it means\", \"turn this into a proper metric definition\". Always use this skill when the user presents any business performance metric, OKR component, or analytics measure that needs structured decomposition.",
+      "path": "skills/kpi-clarification/SKILL.md"
+    },
+    {
       "name": "self-grill",
       "description": "Use BEFORE you commit to a plan, design recommendation, or implementation approach. The skill turns the orchestrating agent into its own interviewer: it generates 3-6 grilling questions tailored to the current proposal, answers each with concrete evidence (file paths, samples, prior decisions), and surfaces any unknown-unknowns it can no longer brush past. Output is a short Self-Grill Audit block that goes into the response BEFORE the final recommendation.",
       "path": "skills/self-grill/SKILL.md"
@@ -870,6 +875,24 @@
         "required_skills": [
           "workspace-governance",
           "domain-model",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
+        "name": "understand-data",
+        "command": "uv run understand-data --workspace <workspace>",
+        "use_when": [
+          "classify a workspace data-quality tier and schema type before KPI/SQL generation",
+          "surface tier-scoped data-processing options from generated profiles",
+          "inspect the BUG-010 data-understanding gate standalone"
+        ],
+        "outputs": [
+          "interns/reports/data_understanding/current.json",
+          "interns/reports/data_understanding/current.md"
+        ],
+        "safety": "local_safe_reads_generated_profiles_only_no_raw_dataset_reads",
+        "required_skills": [
+          "workspace-governance",
           "data-engineering-pipeline-design"
         ]
       },

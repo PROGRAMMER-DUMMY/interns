@@ -338,6 +338,14 @@
       ]
     },
     {
+      "tool": "understand-data",
+      "command": "uv run understand-data --workspace <workspace>",
+      "required_skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design"
+      ]
+    },
+    {
       "tool": "export-data-model-diagram",
       "command": "uv run export-data-model-diagram --workspace <workspace>",
       "required_skills": [
