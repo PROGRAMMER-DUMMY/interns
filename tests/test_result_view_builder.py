@@ -7,7 +7,7 @@ prove the builder is workspace-agnostic.
 """
 from __future__ import annotations
 
-import pytest
+import unittest
 
 from core.onboarding.kpi.result_view_builder import (
     Aggregation,
@@ -344,3 +344,326 @@ def test_workspace_agnostic_no_healthcare_words_in_window_kpi_output():
     )
     for healthcare_word in ("medicare", "patient", "encounter", "payor", "claim"):
         assert healthcare_word not in sql.lower()
+
+
+def _kpi_uc(**kwargs):
+    base = {"name": "", "business_question": "", "metric": "", "cuts": "", "features": []}
+    base.update(kwargs)
+    return base
+
+
+class ShareOfTotalByGroupTests(unittest.TestCase):
+    """A metric phrased '<agg> / <same agg> for <group>' is a share-of-total BY
+    <group>: the numerator is the aggregate WITHIN each group (PARTITION BY
+    <group>) and the denominator is the grand total of the same aggregate
+    (OVER ()), so each row is one group and its percentage of the whole — shares
+    sum to ~100% across groups. The result grain is the group only; the
+    descriptive cuts (e.g. Gender) do NOT subdivide the share.
+
+    (This supersedes the earlier BUG-002 reading, which scoped the denominator
+    to the group and grained by group+cuts, producing within-group composition
+    instead of each group's share of the total.)
+    """
+
+    def test_numerator_per_group_denominator_is_grand_total(self):
+        kpi = _kpi_uc(
+            name="percentage share of lives by department",
+            metric=(
+                "percentage of sum(distinct PatientID) / "
+                "sum(distinct PatientID) for departement"
+            ),
+            cuts="departement, Gender",
+            features=[
+                {"feature": "PatientID", "source_columns": [{"column": "PatientID"}]},
+                {"feature": "departement", "source_columns": [{"column": "departement"}]},
+                {"feature": "Gender", "source_columns": [{"column": "Gender"}]},
+            ],
+        )
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_002",
+            feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
+        )
+        # Numerator is per-group, partitioned by the "for X" column.
+        self.assertIn('PARTITION BY "departement"', sql)
+        # Denominator is the grand total: a bare OVER () window.
+        self.assertIn("OVER ()", sql)
+        self.assertIn("percentage_share", sql)
+        self.assertIn("NULLIF", sql)
+
+        # Structurally: exactly one windowed agg partitions by the group, and
+        # exactly one is the global grand total (empty window).
+        parsed = parse_kpi(kpi)
+        windowed = [a for a in parsed.aggregations if a.window is not None]
+        self.assertTrue(windowed)
+        self.assertTrue(
+            any(a.window.partition_by == ('"departement"',) for a in windowed),
+            "numerator must PARTITION BY the group column",
+        )
+        self.assertTrue(
+            any(a.window.partition_by == () for a in windowed),
+            "denominator must be the grand total (no partition)",
+        )
+
+        # Grain is the group only — the Gender cut does not subdivide the share.
+        self.assertEqual(
+            [d.alias for d in parsed.dimensions], ["departement"],
+            "result grain must be the group column only, not group + cuts",
+        )
+
+    def test_no_for_group_keeps_global_percent_of_total(self):
+        # Without a "for <group>", the existing global percent-of-total path
+        # (OVER ()) must be preserved.
+        kpi = _kpi_uc(
+            name="Percentage of total revenue by channel",
+            metric="sum(total_amount)",
+            cuts="channel",
+        )
+        sql = build_result_view_sql(
+            kpi, kpi_id="k", feature_view='"f"', result_view='"r"',
+        )
+        self.assertIn("OVER ()", sql)
+        self.assertIn("percent_of_total", sql)
+
+
+class WindowedOnlyDedupRegressionTests(unittest.TestCase):
+    """BUG-012: a mismatched-grain percentage KPI parses into a window-only plan
+    (every aggregation carries an OVER clause, no plain aggregations), so the
+    builder emits no GROUP BY. Without deduping, the view returns one row per
+    source record (~10k duplicate grain rows). Windowed-only mode must emit
+    SELECT DISTINCT to collapse to one row per grain. The plain GROUP BY path
+    must NOT gain DISTINCT.
+    """
+
+    def _windowed_only_kpi(self):
+        return _kpi_uc(
+            name="percentage share of lives by department",
+            metric=(
+                "percentage of sum(distinct PatientID) / "
+                "sum(distinct PatientID) for departement"
+            ),
+            cuts="departement, Gender",
+            features=[
+                {"feature": "PatientID", "source_columns": [{"column": "PatientID"}]},
+                {"feature": "departement", "source_columns": [{"column": "departement"}]},
+                {"feature": "Gender", "source_columns": [{"column": "Gender"}]},
+            ],
+        )
+
+    def test_windowed_only_kpi_emits_select_distinct_for_duckdb(self):
+        kpi = self._windowed_only_kpi()
+        # Confirm this really is a windowed-only plan (precondition for the fix).
+        parsed = parse_kpi(kpi)
+        self.assertTrue(any(a.window is not None for a in parsed.aggregations))
+        self.assertFalse([a for a in parsed.aggregations if a.window is None])
+
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_002",
+            feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
+            dialect="duckdb",
+        )
+        self.assertIn("SELECT DISTINCT", sql)
+        # Window math preserved.
+        self.assertIn("percentage_share", sql)
+        self.assertIn('PARTITION BY "departement"', sql)
+        # Windowed-only mode still emits no GROUP BY.
+        self.assertNotIn("GROUP BY", sql)
+
+    def test_windowed_only_kpi_emits_select_distinct_for_databricks(self):
+        sql = build_result_view_sql(
+            self._windowed_only_kpi(), kpi_id="kpi_002",
+            feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
+            dialect="databricks",
+        )
+        self.assertIn("SELECT DISTINCT", sql)
+        self.assertIn("percentage_share", sql)
+
+    def test_plain_group_by_kpi_does_not_get_distinct(self):
+        # Guard against regressing the normal aggregating path: a plain GROUP BY
+        # KPI already collapses to one row per grain and must NOT gain DISTINCT.
+        kpi = _kpi_uc(metric="sum(total_amount)", cuts="month (order_date), channel")
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_001",
+            feature_view='"kpi_001_features"', result_view='"kpi_001_results"',
+        )
+        self.assertNotIn("SELECT DISTINCT", sql)
+        self.assertIn("GROUP BY", sql)
+
+
+class AgeAsOfEventDateRegressionTests(unittest.TestCase):
+    """BUG-005: age date arithmetic must be measured as-of the event/service
+    date when the KPI exposes one, falling back to CURRENT_DATE when absent."""
+
+    def test_age_uses_event_date_when_time_grain_present(self):
+        kpi = _kpi_uc(
+            name="amount paid trend for patients above 50",
+            metric="sum(PaidAmount)",
+            cuts="Month (ServiceDate), LineOfBusiness, Age(DOB)",
+            features=[
+                {"feature": "PaidAmount", "source_columns": [{"column": "PaidAmount"}]},
+                {"feature": "ServiceDate", "source_columns": [{"column": "ServiceDate"}]},
+                {"feature": "DOB", "source_columns": [{"column": "DOB"}]},
+                {"feature": "LineOfBusiness",
+                 "source_columns": [{"column": "LineOfBusiness"}]},
+            ],
+        )
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_001",
+            feature_view='"kpi_001_features"', result_view='"kpi_001_results"',
+        )
+        # Age is computed relative to the event date, not today.
+        self.assertIn(
+            "date_diff('year', CAST(\"DOB\" AS DATE), CAST(\"ServiceDate\" AS DATE))",
+            sql,
+        )
+        self.assertNotIn(
+            "date_diff('year', CAST(\"DOB\" AS DATE), CURRENT_DATE)", sql,
+        )
+
+    def test_age_falls_back_to_current_date_without_event_date(self):
+        # No time-grain source column => no event date => CURRENT_DATE (legacy).
+        kpi = _kpi_uc(
+            metric="count(distinct customer_id)",
+            cuts="age (date_of_birth)",
+        )
+        sql = build_result_view_sql(
+            kpi, kpi_id="k", feature_view='"f"', result_view='"r"',
+        )
+        self.assertIn(
+            "date_diff('year', CAST(\"date_of_birth\" AS DATE), CURRENT_DATE)", sql,
+        )
+
+    def test_days_since_also_uses_event_date_when_present(self):
+        kpi = _kpi_uc(
+            metric="count(*)",
+            cuts="Month (event_date), days since signup_date",
+            features=[
+                {"feature": "event_date", "source_columns": [{"column": "event_date"}]},
+                {"feature": "signup_date", "source_columns": [{"column": "signup_date"}]},
+            ],
+        )
+        sql = build_result_view_sql(
+            kpi, kpi_id="k", feature_view='"f"', result_view='"r"',
+        )
+        self.assertIn(
+            "date_diff('day', CAST(\"signup_date\" AS DATE), "
+            "CAST(\"event_date\" AS DATE))",
+            sql,
+        )
+
+
+class ForGroupTokenResolvesToRealColumnTests(unittest.TestCase):
+    """BUG-011: the "for <group>" partition token must resolve to a column the
+    features view actually emits, even when the group word does NOT match any
+    feature label exactly (e.g. a misspelled/aliased dimension whose redundant
+    feature was dropped by the BUG-001 feature-dedup). A PARTITION BY on a
+    phantom token makes the generated SQL non-executable.
+    """
+
+    def _emitted_columns(self, kpi):
+        # The features view emits one column per feature (its resolved column).
+        cols = set()
+        for f in kpi["features"]:
+            srcs = f.get("source_columns") or []
+            cols.add(srcs[0]["column"] if srcs else (f.get("feature") or f.get("name")))
+        return cols
+
+    def _partition_cols(self, parsed):
+        out = set()
+        for agg in parsed.aggregations:
+            if agg.window is not None:
+                for term in agg.window.partition_by:
+                    out.add(term)
+        return out
+
+    def test_group_word_aliased_dimension_resolves_to_emitted_physical_column(self):
+        # Real KPI_002 shape AFTER BUG-001 dropped the redundant `departement`
+        # feature: the surviving department dimension is `departments.Name`,
+        # emitted as the column "Name". The cut "Department Name" resolves to
+        # "Name"; the group token "departement" (a misspelling of the dataset
+        # `departments`) must ALSO resolve to "Name", never to a phantom
+        # "departement" column.
+        ds = "/data/warehouse/departments.csv"
+        kpi = _kpi_uc(
+            name="percentage share of lives by department",
+            metric=(
+                "percentage of sum(distinct PatientID) / "
+                "sum(disitnct PatientID) for departement"
+            ),
+            cuts="Department Name, VisitType, Gender",
+            features=[
+                {"feature": "PatientID",
+                 "source_columns": [{"dataset": "/data/warehouse/transactions.csv",
+                                     "column": "PatientID"}]},
+                {"feature": "Name",
+                 "source_columns": [{"dataset": ds, "column": "Name"}]},
+                {"feature": "VisitType",
+                 "source_columns": [{"dataset": "/data/warehouse/transactions.csv",
+                                     "column": "VisitType"}]},
+                {"feature": "Gender",
+                 "source_columns": [{"dataset": "/data/warehouse/patients.csv",
+                                     "column": "Gender"}]},
+            ],
+        )
+        parsed = parse_kpi(kpi)
+        emitted = self._emitted_columns(kpi)
+
+        # The phantom token must NEVER appear in any partition.
+        partitions = self._partition_cols(parsed)
+        self.assertNotIn('"departement"', partitions)
+
+        # Every partition term that is a bare quoted column must reference a
+        # column the feature set actually emits.
+        for term in partitions:
+            bare = term.strip().strip('"')
+            if "(" in term:  # an expression (e.g. date_trunc) — not a bare column
+                continue
+            self.assertIn(
+                bare, emitted,
+                f"partition references {bare!r} which is absent from the feature set",
+            )
+
+        # The per-group numerator must partition by the REAL department column
+        # ("Name"), never the phantom "departement" token.
+        windowed = [a for a in parsed.aggregations if a.window is not None]
+        self.assertTrue(
+            any(a.window.partition_by == ('"Name"',) for a in windowed),
+            "numerator must PARTITION BY the resolved physical department column",
+        )
+
+    def test_unresolvable_group_token_does_not_emit_phantom_partition(self):
+        # A group word that matches NOTHING (no feature label, no dataset stem)
+        # must not produce a PARTITION BY on a non-existent column; the builder
+        # degrades to an executable global-total denominator instead.
+        kpi = _kpi_uc(
+            name="percentage share",
+            metric=(
+                "percentage of sum(distinct user_id) / "
+                "sum(distinct user_id) for zzqqxx"
+            ),
+            cuts="channel",
+            features=[
+                {"feature": "user_id",
+                 "source_columns": [{"dataset": "/d/events.csv", "column": "user_id"}]},
+                {"feature": "channel",
+                 "source_columns": [{"dataset": "/d/events.csv", "column": "channel"}]},
+            ],
+        )
+        parsed = parse_kpi(kpi)
+        emitted = self._emitted_columns(kpi)
+        for term in self._partition_cols(parsed):
+            bare = term.strip().strip('"')
+            if "(" in term:
+                continue
+            self.assertIn(bare, emitted)
+        self.assertNotIn('"zzqqxx"', self._partition_cols(parsed))
+
+        # Still executable + still a percentage share.
+        sql = build_result_view_sql(
+            kpi, kpi_id="k", feature_view='"f"', result_view='"r"',
+        )
+        self.assertNotIn('"zzqqxx"', sql)
+        self.assertIn("percentage_share", sql)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -180,6 +180,67 @@ class KPIExecutionHarnessTests(unittest.TestCase):
                 any("sum(PaidAmount)" in error for error in result.records[0].errors)
             )
 
+    def test_harness_accepts_sum_distinct_metric_implemented_as_count_distinct(self):
+        # A sum(distinct X) metric is a distinct count; the builder renders it as
+        # COUNT(DISTINCT X). The semantic gate must accept that faithful
+        # rendering rather than demanding a literal SUM(. (Also tolerates the
+        # `disitnct` misspelling that appears in the source workbook.)
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            solutions = workspace / "interns" / "generated" / "solutions"
+            contracts = workspace / "interns" / "generated" / "contracts"
+            solutions.mkdir(parents=True)
+            contracts.mkdir(parents=True)
+            (contracts / "kpi_registry.json").write_text(
+                json.dumps(
+                    {
+                        "kpis": [
+                            {
+                                "name": "percentage share of lives by department",
+                                "cuts": "Department Name",
+                                "metric": (
+                                    "percentage of sum(distinct PatientID) / "
+                                    "sum(disitnct PatientID) for departement"
+                                ),
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (solutions / "kpi_001.sql").write_text(
+                "\n".join(
+                    [
+                        'CREATE OR REPLACE VIEW "kpi_001_results" AS',
+                        "SELECT DISTINCT name,",
+                        '  COUNT(DISTINCT "PatientID") OVER (PARTITION BY name) AS per_dept,',
+                        '  COUNT(DISTINCT "PatientID") OVER () AS total',
+                        "FROM (VALUES ('A', 1), ('A', 2), ('B', 3))"
+                        ' AS t(name, "PatientID");',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = KPIExecutionHarness(root, "workspaces/demo").run()
+
+            # The metric-implementation gate must NOT reject the COUNT(DISTINCT)
+            # rendering of sum(distinct PatientID).
+            self.assertFalse(
+                any(
+                    "does not implement workbook metric" in error
+                    for error in result.records[0].errors
+                ),
+                result.records[0].errors,
+            )
+            self.assertEqual(result.records[0].status, "passed", result.records[0].errors)
+
     def test_validator_rejects_generated_sql_without_result_view(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

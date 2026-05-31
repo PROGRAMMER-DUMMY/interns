@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Any
 
 
@@ -203,6 +204,121 @@ def _resolve_column(name: str, lookup: dict[str, str]) -> str:
     return best[1] if best else name
 
 
+def _norm(text: str) -> str:
+    """Lowercase, strip everything but alphanumerics."""
+    return re.sub(r"[^a-z0-9]+", "", str(text).lower())
+
+
+def _emitted_columns(lookup: dict[str, str]) -> set[str]:
+    """The set of physical columns the features view actually emits."""
+    return {col for col in lookup.values() if col}
+
+
+def _dataset_token_index(kpi: dict[str, Any]) -> list[tuple[str, str]]:
+    """Map each feature's source-dataset stem to the column it resolves to.
+
+    A group token (e.g. ``departement``) often names the *dimension table* the
+    column lives in (``departments.csv`` → ``Name``) rather than the column
+    itself. This index lets us recover the emitted column from the dataset name
+    when no feature label matches the token. Workspace-agnostic: it reads only
+    the dataset path stem already present in ``source_columns``.
+    """
+    index: list[tuple[str, str]] = []
+    for feature in kpi.get("features") or []:
+        if not isinstance(feature, dict):
+            continue
+        for source in feature.get("source_columns") or []:
+            if not isinstance(source, dict):
+                continue
+            column = str(source.get("column") or "")
+            dataset = str(source.get("dataset") or "")
+            if not column or not dataset:
+                continue
+            stem = re.split(r"[\\/]", dataset)[-1]
+            stem = re.sub(r"\.[A-Za-z0-9]+$", "", stem)  # drop extension
+            if stem:
+                index.append((stem, column))
+    return index
+
+
+def _fuzzy_ratio(a: str, b: str) -> float:
+    if not a or not b:
+        return 0.0
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _resolve_group_column(
+    token: str,
+    lookup: dict[str, str],
+    kpi: dict[str, Any],
+    fallback_columns: tuple[str, ...] = (),
+) -> str:
+    """Resolve a "for <group>" partition token to a real emitted column.
+
+    Unlike a plain cut, a phantom partition column makes the generated SQL
+    non-executable (BUG-011), so this never returns an unresolved token.
+    Resolution order:
+      1. ``_resolve_column`` (exact / normalized / word-subset on feature labels)
+         — accepted only if it lands on a column the features view emits.
+      2. Fuzzy match of the token against feature labels and against source
+         dataset stems (e.g. ``departement`` ~ ``departments`` → ``Name``);
+         the closest emitted column above a similarity threshold wins. This
+         absorbs misspellings/aliases of a dimension whose redundant feature was
+         dropped (BUG-001).
+      3. Fall back to the closest already-built cut dimension column.
+      4. Empty string — caller must then drop the per-group denominator rather
+         than emit a PARTITION BY on a column that does not exist.
+    """
+    emitted = _emitted_columns(lookup)
+
+    direct = _resolve_column(token, lookup)
+    if direct in emitted:
+        return direct
+
+    token_norm = _norm(token)
+    if not token_norm:
+        return ""
+
+    candidates: list[tuple[float, str]] = []
+    # Feature labels → emitted column.
+    for label, column in lookup.items():
+        if column not in emitted:
+            continue
+        score = _fuzzy_ratio(token_norm, _norm(label))
+        candidates.append((score, column))
+    # Source dataset stems → emitted column (handles dimension-table aliases).
+    for stem, column in _dataset_token_index(kpi):
+        if column not in emitted:
+            continue
+        stem_norm = _norm(stem)
+        score = _fuzzy_ratio(token_norm, stem_norm)
+        # A containment relationship (departement in departments or vice-versa)
+        # is a strong signal even when the edit ratio is middling.
+        if token_norm in stem_norm or stem_norm in token_norm:
+            score = max(score, 0.9)
+        candidates.append((score, column))
+
+    if candidates:
+        score, column = max(candidates, key=lambda c: c[0])
+        if score >= 0.6:
+            return column
+
+    # Last resort: reuse the closest existing cut dimension's underlying column
+    # so the denominator still partitions by a real emitted column rather than a
+    # phantom token.
+    best_dim: tuple[float, str] | None = None
+    for bare in fallback_columns:
+        if bare not in emitted:
+            continue
+        score = _fuzzy_ratio(token_norm, _norm(bare))
+        if best_dim is None or score > best_dim[0]:
+            best_dim = (score, bare)
+    if best_dim and best_dim[0] >= 0.6:
+        return best_dim[1]
+
+    return ""
+
+
 def _detect_time_bucket(token: str) -> tuple[str, str, str] | None:
     """Return (bucket_unit, source_column, alias) when token is a time bucket hint.
 
@@ -310,9 +426,42 @@ def _detect_window_intent(metric_text: str, name_text: str) -> dict[str, Any]:
     return {}
 
 
-def _detect_date_arithmetic(cuts_text: str, lookup: dict[str, str]) -> list[tuple[str, str]]:
+def _detect_event_date_column(cuts_text: str, lookup: dict[str, str]) -> str:
+    """Discover the KPI's event/service date column, generically.
+
+    The event date is the column the KPI uses as its time grain — i.e. the
+    source column of a time-bucket cut such as ``Month (ServiceDate)`` /
+    ``Year(order_date)``. Returns the resolved physical column name, or an
+    empty string if the KPI has no explicit time-grain source.
+
+    This is the reference date for as-of-event age arithmetic (BUG-005): a
+    row's age must be computed as of when the event happened, not as of today.
+    Detection is purely structural (the time-bucket's source column) so it
+    carries no domain vocabulary.
+    """
+    for token in _split_cuts(cuts_text):
+        bucket = _detect_time_bucket(token)
+        if not bucket:
+            continue
+        _unit, source, _alias = bucket
+        if source:
+            return _resolve_column(source, lookup)
+    return ""
+
+
+def _detect_date_arithmetic(
+    cuts_text: str,
+    lookup: dict[str, str],
+    as_of_expr: str = "CURRENT_DATE",
+) -> list[tuple[str, str]]:
     """Detect age/date-arithmetic expressions in cuts text. Returns
     [(sql_expression, alias), ...] to add to SELECT.
+
+    ``as_of_expr`` is the reference point the arithmetic is measured against.
+    For a historical/trend KPI the caller passes the event-date expression
+    (e.g. ``CAST("ServiceDate" AS DATE)``) so age is computed as-of the event,
+    not as-of today (BUG-005). Defaults to ``CURRENT_DATE`` when the KPI has no
+    event date available, preserving the original behavior.
     """
     out: list[tuple[str, str]] = []
     for match in _AGE_PATTERN.finditer(cuts_text):
@@ -322,7 +471,7 @@ def _detect_date_arithmetic(cuts_text: str, lookup: dict[str, str]) -> list[tupl
         col = _resolve_column(source, lookup)
         out.append(
             (
-                f"date_diff('year', CAST({_quote(col)} AS DATE), CURRENT_DATE)",
+                f"date_diff('year', CAST({_quote(col)} AS DATE), {as_of_expr})",
                 "age",
             )
         )
@@ -331,7 +480,7 @@ def _detect_date_arithmetic(cuts_text: str, lookup: dict[str, str]) -> list[tupl
         col = _resolve_column(source, lookup)
         out.append(
             (
-                f"date_diff('day', CAST({_quote(col)} AS DATE), CURRENT_DATE)",
+                f"date_diff('day', CAST({_quote(col)} AS DATE), {as_of_expr})",
                 f"days_since_{_norm_alias(col)}",
             )
         )
@@ -360,59 +509,100 @@ def parse_kpi(kpi: dict[str, Any]) -> ParsedKPI:
     lookup = _column_lookup(kpi)
     window_intent = _detect_window_intent(metric_text, name_text)
 
-    # Mismatched-grain percentage is now handled via window functions
-    # (PARTITION BY the "for X" group, divide by total over all rows).
+    # BUG-005: age (and other date arithmetic) must be measured as-of the
+    # event/service date when the KPI has one, not as-of today. The event date
+    # is the KPI's time-grain source column (e.g. Month(ServiceDate)); when none
+    # exists we fall back to CURRENT_DATE.
+    event_date_col = _detect_event_date_column(cuts_text, lookup)
+    as_of_expr = (
+        f"CAST({_quote(event_date_col)} AS DATE)" if event_date_col else "CURRENT_DATE"
+    )
+
+    # Mismatched-grain percentage is handled via window functions.
+    # The metric reads "<agg> / <same agg> for <group>": a share-of-total by
+    # <group>. The numerator is the aggregate within each group and the
+    # denominator is the grand total of the same aggregate, so each row is one
+    # group and its percentage of the whole (e.g. a department's distinct lives
+    # as a fraction of all distinct lives). Shares sum to ~100% across groups.
     if window_intent.get("kind") == "mismatched_grain_percentage":
         partition = window_intent.get("partition", "")
-        partition_col = _resolve_column(partition, lookup) if partition else ""
         inner = _AGG_FN_PATTERN.search(metric_text)
-        if inner and partition_col:
+        if inner:
             fn = inner.group(1).lower()
             distinct = bool(inner.group(2))
             column = _resolve_column(inner.group(3).strip(), lookup)
-            partition_agg = Aggregation(
-                fn=fn, column=column, alias=_norm_alias(f"{fn}_{column}_per_{partition_col}"),
-                distinct=distinct,
-                window=WindowSpec(partition_by=(_quote(partition_col),)),
-            )
-            total_agg = Aggregation(
-                fn=fn, column=column, alias=_norm_alias(f"total_{fn}_{column}"),
-                distinct=distinct,
-                window=WindowSpec(),
-            )
-            parsed.aggregations.extend([partition_agg, total_agg])
-            parsed.extra_select_exprs.append(
-                (
-                    f"CAST({partition_agg.alias} AS DOUBLE) / NULLIF({total_agg.alias}, 0) * 100",
-                    "percentage_share",
-                )
-            )
-            # Also produce dimensions from cuts so the result is per-grain.
+
+            # "percentage of <agg> / <same agg> for <group>" is a share-of-total
+            # BY <group>: each group's aggregate as a fraction of the grand total.
+            # Numerator and denominator are the SAME aggregation; only the
+            # partition scope differs (per-group numerator over grand-total
+            # denominator). The result grain is therefore the <group> itself —
+            # the descriptive cuts (e.g. gender/age/visit type) do NOT subdivide
+            # the share, so each row is one group and its percentage of the whole
+            # (shares sum to ~100% across groups).
+            #
+            # The other cuts still feed group resolution as a graceful fallback
+            # target, but are never emitted as grain dimensions in this shape.
+            cut_columns: list[str] = []
             for token in _split_cuts(cuts_text):
-                bucket = _detect_time_bucket(token)
-                if bucket:
-                    unit, source, alias = bucket
-                    source_col = _resolve_column(source or alias, lookup) or alias
-                    parsed.dimensions.append(
-                        Dimension(
-                            expression=f"date_trunc('{unit}', CAST({_quote(source_col)} AS DATE))",
-                            alias=_norm_alias(alias),
-                        )
-                    )
+                if _detect_time_bucket(token):
                     continue
-                date_exprs = _detect_date_arithmetic(token, lookup)
-                if date_exprs:
-                    for expr, alias in date_exprs:
-                        parsed.dimensions.append(Dimension(expression=expr, alias=alias))
+                if _AGE_PATTERN.search(token) or _DAYS_SINCE_PATTERN.search(token):
                     continue
                 clean = re.sub(r"\(.*?\)", "", token).strip()
                 if clean:
-                    col = _resolve_column(clean, lookup)
-                    parsed.dimensions.append(
-                        Dimension(expression=_quote(col), alias=_norm_alias(col))
-                    )
-            # Window-function aggregations don't GROUP BY; they OVER.
-            # But dimensions still need to appear in SELECT.
+                    cut_columns.append(_resolve_column(clean, lookup))
+
+            # Resolve the "for <group>" token to a REAL emitted column. A raw
+            # token (e.g. a misspelled/aliased dimension whose redundant feature
+            # was dropped by BUG-001) must never reach PARTITION BY, or the view
+            # is non-executable (BUG-011). Cut columns are the graceful fallback.
+            partition_col = _resolve_group_column(
+                partition, lookup, kpi, tuple(cut_columns)
+            ) if partition else ""
+
+            # Grain = the resolved group column. If the named group did not
+            # resolve to a real emitted column (e.g. a misspelled/aliased token),
+            # gracefully fall back to the emitted cut columns as the grain so the
+            # share is still meaningful and the view stays executable (BUG-011),
+            # rather than emitting a PARTITION BY on a phantom column.
+            emitted = _emitted_columns(lookup)
+            if partition_col:
+                grain_cols = [partition_col]
+            else:
+                grain_cols = [c for c in cut_columns if c in emitted]
+            grain_terms = tuple(_quote(c) for c in grain_cols)
+            for c in grain_cols:
+                parsed.dimensions.append(
+                    Dimension(expression=_quote(c), alias=_norm_alias(c))
+                )
+
+            group_label = partition_col or (grain_cols[0] if grain_cols else "group")
+            # Numerator = the group's own aggregate (PARTITION BY the grain).
+            group_agg = Aggregation(
+                fn=fn, column=column,
+                alias=_norm_alias(f"{fn}_{column}_per_{group_label}"),
+                distinct=distinct,
+                window=WindowSpec(partition_by=grain_terms),
+            )
+            # Denominator = the grand total of the same aggregate (no partition).
+            # Each share is therefore the group's fraction of the whole.
+            total_agg = Aggregation(
+                fn=fn, column=column,
+                alias=_norm_alias(f"{fn}_{column}_total"),
+                distinct=distinct,
+                window=WindowSpec(),
+            )
+            parsed.aggregations.extend([group_agg, total_agg])
+            parsed.extra_select_exprs.append(
+                (
+                    f"CAST({group_agg.alias} AS DOUBLE) / NULLIF({total_agg.alias}, 0) * 100",
+                    "percentage_share",
+                )
+            )
+            # Window aggregations don't GROUP BY; they OVER. Dimensions still
+            # appear in SELECT, deduped to one row per group via SELECT DISTINCT
+            # (BUG-012).
             return parsed
 
     if "/" in metric_text and any(
@@ -593,7 +783,7 @@ def parse_kpi(kpi: dict[str, Any]) -> ParsedKPI:
 
     # Date arithmetic (age, days-since) — must run BEFORE prose filter detection
     # so the date_diff dimension exists when we look for it.
-    for expr, alias in _detect_date_arithmetic(cuts_text + " " + name_text, lookup):
+    for expr, alias in _detect_date_arithmetic(cuts_text + " " + name_text, lookup, as_of_expr):
         parsed.extra_select_exprs.append((expr, alias))
         parsed.dimensions.append(Dimension(expression=expr, alias=alias))
 
@@ -756,9 +946,15 @@ def build_result_view_sql(
 
     limit_clause = f"LIMIT {parsed.limit}" if parsed.limit and plain_aggs else ""
 
+    # In windowed-only mode there is no GROUP BY, so the projection returns one
+    # row per source record (every row at the same grain carries identical
+    # window values). Dedupe to one row per grain with SELECT DISTINCT. Valid in
+    # both duckdb and databricks; safe because windowed-only mode has no
+    # ORDER BY/LIMIT and every same-grain row is byte-identical. [ok]
+    select_keyword = "SELECT DISTINCT" if windowed_only else "SELECT"
     lines = [
         f"CREATE OR REPLACE VIEW {result_view} AS",
-        "SELECT",
+        select_keyword,
         "  " + ",\n  ".join(select_terms),
         f"FROM {feature_view}",
     ]

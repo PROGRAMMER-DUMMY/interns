@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.onboarding.kpi.result_view_builder import parse_kpi
 from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -226,7 +227,21 @@ class KPIExecutionHarness:
         lowered_sql = sql.lower()
         lowered_metric = metric.lower()
         if "sum(" in lowered_metric:
-            if "sum(" not in lowered_sql:
+            # An aggregation over DISTINCT values is rendered by the generator as
+            # COUNT(DISTINCT ...) (summing distinct values is meaningless), so a
+            # metric's sum(distinct X) legitimately appears as COUNT(DISTINCT X)
+            # in the SQL. Ask the SAME canonical parser the generator uses whether
+            # the metric is a distinct aggregation, rather than re-scanning the
+            # raw metric text here. This keeps the gate consistent with the
+            # generator for every workspace and inherits its metric-token handling
+            # (no metric-spelling rules duplicated in the verifier).
+            expects_distinct_count = any(
+                agg.distinct for agg in parse_kpi(kpi).aggregations
+            )
+            implements_sum = "sum(" in lowered_sql or (
+                expects_distinct_count and "count(distinct" in lowered_sql
+            )
+            if not implements_sum:
                 errors.append(f"SQL does not implement workbook metric `{metric}`")
             for column in _metric_input_columns(metric):
                 if column.lower() not in lowered_sql:
@@ -353,10 +368,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", required=True, help="Workspace path, for example workspaces/demo")
     parser.add_argument("--repo-root", default=".", help="Repository root. Defaults to current directory.")
     parser.add_argument("--sample-limit", type=int, default=20, help="Rows to show per KPI result sample.")
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Print a compact per-KPI status summary + report path instead of the full JSON.",
+    )
     args = parser.parse_args(argv)
 
     result = KPIExecutionHarness(args.repo_root, args.workspace, sample_limit=args.sample_limit).run()
-    print(json.dumps(result.summary(), indent=2))
+    if args.quiet:
+        status = "[ok] passed" if result.ok else "[x] failed"
+        print(f"{status} kpi-execution: {result.workspace} ({len(result.records)} KPI SQL files)")
+        for record in result.records:
+            marker = "[ok]" if record.status in {"ok", "passed"} else "[x]"
+            rows = "" if record.row_count is None else f" - {record.row_count} rows"
+            print(f"  {marker} {record.kpi_id}: {record.status}{rows}")
+            for error in record.errors:
+                print(f"      [x] {error}")
+        report_path = _rel(Path(args.repo_root).resolve() / args.workspace / "interns/reports/kpi_execution_harness.md", Path(args.repo_root).resolve())
+        print(f"detail: {report_path}")
+    else:
+        print(json.dumps(result.summary(), indent=2))
     return 0 if result.ok else 1
 
 
