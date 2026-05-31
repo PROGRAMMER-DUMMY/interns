@@ -335,6 +335,7 @@ class KPIFeatureResolver:
                 "candidates": [],
                 "question": f"What source, formula, or accepted rule should define `{token}` for this KPI?",
             })
+        features = _dedupe_features_by_physical_column(features)
         blocked = [feature for feature in features if feature.get("state") not in READY_STATES]
         return {
             "kpi_id": f"kpi_{idx:03d}",
@@ -445,6 +446,179 @@ class KPIFeatureResolver:
             except OSError:
                 continue
         return rows
+
+
+def _column_pair(source: dict[str, Any]) -> tuple[str, str] | None:
+    """Normalized ``(dataset, column)`` identity for one source-column entry.
+
+    The dataset basename is used (not the full path) so the same physical
+    column matches whether one feature recorded an absolute path and another a
+    repo-relative one. Returns ``None`` when no column is present.
+    """
+    column = normalize_blocker(str(source.get("column") or ""))
+    if not column:
+        return None
+    raw_dataset = str(source.get("dataset") or source.get("source") or "")
+    dataset = normalize_blocker(Path(raw_dataset).name or raw_dataset)
+    return (dataset, column)
+
+
+def _physical_column_key(feature: dict[str, Any]) -> frozenset[tuple[str, str]]:
+    """Identity of the physical column(s) a feature resolves to.
+
+    Keyed on normalized (dataset, column) pairs so the dedup is workspace
+    agnostic — it never inspects feature names, only the resolved physical
+    columns. Features that resolved to no physical column (e.g.
+    ``blocked_missing_evidence``) return an empty key and are never collapsed.
+    """
+    key: set[tuple[str, str]] = set()
+    for source in feature.get("source_columns") or []:
+        pair = _column_pair(source)
+        if pair:
+            key.add(pair)
+    return frozenset(key)
+
+
+def _resolved_physical_columns(feature: dict[str, Any]) -> set[tuple[str, str]]:
+    """Physical columns a PROVEN feature resolves to.
+
+    A proven feature's ``source_columns`` are its resolved columns, so every
+    entry counts. Used as the set a candidate sibling must match to be
+    considered already-covered.
+    """
+    columns: set[tuple[str, str]] = set()
+    for source in feature.get("source_columns") or []:
+        pair = _column_pair(source)
+        if pair:
+            columns.add(pair)
+    return columns
+
+
+def _candidate_physical_column(feature: dict[str, Any]) -> tuple[str, str] | None:
+    """Top-ranked CANDIDATE physical column for an UNRESOLVED feature.
+
+    An unresolved contextual/alias feature does not have a single resolved
+    column; instead it carries one or more ranked candidate columns. The
+    target it would resolve to is the highest-ranked candidate — index 0 of
+    ``candidates`` (preferred) or, failing that, ``source_columns``, both of
+    which preserve descending-score order. Returns ``None`` when no candidate
+    column is present.
+    """
+    for entry in feature.get("candidates") or []:
+        pair = _column_pair(entry)
+        if pair:
+            return pair
+    for entry in feature.get("source_columns") or []:
+        pair = _column_pair(entry)
+        if pair:
+            return pair
+    return None
+
+
+def _dedupe_features_by_physical_column(
+    features: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse features of one KPI that resolve to the SAME physical column.
+
+    When a misspelling/cut-label/column-word are all extracted as separate
+    features but resolve to the same physical ``dataset.column``, keep a single
+    feature. If any sibling in the group is already proven (a ``READY_STATES``
+    member), the canonical survivor is that proven feature, so a duplicate that
+    only reached ``candidate_unconfirmed`` no longer raises a phantom blocker —
+    it inherits the proven resolution. The earliest feature in spec order wins
+    ties, preserving the canonical name the registry expects downstream.
+
+    Features without a resolved physical column are passed through untouched so
+    legitimately distinct (or still-unresolved) features are never merged.
+
+    A second pass handles unresolved features (e.g. ``candidate_unconfirmed``)
+    that carry a *ranked candidate* column rather than a resolved one: if such a
+    feature's top-ranked candidate column equals a proven sibling's resolved
+    column, the candidate is a phantom blocker for an already-proven column and
+    is dropped. Its remaining lower-ranked candidates are ignored — the proven
+    sibling already covers the column it would have resolved to.
+    """
+    groups: dict[frozenset[tuple[str, str]], list[int]] = {}
+    for position, feature in enumerate(features):
+        key = _physical_column_key(feature)
+        if not key:
+            continue
+        groups.setdefault(key, []).append(position)
+
+    drop: set[int] = set()
+    for key, positions in groups.items():
+        if len(positions) < 2:
+            continue
+        # A proven sibling wins over an unconfirmed one — the unconfirmed
+        # duplicate (a misspelling/cut-label artifact) inherits that proof
+        # instead of raising a phantom blocker.
+        proven = [pos for pos in positions if features[pos].get("state") in READY_STATES]
+        candidates = proven or positions
+        survivor = _canonical_survivor(features, candidates)
+        for pos in positions:
+            if pos != survivor:
+                drop.add(pos)
+
+    # Columns already proven by some sibling in this KPI. An unresolved
+    # feature whose top-ranked candidate column is in this set is redundant.
+    proven_columns: set[tuple[str, str]] = set()
+    for position, feature in enumerate(features):
+        if position in drop:
+            continue
+        if feature.get("state") in READY_STATES:
+            proven_columns.update(_resolved_physical_columns(feature))
+
+    if proven_columns:
+        for position, feature in enumerate(features):
+            if position in drop:
+                continue
+            if feature.get("state") in READY_STATES:
+                continue
+            candidate_column = _candidate_physical_column(feature)
+            if candidate_column is not None and candidate_column in proven_columns:
+                drop.add(position)
+
+    return [feature for position, feature in enumerate(features) if position not in drop]
+
+
+def _canonical_survivor(
+    features: list[dict[str, Any]],
+    candidates: list[int],
+) -> int:
+    """Pick which feature name survives a same-physical-column collapse.
+
+    Workspace-agnostic preference, in order:
+
+    1. A feature whose normalized name is a word of the resolved column name
+       (the dimension's own column word, e.g. ``Name`` for ``departments.Name``
+       or ``cost`` for ``BASE_COST``) — and among those, the one matching the
+       column's trailing/head word, which is the canonical noun.
+    2. Otherwise the earliest feature in spec order.
+
+    Keying is purely on resolved column tokens, never on specific business
+    vocabulary, so it generalises across workspaces.
+    """
+    column_words: list[str] = []
+    for pos in candidates:
+        for source in features[pos].get("source_columns") or []:
+            column = str(source.get("column") or "")
+            for word in re.findall(r"[a-z0-9]+", _split_identifier(column).lower()):
+                norm = normalize_blocker(word)
+                if norm and norm not in column_words:
+                    column_words.append(norm)
+
+    def rank(pos: int) -> tuple[int, int, int]:
+        name = normalize_blocker(str(features[pos].get("feature") or ""))
+        is_column_word = name in column_words
+        # Prefer the trailing column word (head noun) when several names are words.
+        trailing_index = column_words.index(name) if is_column_word else -1
+        return (
+            0 if is_column_word else 1,
+            -trailing_index,  # later word in the column name ranks first
+            candidates.index(pos),  # stable spec-order tie-break
+        )
+
+    return min(candidates, key=rank)
 
 
 def extract_expression(

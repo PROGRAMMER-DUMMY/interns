@@ -5,7 +5,6 @@ import argparse
 import json
 import re
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -165,71 +164,15 @@ class DuckDBKPISQLGenerator:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(sql, encoding="utf-8")
         self._ingest_bronze_delta(profile_map, required_sources)
-        self._write_run_report(kpi_id, kpi, sql)
+        # The dated runs/<date>/ snapshot is written by WorkspaceFlow._write_result_preview,
+        # which re-executes the on-disk SQL. Writing it here would freeze an "as-generated"
+        # copy that drifts the moment the SQL is edited or re-executed downstream.
         return SQLGenerationResult(
             path=_rel(output, self.repo_root),
             kpi_id=kpi_id,
             status="generated",
             dialect=self.dialect,
         )
-
-    def _write_run_report(self, kpi_id: str, kpi: dict[str, Any], sql: str) -> None:
-        run_dir = self.layout.runs_dir / date.today().isoformat()
-        run_dir.mkdir(parents=True, exist_ok=True)
-
-        # Self-grill gate: execute (warehouse-aware) and cross-check intent before
-        # showing anything. A misleading or non-executable result is BLOCKED, never shown.
-        from core.onboarding.kpi.verify_kpi_output import KPIOutputVerifier
-
-        record = KPIOutputVerifier(
-            self.repo_root, _rel(self.workspace, self.repo_root), sample_limit=50
-        ).verify_sql_text(kpi_id, sql)
-
-        label = kpi_id.upper().replace("_", " ")
-        section: list[str] = [
-            f"## {label}",
-            f"**{kpi.get('name', '')}**",
-            f"- Description: {kpi.get('description', '')}",
-            f"- Metric: `{kpi.get('metric', '')}`",
-            f"- Cuts: {kpi.get('cuts', '')}",
-            "",
-            "```sql",
-            sql.strip(),
-            "```",
-            "",
-        ]
-        if record.ok and record.sample_output_table:
-            section += [
-                f"_Verified via `{record.engine}` — {record.row_count} rows; "
-                "metric, cuts, and name-derived filters aligned with KPI intent._",
-                "",
-                record.sample_output_table,
-            ]
-        else:
-            section += ["**[blocked] BLOCKED by self-grill — not a trustworthy result.**", ""]
-            section += [f"- [x] {e}" for e in record.errors] or ["- (no detail captured)"]
-            section += [f"- [~] {w}" for w in record.warnings]
-        section += [""]
-
-        # Current-state per KPI: overwrite this KPI's file (no append graveyard),
-        # then rebuild the combined results.md from all per-KPI files.
-        (run_dir / f"{kpi_id}.md").write_text("\n".join(section), encoding="utf-8")
-        self._rebuild_results_index(run_dir)
-
-    def _rebuild_results_index(self, run_dir: Path) -> None:
-        workspace_name = Path(self.layout.project_root).name
-        scope = _derive_scope(Path(self.layout.project_root))
-        lines = [
-            f"# KPI Results — {workspace_name}",
-            f"**Date:** {date.today().isoformat()} | **Scope:** {scope}",
-            "",
-            "---",
-            "",
-        ]
-        for kpi_file in sorted(run_dir.glob("kpi_*.md")):
-            lines.append(kpi_file.read_text(encoding="utf-8").rstrip())
-            lines += ["", "---", ""]
-        (run_dir / "results.md").write_text("\n".join(lines), encoding="utf-8")
 
     def _staging_with_delta(
         self,
@@ -842,24 +785,6 @@ def _unique_preserve_order(values: list[str]) -> list[str]:
             result.append(value)
             seen.add(value)
     return result
-
-
-def _derive_scope(workspace_path: Path) -> str:
-    settings_file = workspace_path / "workspace_settings.json"
-    if settings_file.exists():
-        try:
-            settings = json.loads(settings_file.read_text(encoding="utf-8"))
-            paths = [
-                e["path"]
-                for e in settings.get("dataset_allowlist", [])
-                if e.get("type") == "workspace_relative" and "datasets" in e.get("path", "")
-            ]
-            if paths:
-                parts = [Path(p).parts[-2:] for p in paths]
-                return " / ".join("/".join(p) for p in parts[:1])
-        except Exception:
-            pass
-    return workspace_path.name
 
 
 def _df_to_md(df: Any) -> str:

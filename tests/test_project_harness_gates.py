@@ -8,6 +8,7 @@ from core.onboarding.harness.project_harness import (
     ProjectHarness,
     _collect_blockers,
     _collect_warnings,
+    _dedupe_with_counts,
     _next_commands,
 )
 
@@ -98,6 +99,28 @@ class WorkflowReliabilitySignalTests(unittest.TestCase):
             blockers,
         )
 
+    def test_dedupe_with_counts_collapses_repeats(self):
+        items = ["a", "a", "b", "a", "c", "c"]
+        self.assertEqual(
+            _dedupe_with_counts(items),
+            ["a (x3)", "b", "c (x2)"],
+        )
+
+    def test_repeated_reliability_warnings_collapse_to_one_line(self):
+        finding = {
+            "severity": "warning",
+            "code": "trajectory_failed_step_without_recovery",
+            "message": "Trajectory contains a failed step without a nearby retry or recovery event.",
+        }
+        checks = _base_checks()
+        checks["workflow_guardrails"] = {"ok": True, "report": {"findings": [finding] * 6}}
+
+        warnings = _collect_warnings(checks)
+
+        matching = [w for w in warnings if "trajectory_failed_step_without_recovery" in w]
+        self.assertEqual(len(matching), 1, warnings)
+        self.assertTrue(matching[0].endswith("(x6)"), matching[0])
+
     def test_roster_not_routed_warning_appears_in_warnings(self):
         checks = _base_checks()
         checks["workflow_guardrails"] = {
@@ -132,13 +155,23 @@ class WorkflowReliabilitySignalTests(unittest.TestCase):
                     {"severity": "warning", "code": "stalled_step", "message": "stalled"},
                     {"severity": "warning", "code": "slow_step", "message": "slow"},
                     {"severity": "warning", "code": "unsupported_command", "message": "bad cmd"},
+                    {"severity": "warning", "code": "repeated_identical_command", "message": "rerun"},
+                    {"severity": "warning", "code": "generated_artifact_hand_edited", "message": "edit"},
+                    {"severity": "warning", "code": "throwaway_reader_script", "message": "reader"},
                 ]
             },
         }
 
         warnings = _collect_warnings(checks)
 
-        for code in ("stalled_step", "slow_step", "unsupported_command"):
+        for code in (
+            "stalled_step",
+            "slow_step",
+            "unsupported_command",
+            "repeated_identical_command",
+            "generated_artifact_hand_edited",
+            "throwaway_reader_script",
+        ):
             self.assertTrue(
                 any(f"workflow reliability: {code}" in w for w in warnings),
                 (code, warnings),

@@ -64,13 +64,19 @@ class RelationshipContractBuilder:
             self.repo_root,
         )
         doc_relationships = _parse_relationships_from_docs(data_model_docs, profiles)
-        profile_relationships = _profile_relationship_candidates(profiles)
+        diagram_relationships = _relationships_from_diagram_sidecars(
+            self.layout,
+            profiles,
+            self.repo_root,
+        )
+        profile_relationships = _profile_relationship_candidates(profiles, self.repo_root)
         profile_relationships = _promote_profile_relationships_with_doc_context(
             profile_relationships,
             data_model_docs,
         )
         relationships = _merge_relationships(
             doc_relationships,
+            diagram_relationships,
             profile_relationships,
             finalized_model_relationships,
         )
@@ -474,7 +480,24 @@ def _dataset_from_fk_column(column: str, dataset_lookup: dict[str, str]) -> str:
     return ""
 
 
-def _profile_relationship_candidates(profiles: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _profile_relationship_candidates(
+    profiles: dict[str, dict[str, Any]],
+    repo_root: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Infer profile-evidence relationships, choosing a dimension-side unique key.
+
+    For a table-pair sharing more than one candidate join column, the join key
+    is selected by dimension-side uniqueness (the column whose distinct-count
+    equals its non-null row-count, i.e. a primary/near-unique key on the "one"
+    side), not by first/any shared column name. Choosing a non-unique key fans
+    the join out; choosing the unique key on the dimension side does not.
+
+    Each edge is oriented so the unique (dimension/"one") side is the right
+    dataset. When neither side of the chosen key is unique, the edge is flagged
+    (lower confidence, grain risk) and is NOT silently allowed in SQL
+    generation. Workspace-agnostic: the decision uses only profile uniqueness
+    stats (or, when absent, a distinct-count read of the dataset).
+    """
     relationships = []
     sources = sorted(profiles)
     for idx, left in enumerate(sources):
@@ -482,26 +505,128 @@ def _profile_relationship_candidates(profiles: dict[str, dict[str, Any]]) -> lis
             columns = _shared_join_columns(profiles[left], profiles[right])
             if not columns:
                 continue
-            left_col, right_col = columns[0]
-            relationships.append(
-                _relationship(
-                    left_dataset=left,
-                    left_column=left_col,
-                    right_dataset=right,
-                    right_column=right_col,
-                    state="profile_validated",
-                    confidence=0.62,
-                    evidence_sources=[
-                        {
-                            "type": "profile_shared_key",
-                            "left_profile": profiles[left].get("profile_path", ""),
-                            "right_profile": profiles[right].get("profile_path", ""),
-                            "normalized_key": _norm(left_col),
-                        }
-                    ],
-                )
+            relationships.extend(
+                _pair_relationships(left, right, columns, profiles, repo_root)
             )
     return relationships
+
+
+def _pair_relationships(
+    left: str,
+    right: str,
+    columns: list[tuple[str, str]],
+    profiles: dict[str, dict[str, Any]],
+    repo_root: Path | None,
+) -> list[dict[str, Any]]:
+    """Build the relationship(s) for one table-pair from its shared columns.
+
+    Scores every shared candidate column by per-side uniqueness ratio and
+    prefers the candidate that is unique on a dimension side. If several shared
+    columns are unique on a dimension side, an edge is emitted for each. If no
+    shared column is unique on either side, a single flagged (non-executable)
+    edge is emitted on the best-available (highest-uniqueness) candidate.
+    """
+    scored: list[dict[str, Any]] = []
+    for left_col, right_col in columns:
+        left_u = _column_uniqueness(profiles[left], left_col, repo_root)
+        right_u = _column_uniqueness(profiles[right], right_col, repo_root)
+        scored.append(
+            {
+                "left_col": left_col,
+                "right_col": right_col,
+                "left_uniqueness": left_u,
+                "right_uniqueness": right_u,
+                # Best side ratio drives ranking; missing stats sort last.
+                "best_ratio": max(
+                    (v for v in (left_u, right_u) if v is not None),
+                    default=-1.0,
+                ),
+            }
+        )
+
+    unique_candidates = [c for c in scored if _is_unique_ratio(c["left_uniqueness"]) or _is_unique_ratio(c["right_uniqueness"])]
+
+    chosen = unique_candidates if unique_candidates else (
+        [max(scored, key=lambda c: c["best_ratio"])] if scored else []
+    )
+
+    relationships: list[dict[str, Any]] = []
+    for candidate in chosen:
+        relationships.append(
+            _profile_relationship_from_candidate(left, right, candidate, profiles, repo_root)
+        )
+    return relationships
+
+
+def _profile_relationship_from_candidate(
+    left: str,
+    right: str,
+    candidate: dict[str, Any],
+    profiles: dict[str, dict[str, Any]],
+    repo_root: Path | None = None,
+) -> dict[str, Any]:
+    left_col = candidate["left_col"]
+    right_col = candidate["right_col"]
+    left_u = candidate["left_uniqueness"]
+    right_u = candidate["right_uniqueness"]
+
+    # Orient the edge so the unique (dimension / "one") side is the right side.
+    # Prefer the higher-uniqueness side as the dimension; if the left is the
+    # only unique side, swap so the PK column lands on the right.
+    left_unique = _is_unique_ratio(left_u)
+    right_unique = _is_unique_ratio(right_u)
+    if left_unique and not right_unique:
+        left, right = right, left
+        left_col, right_col = right_col, left_col
+        left_u, right_u = right_u, left_u
+        left_unique, right_unique = right_unique, left_unique
+
+    # Tri-state: True (unique PK), False (known non-unique -> fan-out risk),
+    # or None (uniqueness undeterminable -> preserve prior runtime-validation
+    # gating instead of flagging). right_u is None only when no profile stat and
+    # no readable dataset were available for the dimension-side column.
+    if right_unique:
+        dimension_key_unique: bool | None = True
+        confidence = 0.7
+    elif right_u is None:
+        dimension_key_unique = None
+        confidence = 0.62
+    else:
+        dimension_key_unique = False
+        confidence = 0.45
+
+    # Referential integrity: fraction of left (fact/"many") key values that
+    # resolve to a right (dimension/"one") key value. A 0%/low-resolution edge
+    # is unjoinable in the data (e.g. a key-namespace mismatch) and must not be
+    # marked executable regardless of uniqueness. Workspace-agnostic — computed
+    # purely from observed distinct values via the same bounded CSV read used
+    # for uniqueness. None when undeterminable (preserve prior gating).
+    ri_ratio = _left_key_resolution_ratio(
+        profiles.get(left, {}), left_col, profiles.get(right, {}), right_col, repo_root
+    )
+
+    return _relationship(
+        left_dataset=left,
+        left_column=left_col,
+        right_dataset=right,
+        right_column=right_col,
+        state="profile_validated",
+        confidence=confidence,
+        evidence_sources=[
+            {
+                "type": "profile_shared_key",
+                "left_profile": profiles[left].get("profile_path", ""),
+                "right_profile": profiles[right].get("profile_path", ""),
+                "normalized_key": _norm(right_col),
+                "left_uniqueness_ratio": left_u,
+                "right_uniqueness_ratio": right_u,
+                "dimension_side_key_unique": dimension_key_unique,
+                "left_key_resolution_ratio": ri_ratio,
+            }
+        ],
+        dimension_key_unique=dimension_key_unique,
+        referential_integrity_ratio=ri_ratio,
+    )
 
 
 def _promote_profile_relationships_with_doc_context(
@@ -525,9 +650,48 @@ def _promote_profile_relationships_with_doc_context(
                 *relationship.get("evidence_sources", []),
                 evidence,
             ],
+            dimension_key_unique=_dimension_key_unique_from(relationship),
+            referential_integrity_ratio=_referential_integrity_ratio_from(relationship),
         )
         promoted.append(updated)
     return promoted
+
+
+def _referential_integrity_ratio_from(relationship: dict[str, Any]) -> float | None:
+    """Recover the left-key resolution ratio from a built relationship.
+
+    Lets a profile edge carry its referential-integrity verdict through a
+    doc-context promotion, so a 0%-resolution (key-namespace mismatch) edge is
+    not re-marked executable on promotion.
+    """
+    checks = relationship.get("referential_integrity_checks")
+    if isinstance(checks, dict):
+        value = checks.get("left_key_resolution_ratio")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    for evidence in relationship.get("evidence_sources") or []:
+        if isinstance(evidence, dict):
+            value = evidence.get("left_key_resolution_ratio")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return float(value)
+    return None
+
+
+def _dimension_key_unique_from(relationship: dict[str, Any]) -> bool | None:
+    """Recover the dimension-side uniqueness verdict from a built relationship.
+
+    Lets a profile edge carry its uniqueness verdict through a doc-context
+    promotion so a non-unique key is not re-marked executable on promotion.
+    """
+    checks = relationship.get("uniqueness_checks")
+    if isinstance(checks, dict) and "right_key_unique" in checks:
+        value = checks.get("right_key_unique")
+        if isinstance(value, bool):
+            return value
+    for evidence in relationship.get("evidence_sources") or []:
+        if isinstance(evidence, dict) and isinstance(evidence.get("dimension_side_key_unique"), bool):
+            return evidence["dimension_side_key_unique"]
+    return None
 
 
 def _entity_relationship_doc_evidence(
@@ -584,9 +748,61 @@ def _relationship(
     state: str,
     confidence: float,
     evidence_sources: list[dict[str, Any]],
+    dimension_key_unique: bool | None = None,
+    referential_integrity_ratio: float | None = None,
 ) -> dict[str, Any]:
     now = _now()
-    executable = state in EXECUTABLE_RELATIONSHIP_STATES
+    # An edge whose dimension-side (right/"one") key is known to be non-unique
+    # fans the join out and must never be silently executable, even if a doc or
+    # finalized-model promotion would otherwise mark the state executable. When
+    # uniqueness is unknown (None) the prior gating is preserved.
+    non_unique_dimension_key = dimension_key_unique is False
+    # Referential integrity: when the fraction of left ("many") keys resolving to
+    # a right ("one") key value is known and below threshold, the edge is
+    # unjoinable in the data (e.g. a key-namespace mismatch where 0% resolve) and
+    # must never be executable. None means undeterminable -> preserve prior gating.
+    ri_failed = (
+        referential_integrity_ratio is not None
+        and referential_integrity_ratio < _REFERENTIAL_INTEGRITY_THRESHOLD
+    )
+    executable = (
+        state in EXECUTABLE_RELATIONSHIP_STATES
+        and not non_unique_dimension_key
+        and not ri_failed
+    )
+    if ri_failed:
+        ri_pct = round(referential_integrity_ratio * 100, 1)
+        cardinality_status = "referential_integrity_failed"
+        uniqueness_status = (
+            "right_key_not_unique" if non_unique_dimension_key else "needs_runtime_validation"
+        )
+        grain_risk = (
+            f"referential integrity failed: only {ri_pct}% of left keys resolve to a "
+            "right-side key value (likely key-namespace mismatch); join is unusable."
+        )
+        block_reason = (
+            f"referential_integrity_failed: {ri_pct}% of left keys resolve to the "
+            "right key (below threshold); data-quality/key-namespace mismatch must "
+            "be resolved before this edge is executable"
+        )
+    elif non_unique_dimension_key:
+        cardinality_status = "non_unique_dimension_key_fan_out_risk"
+        uniqueness_status = "right_key_not_unique"
+        grain_risk = (
+            "dimension-side join key is NOT unique (distinct-count < row-count); "
+            "join fans out base rows. Resolve to a unique key or confirm explicitly."
+        )
+        block_reason = (
+            "dimension-side join key is not unique; non-unique key fans the join "
+            "out and requires a unique key or explicit user confirmation"
+        )
+    else:
+        cardinality_status = "needs_runtime_validation"
+        uniqueness_status = "needs_runtime_validation"
+        grain_risk = "join may duplicate base rows unless cardinality is validated"
+        block_reason = (
+            "" if executable else "candidate relationship requires data-model proof or user confirmation"
+        )
     return {
         "relationship_id": _relationship_id(left_dataset, left_column, right_dataset, right_column),
         "left_dataset": left_dataset,
@@ -601,7 +817,7 @@ def _relationship(
         "cardinality": {
             "expected": "many_to_one_or_many_to_many_pending_validation",
             "validation_query_required": True,
-            "status": "needs_runtime_validation",
+            "status": cardinality_status,
         },
         "null_behavior": {
             "left_key_null_check_required": True,
@@ -610,15 +826,26 @@ def _relationship(
         },
         "uniqueness_checks": {
             "right_key_uniqueness_check_required": True,
-            "status": "needs_runtime_validation",
+            "right_key_unique": dimension_key_unique,
+            "status": uniqueness_status,
         },
         "referential_integrity_checks": {
             "orphan_left_key_check_required": True,
-            "status": "needs_runtime_validation",
+            "left_key_resolution_ratio": referential_integrity_ratio,
+            "left_keys_resolve": (None if referential_integrity_ratio is None else not ri_failed),
+            "status": (
+                "referential_integrity_failed"
+                if ri_failed
+                else "needs_runtime_validation"
+                if referential_integrity_ratio is None
+                else "left_keys_resolve"
+            ),
         },
         "grain_impact": {
-            "risk": "join may duplicate base rows unless cardinality is validated",
+            "risk": grain_risk,
             "requires_review": True,
+            "fan_out_risk": non_unique_dimension_key,
+            "referential_integrity_risk": ri_failed,
         },
         "approval": {
             "state": "approved_for_execution" if executable else "needs_review",
@@ -632,7 +859,7 @@ def _relationship(
             "allowed_in_polars_generation": executable,
             "allowed_in_pyspark_generation": executable,
             "allowed_in_medallion_generation": executable,
-            "block_reason": "" if executable else "candidate relationship requires data-model proof or user confirmation",
+            "block_reason": block_reason,
         },
         "decision_history": [
             {
@@ -715,6 +942,139 @@ def _relationships_from_finalized_model(
     return relationships
 
 
+def _relationships_from_diagram_sidecars(
+    layout: WorkspaceLayout,
+    profiles: dict[str, dict[str, Any]],
+    repo_root: Path,
+) -> list[dict[str, Any]]:
+    """Consume the parsed data-model diagram (DataModel.png) as relationship evidence.
+
+    `parse-data-model-images` (image_parser) writes review-gated sidecars under
+    `generated/data_model_images/*.model.json` that already OCR the diagram,
+    extract fact->dim FKs, and match each endpoint to a workspace profile
+    dataset/column. This reads those sidecars and, for every diagram-declared
+    relationship whose BOTH endpoints resolved to profiles, emits a
+    `proven_data_model` edge with a `data_model_image_diagram` evidence source.
+
+    Because the diagram is authoritative for relationship *intent*, this evidence
+    ranks above raw profile column-name overlap (proven_data_model > profile_validated
+    in `_state_rank`). The edge is still subject to the uniqueness and referential
+    -integrity gates in `_relationship`, so a diagram FK that does not resolve in
+    the data (key-namespace mismatch) stays non-executable.
+    """
+    sidecar_dir = layout.generated_dir / "data_model_images"
+    if not sidecar_dir.exists():
+        return []
+    relationships: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for path in sorted(sidecar_dir.glob("*.model.json")):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        edges = _diagram_resolved_edges(record)
+        for edge in edges:
+            left_dataset = _diagram_profile_dataset(edge["from"], profiles, repo_root)
+            right_dataset = _diagram_profile_dataset(edge["to"], profiles, repo_root)
+            if not left_dataset or not right_dataset or left_dataset == right_dataset:
+                continue
+            left_column = _resolve_column(edge["from"].get("profile_column", ""), profiles[left_dataset])
+            right_column = _resolve_column(edge["to"].get("profile_column", ""), profiles[right_dataset])
+            if not left_column or not right_column:
+                continue
+            key = (left_dataset, _norm(left_column), right_dataset, _norm(right_column))
+            if key in seen:
+                continue
+            seen.add(key)
+            # Orient so the diagram's "to" (dimension/PK) side is the right side,
+            # then re-derive uniqueness + RI from the data the same way profile
+            # candidates do, so diagram intent never overrides observed data quality.
+            left_u = _column_uniqueness(profiles[left_dataset], left_column, repo_root)
+            right_u = _column_uniqueness(profiles[right_dataset], right_column, repo_root)
+            dimension_key_unique = (
+                True if _is_unique_ratio(right_u)
+                else None if right_u is None
+                else False
+            )
+            ri_ratio = _left_key_resolution_ratio(
+                profiles[left_dataset], left_column,
+                profiles[right_dataset], right_column,
+                repo_root,
+            )
+            relationships.append(
+                _relationship(
+                    left_dataset=left_dataset,
+                    left_column=left_column,
+                    right_dataset=right_dataset,
+                    right_column=right_column,
+                    state="proven_data_model",
+                    confidence=float(edge.get("confidence") or 0.8),
+                    evidence_sources=[
+                        {
+                            "type": "data_model_image_diagram",
+                            "path": record.get("source_image", _rel(path, repo_root)),
+                            "sidecar_path": _rel(path, repo_root),
+                            "relationship_id": edge.get("relationship_id", ""),
+                            "from_table": edge["from"].get("table_name", ""),
+                            "to_table": edge["to"].get("table_name", ""),
+                            "left_uniqueness_ratio": left_u,
+                            "right_uniqueness_ratio": right_u,
+                            "dimension_side_key_unique": dimension_key_unique,
+                            "left_key_resolution_ratio": ri_ratio,
+                        }
+                    ],
+                    dimension_key_unique=dimension_key_unique,
+                    referential_integrity_ratio=ri_ratio,
+                )
+            )
+    return relationships
+
+
+def _diagram_resolved_edges(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Diagram relationships whose both endpoints matched a workspace profile."""
+    profile_matching = record.get("profile_matching") or {}
+    matches = profile_matching.get("relationship_matches") or []
+    rel_by_id = {
+        str(rel.get("relationship_id") or ""): rel
+        for rel in record.get("relationships") or []
+    }
+    edges: list[dict[str, Any]] = []
+    for match in matches:
+        if not isinstance(match, dict) or match.get("state") != "profile_matched":
+            continue
+        from_match = match.get("from_match") or {}
+        to_match = match.get("to_match") or {}
+        if not from_match.get("dataset") or not to_match.get("dataset"):
+            continue
+        rel = rel_by_id.get(str(match.get("relationship_id") or ""), {})
+        edges.append(
+            {
+                "relationship_id": match.get("relationship_id", ""),
+                "confidence": match.get("confidence") or rel.get("confidence"),
+                "from": from_match,
+                "to": to_match,
+            }
+        )
+    return edges
+
+
+def _diagram_profile_dataset(
+    column_match: dict[str, Any],
+    profiles: dict[str, dict[str, Any]],
+    repo_root: Path,
+) -> str:
+    dataset = _repo_path(str(column_match.get("dataset") or ""), repo_root)
+    if dataset in profiles:
+        return dataset
+    # Profile keys are repo-relative; the sidecar may carry an absolute or
+    # differently-rooted dataset path. Match on normalized path tail.
+    target = _norm_path(dataset)
+    for source in profiles:
+        if _norm_path(source).endswith(target) or target.endswith(_norm_path(source)):
+            return source
+    return ""
+
+
 def _preserve_user_decided_relationships(
     rebuilt: list[dict[str, Any]],
     existing_by_key: dict[tuple[str, str, str, str], dict[str, Any]],
@@ -790,6 +1150,192 @@ def _dataset_pair_key(relationship: dict[str, Any]) -> tuple[str, str]:
     left = _norm_path(str(relationship.get("left_dataset") or ""))
     right = _norm_path(str(relationship.get("right_dataset") or ""))
     return tuple(sorted((left, right)))
+
+
+# A column is treated as a (near-)unique dimension key when its distinct-count
+# reaches this fraction of its non-null row-count. 1.0 = strict PK; the small
+# tolerance absorbs trivial sampling/whitespace noise without admitting a key
+# that genuinely fans out (e.g. 15 distinct over 25 rows = 0.6).
+_UNIQUE_RATIO_THRESHOLD = 0.99
+
+# Minimum fraction of left ("many") key values that must resolve to a right
+# ("one") key value for an edge to be join-worthy. Below this the keys live in
+# different namespaces (e.g. `PROV0288` vs `H1-PROV0004` -> 0% resolve) and the
+# join produces no/near-no matches, so the edge must not be executable.
+_REFERENTIAL_INTEGRITY_THRESHOLD = 0.5
+
+
+def _is_unique_ratio(ratio: float | None) -> bool:
+    return ratio is not None and ratio >= _UNIQUE_RATIO_THRESHOLD
+
+
+def _left_key_resolution_ratio(
+    left_profile: dict[str, Any],
+    left_column: str,
+    right_profile: dict[str, Any],
+    right_column: str,
+    repo_root: Path | None,
+) -> float | None:
+    """Fraction of distinct left-key values that exist in the right key column.
+
+    Reads the bounded distinct value set of each side from the CSV (reusing the
+    same dataset-resolution + normalization used for the uniqueness check) and
+    returns |left ∩ right| / |left|. Returns None when either side's values are
+    undeterminable (no readable CSV), so RI gating is skipped rather than guessed.
+    Workspace-agnostic — compares observed values only, no key name is special-cased.
+    """
+    left_values = _distinct_values(left_profile, left_column, repo_root)
+    if left_values is None or not left_values:
+        return None
+    right_values = _distinct_values(right_profile, right_column, repo_root)
+    if right_values is None:
+        return None
+    resolved = sum(1 for value in left_values if value in right_values)
+    return resolved / len(left_values)
+
+
+def _distinct_values(
+    profile: dict[str, Any],
+    column: str,
+    repo_root: Path | None,
+) -> set[str] | None:
+    """Distinct non-null string values for `column`, or None if unreadable.
+
+    Mirrors `_ratio_from_dataset`'s bounded CSV read so RI and uniqueness share
+    one data path. Only CSV-backed datasets are read; other formats return None.
+    """
+    path = _resolve_dataset_file(profile, repo_root)
+    if path is None or path.suffix.lower() != ".csv":
+        return None
+    schema = _schema(profile)
+    by_norm = {_norm(name): name for name in schema}
+    physical = by_norm.get(_norm(column), column)
+    values: set[str] = set()
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if not reader.fieldnames:
+                return None
+            field = next(
+                (f for f in reader.fieldnames if _norm(f) == _norm(physical)),
+                None,
+            )
+            if field is None:
+                return None
+            for row in reader:
+                value = str(row.get(field) or "").strip()
+                if value:
+                    values.add(value)
+    except OSError:
+        return None
+    return values
+
+
+def _column_uniqueness(
+    profile: dict[str, Any],
+    column: str,
+    repo_root: Path | None,
+) -> float | None:
+    """Return distinct/non-null ratio for `column`, or None if undeterminable.
+
+    Prefers per-column distinct-count stats carried in the profile; falls back
+    to a distinct-count read of the underlying dataset file when the profile
+    lacks them. Workspace-agnostic — no column or table name is special-cased.
+    """
+    column_stats = _column_profile(profile, column)
+    if column_stats is not None:
+        ratio = _ratio_from_stats(column_stats, profile)
+        if ratio is not None:
+            return ratio
+    return _ratio_from_dataset(profile, column, repo_root)
+
+
+def _column_profile(profile: dict[str, Any], column: str) -> dict[str, Any] | None:
+    target = _norm(column)
+    for entry in profile.get("columns") or []:
+        if isinstance(entry, dict) and _norm(str(entry.get("name") or entry.get("column") or "")) == target:
+            return entry
+    return None
+
+
+def _ratio_from_stats(column_stats: dict[str, Any], profile: dict[str, Any]) -> float | None:
+    distinct = _first_number(
+        column_stats,
+        ("distinct_count", "n_unique", "unique_count", "approx_distinct", "cardinality"),
+    )
+    if distinct is None:
+        return None
+    null_count = _first_number(column_stats, ("null_count",)) or 0
+    row_count = _first_number(column_stats, ("row_count",))
+    if row_count is None:
+        row_count = _first_number(profile, ("row_count",))
+    if not row_count:
+        return None
+    non_null = max(row_count - null_count, 0)
+    if non_null <= 0:
+        return None
+    return min(distinct / non_null, 1.0)
+
+
+def _ratio_from_dataset(
+    profile: dict[str, Any],
+    column: str,
+    repo_root: Path | None,
+) -> float | None:
+    path = _resolve_dataset_file(profile, repo_root)
+    if path is None or path.suffix.lower() != ".csv":
+        return None
+    schema = _schema(profile)
+    by_norm = {_norm(name): name for name in schema}
+    physical = by_norm.get(_norm(column), column)
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if not reader.fieldnames:
+                return None
+            field = next(
+                (f for f in reader.fieldnames if _norm(f) == _norm(physical)),
+                None,
+            )
+            if field is None:
+                return None
+            distinct: set[str] = set()
+            non_null = 0
+            for row in reader:
+                value = str(row.get(field) or "").strip()
+                if not value:
+                    continue
+                non_null += 1
+                distinct.add(value)
+    except OSError:
+        return None
+    if non_null <= 0:
+        return None
+    return min(len(distinct) / non_null, 1.0)
+
+
+def _resolve_dataset_file(profile: dict[str, Any], repo_root: Path | None) -> Path | None:
+    raw = str(profile.get("path") or "")
+    if not raw:
+        return None
+    path = Path(raw)
+    if path.is_absolute() and path.exists():
+        return path
+    if repo_root is not None:
+        candidate = (repo_root / raw).resolve()
+        if candidate.exists():
+            return candidate
+    return path if path.exists() else None
+
+
+def _first_number(payload: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            return float(value)
+    return None
 
 
 def _shared_join_columns(

@@ -2,7 +2,7 @@
 
 Renders from the shared engine-neutral intent (`kpi_intent.parse_intent`) so it
 agrees with the SQL and Polars paths. Applies the self-hosted lakehouse ops
-rules from `docs/self_hosted_lakehouse_ops_reference.md`:
+rules from `docs/reference/self_hosted_lakehouse_ops_reference.md`:
   - read typed Bronze Delta on the hot path (no `inferSchema` downstream — Rule 3);
   - add provenance columns at Bronze ingest;
   - broadcast dimension tables in joins;

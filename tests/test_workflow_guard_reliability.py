@@ -271,6 +271,136 @@ class RosterSeverityFlagTests(unittest.TestCase):
             self.assertEqual(harness.roster_severity, "warning")
 
 
+class RepeatedCommandTests(unittest.TestCase):
+    def test_same_command_three_times_warns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cmd = "uv run validate-project-harness --workspace workspaces/demo"
+            _write_trajectory(
+                root,
+                [
+                    {"event_type": "command", "status": "ok", "command": cmd},
+                    {"event_type": "command", "status": "ok", "command": cmd},
+                    {"event_type": "command", "status": "ok", "command": cmd},
+                ],
+            )
+            findings = _harness(root)._check_repeated_commands()
+            codes = [f["code"] for f in findings]
+            self.assertIn("repeated_identical_command", codes)
+            self.assertTrue(all(f["severity"] == "warning" for f in findings))
+
+    def test_volatile_flags_normalized_so_quiet_variant_still_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = "uv run workspace-flow start --workspace workspaces/demo"
+            _write_trajectory(
+                root,
+                [
+                    {"event_type": "command", "status": "ok", "command": base},
+                    {"event_type": "command", "status": "ok", "command": base + " --quiet"},
+                    {"event_type": "command", "status": "ok", "command": base + " --diff"},
+                    {"event_type": "command", "status": "ok", "command": base},
+                ],
+            )
+            codes = [f["code"] for f in _harness(root)._check_repeated_commands()]
+            self.assertIn("repeated_identical_command", codes)
+
+    def test_two_runs_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cmd = "uv run list-workspace-files --workspace workspaces/demo"
+            _write_trajectory(
+                root,
+                [
+                    {"event_type": "command", "status": "ok", "command": cmd},
+                    {"event_type": "command", "status": "ok", "command": cmd},
+                ],
+            )
+            codes = [f["code"] for f in _harness(root)._check_repeated_commands()]
+            self.assertNotIn("repeated_identical_command", codes)
+
+
+class HandEditedGeneratedArtifactTests(unittest.TestCase):
+    def test_edit_under_generated_solutions_warns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_trajectory(
+                root,
+                [
+                    {
+                        "event_type": "edit",
+                        "status": "ok",
+                        "artifact": "workspaces/demo/interns/generated/solutions/kpi_002.sql",
+                    },
+                ],
+            )
+            findings = _harness(root)._check_hand_edited_generated_artifacts()
+            codes = [f["code"] for f in findings]
+            self.assertIn("generated_artifact_hand_edited", codes)
+            self.assertTrue(all(f["severity"] == "warning" for f in findings))
+
+    def test_edit_path_in_metadata_warns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_trajectory(
+                root,
+                [
+                    {
+                        "event_type": "file_write",
+                        "status": "ok",
+                        "metadata": {"path": "interns/generated/contracts/kpi_registry.json"},
+                    },
+                ],
+            )
+            codes = [f["code"] for f in _harness(root)._check_hand_edited_generated_artifacts()]
+            self.assertIn("generated_artifact_hand_edited", codes)
+
+    def test_edit_outside_generated_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_trajectory(
+                root,
+                [
+                    {
+                        "event_type": "edit",
+                        "status": "ok",
+                        "artifact": "core/onboarding/kpi/sql_generator.py",
+                    },
+                ],
+            )
+            codes = [f["code"] for f in _harness(root)._check_hand_edited_generated_artifacts()]
+            self.assertNotIn("generated_artifact_hand_edited", codes)
+
+
+class ThrowawayReaderScriptTests(unittest.TestCase):
+    def test_reader_script_at_repo_root_warns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_trajectory(
+                root,
+                [
+                    {"event_type": "create_file", "status": "ok", "artifact": "read_panel.py"},
+                ],
+            )
+            findings = _harness(root)._check_throwaway_reader_scripts()
+            codes = [f["code"] for f in findings]
+            self.assertIn("throwaway_reader_script", codes)
+            self.assertTrue(all(f["severity"] == "warning" for f in findings))
+
+    def test_normal_module_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_trajectory(
+                root,
+                [
+                    {"event_type": "write", "status": "ok", "artifact": "tools/read_workspace_files.py"},
+                    {"event_type": "write", "status": "ok", "artifact": "core/dev/green_gate.py"},
+                ],
+            )
+            codes = [f["code"] for f in _harness(root)._check_throwaway_reader_scripts()]
+            self.assertNotIn("throwaway_reader_script", codes)
+
+
 class CleanTrajectoryTests(unittest.TestCase):
     def test_clean_trajectory_yields_no_reliability_findings(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -294,6 +424,9 @@ class CleanTrajectoryTests(unittest.TestCase):
             codes += [f["code"] for f in harness._check_unsupported_commands()]
             codes += [f["code"] for f in harness._check_failed_without_retry()]
             codes += [f["code"] for f in harness._check_incomplete_workflow()]
+            codes += [f["code"] for f in harness._check_repeated_commands()]
+            codes += [f["code"] for f in harness._check_hand_edited_generated_artifacts()]
+            codes += [f["code"] for f in harness._check_throwaway_reader_scripts()]
             self.assertEqual(codes, [])
 
     def test_missing_trajectory_is_tolerated(self):
@@ -304,6 +437,9 @@ class CleanTrajectoryTests(unittest.TestCase):
             self.assertEqual(harness._check_unsupported_commands(), [])
             self.assertEqual(harness._check_failed_without_retry(), [])
             self.assertEqual(harness._check_incomplete_workflow(), [])
+            self.assertEqual(harness._check_repeated_commands(), [])
+            self.assertEqual(harness._check_hand_edited_generated_artifacts(), [])
+            self.assertEqual(harness._check_throwaway_reader_scripts(), [])
 
 
 if __name__ == "__main__":

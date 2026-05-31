@@ -422,6 +422,9 @@ _WORKFLOW_RELIABILITY_WARNING_CODES = frozenset(
         "unsupported_command",
         "workflow_incomplete",
         "session_not_monitored",
+        "repeated_identical_command",
+        "generated_artifact_hand_edited",
+        "throwaway_reader_script",
     }
 )
 # Reliability finding codes that are always blockers when present (regardless of
@@ -511,7 +514,9 @@ def _collect_blockers(checks: dict[str, Any]) -> list[str]:
     release = (checks["agent_benchmark"].get("release_gate") or {}).get("blocked_gates") or []
     for gate in release:
         blockers.append(f"release gate `{gate.get('gate')}` blocked: {gate.get('reason')}")
-    return blockers
+    # Reliability findings repeat per failed trajectory step; collapse identical
+    # blocker lines to one + a count suffix.
+    return _dedupe_with_counts(blockers)
 
 
 def _collect_warnings(checks: dict[str, Any]) -> list[str]:
@@ -539,7 +544,20 @@ def _collect_warnings(checks: dict[str, Any]) -> list[str]:
     generation = checks.get("generation_scoring", {})
     if generation and generation.get("ok") is False:
         warnings.append(f"generation scoring: {generation.get('reason')}")
-    return warnings
+    # Collapse identical warnings to one line + a count suffix. Reliability
+    # findings (e.g. trajectory_failed_step_without_recovery) routinely repeat
+    # per trajectory step and otherwise flood the output dozens of times.
+    return _dedupe_with_counts(warnings)
+
+
+def _dedupe_with_counts(items: list[str]) -> list[str]:
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for item in items:
+        if item not in counts:
+            order.append(item)
+        counts[item] = counts.get(item, 0) + 1
+    return [f"{item} (x{counts[item]})" if counts[item] > 1 else item for item in order]
 
 
 def _next_commands(workspace: str, domain: str, checks: dict[str, Any]) -> list[str]:
@@ -678,6 +696,10 @@ def main(argv: list[str] | None = None) -> int:
         "--cross-engine", action="store_true",
         help="Enforce SQL↔Polars/PySpark parity by executing generated scripts (opt-in; runs code).",
     )
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Print a compact pass/fail summary + artifact paths instead of the full JSON.",
+    )
     args = parser.parse_args(argv)
 
     result = ProjectHarness(
@@ -689,8 +711,28 @@ def main(argv: list[str] | None = None) -> int:
         ai_cli_dataset=args.ai_cli_dataset,
         cross_engine=args.cross_engine,
     ).run()
-    print(json.dumps(result.summary(), indent=2, default=str))
+    if args.quiet:
+        for line in _quiet_summary_lines(result):
+            print(line)
+    else:
+        print(json.dumps(result.summary(), indent=2, default=str))
     return 0 if result.ok else 1
+
+
+def _quiet_summary_lines(result: ProjectHarnessResult) -> list[str]:
+    status = "[ok] pass" if result.ok else "[x] fail"
+    lines = [
+        f"{status} project-harness: {result.workspace} (score {result.score:.1f}/{result.threshold:.0f})",
+        f"blockers: {len(result.blockers)} | warnings: {len(result.warnings)}",
+    ]
+    for blocker in result.blockers:
+        lines.append(f"  [x] {blocker}")
+    for warning in result.warnings:
+        lines.append(f"  [~] {warning}")
+    lines.append(f"detail: {result.report_path} (full JSON: {result.manifest_path})")
+    if result.next_commands:
+        lines.append(f"next: {result.next_commands[0]}")
+    return lines
 
 
 if __name__ == "__main__":
