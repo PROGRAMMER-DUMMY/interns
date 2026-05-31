@@ -1,125 +1,32 @@
-# Runtime state and experiment outputs
-state/
-core/agents/state/
-results.tsv
-run.log
-*.log
-*.sqlite
-*.sqlite3
-*.db
-
-# Local documentation drafts
-docs/*
-docs/project_sections.local.md
-!docs/agents/
-!docs/agents/gemini-cli-reference.md
-!docs/data_workflow_medallion_reference.md
-!docs/databricks_production_practices.md
-!docs/databricks_token_scopes.md
-!docs/PRODUCTION_ROADMAP.md
-!docs/session_snapshot.md
-
-# Local data dumps and generated warehouse artifacts
-dump/
-
-workspaces/**/*.parquet
-workspaces/**/*.duckdb
-workspaces/**/*.pdf
-workspaces/**/interns/
-# Track source-of-truth and scaffold artifacts inside interns/ (un-ignores).
-# Lifecycle classification lives in tools/artifact_inventory.py — every entry
-# below corresponds to a source_of_truth or scaffold spec. Derived/cache/log
-# stay ignored.
-!workspaces/**/interns/
-workspaces/**/interns/*
-!workspaces/**/interns/README.md
-!workspaces/**/interns/MANIFEST.md
-!workspaces/**/interns/MANIFEST.json
-!workspaces/**/interns/generated/
-workspaces/**/interns/generated/*
-!workspaces/**/interns/generated/contracts/
-workspaces/**/interns/generated/contracts/*
-!workspaces/**/interns/generated/contracts/kpi_registry.json
-!workspaces/**/interns/generated/contracts/kpi_feature_mapping.json
-!workspaces/**/interns/generated/contracts/relationship_contracts.json
-!workspaces/**/interns/generated/contracts/data_model_contract.json
-!workspaces/**/interns/generated/contracts/workspace_feature_definitions.json
-!workspaces/**/interns/generated/contracts/domain_model.json
-!workspaces/**/interns/generated/profiles/
-!workspaces/**/interns/generated/profiles/**
-!workspaces/**/interns/state/
-workspaces/**/interns/state/*
-!workspaces/**/interns/state/applied_ops.jsonl
-!workspaces/**/interns/state/workspace_settings.json
-!workspaces/**/interns/evaluation/
-!workspaces/**/interns/evaluation/**
-# Per-workspace BI dashboard: track JSON specs (carry user_overrides),
-# ignore the static HTML export.
-!workspaces/**/dashboard/
-!workspaces/**/dashboard/*.json
-!workspaces/**/dashboard/index.json
-workspaces/**/dashboard/exports/
-workspaces/Healthcare-RCM-Data-Platform/
-workspaces/**/hotspots.json
-workspaces/**/experiment_profile/
-workspaces/**/csv_profile/
-
-# Secrets and local credentials
+# --- Secrets / local config (NEVER commit) ---
 .env
 .env.*
 !.env.example
-secrets.toml
-config/external_data_roots.local.json
+config/lock.toml
+!config/lock.toml.example
+.claude/settings.local.json
+*.databrickscfg
 *.pem
 *.key
-*.token
-.databrickscfg
+*.p12
+credentials*
 
-# Python build/cache artifacts
+# --- Per-run / generated output (not source) ---
+workspaces/**/interns/
+state/
+.agents/sessions/
+*.duckdb
+*.db
+*.sqlite
+*.log
+
+# --- Caches / build / IDE ---
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-.Python
-*.egg-info/
+.venv/
+.idea/
+.ruff_cache/
+.pytest_cache/
+node_modules/
 dist/
 build/
-.eggs/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.pyright/
-.coverage
-coverage.xml
-htmlcov/
-
-# Virtual environments
-.venv/
-venv/
-env/
-
-# Notebook/editor/local agent metadata
-.idea/
-.vscode/
-.ipynb_checkpoints/
-# Ignore local Claude state by default, but share the project hooks + their config.
-# settings.local.json (personal allow-list) and generated agents stay local.
-.claude/*
-!.claude/settings.json
-!.claude/hooks/
-.agents/sessions/
-
-# Local runtime config — real values stay local; commit only the .example template.
-config/lock.toml
-.memory/
-.code-review-graph/
-*.swp
-*.swo
-.DS_Store
-Thumbs.db
-
-# ML/model artifacts
-*.pt
-*.ckpt
-*.safetensors
-checkpoints/
