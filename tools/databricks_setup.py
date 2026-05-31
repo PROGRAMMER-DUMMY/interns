@@ -57,7 +57,7 @@ def required_scopes_for_config(db) -> list[tuple[str, str]]:
 
     Drives dynamic scope suggestion: the set is derived from the configured
     execution mode and target catalog/schema, not hardcoded. See
-    docs/databricks_token_scopes.md for the full catalog and per-task mapping.
+    docs/reference/databricks_token_scopes.md for the full catalog and per-task mapping.
     """
     scopes = [
         ("settings", "current_user.me() -- connection health check"),
@@ -95,7 +95,7 @@ def print_required_scopes(cfg) -> None:
     print("    Optional:    files (Volumes upload) | secrets | query-history")
     print("    Deploy-only: workspace, files  (deploy-databricks-workspace folder/file upload)")
     print("    Spec-only (NO scope/API call): genie, dashboards, jobs-registration are spec-gated")
-    print("    Full catalog + per-task mapping: docs/databricks_token_scopes.md")
+    print("    Full catalog + per-task mapping: docs/reference/databricks_token_scopes.md")
 
 
 def print_scope_guide() -> None:

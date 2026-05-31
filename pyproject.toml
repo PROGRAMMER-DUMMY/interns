@@ -43,6 +43,7 @@ dependencies = [
 
 [project.scripts]
 loop      = "core.orchestration.loop:main"
+retrieve-docs = "core.context.doc_retrieval_cli:main"
 cli-inspect = "core.agents.cli_inspector:main"
 onboard-workspace = "core.onboarding.workspace.onboarding:main"
 kickstart-workspace = "core.onboarding.workspace.kickstart:main"
@@ -100,6 +101,7 @@ finalize-data-model-generation = "core.onboarding.data_model.generation_cli:fina
 prepare-data-model-blocker-panel = "core.onboarding.data_model.generation_cli:prepare_blocker_main"
 apply-data-model-blocker-answer = "core.onboarding.data_model.generation_cli:apply_blocker_main"
 parse-data-model-images = "core.onboarding.data_model.image_parser:main"
+understand-data = "core.onboarding.data_model.data_understanding_cli:main"
 export-data-model-diagram = "core.presentation.exports:export_data_model_diagram_main"
 export-kpi-registry-excel = "core.presentation.exports:export_kpi_registry_excel_main"
 export-workspace-presentation = "core.presentation.exports:export_workspace_presentation_main"

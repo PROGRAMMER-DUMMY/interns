@@ -383,6 +383,10 @@ def main() -> None:
     )
     parser.add_argument("--max-files", type=int, default=200, help="Maximum file paths to list.")
     parser.add_argument("--json", action="store_true", help="Print JSON instead of text.")
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Omit the full 'All files' dump; print counts, dataset roots, and classified KPI/model/doc hints only.",
+    )
     args = parser.parse_args()
 
     workspace = " ".join(args.workspace)
@@ -411,7 +415,10 @@ def main() -> None:
     )
     _print_group("Dataset roots", listing.dataset_roots)
     _print_classified_group("Docs", listing.docs, listing.classifications, "context_doc")
-    _print_group("All files", listing.files)
+    if args.quiet:
+        print(f"\nAll files: {listing.file_count} (omitted in --quiet; re-run without --quiet or with --json for the full list)")
+    else:
+        _print_group("All files", listing.files)
 
 
 def _print_group(title: str, values: list[str]) -> None:
