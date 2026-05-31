@@ -26,6 +26,12 @@ from core.onboarding.kpi.text_parser import (
     infer_metric_and_cuts,
     is_template_kpi_row,
 )
+from core.onboarding.kpi.kpi_confirmation_panel import (
+    build_kpi_confirmation_panel,
+    render_kpi_confirmation_markdown,
+)
+from core.onboarding.kpi.kpi_format_detector import KpiFormatDetection, detect_kpi_format
+from core.onboarding.kpi.workbook_structure import read_workbook_grid
 from core.onboarding.lexicon import (
     WorkspaceLexicon,
     build_workspace_lexicon,
@@ -350,13 +356,22 @@ class WorkspaceOnboarder:
     def load_kpis(self, registry_paths: list[str]) -> tuple[list[KpiDefinition], list[str]]:
         kpis: list[KpiDefinition] = []
         warnings: list[str] = []
+        detections: list[tuple[KpiFormatDetection, list[dict[str, Any]]]] = []
         for registry in registry_paths:
             path = self.repo_root / registry
+            rel = _rel(path, self.repo_root)
             try:
                 if path.suffix.lower() in {".xlsx", ".xlsm"}:
-                    kpis.extend(_read_excel_kpis(path))
+                    detection, file_kpis = _read_excel_kpis_with_detection(path)
+                    kpis.extend(file_kpis)
+                    if detection is not None:
+                        detections.append((detection, _sample_rows_for(path)))
                 elif path.suffix.lower() == ".csv" and pl:
-                    kpis.extend(_read_tabular_kpis(pl.read_csv(path), source=_rel(path, self.repo_root)))
+                    frame = pl.read_csv(path)
+                    detection, file_kpis = _read_frame_with_detection(frame, rel)
+                    kpis.extend(file_kpis)
+                    if detection is not None:
+                        detections.append((detection, list(frame.head(2).iter_rows(named=True))))
                 elif path.suffix.lower() == ".json":
                     kpis.extend(_read_json_kpis(path, self.repo_root))
                 elif path.suffix.lower() == ".md":
@@ -364,13 +379,43 @@ class WorkspaceOnboarder:
                 elif path.suffix.lower() == ".sql":
                     kpis.extend(_read_sql_comment_kpis(path, self.repo_root))
                 else:
-                    warnings.append(f"unsupported_registry_format:{_rel(path, self.repo_root)}")
+                    warnings.append(f"unsupported_registry_format:{rel}")
             except Exception as exc:
                 warnings.append(
-                    f"kpi_registry_read_failed:{_rel(path, self.repo_root)}:"
-                    f"{type(exc).__name__}:{exc}"
+                    f"kpi_registry_read_failed:{rel}:{type(exc).__name__}:{exc}"
                 )
+        self._write_kpi_format_confirmation(detections)
         return kpis, warnings
+
+    def _write_kpi_format_confirmation(
+        self,
+        detections: list[tuple[KpiFormatDetection, list[dict[str, Any]]]],
+    ) -> str:
+        """Write the KPI-file format confirmation card (the detected column->role
+        mapping, a real-row read-back, and any nesting/low-confidence flags) so the
+        user can verify the interpretation before it is trusted. One panel per
+        detected tabular KPI file; nothing here commits a mapping."""
+        if not detections:
+            return ""
+        panels = [
+            build_kpi_confirmation_panel(detection, samples)
+            for detection, samples in detections
+        ]
+        out_dir = self.layout.reports_dir / "kpi_format"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "artifact_type": "kpi_format_confirmation",
+            "needs_user_confirmation": any(
+                p["summary"]["needs_user_confirmation"] for p in panels
+            ),
+            "panels": panels,
+        }
+        (out_dir / "current.json").write_text(
+            json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8"
+        )
+        markdown = "\n\n---\n\n".join(render_kpi_confirmation_markdown(p) for p in panels)
+        (out_dir / "current.md").write_text(markdown + "\n", encoding="utf-8")
+        return _rel(out_dir / "current.json", self.repo_root)
 
     def _fill_kpi_gaps_with_lexicon(
         self,
@@ -937,30 +982,78 @@ def find_root_artifact_violations(workspace: str | Path) -> list[str]:
     return violations
 
 
+def _sample_rows_for(path: Path, limit: int = 2) -> list[dict[str, Any]]:
+    """First few data rows of an .xlsx, for the confirmation read-back."""
+    try:
+        return read_workbook_grid(path).rows[:limit]
+    except Exception:
+        return []
+
+
 def _read_excel_kpis(path: Path) -> list[KpiDefinition]:
+    return _read_excel_kpis_with_detection(path)[1]
+
+
+def _read_excel_kpis_with_detection(
+    path: Path,
+) -> tuple[KpiFormatDetection | None, list[KpiDefinition]]:
+    """Read an .xlsx KPI file, returning the format detection (with merged-cell
+    nesting signals) alongside the extracted KPIs. Falls back to the XML reader
+    when the structural reader is unavailable."""
+    try:
+        grid = read_workbook_grid(path)
+        detection = detect_kpi_format(
+            grid.columns, grid.rows, source=str(path), merged_spans=grid.merged_spans,
+        )
+        return detection, _extract_tabular_kpis(grid.columns, grid.rows, detection, source=str(path))
+    except Exception:
+        pass
     if pl:
         try:
             frame = pl.read_excel(path)
-            return _read_tabular_kpis(frame, source=str(path))
+            return _read_frame_with_detection(frame, str(path))
         except Exception:
             pass
-    return _read_xlsx_xml_kpis(path)
+    return None, _read_xlsx_xml_kpis(path)
+
+
+def _read_frame_with_detection(
+    frame: Any, source: str,
+) -> tuple[KpiFormatDetection | None, list[KpiDefinition]]:
+    columns = list(frame.columns)
+    rows = list(frame.iter_rows(named=True))
+    detection = detect_kpi_format(columns, rows, source=source)
+    return detection, _extract_tabular_kpis(columns, rows, detection, source=source)
 
 
 def _read_tabular_kpis(frame: Any, source: str) -> list[KpiDefinition]:
-    columns = list(frame.columns)
+    return _read_frame_with_detection(frame, source)[1]
+
+
+def _extract_tabular_kpis(
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    detection: KpiFormatDetection,
+    *,
+    source: str,
+) -> list[KpiDefinition]:
+    """Extract KPI rows using the detector's column->role mapping, with the legacy
+    header-synonym matcher as a zero-regression fallback for any role the detector
+    did not place. The nested-row inheritance (blank key rows merging into the
+    parent) is preserved exactly."""
     lowered = {col.lower().strip(): col for col in columns}
-    name_col = _first_existing(lowered, ["key business question", "kpi", "kpi name", "metric", "name"])
-    desc_col = _first_existing(lowered, ["description", "definition"])
-    cuts_col = _first_existing(lowered, KPI_CUTS_HEADERS)
-    metric_col = _first_existing(lowered, ["metric", "formula", "expression"])
-    refine_col = _first_existing(
+    name_col = detection.role_header("business_question") or _first_existing(
+        lowered, ["key business question", "kpi", "kpi name", "metric", "name"]
+    )
+    desc_col = detection.role_header("description") or _first_existing(lowered, ["description", "definition"])
+    cuts_col = detection.role_header("cuts") or _first_existing(lowered, KPI_CUTS_HEADERS)
+    metric_col = detection.role_header("metric") or _first_existing(lowered, ["metric", "formula", "expression"])
+    refine_col = detection.role_header("refinement") or _first_existing(
         lowered,
         ["data model refinement required", "refinement required", "open questions"],
     )
     if not name_col:
         return []
-    rows = list(frame.iter_rows(named=True))
     if not cuts_col or not metric_col:
         detected_cuts_col, detected_metric_col = _detect_kpi_registry_detail_columns(rows, columns, name_col)
         cuts_col = cuts_col or detected_cuts_col
