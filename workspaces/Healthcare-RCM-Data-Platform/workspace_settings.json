@@ -1,0 +1,5 @@
+{
+  "dataset_allowlist": [
+    "datasets/EMR/trendytech-hospital-a"
+  ]
+}

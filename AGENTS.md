@@ -350,6 +350,31 @@ raw logs, or validation traces unless the user asks to inspect them. Save detail
 `workspaces/<project>/interns/generated/` and `workspaces/<project>/interns/reports/`, then point to
 the artifact path.
 
+Pass `--quiet` to high-volume CLIs so they emit a compact summary instead of the full JSON. These
+commands write the full result to disk regardless; quiet mode prints a pass/fail line, counts,
+and the artifact path to read when detail is actually needed. Use it by default for status,
+validation, listing, and execution checks:
+
+```powershell
+uv run validate-project-harness --workspace workspaces/<project> --domain <domain> --quiet
+uv run run-kpi-execution-harness --workspace workspaces/<project> --quiet
+uv run list-workspace-files --workspace workspaces/<project> --quiet
+uv run workspace-flow status --diff --workspace workspaces/<project> --quiet
+```
+
+Quiet-mode discipline:
+
+- Default to `--quiet` for any command run to check state or progress (harness, execution, diff,
+  listing). Reach for the full JSON (`--json` or no flag) only when a specific field is needed that
+  the quiet summary does not surface, and say which field.
+- Run each deterministic command once. Do not re-run `validate-project-harness`, `workspace-flow
+  start`, or `list-workspace-files` repeatedly in one turn; if a command resumed an existing session
+  or already produced an artifact, read the artifact path it printed instead of re-running.
+- Do not write throwaway reader scripts (`read_*.py`) to view an artifact. Read the file directly,
+  or re-run the producing command with `--quiet` and read the `detail:` path it prints.
+- Repeated-identical warnings and blockers are already collapsed to one line with an `(xN)` count
+  suffix; do not expand them back out.
+
 ## Tool And Evidence Discovery
 
 Before inventing a helper script, manually scanning large files, or choosing an ad hoc workflow,

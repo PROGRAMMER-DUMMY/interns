@@ -71,13 +71,16 @@ Command:
 
 ```powershell
 uv run list-workspace-files --workspace workspaces/<project>
+uv run list-workspace-files --workspace workspaces/<project> --quiet   # counts + hints, omits the full file dump
 ```
 
 Use first for `set workspace` and active-workspace selection requests. It lists all workspace file
 paths up to the cap and adds basic hint groups: possible KPI files, possible data model files,
 dataset roots, docs, and `interns` state. The possible KPI/model groups are not ground truth. The
 full `All files` section is the user confirmation boundary. It does not read file contents, parse
-Excel, profile datasets, onboard, delete, or write files.
+Excel, profile datasets, onboard, delete, or write files. Use `--quiet` for progress/state checks
+where the full file dump is not needed (it still prints the file count and classified hints); use
+the default (full `All files`) when you must present the confirmation boundary to the user.
 
 ### prepare-workspace-selection
 
@@ -226,9 +229,15 @@ Command:
 ```powershell
 uv run workspace-flow start --workspace workspaces/<project> --intent kpi_generation --domain healthcare
 uv run workspace-flow status --session <session-id>
+uv run workspace-flow --quiet status --diff --workspace workspaces/<project>   # compact KPI-readiness summary
 uv run workspace-flow answer --session <session-id> --answer option_a
 uv run workspace-flow results --session <session-id>
 ```
+
+`--quiet` is a top-level flag (place it before the subcommand). For `status --diff` it prints a
+compact ready/blocked/gap summary plus the manifest path instead of the full diff JSON. `start`
+resumes an existing open session when one exists; do not re-run `start` in a loop — read the
+artifact paths it prints.
 
 Use as the quiet front door for agent-led workspace workflows. It persists session state under
 `interns/state/workflow_sessions/<session-id>/`, runs existing governed tools in-process, hides
@@ -327,12 +336,15 @@ Command:
 
 ```powershell
 uv run validate-project-harness --workspace workspaces/<project> --domain <domain>
+uv run validate-project-harness --workspace workspaces/<project> --domain <domain> --quiet   # score + collapsed blockers/warnings + paths
 ```
 
 Use when a workspace needs one top-level local-safe score before completion is claimed. It runs
 artifact validation, the KPI execution harness, the project-native benchmark, workflow guardrails,
 and staged-file git hygiene, then writes one scoreable proof packet. Workflow guardrails include
-trajectory health when `interns/state/trajectory.jsonl` is present.
+trajectory health when `interns/state/trajectory.jsonl` is present. Pass `--quiet` to print the
+score, collapsed blockers/warnings (identical findings are deduped with an `(xN)` suffix), and the
+artifact paths instead of the full ~700-line JSON; the JSON is still written to disk.
 
 Outputs:
 
@@ -735,6 +747,23 @@ workspaces/<project>/interns/reports/data_model_images/<image>.model.md
 workspaces/<project>/interns/reports/data_model_images/current.json
 workspaces/<project>/interns/reports/data_model_images/current.md
 ```
+
+### understand-data
+
+Command:
+
+```powershell
+uv run understand-data --workspace workspaces/<project>
+uv run understand-data --workspace workspaces/<project> --quiet   # one-line tier + schema + option count + artifact path
+```
+
+Use to run the BUG-010 data-understanding gate standalone: it classifies the workspace data-quality
+tier (raw/bronze, silver, gold) and schema type (star, snowflake, galaxy, flat, OBT, 3NF,
+hierarchical) from generated profiles plus relationship contracts, surfaces tier-scoped
+data-processing options, and writes `interns/reports/data_understanding/current.json` and
+`current.md`. It reads generated profiles only (no raw dataset reads) and reuses the same classifier
+the workspace-flow gate uses. `--quiet` prints a compact summary line while still writing the full
+JSON and Markdown to disk.
 
 ### export-data-model-diagram
 
