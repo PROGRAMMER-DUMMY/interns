@@ -38,7 +38,12 @@ jobs:
             tests.test_workflow_guard_reliability \
             tests.test_workflow_guard_roster \
             tests.test_workflow_guard_monitoring \
-            tests.test_project_harness_gates
+            tests.test_project_harness_gates \
+            tests.test_result_view_builder \
+            tests.test_kpi_execution_harness \
+            tests.test_kpi_format_detector \
+            tests.test_workbook_structure \
+            tests.test_kpi_confirmation_panel
 
   pyspark-parity:
     runs-on: ubuntu-latest
