@@ -350,6 +350,68 @@ Review `interns/generated/contracts/source_to_target_plan.json` and
 `interns/reports/source_to_target_plan.md`. If any KPI in the plan is blocked, resolve that blocker
 before generating SQL, Polars, PySpark, or medallion pipeline code.
 
+## Human-Gate Provenance Rule
+
+When a human answers an approval or review gate — a relationship-join approval or the kpi-analyst
+review — the agent MUST pass `--confirmed-by <name>` to the relevant CLI:
+
+```powershell
+uv run apply-relationship-answer --workspace workspaces/<project> --confirmed-by "<reviewer>"
+uv run workspace-flow review      --workspace workspaces/<project> --confirmed-by "<reviewer>"
+```
+
+An empty `--confirmed-by` records the decision as agent-asserted (`source: agent`). A human "yes"
+in an Ask-User prompt must be recorded as `source: human`. Do not clear a human gate while
+recording it as agent-asserted. If `--confirmed-by` is not available from context, ask for the
+reviewer name before applying the decision.
+
+(Residual from BUG-014; the harness now stores `source`/`confirmed_by` but relies on the agent
+passing the flag correctly.)
+
+## KPI Result Packet Forwarding Rule
+
+When presenting KPI results, forward the canonical artifact verbatim:
+
+```powershell
+# Read and display — do not retype or paraphrase
+workspaces/<project>/interns/reports/kpi_results/current.md
+```
+
+The agent MUST NOT re-author, re-type, or reconstruct the generated SQL or result tables from
+memory or session context. Emitting the packet from memory caused a fabricated data-source render
+(BUG-015: `read_csv_auto` shown when the on-disk SQL used `delta_scan`). Show the emitted packet
+once; do not paraphrase the SQL or table rows.
+
+(Residual from BUG-015; the completion path now auto-emits this packet, but any explicit "show
+results" turn must still forward the file, not reconstruct from memory.)
+
+## Token Discipline
+
+Per-run token cost is currently ~44 pp of model quota. These habits reduce it materially:
+
+- Use `run-kpi-pipeline` for the deterministic KPI chain instead of issuing each step
+  (onboard / blocker / contracts / start / results) as a separate LLM-driven call. The wrapper
+  stops only at genuine human gates and emits the result packet once:
+
+  ```powershell
+  uv run run-kpi-pipeline --workspace workspaces/<project> --domain <domain>
+  ```
+
+- Never read large JSON audit files whole. The following are machine audit trails (thousands of
+  lines); read the paired `.md` summary instead and treat the JSON as machine-only:
+  - `interns/state/**/session.json`
+  - `**/trajectory*.json`
+  - workflow `current.json`
+  - `kpi_feature_mapping.json`
+
+- Pass `--quiet` on workspace-flow subcommands (accepted per-subcommand since BUG-019) so panels
+  are not dumped in full each call.
+
+- Use a cheaper model tier for mechanical/deterministic pipeline steps (profiling, contract
+  building, validation, execution harness). Reserve the top tier for genuine semantic decisions:
+  KPI clarification, derived-feature judgment, and the kpi-analyst review. See the `control-pane`
+  skill for model-tier routing.
+
 ## Quiet Execution Rule
 
 Keep main-chat workflow output concise. Show only the stage, key result, blocker or risk,

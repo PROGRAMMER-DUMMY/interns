@@ -71,6 +71,11 @@ from tools.workspace_gc import (
 FLOW_VERSION = 1
 INTENTS = {"kpi_generation", "usual_workflow", "full_kpi_sql"}
 
+# Maximum number of rows shown in the KPI result preview packet.
+# Raising this constant is the only knob needed to widen the preview;
+# the truncation note ([~] N more rows ...) is appended automatically.
+PREVIEW_ROW_CAP = 10
+
 
 @dataclass(frozen=True)
 class WorkspaceFlowResult:
@@ -217,6 +222,25 @@ class WorkspaceFlow:
             self._record_step(state, "apply_duplicate_review_answer", "ok", result, decision=answer)
             return self._advance_until_stop(state)
 
+        # BUG-021: when the session is blocked on join_proof_missing
+        # (`source="source_to_target"`, status="blocked"), out-of-band relationship
+        # approvals (e.g. `apply-relationship-answer --answer approve`) happen
+        # outside the session and do NOT automatically re-check the plan.
+        # Accepting `answer="continue"` here re-evaluates the current relationship
+        # contracts and either advances the flow (when joins are now executable) or
+        # surfaces the updated blocked state.  This also handles the case where
+        # `workspace-flow answer --answer continue` is called after approvals so the
+        # caller does not have to mint a brand-new session just to unblock.
+        if source == "source_to_target" and answer.strip().lower() == "continue":
+            self._record_step(
+                state,
+                "answer_continue_source_to_target",
+                "ok",
+                {"answer": answer, "note": "BUG-021: re-evaluating blocker state after out-of-band relationship approval"},
+                decision=answer,
+            )
+            return self._advance_until_stop(state)
+
         raise ValueError("current workflow stage is not waiting for a supported answer")
 
     def review(
@@ -300,7 +324,7 @@ class WorkspaceFlow:
         """
         return compute_workflow_diff(self.repo_root, self.workspace_rel)
 
-    def results(self, *, preview_rows: int = 20) -> WorkspaceFlowResult:
+    def results(self, *, preview_rows: int = PREVIEW_ROW_CAP) -> WorkspaceFlowResult:
         state = self._load_state()
         preview = self._write_result_preview(preview_rows=preview_rows)
         self._record_step(state, "preview_kpi_results", "ok", preview)
@@ -512,7 +536,7 @@ class WorkspaceFlow:
                 },
                 source="validation",
             )
-        preview = self._write_result_preview(preview_rows=20)
+        preview = self._write_result_preview(preview_rows=PREVIEW_ROW_CAP)
         self._record_step(state, "preview_kpi_results", "ok", preview)
         kpi_entries = preview.get("kpis") or []
         wiki_paths: list[str] = []
@@ -951,7 +975,25 @@ class WorkspaceFlow:
                     view = _result_view(conn, kpi_id)
                     if view:
                         cursor = conn.execute(f'SELECT * FROM "{view}" LIMIT {int(preview_rows)}')
-                        entry["preview_markdown"] = render_query_result_table(cursor)
+                        preview_md = render_query_result_table(cursor)
+                        # Append truncation note when total rows exceed the preview cap.
+                        try:
+                            total_rows = conn.execute(
+                                f'SELECT COUNT(*) FROM "{view}"'
+                            ).fetchone()[0]
+                            remaining = int(total_rows) - int(preview_rows)
+                            if remaining > 0:
+                                result_json_path = (
+                                    self.layout.evidence_dir / "kpi_results" / "current.json"
+                                )
+                                preview_md = (
+                                    preview_md
+                                    + f"\n\n[~] {remaining} more rows "
+                                    f"(full results in {_rel(result_json_path, self.repo_root)})"
+                                )
+                        except Exception:
+                            pass
+                        entry["preview_markdown"] = preview_md
                         entry["result_view"] = view
                     else:
                         entry["status"] = "error"
@@ -2278,7 +2320,7 @@ def main(argv: list[str] | None = None) -> int:
     results = sub.add_parser("results")
     _add_quiet(results)
     results.add_argument("--session", required=True)
-    results.add_argument("--preview-rows", type=int, default=20)
+    results.add_argument("--preview-rows", type=int, default=PREVIEW_ROW_CAP)
 
     review_p = sub.add_parser("review")
     _add_quiet(review_p)
@@ -2567,6 +2609,322 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result.summary(), indent=2))
     else:
         _print_cli_panel(Path(args.repo_root).resolve(), result)
+    return 0
+
+
+def pipeline_main(argv: list[str] | None = None) -> int:
+    """Entry point for ``run-kpi-pipeline``.
+
+    Runs the deterministic post-route-selection KPI chain end-to-end:
+
+        onboard-workspace
+        -> prepare-kpi-blocker-panel
+        -> [human KPI-blocker gate]
+        -> build-relationship-contracts
+        -> [human relationship-approval gate]
+        -> workspace-flow start --intent full_kpi_sql
+        -> [human kpi-analyst review gate]
+        -> results
+
+    HUMAN GATES are enforced: the command stops and surfaces exactly what
+    needs a human decision plus the exact command to resolve it, then exits
+    non-zero.  It never auto-approves relationships or auto-records review
+    verdicts (that would re-introduce BUG-014).
+
+    Idempotent/resumable: re-invoking after the human resolves a gate picks
+    up from where the last invocation stopped (existing open session is
+    reused).
+
+    ``--quiet`` suppresses step-by-step commentary; only gate stops and the
+    final result packet are printed.
+
+    Usage::
+
+        run-kpi-pipeline --workspace workspaces/<project> --domain <domain>
+        run-kpi-pipeline --workspace workspaces/<project> --domain <domain> --quiet
+        run-kpi-pipeline --workspace workspaces/<project> --domain <domain> --new-session
+    """
+    import sys
+
+    parser = argparse.ArgumentParser(prog="run-kpi-pipeline")
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
+    parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")
+    parser.add_argument("--domain", default="generic", help="Domain label (e.g. healthcare, retail).")
+    parser.add_argument(
+        "--new-session",
+        action="store_true",
+        help="Force a new workflow session even if an in-progress one exists.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Print only gate stops and the final KPI result packet.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the final result as machine-readable JSON.",
+    )
+
+    args = parser.parse_args(argv)
+    repo_root = Path(args.repo_root).resolve()
+    workspace_rel: str = args.workspace
+    domain: str = args.domain
+    quiet: bool = args.quiet
+    emit_json: bool = args.json
+
+    def _log(msg: str) -> None:
+        if not quiet:
+            print(msg)
+
+    def _gate_stop(headline: str, details: list[str], commands: list[str]) -> int:
+        """Print a human-gate blocker and return exit code 1."""
+        print(f"[blocked] {headline}")
+        for line in details:
+            print(f"  {line}")
+        if commands:
+            print("")
+            print("Resolve with:")
+            for cmd in commands:
+                print(f"  {cmd}")
+        print("")
+        print("Re-run `run-kpi-pipeline` after resolving the gate.")
+        return 1
+
+    # ------------------------------------------------------------------ #
+    # STEP 1: onboarding (idempotent -- skips if registry already exists) #
+    # ------------------------------------------------------------------ #
+    _log("[ok] Step 1/5: onboard-workspace")
+    try:
+        onboarding = WorkspaceOnboarder(repo_root, workspace_rel).run()
+        _log(f"  [ok] onboarding complete (version={onboarding.summary().get('version', '')})")
+    except Exception as exc:
+        print(f"[x] onboard-workspace failed: {exc}")
+        return 1
+
+    # ------------------------------------------------------------------ #
+    # STEP 2: KPI blocker panel + HUMAN GATE                              #
+    # ------------------------------------------------------------------ #
+    _log("[ok] Step 2/5: prepare-kpi-blocker-panel")
+    try:
+        prepared = prepare_kpi_blocker_panel(
+            repo_root,
+            workspace_rel,
+            domain=domain,
+            onboard_if_missing=False,
+        )
+        panel = _read_json(repo_root / prepared.question_panel_path)
+    except Exception as exc:
+        print(f"[x] prepare-kpi-blocker-panel failed: {exc}")
+        return 1
+
+    if panel.get("status") == "needs_user_answer":
+        feature = str(panel.get("feature") or "")
+        return _gate_stop(
+            headline="Open KPI blocker — human decision required before pipeline can continue.",
+            details=[
+                f"  Feature: {feature}" if feature else "  (see panel for details)",
+                f"  Panel:   {prepared.question_panel_markdown_path}",
+            ],
+            commands=[
+                f"uv run apply-kpi-panel-answer --workspace {workspace_rel} --domain {domain} --answer <option_id>",
+            ],
+        )
+    _log(f"  [ok] no open KPI blockers (question_count={prepared.question_count})")
+
+    # ------------------------------------------------------------------ #
+    # STEP 3: build relationship contracts + HUMAN GATE                   #
+    # ------------------------------------------------------------------ #
+    _log("[ok] Step 3/5: build-relationship-contracts")
+    try:
+        relationships = RelationshipContractBuilder(repo_root, workspace_rel).build()
+        rel_summary = relationships.summary()
+    except Exception as exc:
+        print(f"[x] build-relationship-contracts failed: {exc}")
+        return 1
+
+    candidate_count: int = int(rel_summary.get("candidate_relationship_count") or 0)
+    executable_count: int = int(rel_summary.get("executable_relationship_count") or 0)
+    _log(f"  [ok] relationships: {executable_count} executable, {candidate_count} candidate")
+
+    if candidate_count > 0:
+        # Read the contracts file to surface which ones need approval.
+        contracts_path = (repo_root / workspace_rel).resolve() / "interns" / "generated" / "contracts" / "relationship_contracts.json"
+        contracts_data = _read_json(contracts_path)
+        pending_ids = [
+            str(r.get("relationship_id", ""))
+            for r in (contracts_data.get("relationships") or [])
+            if isinstance(r, dict) and r.get("state") not in {"user_confirmed", "proven_data_model", "rejected"}
+        ]
+        commands = [
+            f"uv run apply-relationship-answer --workspace {workspace_rel} --relationship-id {rid} --answer approve"
+            for rid in pending_ids[:10]
+        ]
+        return _gate_stop(
+            headline=(
+                f"{candidate_count} candidate relationship(s) need human approval before "
+                "executable SQL can be generated."
+            ),
+            details=[
+                f"  Pending IDs: {', '.join(pending_ids[:10])}" + (" ..." if len(pending_ids) > 10 else ""),
+                f"  Contracts:   {workspace_rel}/interns/generated/contracts/relationship_contracts.json",
+                f"  Report:      {workspace_rel}/interns/reports/relationship_contracts.md",
+            ],
+            commands=commands or [
+                f"uv run apply-relationship-answer --workspace {workspace_rel} --relationship-id <id> --answer approve",
+            ],
+        )
+
+    # ------------------------------------------------------------------ #
+    # STEP 4: workspace-flow start / resume (full_kpi_sql)                #
+    # ------------------------------------------------------------------ #
+    _log("[ok] Step 4/5: workspace-flow start --intent full_kpi_sql")
+
+    # Attempt to resume an existing open session first (idempotent).
+    resume_id: str | None = None
+    if not args.new_session:
+        resume_id = latest_open_session(repo_root, workspace_rel)
+
+    flow: WorkspaceFlow
+    if resume_id:
+        _log(f"  [~] resuming existing session {resume_id}")
+        flow = WorkspaceFlow.from_session(repo_root, resume_id)
+        state = flow._load_state()
+        current_stage = str(state.get("stage") or "")
+        current_status = str(state.get("status") or "")
+
+        # BUG-021: if the session is blocked on source_to_target (join_proof_missing),
+        # re-evaluate now that relationships have been approved out-of-band.
+        if current_status == "blocked" and (current_stage == "source_to_target_blocked" or
+                state.get("current_panel", {}).get("source") == "source_to_target"):
+            _log("  [~] BUG-021: re-evaluating source-to-target blocker state after relationship approvals")
+            try:
+                result = flow.answer(answer="continue")
+            except Exception as exc:
+                print(f"[x] Failed to resume blocked session: {exc}")
+                return 1
+        elif current_status in ("complete", "needs_specialist_review"):
+            # Let the code below handle it.
+            result = flow.status()
+        else:
+            result = flow.status()
+    else:
+        try:
+            result = WorkspaceFlow(
+                repo_root,
+                workspace_rel,
+                domain=domain,
+                orchestration_mode="local-safe",
+            ).start(intent="full_kpi_sql")
+        except Exception as exc:
+            print(f"[x] workspace-flow start failed: {exc}")
+            return 1
+
+    # ------------------------------------------------------------------ #
+    # Post-start: check for HUMAN GATES                                   #
+    # ------------------------------------------------------------------ #
+    # Reload flow reference for any needed review calls.
+    flow = WorkspaceFlow.from_session(repo_root, result.session_id)
+
+    # Open KPI blocker inside the session (can surface again after relationship build).
+    if result.status == "needs_user_answer":
+        panel_path = result.current_markdown_path
+        panel_data = _read_json(repo_root / result.current_panel_path) if result.current_panel_path else {}
+        source = panel_data.get("source", result.stage)
+        if source == "kpi_blocker":
+            feature = str(panel_data.get("feature") or panel_data.get("source_panel_summary", {}).get("feature") or "")
+            return _gate_stop(
+                headline="Open KPI blocker (emerged during source-to-target planning) — human decision required.",
+                details=[
+                    f"  Feature: {feature}" if feature else "  (see panel for details)",
+                    f"  Panel:   {panel_path}",
+                ],
+                commands=[
+                    f"uv run apply-kpi-panel-answer --workspace {workspace_rel} --domain {domain} --answer <option_id>",
+                    f"run-kpi-pipeline --workspace {workspace_rel} --domain {domain}",
+                ],
+            )
+        # Generic needs_user_answer gate.
+        return _gate_stop(
+            headline=f"Workflow stopped at stage `{result.stage}` — human answer required.",
+            details=[f"  Panel: {panel_path}"],
+            commands=[
+                f"uv run workspace-flow answer --session {result.session_id} --answer <option_id>",
+                f"run-kpi-pipeline --workspace {workspace_rel} --domain {domain}",
+            ],
+        )
+
+    # Source-to-target blocked (join_proof_missing) — relationships were not all approved.
+    if result.status == "blocked" and result.stage == "source_to_target_blocked":
+        panel_data = _read_json(repo_root / result.current_panel_path) if result.current_panel_path else {}
+        recovery = (panel_data.get("summary") or {}).get("recovery_commands") or panel_data.get("recovery_commands") or []
+        cmds = [str(r.get("command", "")) for r in recovery if r.get("command")]
+        return _gate_stop(
+            headline="Source-to-target blocked on join_proof_missing — approve pending relationships.",
+            details=[
+                "  Run the recovery commands below, then re-run `run-kpi-pipeline`.",
+                f"  Panel: {result.current_markdown_path}",
+            ],
+            commands=cmds or [
+                f"uv run apply-relationship-answer --workspace {workspace_rel} --relationship-id <id> --answer approve",
+            ],
+        )
+
+    # Any other blocked status.
+    if result.status == "blocked":
+        return _gate_stop(
+            headline=f"Workflow blocked at stage `{result.stage}`.",
+            details=[f"  Panel: {result.current_markdown_path}"],
+            commands=[
+                f"uv run workspace-flow status --workspace {workspace_rel} --diff",
+            ],
+        )
+
+    # kpi-analyst review gate (enforced hard gate from BUG-014).
+    if result.status == "needs_specialist_review" and result.stage == "kpi_analyst_review":
+        panel_data = _read_json(repo_root / result.current_panel_path) if result.current_panel_path else {}
+        session_id = result.session_id
+        return _gate_stop(
+            headline="KPI-analyst semantic review required before the workflow can complete.",
+            details=[
+                "  Invoke the `kpi-analyst` skill/agent: review each KPI's SQL + result rows against its intent.",
+                "  Then post the verdict back with the command below.",
+                f"  Brief: {result.current_markdown_path}",
+            ],
+            commands=[
+                f'workspace-flow review --session {session_id} --verdict <ok|blocked> --summary "<one line>"',
+            ],
+        )
+
+    # ------------------------------------------------------------------ #
+    # STEP 5: emit result packet (exactly once)                           #
+    # ------------------------------------------------------------------ #
+    if result.status == "complete":
+        _log("[ok] Step 5/5: emitting KPI result packet")
+        kpi_results_md_path = repo_root / workspace_rel / "interns" / "reports" / "kpi_results" / "current.md"
+        if emit_json:
+            panel_data = _read_json(repo_root / result.current_panel_path) if result.current_panel_path else {}
+            print(json.dumps(panel_data.get("summary") or result.summary(), indent=2, default=str))
+        else:
+            # Print the markdown result packet (same path as BUG-013/BUG-016 fix).
+            if kpi_results_md_path.exists():
+                print("")
+                print("## KPI Result Packet")
+                print("")
+                print(kpi_results_md_path.read_text(encoding="utf-8").rstrip())
+                print("")
+            else:
+                print("[~] KPI result packet not found at expected path.")
+                print(f"    Expected: {kpi_results_md_path}")
+            print("## Pipeline Complete")
+            print(f"  Session: {result.session_id}")
+            print(f"  Workspace: {workspace_rel}")
+            print(f"  Panel: {result.current_panel_path}")
+        return 0
+
+    # Unexpected status — surface it.
+    print(f"[~] Pipeline reached status `{result.status}` at stage `{result.stage}` — inspect manually.")
+    print(f"    Panel: {result.current_markdown_path}")
     return 0
 
 

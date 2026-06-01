@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
+from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator
 from core.onboarding.pipeline_plan import (
     DataEngineeringRoutePlanner,
     PipelineDecisionRecorder,
@@ -141,6 +142,107 @@ class PipelineSQLGeneratorTests(unittest.TestCase):
             result = PipelineSQLGenerator(root, "workspaces/demo").generate()
 
             self.assertEqual(result.status, "generated")
+
+
+class BUG022NoMixSourceLayerTests(unittest.TestCase):
+    """BUG-022: a single SQL generation run must never mix read_csv_auto and delta_scan."""
+
+    def _make_generator(self, root: Path) -> DuckDBKPISQLGenerator:
+        workspace = root / "workspaces" / "demo"
+        workspace.mkdir(parents=True, exist_ok=True)
+        return DuckDBKPISQLGenerator(root, "workspaces/demo")
+
+    def _stub_staging_sql(self, sources: list[str]) -> str:
+        """Build a minimal staging SQL fragment with one read_csv_auto per source."""
+        lines = []
+        for src in sources:
+            lines.append(
+                f"CREATE OR REPLACE VIEW \"catalog_raw_stub\" AS "
+                f"SELECT * FROM read_csv_auto('{src}', union_by_name=true);"
+            )
+        return "\n".join(lines)
+
+    def test_all_csv_run_emits_only_read_csv_auto(self):
+        """When no Delta bronze exists for any source, all views stay CSV."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gen = self._make_generator(root)
+            sources = [
+                "workspaces/demo/datasets/orders.csv",
+                "workspaces/demo/datasets/products.csv",
+            ]
+            staging_sql = self._stub_staging_sql(sources)
+            result_sql = gen._staging_with_delta(staging_sql, {}, sources)
+            self.assertNotIn("delta_scan", result_sql)
+            self.assertIn("read_csv_auto", result_sql)
+
+    def test_partial_delta_falls_back_to_all_csv(self):
+        """When only SOME sources have Delta bronze, the run must NOT use delta_scan at all.
+
+        This is the core BUG-022 fix: mixed CSV+delta within a single run is forbidden.
+        The run falls back uniformly to CSV when not all sources are materialized.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gen = self._make_generator(root)
+            # Materialize bronze for one source but not the other
+            bronze_dir = gen.layout.bronze_dir
+            (bronze_dir / "orders" / "_delta_log").mkdir(parents=True, exist_ok=True)
+            sources = [
+                "workspaces/demo/datasets/orders.csv",    # has delta
+                "workspaces/demo/datasets/products.csv",  # does NOT have delta
+            ]
+            staging_sql = self._stub_staging_sql(sources)
+            result_sql = gen._staging_with_delta(staging_sql, {}, sources)
+            # Must not mix — no delta_scan when any source is missing delta
+            self.assertNotIn("delta_scan", result_sql)
+            self.assertIn("read_csv_auto", result_sql)
+
+    def test_all_delta_run_emits_only_delta_scan(self):
+        """When ALL sources have Delta bronze (no warehouse), delta_scan is used uniformly."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gen = self._make_generator(root)
+            bronze_dir = gen.layout.bronze_dir
+            for stem in ("orders", "products"):
+                (bronze_dir / stem / "_delta_log").mkdir(parents=True, exist_ok=True)
+            sources = [
+                "workspaces/demo/datasets/orders.csv",
+                "workspaces/demo/datasets/products.csv",
+            ]
+            staging_sql = self._stub_staging_sql(sources)
+            result_sql = gen._staging_with_delta(staging_sql, {}, sources)
+            self.assertNotIn("read_csv_auto", result_sql)
+            self.assertIn("delta_scan", result_sql)
+
+    def test_resolve_run_source_mode_returns_csv_when_any_source_missing_delta(self):
+        """_resolve_run_source_mode returns 'csv' when not all sources have delta bronze."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gen = self._make_generator(root)
+            bronze_dir = gen.layout.bronze_dir
+            (bronze_dir / "orders" / "_delta_log").mkdir(parents=True, exist_ok=True)
+            sources = [
+                "workspaces/demo/datasets/orders.csv",
+                "workspaces/demo/datasets/products.csv",
+            ]
+            mode = gen._resolve_run_source_mode(sources)
+            self.assertEqual(mode, "csv")
+
+    def test_resolve_run_source_mode_returns_delta_when_all_sources_have_delta(self):
+        """_resolve_run_source_mode returns 'delta' when all sources have delta bronze."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gen = self._make_generator(root)
+            bronze_dir = gen.layout.bronze_dir
+            for stem in ("orders", "products"):
+                (bronze_dir / stem / "_delta_log").mkdir(parents=True, exist_ok=True)
+            sources = [
+                "workspaces/demo/datasets/orders.csv",
+                "workspaces/demo/datasets/products.csv",
+            ]
+            mode = gen._resolve_run_source_mode(sources)
+            self.assertEqual(mode, "delta")
 
 
 if __name__ == "__main__":

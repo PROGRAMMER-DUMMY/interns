@@ -174,24 +174,61 @@ class DuckDBKPISQLGenerator:
             dialect=self.dialect,
         )
 
+    def _resolve_run_source_mode(
+        self,
+        required_sources: list[str],
+    ) -> str:
+        """Determine the source layer for this generation run.
+
+        Returns one of:
+          "warehouse"   — all sources are materialized AND a warehouse exists
+          "delta"       — all sources have Bronze Delta but no warehouse
+          "csv"         — at least one source lacks a Bronze Delta layer
+
+        The decision is made once per run so every catalog_raw_* view in the
+        generated SQL uses the SAME layer.  Never mixes read_csv_auto and
+        delta_scan within a single run.
+        """
+        if not required_sources:
+            return "csv"
+
+        warehouse_path = self.layout.state_dir / "warehouse.duckdb"
+        all_delta = all(
+            (self.layout.bronze_dir / _safe_name(Path(src).stem) / "_delta_log").exists()
+            for src in required_sources
+        )
+        if not all_delta:
+            return "csv"
+        if warehouse_path.exists():
+            return "warehouse"
+        return "delta"
+
     def _staging_with_delta(
         self,
         staging_sql: str,
         profile_map: dict[str, dict[str, Any]],
         required_sources: list[str],
     ) -> str:
-        """Replace read_csv_auto() with warehouse table refs or delta_scan()."""
+        """Replace read_csv_auto() with warehouse table refs or delta_scan().
+
+        Source layer is resolved ONCE for the whole run via _resolve_run_source_mode
+        so every catalog_raw_* view uses the same layer.  Mixed CSV+Delta within
+        a single run is never emitted (BUG-022 fix).
+        """
         if self.dialect != "duckdb":
+            return staging_sql
+
+        run_mode = self._resolve_run_source_mode(required_sources)
+        if run_mode == "csv":
+            # All sources must use raw CSV — nothing to replace.
             return staging_sql
 
         warehouse_path = self.layout.state_dir / "warehouse.duckdb"
         result = staging_sql
-        any_delta = False
 
-        # Resolve fact/dim classification once
+        # Resolve fact/dim classification once (warehouse mode only)
         fact_sources: set[str] = set()
-        warehouse_exists = warehouse_path.exists()
-        if warehouse_exists:
+        if run_mode == "warehouse":
             try:
                 from core.onboarding.kpi.local_warehouse import warehouse_table_name
                 mapping = self._load_mapping()
@@ -202,35 +239,30 @@ class DuckDBKPISQLGenerator:
                     if base:
                         fact_sources.add(base)
             except Exception:
-                warehouse_exists = False
+                # warehouse import failed — fall back uniformly to delta
+                run_mode = "delta"
 
         for source in required_sources:
             stem = _safe_name(Path(source).stem)
             bronze_path = self.layout.bronze_dir / stem
-            if not (bronze_path / "_delta_log").exists():
-                continue
-            any_delta = True
             old_reader = f"read_csv_auto('{source}', union_by_name=true)"
-            if warehouse_exists:
-                # Staging view reads FROM the warehouse table — clean table names, no paths
+            if run_mode == "warehouse":
                 tname = warehouse_table_name(source, fact_sources)
                 result = result.replace(old_reader, f'"{tname}"')
             else:
-                # No warehouse yet — read directly from Bronze Delta
+                # run_mode == "delta": all sources have bronze, use delta_scan uniformly
                 result = result.replace(old_reader, f"delta_scan('{bronze_path.as_posix()}')")
 
-        if any_delta:
-            if warehouse_exists:
-                header = (
-                    f"-- Warehouse: {_rel(warehouse_path, self.repo_root)}\n"
-                    f"-- Staging views below proxy to registered fact/dim tables.\n"
-                    f"-- Run this SQL inside the warehouse:\n"
-                    f"--   uv run warehouse query --workspace {_rel(self.workspace, self.repo_root)} --sql @kpi.sql\n\n"
-                )
-            else:
-                header = "INSTALL delta;\nLOAD delta;\n\n"
-            result = header + result
-        return result
+        if run_mode == "warehouse":
+            header = (
+                f"-- Warehouse: {_rel(warehouse_path, self.repo_root)}\n"
+                f"-- Staging views below proxy to registered fact/dim tables.\n"
+                f"-- Run this SQL inside the warehouse:\n"
+                f"--   uv run warehouse query --workspace {_rel(self.workspace, self.repo_root)} --sql @kpi.sql\n\n"
+            )
+        else:
+            header = "INSTALL delta;\nLOAD delta;\n\n"
+        return header + result
 
     def _delta_write_sql(self, kpi_id: str) -> str:
         """Emit COPY statement to write Gold results to Parquet (delta written via Python)."""

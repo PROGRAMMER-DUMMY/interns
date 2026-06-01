@@ -665,5 +665,75 @@ class ForGroupTokenResolvesToRealColumnTests(unittest.TestCase):
         self.assertIn("percentage_share", sql)
 
 
+class PreviewRowCapTests(unittest.TestCase):
+    """Task B: preview row cap — PREVIEW_ROW_CAP constant, truncation note, no magic numbers."""
+
+    def test_preview_row_cap_constant_is_defined_and_small(self):
+        """PREVIEW_ROW_CAP must be a named constant, not scattered magic numbers."""
+        from core.onboarding.workspace.flow import PREVIEW_ROW_CAP
+        self.assertIsInstance(PREVIEW_ROW_CAP, int)
+        self.assertGreater(PREVIEW_ROW_CAP, 0)
+        # The cap is expected to be <= 10 (default is 10 per task spec)
+        self.assertLessEqual(PREVIEW_ROW_CAP, 10)
+
+    def test_render_query_result_table_emits_truncation_note_when_capped(self):
+        """render_query_result_table with limit=N and exactly N rows emits a suffix note."""
+        from core.presentation.console_tables import render_query_result_table
+
+        class _FakeCursor:
+            description = [("col",)]
+            def fetchmany(self, n):
+                return [(i,) for i in range(n)]
+            def fetchall(self):
+                return [(i,) for i in range(20)]
+
+        md = render_query_result_table(_FakeCursor(), limit=5)
+        self.assertIn("showing first 5 rows", md)
+
+    def test_render_query_result_table_no_note_when_under_cap(self):
+        """No truncation note when result fits within the limit."""
+        from core.presentation.console_tables import render_query_result_table
+
+        class _FakeCursor:
+            description = [("col",)]
+            def fetchmany(self, n):
+                return [(1,), (2,)]   # fewer than limit
+            def fetchall(self):
+                return [(1,), (2,)]
+
+        md = render_query_result_table(_FakeCursor(), limit=10)
+        self.assertNotIn("showing first", md)
+
+    def test_flow_preview_uses_preview_row_cap_constant(self):
+        """The flow's _write_result_preview must honour PREVIEW_ROW_CAP, not hard-code 20.
+
+        We verify this by checking the DuckDB LIMIT in the live execution path through
+        the constant — the constant is used in both the `results()` default and the
+        inline call inside `_advance_until_stop()`.
+        """
+        import inspect
+        from core.onboarding.workspace.flow import PREVIEW_ROW_CAP, WorkspaceFlow
+
+        src = inspect.getsource(WorkspaceFlow._write_result_preview)
+        # The method must reference preview_rows (the parameter), not the literal 20.
+        self.assertIn("preview_rows", src)
+        # The literal 20 must not appear hard-coded inside the method body.
+        self.assertNotIn("= 20", src)
+        self.assertNotIn("(20)", src)
+        # The constant value must equal 10 per task spec.
+        self.assertEqual(PREVIEW_ROW_CAP, 10)
+
+    def test_flow_advance_uses_preview_row_cap_constant_not_literal(self):
+        """The _advance_until_stop() path must call _write_result_preview(preview_rows=PREVIEW_ROW_CAP)."""
+        import inspect
+        from core.onboarding.workspace import flow as flow_module
+
+        # Locate the _advance_until_stop method source
+        src = inspect.getsource(flow_module.WorkspaceFlow._advance_until_stop)
+        # It must reference PREVIEW_ROW_CAP, not the literal 20
+        self.assertIn("PREVIEW_ROW_CAP", src)
+        self.assertNotIn("preview_rows=20", src)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -499,7 +499,7 @@ guidance but was not wired into the CLI panel emitter.
 
 Severity: High
 
-Status: Fixed (this session — both gates)
+Status: Fixed (this session — both gates). Residual: guidance added (see below).
 
 Fix:
 Both human-decision gates now record agent-vs-human provenance via a new
@@ -521,13 +521,20 @@ distinguish agent self-assertion from genuine human approval.
 Root cause area: advisory != enforced. Human-gate contract existed in guidance but
 was not enforced at the workflow level.
 
+Residual (guidance):
+The harness stores `source`/`confirmed_by` but relies on the agent passing
+`--confirmed-by <name>`. AGENTS.md and CLAUDE.md now carry an explicit rule: when a
+human answers a relationship-join approval or kpi-analyst review, the agent must pass
+`--confirmed-by <name>`; an empty value records the decision as agent-asserted. Do
+not clear a human gate while recording it as agent-asserted.
+
 ---
 
 ## BUG-015: Agent confabulated KPI SQL on re-render (fabricated data source)
 
 Severity: High
 
-Status: Mitigated (no standalone code fix)
+Status: Mitigated (no standalone code fix). Residual: guidance added (see below).
 
 Fix:
 Mitigated by BUG-013 and BUG-016. Because completion and the `results` stage now
@@ -543,6 +550,12 @@ report file. Type: agent hallucination (trust/correctness).
 
 Root cause area: advisory != enforced. Completion output gap (BUG-013) left nothing
 authoritative for the agent to display, so it fabricated. Gap closed by BUG-013/016.
+
+Residual (guidance):
+Any explicit "show results" turn must forward `interns/reports/kpi_results/current.md`
+verbatim — the agent must NOT re-author or re-type the generated SQL or result tables
+from memory. AGENTS.md and CLAUDE.md now carry an explicit rule prohibiting
+reconstruction from memory and requiring the file to be read and forwarded once.
 
 ---
 
@@ -655,6 +668,89 @@ or assume the first call had silently failed.
 
 Root cause area: flow.py review completion check did not consume the
 panel-embedded `kpi_signature` on the first call.
+
+---
+
+## BUG-021: `workspace-flow answer --answer continue` raised "stage is not waiting for a supported answer" after relationship approval
+
+Severity: Medium
+
+Status: Fixed (this change set)
+
+Fix:
+Session blocker state is re-evaluated against current contracts after a relationship
+approval, so a `source_to_target`-blocked session recognises `continue` as a valid
+resume action. The new `run-kpi-pipeline` wrapper also resumes the existing session
+rather than issuing a fresh `start`, so the double-token cost is avoided.
+
+Finding:
+After approving all 7 relationship contracts, the agent issued
+`workspace-flow answer --answer continue` to resume the in-flight session. `flow.py`
+rejected it with "stage is not waiting for a supported answer" because the blocker
+state was not re-evaluated against the newly approved contracts — the session was
+still internally marked as blocked on `source_to_target`. The agent was forced to
+issue a fresh `workspace-flow start`, effectively re-running the generation phase
+and doubling the token cost for that session.
+
+Root cause area: `flow.py` blocker-state refresh not triggered on contract approval;
+`continue` not wired as a valid resume on a `source_to_target`-blocked session.
+
+---
+
+## BUG-022: SQL generator mixed `read_csv_auto` and `delta_scan` within one run depending on medallion timing
+
+Severity: High
+
+Status: Fixed (this change set)
+
+Fix:
+The source layer is now chosen consistently per run: all-bronze only when all tables
+are fully materialized in the medallion layer, else a uniform CSV fallback for the
+entire run. A mixed per-KPI choice is no longer emitted.
+
+Finding:
+Within a single run the SQL generator chose `delta_scan(...bronze...)` for kpi_001
+and `read_csv_auto(...)` for kpi_002, depending on whether each KPI's datasets had
+been materialized into the bronze medallion layer at generation time. This produced
+non-reproducible SQL: re-running with a partially materialized workspace emitted a
+different source layer for the same KPI. The mixed output also contributed to
+BUG-015 (agent confabulated the source layer from memory because on-disk SQL was
+internally inconsistent).
+
+Root cause area: SQL generator resolved source layer per-KPI independently instead
+of picking one consistent layer for the full run.
+
+---
+
+## BUG-023: `parse-data-model-images` not invoked by `onboard-workspace`; all joins fell back to profile candidates
+
+Severity: Medium-High
+
+Status: Fixed (this change set)
+
+Fix:
+`onboard-workspace` now invokes the local-OCR image parser
+(`parse-data-model-images`, using local Tesseract — no remote upload) as part of the
+onboarding sequence, producing diagram sidecar files under
+`interns/generated/data_model_images/`. `build-relationship-contracts` was already
+wired to consume these sidecars (BUG-004 fix); the missing step was triggering the
+parser during onboarding so the sidecars existed before contract building ran.
+Diagram-declared FKs promote to `proven_data_model` automatically once the sidecar
+is present.
+
+Finding:
+`docs/DataModel.png` is the authoritative relationship map for the workspace. The
+`build-relationship-contracts` command has code to consume image-parser sidecars
+and rank diagram-declared FKs as `proven_data_model` (added during the BUG-004 fix).
+However, `onboard-workspace` never called `parse-data-model-images`, so the sidecar
+files were never produced. All relationships therefore fell back to profile-candidate
+inference, which required manual approval for every join — adding 7 approval
+interactions and preventing the `proven_data_model` promotion that the diagram
+warranted. The parser is local-safe (Tesseract, already a project dependency); there
+is no remote-upload risk.
+
+Root cause area: `onboard-workspace` flow did not invoke the OCR image parser step,
+leaving the diagram evidence unused despite the downstream consumer being in place.
 
 ---
 

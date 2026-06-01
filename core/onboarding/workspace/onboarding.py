@@ -183,6 +183,63 @@ class WorkspaceOnboarder:
             )
         return extracted, warnings
 
+    def _parse_data_model_images(self) -> tuple[dict[str, str], list[str]]:
+        """Invoke DataModelImageParser for any data-model image under the workspace
+        docs tree.  Writes review-gated sidecars under
+        ``interns/generated/data_model_images/``.
+
+        LOCAL-SAFE ONLY: remote vision and sensitive-upload flags are always off.
+        If Tesseract / local OCR is unavailable, degrades gracefully with a [~]
+        warning so onboarding continues without hard-failing.
+
+        Returns ``(artifacts_dict, warnings_list)`` where the artifacts dict
+        contains ``"diagram_sidecar_dir"`` and ``"diagram_current_json"`` when at
+        least one image was processed; it is empty when no images are found or when
+        the parser cannot be imported.
+        """
+        try:
+            from core.onboarding.data_model.image_parser import DataModelImageParser
+        except Exception as exc:  # pragma: no cover - import guard
+            return {}, [f"data_model_image_parser_import_failed:{type(exc).__name__}:{exc}"]
+
+        try:
+            parse_result = DataModelImageParser(self.repo_root, self.workspace).parse(
+                allow_remote_vision=False,
+                confirm_sensitive_upload=False,
+                local_ocr="auto",
+                auto_install_ocr=False,
+            )
+        except Exception as exc:
+            return {}, [f"data_model_image_parse_failed:{type(exc).__name__}:{exc}"]
+
+        warnings: list[str] = []
+        artifacts: dict[str, str] = {}
+
+        if parse_result.image_count == 0:
+            return artifacts, warnings
+
+        # Surface OCR availability through warnings rather than errors.
+        for sidecar_path in parse_result.generated_sidecars:
+            try:
+                import json as _json
+                sidecar = _json.loads((self.repo_root / sidecar_path).read_text(encoding="utf-8"))
+                ocr_state = (sidecar.get("parsers") or {}).get("ocr_layout") or {}
+                if ocr_state.get("state") in {"provider_not_configured", "failed"}:
+                    warnings.append(
+                        f"[~] data_model_image_ocr_unavailable:{sidecar_path}:"
+                        "Tesseract not found locally; diagram parsed without OCR text. "
+                        "Install Tesseract or pass --auto-install-ocr for full extraction."
+                    )
+            except Exception:
+                pass
+
+        artifacts["diagram_sidecar_dir"] = str(
+            self.layout.generated_dir / "data_model_images"
+        )
+        artifacts["diagram_current_json"] = parse_result.current_json_path
+        artifacts["diagram_current_md"] = parse_result.current_markdown_path
+        return artifacts, warnings
+
     def _run_locked(self) -> OnboardingResult:
         self._clear_onboarding_artifacts()
         inputs = self.discover_inputs()
@@ -205,6 +262,14 @@ class WorkspaceOnboarder:
             expensive_checks=profiling_settings.expensive_checks,
             resource_mode=profiling_settings.mode,
         )
+        # Parse data-model images (e.g. DataModel.png) into review-gated sidecars.
+        # This must run AFTER profile_inputs so profile matching inside the parser
+        # can resolve diagram FK endpoints to real dataset/column names.
+        # LOCAL-SAFE ONLY: allow_remote_vision and confirm_sensitive_upload are
+        # always False.  If Tesseract is absent, the parser degrades gracefully
+        # and onboarding continues with a [~] warning.
+        diagram_artifacts, diagram_warnings = self._parse_data_model_images()
+
         # Extract dictionary text from PDF/DOCX data-model files. The text is
         # downstream evidence for the CLI-agent proposal panel; failures
         # (missing pdfplumber/docx) are warnings, not errors.
@@ -290,6 +355,7 @@ class WorkspaceOnboarder:
             "onboarding_report": self._write_report(inputs, kpis, profiles),
             "profile_index": profile_index,
             **resource_artifacts,
+            **diagram_artifacts,
         }
         artifacts["generated_file_readability"] = self._write_generated_file_readability()
 
@@ -302,7 +368,7 @@ class WorkspaceOnboarder:
             artifacts=artifacts,
             next_step=_onboarding_next_step(inputs, kpis, profiles),
             next_command=_onboarding_next_command(inputs, kpis, profiles),
-            warnings=kpi_warnings + profile_warnings + dictionary_warnings,
+            warnings=kpi_warnings + profile_warnings + dictionary_warnings + diagram_warnings,
         )
 
     def discover_inputs(self) -> WorkspaceInputs:
@@ -943,6 +1009,13 @@ if __name__ == "__main__":
         dictionary_root = self.layout.generated_dir / "data_dictionary"
         if dictionary_root.exists():
             shutil.rmtree(dictionary_root)
+        # Clear parsed data-model image sidecars so a re-run re-parses fresh.
+        sidecar_root = self.layout.generated_dir / "data_model_images"
+        if sidecar_root.exists():
+            shutil.rmtree(sidecar_root)
+        sidecar_report_root = self.layout.reports_dir / "data_model_images"
+        if sidecar_report_root.exists():
+            shutil.rmtree(sidecar_report_root)
 
     def _store_metadata(
         self,
