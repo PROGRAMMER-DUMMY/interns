@@ -225,6 +225,7 @@ class WorkspaceFlow:
         verdict: str,
         summary: str = "",
         per_kpi: list[dict[str, Any]] | None = None,
+        confirmed_by: str = "",
     ) -> WorkspaceFlowResult:
         """Record the kpi-analyst's SEMANTIC verdict and re-advance the flow.
 
@@ -233,16 +234,37 @@ class WorkspaceFlow:
         actually answers its intent, then posts the verdict here. The verdict is
         bound to a signature of the CURRENT generated KPIs, so a later regeneration
         that changes the SQL invalidates a stale review and re-gates completion.
+
+        BUG-014: ``confirmed_by`` records the name/identity of the confirming
+        party when provided.  Without it the verdict defaults to ``source: agent``
+        (machine-asserted).  Pass a non-empty string (e.g. the user's name or
+        ``"human"``) to mark the verdict as ``source: human``.
         """
         if verdict not in {"ok", "blocked"}:
             raise ValueError("review verdict must be 'ok' or 'blocked'")
         state = self._load_state()
-        completed = ((state.get("current_panel") or {}).get("summary") or {}).get("completed_kpis") or []
+        # BUG-020: Use the kpi_signature already embedded in the current panel's
+        # summary (set by _advance_until_stop when it emitted the gate panel) so
+        # the stored review always carries the SAME signature that _advance_until_stop
+        # will recompute on this call.  Previously the signature was recomputed from
+        # the old completed_kpis list, which could differ after a re-run and cause
+        # review_current to be False on the first valid call.
+        panel_summary = ((state.get("current_panel") or {}).get("summary") or {})
+        stored_kpi_signature: str = str(panel_summary.get("kpi_signature") or "")
+        if not stored_kpi_signature:
+            # Fallback: compute from completed_kpis if the panel predates BUG-020 fix.
+            completed = panel_summary.get("completed_kpis") or []
+            stored_kpi_signature = _kpi_review_signature(completed)
+        # BUG-014: record provenance so downstream can distinguish agent-asserted
+        # verdicts from human-confirmed ones.
+        source = "human" if confirmed_by else "agent"
         recorded = {
             "verdict": verdict,
             "summary": summary,
             "per_kpi": per_kpi or [],
-            "kpi_signature": _kpi_review_signature(completed),
+            "kpi_signature": stored_kpi_signature,
+            "source": source,
+            "confirmed_by": confirmed_by or "",
             "recorded_at": _now(),
         }
         state["kpi_analyst_review"] = recorded
@@ -259,7 +281,7 @@ class WorkspaceFlow:
             verdict_fn=lambda: DelegationVerdict(
                 status=verdict,
                 summary=summary or "kpi-analyst semantic review recorded",
-                details={"per_kpi": per_kpi or []},
+                details={"per_kpi": per_kpi or [], "source": source, "confirmed_by": confirmed_by or ""},
             ),
         )
         return self._advance_until_stop(state)
@@ -2006,6 +2028,7 @@ def _rel(path: Path, root: Path) -> str:
 
 def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
     panel_path = repo_root / result.current_panel_path if result.current_panel_path else None
+    panel_payload: dict[str, Any] = {}
     delegations: list[dict[str, Any]] = []
     if panel_path and panel_path.exists():
         try:
@@ -2021,8 +2044,25 @@ def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
             stage = event.get("stage", "")
             verdict = event.get("verdict") or {}
             status = verdict.get("status", "")
-            summary = verdict.get("summary", "")
-            print(f"- `{agent}` @ `{stage}` → **{status}** — {summary}")
+            summary_text = verdict.get("summary", "")
+            # BUG-014: surface provenance (agent-asserted vs human-confirmed)
+            provenance = verdict.get("details", {}).get("source", "agent") if isinstance(verdict.get("details"), dict) else "agent"
+            confirmed_by = verdict.get("details", {}).get("confirmed_by", "") if isinstance(verdict.get("details"), dict) else ""
+            provenance_tag = f"[human:{confirmed_by}]" if provenance == "human" and confirmed_by else f"[{provenance}]"
+            if stage == "kpi_output_verification" and (agent == "kpi-analyst"):
+                print(f"- `{agent}` @ `{stage}` → **{status}** {provenance_tag} — {summary_text}")
+            else:
+                print(f"- `{agent}` @ `{stage}` → **{status}** — {summary_text}")
+        print("")
+    # BUG-014: for the kpi_analyst_review panel, surface provenance in status line
+    kpi_review = (panel_payload.get("summary") or {}).get("kpi_analyst_review") or {}
+    if kpi_review and result.stage in ("complete", "kpi_analyst_review_blocked"):
+        review_source = str(kpi_review.get("source") or "agent")
+        review_confirmed_by = str(kpi_review.get("confirmed_by") or "")
+        if review_source == "human" and review_confirmed_by:
+            print(f"[ok] Review verdict: **{kpi_review.get('verdict', '')}** [human:{review_confirmed_by}]")
+        else:
+            print(f"[~] Review verdict: **{kpi_review.get('verdict', '')}** [agent-asserted — use --confirmed-by to record human confirmation]")
         print("")
     markdown_path = repo_root / result.current_markdown_path
     if markdown_path.exists():
@@ -2032,6 +2072,32 @@ def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
         print("")
         print(f"- Workspace: `{result.workspace}`")
         print(f"- Status: `{result.status}`")
+    # BUG-013 / BUG-016: on completion OR explicit `results` call, emit the full
+    # kpi_results packet so any driving agent sees KPI + SQL + result rows without
+    # needing a separate call.  For `results` stage the packet IS the point of the
+    # command; for `complete` it surfaces automatically so agents driving via the
+    # CLI see rows immediately after the workflow finishes.
+    if result.stage in ("complete", "results") and result.workspace:
+        kpi_results_paths = (panel_payload.get("artifact_paths") or [])
+        kpi_results_md: str | None = None
+        # Look for the kpi_results current.md among the artifact paths first.
+        for ap in kpi_results_paths:
+            if ap.endswith("kpi_results/current.md"):
+                candidate = repo_root / ap
+                if candidate.exists():
+                    kpi_results_md = candidate.read_text(encoding="utf-8")
+                    break
+        if kpi_results_md is None:
+            # Fallback: derive path from workspace.
+            fallback = repo_root / result.workspace / "interns" / "reports" / "kpi_results" / "current.md"
+            if fallback.exists():
+                kpi_results_md = fallback.read_text(encoding="utf-8")
+        if kpi_results_md:
+            print("")
+            print("## KPI Result Packet")
+            print("")
+            print(kpi_results_md.rstrip())
+            print("")
     print("")
     print("## Next Step")
     print("")
@@ -2135,7 +2201,35 @@ def _kpi_review_signature(completed_kpis: list[dict[str, Any]]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+_SUBCOMMANDS: frozenset[str] = frozenset(
+    {"start", "status", "answer", "results", "review", "artifacts",
+     "handoff", "context-status", "skill-excerpt", "gc"}
+)
+
+
+def _args_before_subcommand(argv: list[str]) -> list[str]:
+    """Return the portion of argv that appears before the first known subcommand.
+
+    Used by BUG-019 to detect top-level --quiet before argparse runs, so the
+    merged quiet flag is correct regardless of argument order.
+    """
+    result: list[str] = []
+    for token in argv:
+        if token in _SUBCOMMANDS:
+            break
+        result.append(token)
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
+    # BUG-019: --quiet must be accepted both at the top level
+    # (workspace-flow --quiet status --diff) AND after the subcommand
+    # (workspace-flow status --diff --quiet).
+    # Strategy: parse the raw argv for a pre-subcommand --quiet first, then
+    # add --quiet to every subparser.  After parse_args we OR the two values
+    # so either placement is honoured without either overriding the other.
+    _toplevel_quiet: bool = bool(argv and "--quiet" in _args_before_subcommand(argv))
+
     parser = argparse.ArgumentParser(prog="workspace-flow")
     parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
     parser.add_argument("--json", action="store_true", help="Print the machine-readable result summary only.")
@@ -2145,7 +2239,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    def _add_quiet(p: argparse.ArgumentParser) -> None:
+        """Add --quiet to a subparser so it is accepted after the subcommand name."""
+        p.add_argument(
+            "--quiet", action="store_true",
+            help="Print a compact summary + artifact paths instead of full JSON.",
+        )
+
     start = sub.add_parser("start")
+    _add_quiet(start)
     start.add_argument("--workspace", required=True)
     start.add_argument("--domain", default="generic")
     start.add_argument("--intent", choices=sorted(INTENTS), default="kpi_generation")
@@ -2157,6 +2259,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     status = sub.add_parser("status")
+    _add_quiet(status)
     status.add_argument("--session", default="")
     status.add_argument("--workspace", default="")
     status.add_argument(
@@ -2166,16 +2269,19 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     answer = sub.add_parser("answer")
+    _add_quiet(answer)
     answer.add_argument("--session", required=True)
     answer.add_argument("--answer", required=True)
     answer.add_argument("--custom-definition", default="")
     answer.add_argument("--evidence-note", default="")
 
     results = sub.add_parser("results")
+    _add_quiet(results)
     results.add_argument("--session", required=True)
     results.add_argument("--preview-rows", type=int, default=20)
 
     review_p = sub.add_parser("review")
+    _add_quiet(review_p)
     review_p.add_argument("--session", required=True)
     review_p.add_argument(
         "--verdict", choices=["ok", "blocked"], required=True,
@@ -2185,6 +2291,16 @@ def main(argv: list[str] | None = None) -> int:
     review_p.add_argument(
         "--kpi-notes", default="",
         help="Optional JSON list of per-KPI judgements, e.g. '[{\"kpi_id\":\"kpi_002\",\"status\":\"ok\",\"note\":\"...\"}]'.",
+    )
+    # BUG-014: --confirmed-by records the human identity when the verdict is
+    # human-confirmed rather than agent-asserted.
+    review_p.add_argument(
+        "--confirmed-by", default="",
+        help=(
+            "Name or identity of the human reviewer confirming this verdict. "
+            "When provided the verdict is recorded as source: human. "
+            "Omit to record as source: agent (machine-asserted)."
+        ),
     )
 
     artifacts = sub.add_parser("artifacts")
@@ -2247,6 +2363,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    # BUG-019: merge top-level --quiet (pre-subcommand) with subparser --quiet
+    # (post-subcommand) so both orderings are honoured.
+    args.quiet = bool(args.quiet) or _toplevel_quiet
     if args.cmd == "start":
         repo_root_path = Path(args.repo_root).resolve()
         workspace_layout = WorkspaceLayout(
@@ -2342,6 +2461,7 @@ def main(argv: list[str] | None = None) -> int:
             verdict=args.verdict,
             summary=args.summary,
             per_kpi=per_kpi,
+            confirmed_by=getattr(args, "confirmed_by", "") or "",
         )
     elif args.cmd == "artifacts":
         repo_root = Path(args.repo_root).resolve()

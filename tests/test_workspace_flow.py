@@ -442,5 +442,228 @@ class WorkspaceFlowTests(unittest.TestCase):
             conn.close()
 
 
+class BugFixTests(unittest.TestCase):
+    """Regression tests for BUG-013, BUG-014, BUG-016, BUG-019, BUG-020."""
+
+    def _make_simple_workspace(self, root: Path) -> str:
+        workspace = root / "workspaces" / "demo"
+        (workspace / "docs").mkdir(parents=True)
+        (workspace / "datasets").mkdir()
+        (workspace / "datasets" / "encounters.csv").write_text(
+            "Id,START,ENCOUNTERCLASS\nE1,2024-01-01,ambulatory\nE2,2024-01-02,inpatient\n",
+            encoding="utf-8",
+        )
+        (workspace / "docs" / "kpi_registry.csv").write_text(
+            "Key business question,Description,Cuts / grain hints,Metric,Data model refinement required\n"
+            "How many encounters are recorded?,Count encounters,,count(Id),\n",
+            encoding="utf-8",
+        )
+        return "workspaces/demo"
+
+    # BUG-020: review --verdict ok should complete on the FIRST valid call.
+    def test_bug020_review_ok_completes_on_first_call(self):
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_simple_workspace(root)
+
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            self.assertEqual(result.status, "needs_specialist_review")
+            session_id = result.session_id
+
+            # First call must complete — no second call required.
+            done = WorkspaceFlow.from_session(root, session_id).review(
+                verdict="ok", summary="looks good on first call",
+            )
+            self.assertEqual(done.status, "complete",
+                             "BUG-020: first review --verdict ok must complete the workflow")
+
+    # BUG-013: completion output must print the full KPI result packet.
+    def test_bug013_completion_cli_emits_kpi_result_packet(self):
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_simple_workspace(root)
+
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            result = WorkspaceFlow.from_session(root, result.session_id).review(
+                verdict="ok", summary="all good",
+            )
+            self.assertEqual(result.status, "complete")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = workspace_flow_main(
+                    ["--repo-root", str(root), "results", "--session", result.session_id]
+                )
+            output = stdout.getvalue()
+            self.assertEqual(exit_code, 0)
+            # BUG-013 / BUG-016: the full result packet must be printed
+            self.assertIn("KPI Result Packet", output)
+            self.assertIn("kpi_001", output)
+
+    # BUG-016: results --session must always emit the full packet (not pointer-only).
+    def test_bug016_results_subcommand_renders_full_packet(self):
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_simple_workspace(root)
+
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            result = WorkspaceFlow.from_session(root, result.session_id).review(
+                verdict="ok", summary="reviewed",
+            )
+            self.assertEqual(result.status, "complete")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = workspace_flow_main(
+                    ["--repo-root", str(root), "results", "--session", result.session_id]
+                )
+            output = stdout.getvalue()
+            self.assertEqual(exit_code, 0)
+            self.assertIn("KPI Result Packet", output,
+                          "BUG-016: results subcommand must print the full KPI result packet")
+            # Must contain SQL or result-table content, not just a path pointer.
+            self.assertIn("kpi_001", output)
+            # Must NOT be pointer-only (just an artifact path without content).
+            self.assertNotIn("Review generated KPI SQL and result previews.\n\n## Next Step", output[:500])
+
+    # BUG-014: review records provenance (agent vs human).
+    def test_bug014_review_records_agent_provenance_by_default(self):
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_simple_workspace(root)
+
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            done = WorkspaceFlow.from_session(root, result.session_id).review(
+                verdict="ok", summary="agent check",
+            )
+            panel = json.loads((root / done.current_panel_path).read_text(encoding="utf-8"))
+            review = panel["summary"]["kpi_analyst_review"]
+            self.assertEqual(review["source"], "agent",
+                             "BUG-014: default review source must be 'agent'")
+            self.assertEqual(review["confirmed_by"], "")
+
+    def test_bug014_review_records_human_provenance_when_confirmed_by_set(self):
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_simple_workspace(root)
+
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            done = WorkspaceFlow.from_session(root, result.session_id).review(
+                verdict="ok", summary="human check", confirmed_by="alice",
+            )
+            panel = json.loads((root / done.current_panel_path).read_text(encoding="utf-8"))
+            review = panel["summary"]["kpi_analyst_review"]
+            self.assertEqual(review["source"], "human",
+                             "BUG-014: confirmed_by must set source to 'human'")
+            self.assertEqual(review["confirmed_by"], "alice")
+
+    def test_bug014_confirmed_by_cli_flag_sets_human_source(self):
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_simple_workspace(root)
+
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            self.assertEqual(result.status, "needs_specialist_review")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = workspace_flow_main([
+                    "--repo-root", str(root),
+                    "review",
+                    "--session", result.session_id,
+                    "--verdict", "ok",
+                    "--summary", "reviewed by human",
+                    "--confirmed-by", "bob",
+                ])
+            self.assertEqual(exit_code, 0)
+            output = stdout.getvalue()
+            self.assertIn("human:bob", output,
+                          "BUG-014: CLI output must show human provenance")
+
+    # BUG-019: --quiet accepted after the subcommand.
+    def test_bug019_quiet_accepted_after_subcommand(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            workspace.mkdir(parents=True)
+            (workspace / "encounters.csv").write_text("Id,START\nE1,2024-01-01\n", encoding="utf-8")
+
+            stdout = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = workspace_flow_main([
+                        "--repo-root", str(root),
+                        "status",
+                        "--workspace", "workspaces/demo",
+                        "--diff",
+                        "--quiet",   # after subcommand — this was BUG-019
+                    ])
+            except SystemExit as exc:
+                self.fail(f"BUG-019: --quiet after subcommand raised SystemExit: {exc}")
+            # exit_code 0 or any value is fine; the key requirement is it did not crash
+            output = stdout.getvalue()
+            # quiet mode emits [ok] workflow-diff line
+            self.assertIn("[ok] workflow-diff", output)
+
+    def test_bug019_quiet_top_level_still_works(self):
+        """Regression: --quiet at top level must keep working."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            workspace.mkdir(parents=True)
+            (workspace / "encounters.csv").write_text("Id,START\nE1,2024-01-01\n", encoding="utf-8")
+
+            stdout = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = workspace_flow_main([
+                        "--repo-root", str(root),
+                        "--quiet",
+                        "status",
+                        "--workspace", "workspaces/demo",
+                        "--diff",
+                    ])
+            except SystemExit as exc:
+                self.fail(f"BUG-019 regression: --quiet at top level raised SystemExit: {exc}")
+            output = stdout.getvalue()
+            self.assertIn("[ok] workflow-diff", output)
+
+
 if __name__ == "__main__":
     unittest.main()

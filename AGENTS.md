@@ -36,10 +36,15 @@ What do you want to do with this project right now, and which workspace/files sh
 ```
 
 3. If the user says only `set <workspace>` or names a workspace/project, treat that as a workspace
-   selection command. Recursively list file paths from the workspace root only, summarize what will
-   be active, ask for confirmation, and then continue from the highest-priority blocker. For KPI/query
-   workspaces, if feature mappings or business definitions are blocked, start the automatic blocker
-   grilling session after confirmation.
+   selection command. During the selection turn, the agent MUST NOT call Edit, Write, or any
+   file-creating/deleting tool on any file — including `.gitignore`, `.geminiignore`, settings
+   files, generated artifacts, or any repo file — until the user has confirmed the workspace AND
+   explicitly authorized continuing past selection. Allowed actions during selection: read-only
+   listing via `list-workspace-files`, bounded PowerShell fallback, `git status --short`, and
+   reading `config/tasks.json`. Recursively list file paths from the workspace root only, summarize
+   what will be active, ask for confirmation, and then continue from the highest-priority blocker.
+   For KPI/query workspaces, if feature mappings or business definitions are blocked, start the
+   automatic blocker grilling session after confirmation.
 
 Then scan likely sources with bounded listing only:
 
@@ -81,6 +86,9 @@ Workspace selection scans must be bounded. For `set <workspace>`:
 - After the listing command returns, do not run more scans or perform extended reasoning. Respond
   within 10 seconds using only the returned path list and `config/tasks.json`.
 - The response must contain only the likely active file-set summary and the confirmation question.
+- HARD STOP: do not call Edit, Write, or any mutation tool on any file during the selection turn.
+  This includes `.gitignore`, `.geminiignore`, `settings.json`, generated artifacts, and all other
+  repo or workspace files. Any mutation before explicit post-confirmation authorization is forbidden.
 
 Summarize the likely active set:
 

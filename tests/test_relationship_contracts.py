@@ -15,6 +15,62 @@ from core.onboarding.workspace.validation import WorkspaceArtifactValidator
 from core.storage.workspace_layout import WorkspaceLayout
 
 
+class RelationshipApprovalProvenanceTests(unittest.TestCase):
+    """BUG-014: relationship approvals must record agent-vs-human provenance."""
+
+    def _seed(self, root: Path) -> tuple[str, str, Path]:
+        workspace = root / "workspaces" / "demo"
+        layout = WorkspaceLayout(project_root=workspace)
+        layout.ensure_runtime_dirs()
+        contracts_path = layout.contracts_dir / "relationship_contracts.json"
+        contracts_path.parent.mkdir(parents=True, exist_ok=True)
+        contracts_path.write_text(
+            json.dumps(
+                {
+                    "relationships": [
+                        {
+                            "relationship_id": "a__k__b__k",
+                            "left_dataset": "a.csv",
+                            "right_dataset": "b.csv",
+                            "state": "profile_validated",
+                            "executable_usage_policy": {"allowed_in_sql_generation": False},
+                        }
+                    ],
+                    "summary": {
+                        "relationship_count": 1,
+                        "executable_relationship_count": 0,
+                        "candidate_relationship_count": 1,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return "workspaces/demo", str(root), contracts_path
+
+    def test_agent_asserted_approval_records_agent_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws, repo, path = self._seed(Path(td))
+            result = apply_relationship_answer(
+                repo, ws, relationship_id="a__k__b__k", answer="approve"
+            )
+            self.assertEqual(result.source, "agent")
+            self.assertEqual(result.confirmed_by, "")
+            saved = json.loads(path.read_text(encoding="utf-8"))["relationships"][0]
+            self.assertEqual(saved["approval"]["source"], "agent")
+
+    def test_human_confirmed_approval_records_human_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws, repo, path = self._seed(Path(td))
+            result = apply_relationship_answer(
+                repo, ws, relationship_id="a__k__b__k", answer="approve", confirmed_by="shubham"
+            )
+            self.assertEqual(result.source, "human")
+            self.assertEqual(result.confirmed_by, "shubham")
+            saved = json.loads(path.read_text(encoding="utf-8"))["relationships"][0]
+            self.assertEqual(saved["approval"]["source"], "human")
+            self.assertEqual(saved["approval"]["confirmed_by"], "shubham")
+
+
 class RelationshipContractTests(unittest.TestCase):
     def test_source_group_keeps_root_workspace_csvs_distinct(self):
         self.assertNotEqual(

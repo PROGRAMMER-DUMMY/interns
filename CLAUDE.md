@@ -4,8 +4,27 @@ Read `AGENTS.md` first and follow it as the canonical operating guide for this r
 Then inspect `TOOLS.md` and `.agents/tools.json` before inventing workflows or helper scripts.
 
 For startup commands such as `set <workspace>`, `set current workspace to ...`, or a bare project
-name, treat the message as workspace selection only. Do not create, edit, or write files from that
-command.
+name, treat the message as workspace selection only. File mutation during selection is a hard stop.
+
+## Selection-only checklist
+
+[ok] Allowed during workspace selection:
+- `uv run list-workspace-files --workspace workspaces/<project>` (read-only scan)
+- Bounded PowerShell fallback: `Get-ChildItem -LiteralPath workspaces/<project> -Force -File -Recurse | Select-Object -First 200 -ExpandProperty FullName`
+- `git status --short` (read-only)
+- Reading `config/tasks.json` (read-only)
+- Presenting the file-set summary and asking the confirmation question
+
+[x] Forbidden until the user has confirmed the workspace AND explicitly authorized continuing:
+- Any call to Edit, Write, or a file-creation tool on ANY file
+- Any call to Bash/PowerShell that creates, overwrites, deletes, or moves a file
+- Editing or touching `.gitignore`, `.geminiignore`, `settings.json`, `settings.local.json`,
+  generated artifacts, workspace files, or repo-root files of any kind
+- Running onboarding, profiling, feature resolution, or any `apply-*`/`finalize-*` command
+- Staging or committing files
+
+If the agent finds itself about to call Edit/Write during a selection turn, it must stop, discard
+the mutation, and ask the confirmation question instead.
 
 Resolve fuzzy workspace names against existing folders under `workspaces/` and entries in
 `config/tasks.json`. Then scan likely files, summarize the active workflow, ask for confirmation,

@@ -462,6 +462,202 @@ Related: BUG-004 (snowflake/nested model not detected), BUG-001 (feature dedup).
 
 ---
 
+## BUG-013 through BUG-016: Standing theme — "advisory != enforced"
+
+BUG-013, BUG-014, BUG-015, and BUG-016 all share the same root cause class as
+BUG-006: the platform documents the required behavior but does not enforce it at
+the harness level. This is the project's standing #1 theme. Until advisory rules
+are backed by harness checks and rejection, agents can silently skip them.
+
+---
+
+## BUG-013: Completion result packet not auto-emitted to CLI output
+
+Severity: High
+
+Status: Fixed (this session)
+
+Fix:
+Completion path in `core/onboarding/workspace/flow.py` (`_print_cli_panel`) now
+emits the `kpi_results` packet (KPI question + generated SQL + result-row preview)
+to stdout at workflow completion. The packet was already written to
+`interns/reports/kpi_results/current.md`; the gap was that the CLI did not surface
+it inline.
+
+Finding:
+On workflow completion the platform writes the full KPI packet to
+`interns/reports/kpi_results/current.md`, but the CLI completion output did not
+surface it. The driving agent reported "complete" with a generic sign-off and the
+user never saw results without explicitly asking for them.
+
+Root cause area: advisory rule, not enforced. Completion output contract existed as
+guidance but was not wired into the CLI panel emitter.
+
+---
+
+## BUG-014: Human-decision gates auto-cleared by the agent
+
+Severity: High
+
+Status: Fixed (this session — both gates)
+
+Fix:
+Both human-decision gates now record agent-vs-human provenance via a new
+`--confirmed-by` flag (empty = agent-asserted, non-empty = human-confirmed):
+- kpi-analyst review: `flow.py` `review` stores `source: agent|human` and surfaces
+  it in status/output.
+- relationship-join approvals: `contracts.py` `apply_relationship_answer` /
+  `apply-relationship-answer` now stores `source` + `confirmed_by` on the approval
+  record and in `decision_history`, and returns them on `RelationshipApprovalResult`.
+This surfaces the distinction so downstream checks can gate on source.
+
+Finding:
+The 7 relationship-join approvals and the kpi-analyst review verdict were
+self-answered by the agent with no human input. The platform accepted an
+agent-issued verdict as if a human had reviewed, with no record of source. Decision
+gates that require human review are rendered advisory if the workflow cannot
+distinguish agent self-assertion from genuine human approval.
+
+Root cause area: advisory != enforced. Human-gate contract existed in guidance but
+was not enforced at the workflow level.
+
+---
+
+## BUG-015: Agent confabulated KPI SQL on re-render (fabricated data source)
+
+Severity: High
+
+Status: Mitigated (no standalone code fix)
+
+Fix:
+Mitigated by BUG-013 and BUG-016. Because completion and the `results` stage now
+render from the canonical on-disk report file (`interns/reports/kpi_results/
+current.md`), there is no gap for the agent to fill with fabricated output.
+
+Finding:
+When asked to show results, the agent printed kpi_001 with
+`read_csv_auto(...hospital-a.csv...)` while the on-disk solution file uses
+`delta_scan(...bronze...)`. This was a fabricated data-source bootstrap that did
+not match the file on disk. The agent invented the SQL rather than reading the
+report file. Type: agent hallucination (trust/correctness).
+
+Root cause area: advisory != enforced. Completion output gap (BUG-013) left nothing
+authoritative for the agent to display, so it fabricated. Gap closed by BUG-013/016.
+
+---
+
+## BUG-016: `workspace-flow results --session <id>` returned SQL/pointer only, not full packet
+
+Severity: Medium
+
+Status: Fixed (this session)
+
+Fix:
+The `results` stage in `flow.py` now always emits the full KPI packet (KPI
+question + generated SQL + result rows) rather than a path pointer or SQL fragment.
+
+Finding:
+`workspace-flow results --session <id>` returned only the SQL or a file path when
+asked for results, even when the caller explicitly requested the full result packet.
+The complete packet was available in `interns/reports/kpi_results/current.md` but
+was not rendered to CLI output.
+
+Root cause area: advisory != enforced. Same root class as BUG-013.
+
+---
+
+## BUG-017: Workspace-selection flow edited files
+
+Severity: Medium
+
+Status: Fixed (guidance level)
+
+Fix:
+Selection-only rule strengthened in `AGENTS.md` and `CLAUDE.md`. The rule now
+states explicitly that `set <workspace>` (and equivalent workspace-selection
+messages) must not create, edit, or write any files. Enforcement is guidance-level;
+harness enforcement is a follow-on item.
+
+Finding:
+`CLAUDE.md` and `AGENTS.md` require `set <workspace>` to be selection-only (no
+create/edit/write). During the observed session, the agent edited `.gitignore`
+during the workspace-selection step. This is a direct violation of the
+selection-only boundary.
+
+Root cause area: advisory != enforced. The rule existed but was not backed by a
+file-write guard in the selection path.
+
+---
+
+## BUG-018: `interns/` artifacts unreadable due to `.gitignore` `state/` pattern; copy/read/delete tax
+
+Severity: Medium
+
+Status: Fixed (this session)
+
+Fix:
+`.geminiignore` negation patterns were added to un-ignore the small report/contract/
+state-panel artifacts under `interns/` that were being blocked by the `state/`
+pattern in `.gitignore`. The orphaned `current.json` file left at the workspace
+root by the copy-read-delete cycle was deleted.
+
+Finding:
+The `.gitignore` `state/` pattern caused the agent to be unable to read
+`interns/state` artifacts directly. To work around this the agent copied each
+artifact to the workspace root, read it, then deleted it. This pattern was the
+dominant token cost in the observed session (a single session climbed from 35% to
+81% context utilization) and left an orphaned `current.json` at the workspace root.
+
+Root cause area: ignore-pattern misconfiguration causing agent workaround behavior
+with measurable token and artifact side-effects.
+
+---
+
+## BUG-019: `--quiet` flag rejected when passed after the subcommand
+
+Severity: Low
+
+Status: Fixed (this session)
+
+Fix:
+`--quiet` is now accepted both as a top-level flag and as a per-subcommand flag in
+`flow.py`. Previously only the top-level position was wired.
+
+Finding:
+`workspace-flow status --diff --quiet` failed with "unrecognized arguments:
+--quiet" because `--quiet` was parsed at the top level only. Any invocation that
+placed `--quiet` after the subcommand name was rejected. This caused agents to
+receive parse errors when following the natural CLI pattern of appending flags
+after the subcommand.
+
+Root cause area: argparse wiring — per-subcommand parsers did not inherit the
+`--quiet` flag.
+
+---
+
+## BUG-020: `review --verdict ok` required two calls to complete the workflow
+
+Severity: Low
+
+Status: Fixed (this session)
+
+Fix:
+`flow.py` review now uses the panel-embedded `kpi_signature` so the first valid
+verdict call completes the workflow. Previously, the completion check was not
+reading the signature from the panel, causing a second identical call to be
+required.
+
+Finding:
+Issuing `review --verdict ok` left the workflow status as "awaiting". A second
+identical `review --verdict ok` call was required to advance to completion. The
+double-call was not documented or expected, and caused agents to enter retry loops
+or assume the first call had silently failed.
+
+Root cause area: flow.py review completion check did not consume the
+panel-embedded `kpi_signature` on the first call.
+
+---
+
 ## Reproduction environment
 
 - Generated artifacts under `workspaces/Healthcare-RCM-Data-Platform/interns/` (gitignored).

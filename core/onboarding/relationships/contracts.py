@@ -42,6 +42,8 @@ class RelationshipApprovalResult:
     state: str
     executable_relationship_count: int
     candidate_relationship_count: int
+    source: str = "agent"
+    confirmed_by: str = ""
 
     def summary(self) -> dict[str, Any]:
         return asdict(self)
@@ -220,6 +222,7 @@ def apply_relationship_answer(
     relationship_id: str,
     answer: str,
     evidence_note: str = "",
+    confirmed_by: str = "",
 ) -> RelationshipApprovalResult:
     root = Path(repo_root).resolve()
     workspace_path = (root / workspace).resolve()
@@ -241,6 +244,11 @@ def apply_relationship_answer(
     if normalized_answer not in {"approve", "reject", "keep_blocked"}:
         raise ValueError("--answer must be approve, reject, or keep_blocked")
     now = _now()
+    confirmed_by = (confirmed_by or "").strip()
+    # BUG-014: distinguish a human-confirmed decision from an agent-asserted one.
+    # An empty --confirmed-by means the answer was issued by the driving agent
+    # without explicit human sign-off; a non-empty value records who confirmed it.
+    decision_source = "human" if confirmed_by else "agent"
     if normalized_answer == "approve":
         target["state"] = "user_confirmed"
         target.setdefault("approval", {})
@@ -249,6 +257,8 @@ def apply_relationship_answer(
                 "state": "approved",
                 "owner": "data_engineering",
                 "approved_at": now,
+                "source": decision_source,
+                "confirmed_by": confirmed_by,
             }
         )
         target["executable_usage_policy"] = {
@@ -263,6 +273,8 @@ def apply_relationship_answer(
         target["state"] = "rejected" if normalized_answer == "reject" else target.get("state", "profile_validated")
         target.setdefault("approval", {})
         target["approval"]["state"] = "rejected" if normalized_answer == "reject" else "needs_review"
+        target["approval"]["source"] = decision_source
+        target["approval"]["confirmed_by"] = confirmed_by
         target.setdefault("executable_usage_policy", {})
         for key in (
             "allowed_in_sql_generation",
@@ -283,6 +295,8 @@ def apply_relationship_answer(
             "note": evidence_note or f"Applied relationship answer `{normalized_answer}` through apply-relationship-answer.",
             "timestamp": now,
             "source": "apply-relationship-answer",
+            "decided_by": decision_source,
+            "confirmed_by": confirmed_by,
         }
     )
     _recompute_summary(data)
@@ -302,6 +316,8 @@ def apply_relationship_answer(
         state=str(target.get("state") or ""),
         executable_relationship_count=int(data["summary"]["executable_relationship_count"]),
         candidate_relationship_count=int(data["summary"]["candidate_relationship_count"]),
+        source=decision_source,
+        confirmed_by=confirmed_by,
     )
 
 
@@ -1577,6 +1593,11 @@ def apply_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--relationship-id", required=True)
     parser.add_argument("--answer", required=True, choices=["approve", "reject", "keep_blocked"])
     parser.add_argument("--evidence-note", default="")
+    parser.add_argument(
+        "--confirmed-by",
+        default="",
+        help="Name of the human confirming this decision. Empty = agent-asserted (no human sign-off).",
+    )
     parser.add_argument("--allow-replay", action="store_true")
     args = parser.parse_args(argv)
     workspace_path = (Path(args.repo_root).resolve() / args.workspace).resolve()
@@ -1592,17 +1613,24 @@ def apply_main(argv: list[str] | None = None) -> int:
             relationship_id=args.relationship_id,
             answer=args.answer,
             evidence_note=args.evidence_note,
+            confirmed_by=args.confirmed_by,
         ),
         op_args={
             "workspace": args.workspace,
             "relationship_id": args.relationship_id,
             "answer": args.answer,
             "evidence_note": args.evidence_note,
+            "confirmed_by": args.confirmed_by,
             "_state_fingerprint": state_fingerprint,
         },
         allow_replay=args.allow_replay,
         decision=args.answer,
-        metadata={"relationship_id": args.relationship_id, "answer": args.answer},
+        metadata={
+            "relationship_id": args.relationship_id,
+            "answer": args.answer,
+            "source": "human" if args.confirmed_by.strip() else "agent",
+            "confirmed_by": args.confirmed_by,
+        },
         record_idempotent=True,
     )
 
