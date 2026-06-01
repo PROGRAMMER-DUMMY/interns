@@ -782,5 +782,361 @@ class RelationshipContractTests(unittest.TestCase):
             self.assertTrue(validation.ok, validation.errors)
 
 
+class DiagramAbstractNameResolverTests(unittest.TestCase):
+    """BUG-023 (real fix): abstract star-schema diagram names (Fact/Dim_X/X_ID)
+    must resolve to physical profile datasets/columns so that
+    _relationships_from_diagram_sidecars can promote executable edges without
+    any apply-relationship-answer call.
+
+    Concrete scenario mirrors the Healthcare-RCM-Data-Platform (Hospital A):
+      Diagram edge                          Physical join
+      Fact.Patient_ID -> Dim_Patient.Patient_ID  transactions.PatientID -> patients.PatientID
+      Fact.DeptID     -> Dim_Diagnosis.Dept_ID   transactions.DeptID    -> departments.DeptID
+      Fact.Provider_ID -> Dim_Provider.Provider_ID transactions.ProviderID -> providers.ProviderID
+      Fact.ICD_Code   -> Dim_Diagnosis.ICD_Code  (no physical counterpart -> skipped)
+
+    3 of 4 edges must resolve and pass the RI/uniqueness gate; the ICD_Code edge
+    must be silently dropped (never fabricated).
+    """
+
+    def _build_workspace(self, root: Path) -> WorkspaceLayout:
+        workspace = root / "workspaces" / "demo"
+        layout = WorkspaceLayout(project_root=workspace)
+        layout.ensure_runtime_dirs()
+        # Physical CSVs: patients/providers/departments are dimension tables
+        # (unique PKs); transactions is the fact table.
+        (workspace / "patients.csv").write_text(
+            "PatientID\nP01\nP02\nP03\n", encoding="utf-8"
+        )
+        (workspace / "providers.csv").write_text(
+            "ProviderID\nPROV01\nPROV02\nPROV03\n", encoding="utf-8"
+        )
+        (workspace / "departments.csv").write_text(
+            "DeptID\nDEPT01\nDEPT02\n", encoding="utf-8"
+        )
+        (workspace / "transactions.csv").write_text(
+            "PatientID,ProviderID,DeptID\n"
+            "P01,PROV01,DEPT01\n"
+            "P01,PROV02,DEPT01\n"
+            "P02,PROV01,DEPT02\n"
+            "P03,PROV03,DEPT02\n",
+            encoding="utf-8",
+        )
+        profile_index = {
+            "profiles": [
+                {
+                    "path": str(workspace / "patients.csv"),
+                    "schema": {"PatientID": "String"},
+                    "profile_path": "workspaces/demo/interns/generated/profiles/patients.csv.profile.json",
+                },
+                {
+                    "path": str(workspace / "providers.csv"),
+                    "schema": {"ProviderID": "String"},
+                    "profile_path": "workspaces/demo/interns/generated/profiles/providers.csv.profile.json",
+                },
+                {
+                    "path": str(workspace / "departments.csv"),
+                    "schema": {"DeptID": "String"},
+                    "profile_path": "workspaces/demo/interns/generated/profiles/departments.csv.profile.json",
+                },
+                {
+                    "path": str(workspace / "transactions.csv"),
+                    "schema": {"PatientID": "String", "ProviderID": "String", "DeptID": "String"},
+                    "profile_path": "workspaces/demo/interns/generated/profiles/transactions.csv.profile.json",
+                },
+            ]
+        }
+        (layout.profiles_dir / "profile_index.json").write_text(
+            json.dumps(profile_index), encoding="utf-8"
+        )
+        return layout
+
+    def _write_abstract_sidecar(self, layout: WorkspaceLayout, root: Path) -> None:
+        """Write a diagram sidecar that uses abstract star-schema names.
+
+        The sidecar has NOT pre-resolved anything in profile_matching; it only
+        carries the raw OCR-inferred relationships with abstract table/column names.
+        _relationships_from_diagram_sidecars must call _diagram_resolved_edges which
+        reads profile_matching.relationship_matches — so we also write those as they
+        would be produced after image_parser runs the profile matching.  The whole
+        point of the resolver is that those matches now use physical dataset paths
+        and physical column names.
+        """
+        sidecar_dir = layout.generated_dir / "data_model_images"
+        sidecar_dir.mkdir(parents=True, exist_ok=True)
+        workspace_path = str(layout.project_root).replace("\\", "/")
+        # Simulate the profile_matching output produced by the fixed image_parser:
+        # abstract diagram names -> resolved physical datasets + columns.
+        sidecar = {
+            "source_image": "workspaces/demo/docs/DataModel.png",
+            "relationships": [
+                {
+                    "relationship_id": "fact__patient_id__dim_patient__patient_id",
+                    "from_table": "Fact",
+                    "from_column": "Patient_ID",
+                    "to_table": "Dim_Patient",
+                    "to_column": "Patient_ID",
+                    "confidence": 0.85,
+                },
+                {
+                    "relationship_id": "fact__deptid__dim_diagnosis__dept_id",
+                    "from_table": "Fact",
+                    "from_column": "DeptID",
+                    "to_table": "Dim_Diagnosis",
+                    "to_column": "Dept_ID",
+                    "confidence": 0.85,
+                },
+                {
+                    "relationship_id": "fact__provider_id__dim_provider__provider_id",
+                    "from_table": "Fact",
+                    "from_column": "Provider_ID",
+                    "to_table": "Dim_Provider",
+                    "to_column": "Provider_ID",
+                    "confidence": 0.85,
+                },
+                {
+                    "relationship_id": "fact__icd_code__dim_diagnosis__icd_code",
+                    "from_table": "Fact",
+                    "from_column": "ICD_Code",
+                    "to_table": "Dim_Diagnosis",
+                    "to_column": "ICD_Code",
+                    "confidence": 0.75,
+                },
+            ],
+            "profile_matching": {
+                "relationship_matches": [
+                    # Patient edge: Fact.Patient_ID -> transactions.PatientID;
+                    # Dim_Patient.Patient_ID -> patients.PatientID
+                    {
+                        "relationship_id": "fact__patient_id__dim_patient__patient_id",
+                        "state": "profile_matched",
+                        "confidence": 0.85,
+                        "from_match": {
+                            "table_name": "Fact",
+                            "column_name": "Patient_ID",
+                            "dataset": str(workspace_path) + "/transactions.csv",
+                            "profile_column": "PatientID",
+                        },
+                        "to_match": {
+                            "table_name": "Dim_Patient",
+                            "column_name": "Patient_ID",
+                            "dataset": str(workspace_path) + "/patients.csv",
+                            "profile_column": "PatientID",
+                        },
+                    },
+                    # DeptID edge: Fact.DeptID -> transactions.DeptID;
+                    # Dim_Diagnosis.Dept_ID -> departments.DeptID
+                    {
+                        "relationship_id": "fact__deptid__dim_diagnosis__dept_id",
+                        "state": "profile_matched",
+                        "confidence": 0.85,
+                        "from_match": {
+                            "table_name": "Fact",
+                            "column_name": "DeptID",
+                            "dataset": str(workspace_path) + "/transactions.csv",
+                            "profile_column": "DeptID",
+                        },
+                        "to_match": {
+                            "table_name": "Dim_Diagnosis",
+                            "column_name": "Dept_ID",
+                            "dataset": str(workspace_path) + "/departments.csv",
+                            "profile_column": "DeptID",
+                        },
+                    },
+                    # Provider edge: Fact.Provider_ID -> transactions.ProviderID;
+                    # Dim_Provider.Provider_ID -> providers.ProviderID
+                    {
+                        "relationship_id": "fact__provider_id__dim_provider__provider_id",
+                        "state": "profile_matched",
+                        "confidence": 0.85,
+                        "from_match": {
+                            "table_name": "Fact",
+                            "column_name": "Provider_ID",
+                            "dataset": str(workspace_path) + "/transactions.csv",
+                            "profile_column": "ProviderID",
+                        },
+                        "to_match": {
+                            "table_name": "Dim_Provider",
+                            "column_name": "Provider_ID",
+                            "dataset": str(workspace_path) + "/providers.csv",
+                            "profile_column": "ProviderID",
+                        },
+                    },
+                    # ICD_Code edge: no physical counterpart -> unmatched, skipped.
+                    {
+                        "relationship_id": "fact__icd_code__dim_diagnosis__icd_code",
+                        "state": "unmatched",
+                        "confidence": 0.0,
+                        "from_match": {},
+                        "to_match": {},
+                    },
+                ]
+            },
+        }
+        (sidecar_dir / "datamodel.model.json").write_text(
+            json.dumps(sidecar), encoding="utf-8"
+        )
+
+    def test_abstract_diagram_names_resolve_and_promote_executable_edges(self):
+        """3 of 4 diagram edges must resolve to physical datasets/columns and
+        become executable proven_data_model edges via the RI/uniqueness gate.
+        The ICD_Code edge (no physical counterpart) must be silently skipped.
+        No apply-relationship-answer call may be used.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            layout = self._build_workspace(root)
+            self._write_abstract_sidecar(layout, root)
+
+            result = RelationshipContractBuilder(root, "workspaces/demo").build()
+
+            contract = json.loads(
+                (layout.contracts_dir / "relationship_contracts.json").read_text()
+            )
+            relationships = contract["relationships"]
+
+            # All diagram-sourced edges must use the data_model_image_diagram type.
+            diagram_edges = [
+                r for r in relationships
+                if any(
+                    src.get("type") == "data_model_image_diagram"
+                    for src in r.get("evidence_sources", [])
+                )
+            ]
+            # 3 edges resolve (Patient, Dept, Provider); ICD_Code is skipped.
+            self.assertEqual(
+                len(diagram_edges), 3,
+                f"Expected 3 resolved diagram edges, got {len(diagram_edges)}: "
+                + str([(r['left_dataset'], r['left_column'], r['right_dataset'], r['right_column']) for r in diagram_edges])
+            )
+
+            # Each of the 3 resolved edges must be executable (RI + uniqueness pass).
+            executable_diagram_edges = [
+                r for r in diagram_edges
+                if r.get("executable_usage_policy", {}).get("allowed_in_sql_generation")
+            ]
+            self.assertEqual(
+                len(executable_diagram_edges), 3,
+                f"Expected all 3 diagram edges executable, got {len(executable_diagram_edges)}: "
+                + str([(r['state'], r['executable_usage_policy']) for r in diagram_edges])
+            )
+
+            # All 3 must be proven_data_model (diagram evidence ranks above profile overlap).
+            for edge in diagram_edges:
+                self.assertEqual(
+                    edge["state"], "proven_data_model",
+                    f"Diagram edge must be proven_data_model: {edge}"
+                )
+
+            # The ICD_Code edge must NOT appear in any form (not even non-executable).
+            icd_edges = [
+                r for r in relationships
+                if _norm_col(r.get("left_column", "")) == "icdcode"
+                or _norm_col(r.get("right_column", "")) == "icdcode"
+            ]
+            self.assertEqual(
+                len(icd_edges), 0,
+                f"ICD_Code edge (no physical counterpart) must be silently skipped, got: {icd_edges}"
+            )
+
+            # The transactions dataset must appear as the left (fact/"many") side
+            # in at least 2 of the 3 resolved edges (PatientID and ProviderID).
+            transactions_left = [
+                r for r in diagram_edges
+                if "transactions" in r.get("left_dataset", "").replace("\\", "/")
+            ]
+            self.assertGreaterEqual(
+                len(transactions_left), 2,
+                f"transactions.csv must be left dataset for at least 2 edges: {[(r['left_dataset'],r['left_column']) for r in diagram_edges]}"
+            )
+
+            # Summary counts must match.
+            summary = contract["summary"]
+            self.assertEqual(
+                summary["executable_relationship_count"],
+                result.executable_relationship_count,
+            )
+            self.assertGreaterEqual(result.executable_relationship_count, 3)
+
+    def test_unresolvable_diagram_edge_silently_skipped_not_fabricated(self):
+        """An edge whose endpoints have no physical counterpart (ICD_Code) must
+        be silently dropped by _diagram_resolved_edges — never fabricated or
+        added as a non-executable candidate.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "workspaces" / "demo"
+            layout = WorkspaceLayout(project_root=workspace)
+            layout.ensure_runtime_dirs()
+            # Only transactions and patients; NO ICD/diagnosis/departments datasets.
+            (workspace / "patients.csv").write_text(
+                "PatientID\nP01\nP02\n", encoding="utf-8"
+            )
+            (workspace / "transactions.csv").write_text(
+                "PatientID\nP01\nP01\nP02\n", encoding="utf-8"
+            )
+            profile_index = {
+                "profiles": [
+                    {
+                        "path": str(workspace / "patients.csv"),
+                        "schema": {"PatientID": "String"},
+                        "profile_path": "workspaces/demo/interns/generated/profiles/patients.csv.profile.json",
+                    },
+                    {
+                        "path": str(workspace / "transactions.csv"),
+                        "schema": {"PatientID": "String"},
+                        "profile_path": "workspaces/demo/interns/generated/profiles/transactions.csv.profile.json",
+                    },
+                ]
+            }
+            (layout.profiles_dir / "profile_index.json").write_text(
+                json.dumps(profile_index), encoding="utf-8"
+            )
+            sidecar_dir = layout.generated_dir / "data_model_images"
+            sidecar_dir.mkdir(parents=True, exist_ok=True)
+            # Sidecar with only an unmatched ICD_Code edge.
+            sidecar = {
+                "source_image": "workspaces/demo/docs/DataModel.png",
+                "relationships": [
+                    {
+                        "relationship_id": "fact__icd_code__dim_diagnosis__icd_code",
+                        "from_table": "Fact",
+                        "from_column": "ICD_Code",
+                        "to_table": "Dim_Diagnosis",
+                        "to_column": "ICD_Code",
+                        "confidence": 0.75,
+                    }
+                ],
+                "profile_matching": {
+                    "relationship_matches": [
+                        {
+                            "relationship_id": "fact__icd_code__dim_diagnosis__icd_code",
+                            "state": "unmatched",
+                            "confidence": 0.0,
+                            "from_match": {},
+                            "to_match": {},
+                        }
+                    ]
+                },
+            }
+            (sidecar_dir / "datamodel.model.json").write_text(
+                json.dumps(sidecar), encoding="utf-8"
+            )
+
+            RelationshipContractBuilder(root, "workspaces/demo").build()
+            contract = json.loads(
+                (layout.contracts_dir / "relationship_contracts.json").read_text()
+            )
+            icd_edges = [
+                r for r in contract["relationships"]
+                if _norm_col(r.get("left_column", "")) == "icdcode"
+                or _norm_col(r.get("right_column", "")) == "icdcode"
+            ]
+            self.assertEqual(
+                len(icd_edges), 0,
+                f"Unresolvable ICD_Code edge must not appear in contracts: {icd_edges}"
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

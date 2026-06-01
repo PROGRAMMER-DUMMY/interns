@@ -262,14 +262,6 @@ class WorkspaceOnboarder:
             expensive_checks=profiling_settings.expensive_checks,
             resource_mode=profiling_settings.mode,
         )
-        # Parse data-model images (e.g. DataModel.png) into review-gated sidecars.
-        # This must run AFTER profile_inputs so profile matching inside the parser
-        # can resolve diagram FK endpoints to real dataset/column names.
-        # LOCAL-SAFE ONLY: allow_remote_vision and confirm_sensitive_upload are
-        # always False.  If Tesseract is absent, the parser degrades gracefully
-        # and onboarding continues with a [~] warning.
-        diagram_artifacts, diagram_warnings = self._parse_data_model_images()
-
         # Extract dictionary text from PDF/DOCX data-model files. The text is
         # downstream evidence for the CLI-agent proposal panel; failures
         # (missing pdfplumber/docx) are warnings, not errors.
@@ -313,6 +305,14 @@ class WorkspaceOnboarder:
                 "resource_profile_settings": profiling_settings.to_dict(),
             },
         )
+        # Parse data-model images (e.g. DataModel.png) into review-gated sidecars.
+        # Must run AFTER profile_index.json is persisted to disk: the parser's
+        # profile matcher reads profile_index.json to resolve diagram FK endpoints
+        # (Fact/Dim_*) to real dataset/column names. Running before the write left
+        # the matcher in `profile_index_missing` state, so no edges resolved.
+        # LOCAL-SAFE ONLY (no remote vision / upload); degrades with a [~] warning
+        # if Tesseract is absent.
+        diagram_artifacts, diagram_warnings = self._parse_data_model_images()
         kpi_registry_payload = {
             "artifact_type": "kpi_registry.json",
             "version": 1,

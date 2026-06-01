@@ -729,6 +729,12 @@ class WorkspaceFlow:
                 },
                 source="kpi_analyst_review_blocked",
             )
+        # BUG-014 (enforcement): collect gate provenance before building the
+        # completion panel so agents and humans can see which gates were
+        # human-confirmed vs agent-asserted.
+        gate_provenance = _collect_gate_provenance(state, self.layout)
+        agent_gate_count = sum(1 for g in gate_provenance if g.get("source") != "human")
+        completion_headline = _gate_provenance_headline(gate_provenance)
         return self._save_panel(
             state,
             panel={
@@ -756,6 +762,9 @@ class WorkspaceFlow:
                     "kpi_analyst_review": review,
                     "results": preview_summary,
                     "completed_kpis": completed_kpis,
+                    "gate_provenance": gate_provenance,
+                    "agent_asserted_gate_count": agent_gate_count,
+                    "completion_headline": completion_headline,
                     "suggested_skills": [
                         {"name": "kpi-analyst", "why": "Validate generated SQL and result samples against KPI intent."},
                         {"name": "self-grill", "why": "EXECUTED — see summary.self_grill and the delegation brief for kpi_output_verification."},
@@ -2057,6 +2066,93 @@ def compute_workflow_diff(repo_root: Path, workspace_rel: str) -> dict[str, Any]
     }
 
 
+def _collect_gate_provenance(
+    state: dict[str, Any],
+    layout: "WorkspaceLayout",
+) -> list[dict[str, Any]]:
+    """Gather gate provenance for the workspace/session.
+
+    Returns a list of gate records, each with:
+      gate        - short identifier for the gate
+      source      - 'human' | 'agent'
+      confirmed_by - name (or '' when source is 'agent')
+      label       - human-readable description
+    """
+    gates: list[dict[str, Any]] = []
+
+    # (a) Relationship approvals — read relationship_contracts.json
+    rel_path = layout.relationship_contracts_path
+    if rel_path.exists():
+        try:
+            contracts_data = json.loads(rel_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            contracts_data = {}
+        for rel in (contracts_data.get("relationships") or []):
+            if not isinstance(rel, dict):
+                continue
+            rel_id = str(rel.get("relationship_id") or "")
+            state_val = str(rel.get("state") or "")
+            # Only report gates for executable / user_decided relationships
+            if state_val not in {"user_confirmed", "proven_data_model", "rejected"}:
+                continue
+            approval = rel.get("approval") or {}
+            source = str(approval.get("source") or "agent")
+            confirmed_by = str(approval.get("confirmed_by") or "")
+            gates.append({
+                "gate": f"relationship:{rel_id}",
+                "source": source,
+                "confirmed_by": confirmed_by,
+                "label": f"Relationship `{rel_id}` ({state_val})",
+            })
+
+    # (b) KPI-analyst review — from the recorded review in session state
+    review = state.get("kpi_analyst_review") or {}
+    if review:
+        source = str(review.get("source") or "agent")
+        confirmed_by = str(review.get("confirmed_by") or "")
+        verdict = str(review.get("verdict") or "")
+        gates.append({
+            "gate": "kpi_analyst_review",
+            "source": source,
+            "confirmed_by": confirmed_by,
+            "label": f"KPI-analyst review (verdict: {verdict})",
+        })
+
+    return gates
+
+
+def _render_gate_provenance_lines(gates: list[dict[str, Any]]) -> list[str]:
+    """Render gate provenance as Markdown lines."""
+    if not gates:
+        return ["## Gate Provenance", "", "- (no executable gates recorded)", ""]
+    lines = ["## Gate Provenance", ""]
+    for gate in gates:
+        source = gate.get("source", "agent")
+        confirmed_by = gate.get("confirmed_by", "")
+        label = gate.get("label", gate.get("gate", ""))
+        if source == "human" and confirmed_by:
+            lines.append(f"- [ok] human:{confirmed_by} — {label}")
+        else:
+            lines.append(f"- [~] agent-asserted (no human confirmation) — {label}")
+    lines.append("")
+    return lines
+
+
+def _gate_provenance_headline(gates: list[dict[str, Any]]) -> str:
+    """Return a completion headline that reflects gate provenance.
+
+    If any gate is agent-asserted, the headline includes a warning count.
+    Returns a plain string (no trailing newline).
+    """
+    agent_count = sum(1 for g in gates if g.get("source") != "human")
+    if agent_count:
+        return (
+            f"[~] Completed WITHOUT human confirmation on {agent_count} gate(s) "
+            "(pass --require-human-gates to block on agent-asserted gates)"
+        )
+    return "[ok] Completed — all gates confirmed by humans"
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -2114,6 +2210,17 @@ def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
         print("")
         print(f"- Workspace: `{result.workspace}`")
         print(f"- Status: `{result.status}`")
+    # BUG-014 (enforcement): on completion, print the Gate Provenance section
+    # so the operator can see which gates were human-confirmed vs agent-asserted.
+    if result.stage == "complete":
+        provenance = (panel_payload.get("summary") or {}).get("gate_provenance") or []
+        headline = (panel_payload.get("summary") or {}).get("completion_headline") or ""
+        if headline:
+            print("")
+            print(headline)
+        print("")
+        for line in _render_gate_provenance_lines(provenance):
+            print(line)
     # BUG-013 / BUG-016: on completion OR explicit `results` call, emit the full
     # kpi_results packet so any driving agent sees KPI + SQL + result rows without
     # needing a separate call.  For `results` stage the packet IS the point of the
@@ -2344,6 +2451,17 @@ def main(argv: list[str] | None = None) -> int:
             "Omit to record as source: agent (machine-asserted)."
         ),
     )
+    # BUG-014 (enforcement): strict opt-in to block completion when any required
+    # gate is agent-asserted rather than human-confirmed.
+    review_p.add_argument(
+        "--require-human-gates",
+        action="store_true",
+        help=(
+            "Block completion (exit non-zero) if any required gate is agent-asserted. "
+            "By default completion proceeds with a visible [~] warning. "
+            "Requires --confirmed-by on each gate or prior human approvals."
+        ),
+    )
 
     artifacts = sub.add_parser("artifacts")
     artifacts.add_argument("--workspace", required=True)
@@ -2505,6 +2623,29 @@ def main(argv: list[str] | None = None) -> int:
             per_kpi=per_kpi,
             confirmed_by=getattr(args, "confirmed_by", "") or "",
         )
+        # BUG-014 (enforcement): --require-human-gates blocks completion when any
+        # required gate is agent-asserted (non-breaking by default).
+        if getattr(args, "require_human_gates", False) and result.status == "complete":
+            panel_path = (Path(args.repo_root).resolve() / result.current_panel_path
+                          if result.current_panel_path else None)
+            panel_payload: dict[str, Any] = {}
+            if panel_path and panel_path.exists():
+                try:
+                    panel_payload = json.loads(panel_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    pass
+            provenance = (panel_payload.get("summary") or {}).get("gate_provenance") or []
+            agent_gates = [g for g in provenance if g.get("source") != "human"]
+            if agent_gates:
+                print("[blocked] --require-human-gates: completion blocked — the following gates are agent-asserted:")
+                for g in agent_gates:
+                    label = g.get("label", g.get("gate", ""))
+                    print(f"  [~] {label}")
+                print("")
+                print("Confirm each gate with the appropriate --confirmed-by flag, for example:")
+                print(f"  workspace-flow review --session {result.session_id} --verdict ok --confirmed-by <reviewer>")
+                print("")
+                return 2
     elif args.cmd == "artifacts":
         repo_root = Path(args.repo_root).resolve()
         layout = WorkspaceLayout(project_root=(repo_root / args.workspace).resolve())
@@ -2665,6 +2806,17 @@ def pipeline_main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print the final result as machine-readable JSON.",
     )
+    # BUG-014 (enforcement): strict opt-in to block completion when any required
+    # gate is agent-asserted rather than human-confirmed.
+    parser.add_argument(
+        "--require-human-gates",
+        action="store_true",
+        help=(
+            "Block completion (exit non-zero) if any required gate is agent-asserted. "
+            "By default the pipeline completes with a visible [~] warning. "
+            "Use --confirmed-by on workspace-flow review to record human confirmation."
+        ),
+    )
 
     args = parser.parse_args(argv)
     repo_root = Path(args.repo_root).resolve()
@@ -2672,6 +2824,7 @@ def pipeline_main(argv: list[str] | None = None) -> int:
     domain: str = args.domain
     quiet: bool = args.quiet
     emit_json: bool = args.json
+    require_human_gates: bool = getattr(args, "require_human_gates", False)
 
     def _log(msg: str) -> None:
         if not quiet:
@@ -2902,8 +3055,26 @@ def pipeline_main(argv: list[str] | None = None) -> int:
     if result.status == "complete":
         _log("[ok] Step 5/5: emitting KPI result packet")
         kpi_results_md_path = repo_root / workspace_rel / "interns" / "reports" / "kpi_results" / "current.md"
+
+        # BUG-014 (enforcement): check gate provenance before emitting completion.
+        panel_data = _read_json(repo_root / result.current_panel_path) if result.current_panel_path else {}
+        provenance = (panel_data.get("summary") or {}).get("gate_provenance") or []
+        agent_gates = [g for g in provenance if g.get("source") != "human"]
+        headline = (panel_data.get("summary") or {}).get("completion_headline") or ""
+
+        if require_human_gates and agent_gates:
+            print("[blocked] --require-human-gates: pipeline completion blocked — the following gates are agent-asserted:")
+            for g in agent_gates:
+                label = g.get("label", g.get("gate", ""))
+                print(f"  [~] {label}")
+            print("")
+            print("Confirm each gate with the appropriate --confirmed-by flag, for example:")
+            print(f"  workspace-flow review --session {result.session_id} --verdict ok --confirmed-by <reviewer>")
+            print("")
+            print("Re-run `run-kpi-pipeline` after resolving all agent-asserted gates.")
+            return 2
+
         if emit_json:
-            panel_data = _read_json(repo_root / result.current_panel_path) if result.current_panel_path else {}
             print(json.dumps(panel_data.get("summary") or result.summary(), indent=2, default=str))
         else:
             # Print the markdown result packet (same path as BUG-013/BUG-016 fix).
@@ -2916,6 +3087,12 @@ def pipeline_main(argv: list[str] | None = None) -> int:
             else:
                 print("[~] KPI result packet not found at expected path.")
                 print(f"    Expected: {kpi_results_md_path}")
+            # BUG-014 (enforcement): surface gate provenance at completion.
+            if headline:
+                print(headline)
+            print("")
+            for line in _render_gate_provenance_lines(provenance):
+                print(line)
             print("## Pipeline Complete")
             print(f"  Session: {result.session_id}")
             print(f"  Workspace: {workspace_rel}")
