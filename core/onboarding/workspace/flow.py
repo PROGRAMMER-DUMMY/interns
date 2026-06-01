@@ -2900,32 +2900,17 @@ def pipeline_main(argv: list[str] | None = None) -> int:
     executable_count: int = int(rel_summary.get("executable_relationship_count") or 0)
     _log(f"  [ok] relationships: {executable_count} executable, {candidate_count} candidate")
 
+    # NOTE: do NOT hard-block here merely because candidate relationships remain.
+    # A candidate join only matters if an in-scope KPI actually needs it. The
+    # per-KPI join-proof check runs inside `start` (below) and marks the session
+    # `source_to_target_blocked` only when a KPI requires an unapproved join --
+    # that post-start gate (and not this count) is the correct place to stop.
+    # Diagram-proven joins (proven_data_model) already satisfy the KPIs that use
+    # them, so leftover candidates the KPIs do not use must not block the run.
     if candidate_count > 0:
-        # Read the contracts file to surface which ones need approval.
-        contracts_path = (repo_root / workspace_rel).resolve() / "interns" / "generated" / "contracts" / "relationship_contracts.json"
-        contracts_data = _read_json(contracts_path)
-        pending_ids = [
-            str(r.get("relationship_id", ""))
-            for r in (contracts_data.get("relationships") or [])
-            if isinstance(r, dict) and r.get("state") not in {"user_confirmed", "proven_data_model", "rejected"}
-        ]
-        commands = [
-            f"uv run apply-relationship-answer --workspace {workspace_rel} --relationship-id {rid} --answer approve"
-            for rid in pending_ids[:10]
-        ]
-        return _gate_stop(
-            headline=(
-                f"{candidate_count} candidate relationship(s) need human approval before "
-                "executable SQL can be generated."
-            ),
-            details=[
-                f"  Pending IDs: {', '.join(pending_ids[:10])}" + (" ..." if len(pending_ids) > 10 else ""),
-                f"  Contracts:   {workspace_rel}/interns/generated/contracts/relationship_contracts.json",
-                f"  Report:      {workspace_rel}/interns/reports/relationship_contracts.md",
-            ],
-            commands=commands or [
-                f"uv run apply-relationship-answer --workspace {workspace_rel} --relationship-id <id> --answer approve",
-            ],
+        _log(
+            f"  [~] {candidate_count} candidate relationship(s) not auto-proven from the "
+            "data-model diagram; proceeding -- only a join an in-scope KPI needs will gate."
         )
 
     # ------------------------------------------------------------------ #

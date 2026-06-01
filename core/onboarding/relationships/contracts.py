@@ -958,6 +958,84 @@ def _relationships_from_finalized_model(
     return relationships
 
 
+def _root_fact_dataset(
+    candidates: list[str],
+    profiles: dict[str, dict[str, Any]],
+    repo_root: Path,
+) -> str:
+    """Return the root-fact dataset from a set of candidate fact datasets.
+
+    The root fact is the dataset that is referenced by NONE of the other
+    candidates — i.e. it has in-degree 0 in the workspace join graph.
+
+    In-degree of dataset D = number of OTHER datasets that contain a non-unique
+    column whose name matches one of D's unique-key columns.  A unique column of
+    D that appears as a (non-unique) foreign-key column in another table means D
+    is being referenced *as* a dimension by that other table, so D is NOT the
+    root fact.
+
+    Tie-break: highest out-degree (most FK columns pointing outward, i.e. most
+    non-unique shared-key columns that are unique in some other dataset), then
+    shortest name for determinism (lexically first by dataset path stem).
+
+    Workspace-agnostic — no table name is special-cased.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Collect the set of (near-)unique columns for every candidate.
+    def unique_cols(dataset: str) -> set[str]:
+        p = profiles.get(dataset, {})
+        schema = _schema(p)
+        result: set[str] = set()
+        for col in schema:
+            u = _column_uniqueness(p, col, repo_root)
+            if _is_unique_ratio(u):
+                result.add(_norm(col))
+        return result
+
+    # Collect all (normalized) column names for every candidate.
+    def all_cols(dataset: str) -> set[str]:
+        return {_norm(c) for c in _schema(profiles.get(dataset, {})).keys()}
+
+    unique_by: dict[str, set[str]] = {d: unique_cols(d) for d in candidates}
+    all_cols_by: dict[str, set[str]] = {d: all_cols(d) for d in candidates}
+
+    # in-degree(D) = number of OTHER candidates that contain one of D's unique
+    # keys as a column (regardless of that other dataset's uniqueness on it).
+    def in_degree(dataset: str) -> int:
+        my_unique = unique_by[dataset]
+        if not my_unique:
+            return 0
+        count = 0
+        for other in candidates:
+            if other == dataset:
+                continue
+            if my_unique & all_cols_by[other]:
+                count += 1
+        return count
+
+    # out-degree(D) = number of OTHER candidates that have a unique key matching
+    # one of D's non-PK columns (i.e. D's FK columns pointing outward).
+    def out_degree(dataset: str) -> int:
+        my_all = all_cols_by[dataset]
+        count = 0
+        for other in candidates:
+            if other == dataset:
+                continue
+            if unique_by[other] & my_all:
+                count += 1
+        return count
+
+    in_degrees = {d: in_degree(d) for d in candidates}
+    min_in = min(in_degrees.values())
+    roots = [d for d in candidates if in_degrees[d] == min_in]
+
+    # Tie-break by highest out-degree, then lexically shortest stem.
+    roots.sort(key=lambda d: (-out_degree(d), Path(d.replace("\\", "/")).stem.lower()))
+    return roots[0]
+
+
 def _relationships_from_diagram_sidecars(
     layout: WorkspaceLayout,
     profiles: dict[str, dict[str, Any]],
@@ -977,6 +1055,16 @@ def _relationships_from_diagram_sidecars(
     in `_state_rank`). The edge is still subject to the uniqueness and referential
     -integrity gates in `_relationship`, so a diagram FK that does not resolve in
     the data (key-namespace mismatch) stays non-executable.
+
+    When the diagram's abstract ``Fact`` table maps to more than one physical
+    dataset (e.g. both ``encounters`` and ``transactions`` carry PatientID), the
+    sidecar's first-match choice may be wrong.  This function re-derives the fact
+    dataset among all profile datasets that carry the FK column (excluding the
+    dimension/right dataset) using the root-fact algorithm: pick the dataset with
+    in-degree 0 in the workspace join graph (its unique key is not referenced by
+    any other dataset).  Tie-break: highest out-degree, then lexically shortest
+    stem.  This ensures the correct root fact is promoted regardless of which
+    physical table the image parser happened to match first.
     """
     sidecar_dir = layout.generated_dir / "data_model_images"
     if not sidecar_dir.exists():
@@ -990,9 +1078,36 @@ def _relationships_from_diagram_sidecars(
             continue
         edges = _diagram_resolved_edges(record)
         for edge in edges:
-            left_dataset = _diagram_profile_dataset(edge["from"], profiles, repo_root)
+            sidecar_left = _diagram_profile_dataset(edge["from"], profiles, repo_root)
             right_dataset = _diagram_profile_dataset(edge["to"], profiles, repo_root)
-            if not left_dataset or not right_dataset or left_dataset == right_dataset:
+            if not right_dataset:
+                continue
+            # Re-derive the fact (left) dataset BEFORE the same-dataset guard so
+            # that a sidecar whose both sides were matched to the same physical
+            # dataset (e.g. both sides matched to departments.csv when one should
+            # be the fact table) gets corrected here.
+            #
+            # Find every profile that contains the FK column (excluding the
+            # dimension/right dataset), then pick the root fact among all those
+            # candidates via the in-degree algorithm.
+            fk_col_norm = _norm(edge["from"].get("profile_column", ""))
+            if fk_col_norm:
+                fact_candidates = [
+                    ds for ds in profiles
+                    if ds != right_dataset
+                    and fk_col_norm in {_norm(c) for c in _schema(profiles[ds]).keys()}
+                ]
+                if len(fact_candidates) > 1:
+                    left_dataset = _root_fact_dataset(fact_candidates, profiles, repo_root)
+                elif len(fact_candidates) == 1:
+                    left_dataset = fact_candidates[0]
+                else:
+                    # No profile contains this FK column outside the dim dataset;
+                    # fall back to the sidecar's original match if it is valid.
+                    left_dataset = sidecar_left
+            else:
+                left_dataset = sidecar_left
+            if not left_dataset or left_dataset == right_dataset:
                 continue
             left_column = _resolve_column(edge["from"].get("profile_column", ""), profiles[left_dataset])
             right_column = _resolve_column(edge["to"].get("profile_column", ""), profiles[right_dataset])

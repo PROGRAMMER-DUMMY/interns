@@ -1138,5 +1138,153 @@ class DiagramAbstractNameResolverTests(unittest.TestCase):
             )
 
 
+class RootFactDatasetSelectionTests(unittest.TestCase):
+    """BUG-023 (root-fact fix): when the diagram's abstract Fact table can map
+    to more than one physical dataset (e.g. both encounters and transactions carry
+    PatientID), the resolver must promote the ROOT FACT — the dataset whose unique
+    key is NOT referenced by any other dataset (in-degree 0 in the join graph).
+
+    Concrete scenario: encounters has EncounterID (unique PK) and PatientID (FK);
+    transactions has TransactionID (unique PK) and EncounterID (FK) + PatientID (FK).
+    transactions references encounters (EncounterID), so encounters has in-degree 1
+    and transactions has in-degree 0.  The diagram edge Fact.PatientID -> patients
+    must promote transactions->patients, NOT encounters->patients.
+    """
+
+    def _build_workspace(self, root: Path) -> WorkspaceLayout:
+        workspace = root / "workspaces" / "demo"
+        layout = WorkspaceLayout(project_root=workspace)
+        layout.ensure_runtime_dirs()
+        # patients: unique PK (PatientID)
+        (workspace / "patients.csv").write_text(
+            "PatientID\nP01\nP02\nP03\n", encoding="utf-8"
+        )
+        # encounters: unique PK (EncounterID), FK PatientID -- referenced by transactions
+        (workspace / "encounters.csv").write_text(
+            "EncounterID,PatientID\n"
+            "ENC01,P01\n"
+            "ENC02,P01\n"
+            "ENC03,P02\n"
+            "ENC04,P03\n",
+            encoding="utf-8",
+        )
+        # transactions: unique PK (TransactionID), FK EncounterID + FK PatientID
+        # transactions references encounters, so encounters has in-degree 1;
+        # nothing references transactions (in-degree 0 = root fact)
+        (workspace / "transactions.csv").write_text(
+            "TransactionID,EncounterID,PatientID\n"
+            "TRANS01,ENC01,P01\n"
+            "TRANS02,ENC01,P01\n"
+            "TRANS03,ENC02,P01\n"
+            "TRANS04,ENC03,P02\n"
+            "TRANS05,ENC04,P03\n",
+            encoding="utf-8",
+        )
+        profile_index = {
+            "profiles": [
+                {
+                    "path": str(workspace / "patients.csv"),
+                    "schema": {"PatientID": "String"},
+                    "profile_path": "workspaces/demo/interns/generated/profiles/patients.csv.profile.json",
+                },
+                {
+                    "path": str(workspace / "encounters.csv"),
+                    "schema": {"EncounterID": "String", "PatientID": "String"},
+                    "profile_path": "workspaces/demo/interns/generated/profiles/encounters.csv.profile.json",
+                },
+                {
+                    "path": str(workspace / "transactions.csv"),
+                    "schema": {"TransactionID": "String", "EncounterID": "String", "PatientID": "String"},
+                    "profile_path": "workspaces/demo/interns/generated/profiles/transactions.csv.profile.json",
+                },
+            ]
+        }
+        (layout.profiles_dir / "profile_index.json").write_text(
+            json.dumps(profile_index), encoding="utf-8"
+        )
+        return layout
+
+    def test_diagram_edge_with_ambiguous_fact_promotes_root_fact_not_referenced_table(self):
+        """The diagram edge Fact.PatientID -> Dim_Patient.PatientID must resolve
+        to transactions->patients (root fact, in-degree 0), NOT encounters->patients
+        (encounters is referenced by transactions so has in-degree 1).
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            layout = self._build_workspace(root)
+            workspace_path = str(layout.project_root).replace("\\", "/")
+            sidecar_dir = layout.generated_dir / "data_model_images"
+            sidecar_dir.mkdir(parents=True, exist_ok=True)
+            # Sidecar as produced by image_parser: it mistakenly matched Fact to
+            # encounters.csv (wrong choice; the fix must override it to transactions).
+            (sidecar_dir / "datamodel.model.json").write_text(
+                json.dumps({
+                    "source_image": "workspaces/demo/docs/DataModel.png",
+                    "relationships": [
+                        {
+                            "relationship_id": "fact__patientid__dim_patient__patientid",
+                            "from_table": "Fact",
+                            "from_column": "Patient_ID",
+                            "to_table": "Dim_Patient",
+                            "to_column": "Patient_ID",
+                            "confidence": 0.85,
+                        }
+                    ],
+                    "profile_matching": {
+                        "relationship_matches": [
+                            {
+                                "relationship_id": "fact__patientid__dim_patient__patientid",
+                                "state": "profile_matched",
+                                "confidence": 0.85,
+                                # image_parser picked encounters (wrong)
+                                "from_match": {
+                                    "table_name": "Fact",
+                                    "column_name": "Patient_ID",
+                                    "dataset": workspace_path + "/encounters.csv",
+                                    "profile_column": "PatientID",
+                                },
+                                "to_match": {
+                                    "table_name": "Dim_Patient",
+                                    "column_name": "Patient_ID",
+                                    "dataset": workspace_path + "/patients.csv",
+                                    "profile_column": "PatientID",
+                                },
+                            }
+                        ]
+                    },
+                }),
+                encoding="utf-8",
+            )
+
+            RelationshipContractBuilder(root, "workspaces/demo").build()
+            contract = json.loads(
+                (layout.contracts_dir / "relationship_contracts.json").read_text()
+            )
+            diagram_edges = [
+                r for r in contract["relationships"]
+                if any(
+                    src.get("type") == "data_model_image_diagram"
+                    for src in r.get("evidence_sources", [])
+                )
+            ]
+            self.assertEqual(len(diagram_edges), 1, contract["relationships"])
+            edge = diagram_edges[0]
+            # Must be transactions (root fact, in-degree 0), NOT encounters
+            self.assertIn(
+                "transactions", edge["left_dataset"].replace("\\", "/"),
+                f"Root-fact selection must pick transactions (in-degree 0), got: {edge['left_dataset']}",
+            )
+            self.assertNotIn(
+                "encounters", edge["left_dataset"].replace("\\", "/"),
+                f"encounters has in-degree 1 (referenced by transactions) and must NOT be chosen: {edge['left_dataset']}",
+            )
+            # Edge must be executable (RI passes since transactions.PatientID -> patients.PatientID resolves)
+            self.assertTrue(
+                edge["executable_usage_policy"]["allowed_in_sql_generation"],
+                f"transactions->patients edge must be executable; got: {edge['executable_usage_policy']}",
+            )
+            self.assertEqual(edge["state"], "proven_data_model")
+
+
 if __name__ == "__main__":
     unittest.main()
