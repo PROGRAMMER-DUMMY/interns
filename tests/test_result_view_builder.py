@@ -353,19 +353,20 @@ def _kpi_uc(**kwargs):
 
 
 class ShareOfTotalByGroupTests(unittest.TestCase):
-    """A metric phrased '<agg> / <same agg> for <group>' is a share-of-total BY
-    <group>: the numerator is the aggregate WITHIN each group (PARTITION BY
-    <group>) and the denominator is the grand total of the same aggregate
-    (OVER ()), so each row is one group and its percentage of the whole — shares
-    sum to ~100% across groups. The result grain is the group only; the
-    descriptive cuts (e.g. Gender) do NOT subdivide the share.
+    """BUG-024: a metric phrased '<agg> / <same agg> for <group>' whose KPI also
+    declares descriptive cuts is a share-of-total whose grain is the FULL cut set
+    (group + every descriptive cut). The numerator counts WITHIN each full-grain
+    cell (PARTITION BY all grain dimensions) and the denominator is the grand
+    total of the same aggregate (OVER ()), so each row is one cell and its
+    percentage of the whole population — shares sum to ~100% across all cells.
 
-    (This supersedes the earlier BUG-002 reading, which scoped the denominator
-    to the group and grained by group+cuts, producing within-group composition
-    instead of each group's share of the total.)
+    (This reverses the prior group-only-grain reading: the KPI's stated cuts
+    must subdivide the share, e.g. "percentage share of lives by gender, age,
+    visit type, department" grains by all four, not by department alone. The
+    denominator scope is intentionally left as the grand total.)
     """
 
-    def test_numerator_per_group_denominator_is_grand_total(self):
+    def test_descriptive_cuts_subdivide_the_grain(self):
         kpi = _kpi_uc(
             name="percentage share of lives by department",
             metric=(
@@ -383,31 +384,31 @@ class ShareOfTotalByGroupTests(unittest.TestCase):
             kpi, kpi_id="kpi_002",
             feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
         )
-        # Numerator is per-group, partitioned by the "for X" column.
-        self.assertIn('PARTITION BY "departement"', sql)
+        # Numerator partitions by the FULL grain (group + descriptive cut).
+        self.assertIn('PARTITION BY "departement", "Gender"', sql)
         # Denominator is the grand total: a bare OVER () window.
         self.assertIn("OVER ()", sql)
         self.assertIn("percentage_share", sql)
         self.assertIn("NULLIF", sql)
 
-        # Structurally: exactly one windowed agg partitions by the group, and
-        # exactly one is the global grand total (empty window).
+        # Structurally: the numerator window partitions by every grain dimension,
+        # and exactly one agg is the global grand total (empty window).
         parsed = parse_kpi(kpi)
         windowed = [a for a in parsed.aggregations if a.window is not None]
         self.assertTrue(windowed)
         self.assertTrue(
-            any(a.window.partition_by == ('"departement"',) for a in windowed),
-            "numerator must PARTITION BY the group column",
+            any(a.window.partition_by == ('"departement"', '"Gender"') for a in windowed),
+            "numerator must PARTITION BY every grain dimension (group + cuts)",
         )
         self.assertTrue(
             any(a.window.partition_by == () for a in windowed),
             "denominator must be the grand total (no partition)",
         )
 
-        # Grain is the group only — the Gender cut does not subdivide the share.
+        # Grain is the group AND every descriptive cut — the cuts subdivide.
         self.assertEqual(
-            [d.alias for d in parsed.dimensions], ["departement"],
-            "result grain must be the group column only, not group + cuts",
+            [d.alias for d in parsed.dimensions], ["departement", "gender"],
+            "result grain must be group + every declared descriptive cut",
         )
 
     def test_no_for_group_keeps_global_percent_of_total(self):
@@ -623,11 +624,18 @@ class ForGroupTokenResolvesToRealColumnTests(unittest.TestCase):
             )
 
         # The per-group numerator must partition by the REAL department column
-        # ("Name"), never the phantom "departement" token.
+        # ("Name"), never the phantom "departement" token. Under BUG-024 the
+        # descriptive cuts subdivide the grain, so the numerator window is the
+        # full cut set (Name + VisitType + Gender) — "Name" must be present and
+        # resolved, and the phantom token must be absent.
         windowed = [a for a in parsed.aggregations if a.window is not None]
-        self.assertTrue(
-            any(a.window.partition_by == ('"Name"',) for a in windowed),
-            "numerator must PARTITION BY the resolved physical department column",
+        numerator = next(
+            (a for a in windowed if a.window.partition_by), None
+        )
+        self.assertIsNotNone(numerator, "a per-cell numerator window must exist")
+        self.assertEqual(
+            numerator.window.partition_by, ('"Name"', '"VisitType"', '"Gender"'),
+            "numerator must PARTITION BY the full resolved grain (group + cuts)",
         )
 
     def test_unresolvable_group_token_does_not_emit_phantom_partition(self):
@@ -663,6 +671,129 @@ class ForGroupTokenResolvesToRealColumnTests(unittest.TestCase):
         )
         self.assertNotIn('"zzqqxx"', sql)
         self.assertIn("percentage_share", sql)
+
+
+class DenominatorScopeTests(unittest.TestCase):
+    """Phase 1: denominator-scope facet wired end-to-end through build_result_view_sql.
+
+    The live bug: a recorded ``within_department`` scope for kpi_002 was ignored
+    and the generator emitted ``OVER ()`` instead of ``OVER (PARTITION BY <group>)``.
+    These tests close that gap.
+    """
+
+    def _pct_kpi(self, *, extra_cuts: str = "") -> dict:
+        cuts = "departement, Gender"
+        if extra_cuts:
+            cuts += f", {extra_cuts}"
+        return _kpi(
+            name="Percentage share of lives by department",
+            metric=(
+                "percentage of sum(distinct PatientID) / "
+                "sum(distinct PatientID) for departement"
+            ),
+            cuts=cuts,
+            features=[
+                {"feature": "PatientID", "source_columns": [{"column": "PatientID"}]},
+                {"feature": "departement", "source_columns": [{"column": "departement"}]},
+                {"feature": "Gender", "source_columns": [{"column": "Gender"}]},
+            ],
+        )
+
+    def test_within_group_scope_flips_denominator_to_partition_by(self):
+        """A ``within_department`` scope must emit OVER (PARTITION BY <group>)
+        for the denominator, not OVER ()."""
+        kpi = self._pct_kpi()
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_002",
+            feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
+            denominator_scope="within_department",
+        )
+        # Denominator window must be scoped to the partition column.
+        self.assertIn('PARTITION BY "departement"', sql)
+        # Grand-total OVER () must NOT be present (it has been replaced).
+        self.assertNotIn("OVER ()", sql)
+        # percentage_share expression still present.
+        self.assertIn("percentage_share", sql)
+        self.assertIn("NULLIF", sql)
+
+    def test_default_scope_none_still_emits_grand_total_over(self):
+        """No denominator_scope (default) must keep OVER () — no regression."""
+        kpi = self._pct_kpi()
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_002",
+            feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
+            denominator_scope=None,
+        )
+        self.assertIn("OVER ()", sql)
+        self.assertIn("percentage_share", sql)
+
+    def test_explicit_grand_total_scope_still_emits_over(self):
+        """Explicit ``grand_total`` must behave identically to None."""
+        kpi = self._pct_kpi()
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_002",
+            feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
+            denominator_scope="grand_total",
+        )
+        self.assertIn("OVER ()", sql)
+
+    def test_within_group_scope_emits_auditable_comment(self):
+        """The design requires a SQL comment recording the denominator scope for
+        auditability (design/kpi_intent_contract.md §2 'Reported')."""
+        kpi = self._pct_kpi()
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_002",
+            feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
+            denominator_scope="within_department",
+        )
+        self.assertIn("-- denominator_scope:", sql)
+        self.assertIn("within_department", sql)
+
+    def test_grand_total_scope_emits_auditable_comment(self):
+        """Grand-total scope also emits an auditable comment (None defaults
+        to ``grand_total`` label)."""
+        kpi = self._pct_kpi()
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_002",
+            feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
+            denominator_scope=None,
+        )
+        self.assertIn("-- denominator_scope:", sql)
+
+    def test_within_group_scope_grain_still_includes_all_cuts(self):
+        """BUG-024 regression: the within-group scope must not drop descriptive
+        cuts from the grain.  Both departement and Gender must remain."""
+        kpi = self._pct_kpi()
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_002",
+            feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
+            denominator_scope="within_department",
+        )
+        # Numerator still partitions by the full grain.
+        self.assertIn('"departement"', sql)
+        self.assertIn('"Gender"', sql)
+
+    def test_within_scope_parse_kpi_records_denominator_scope_field(self):
+        """parse_kpi records the resolved denominator_scope in ParsedKPI for
+        downstream audit."""
+        kpi = self._pct_kpi()
+        parsed = parse_kpi(kpi, denominator_scope="within_department")
+        self.assertIsNotNone(parsed.denominator_scope)
+        self.assertIn("within_department", parsed.denominator_scope)
+
+    def test_none_scope_parse_kpi_records_grand_total_default(self):
+        """With no scope, denominator_scope is recorded as 'grand_total' label."""
+        kpi = self._pct_kpi()
+        parsed = parse_kpi(kpi, denominator_scope=None)
+        # For a percentage-share KPI, denominator_scope is set.
+        self.assertIsNotNone(parsed.denominator_scope)
+        self.assertIn("grand_total", parsed.denominator_scope)
+
+    def test_non_percentage_kpi_denominator_scope_stays_none(self):
+        """parse_kpi on a non-percentage-share KPI must not set denominator_scope."""
+        kpi = _kpi(metric="sum(total_amount)", cuts="channel")
+        parsed = parse_kpi(kpi, denominator_scope="within_department")
+        self.assertIsNone(parsed.denominator_scope)
 
 
 class PreviewRowCapTests(unittest.TestCase):

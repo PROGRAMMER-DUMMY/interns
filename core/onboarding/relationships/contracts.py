@@ -19,6 +19,15 @@ EXECUTABLE_RELATIONSHIP_STATES = {"proven_data_model", "user_confirmed"}
 USER_DECIDED_RELATIONSHIP_STATES = {"user_confirmed", "rejected"}
 RELATIONSHIP_VERSION = 1
 
+# A diagram-declared join proven only by referential integrity against a very
+# small dimension table can pass RI coincidentally (few distinct keys => the FK
+# resolves by chance, not by genuine design). Such joins stay executable
+# (proven_data_model) but are FLAGGED low_cardinality_dimension and their
+# recorded confidence is capped, so they are not silently treated as
+# high-certainty. Workspace-agnostic: threshold is a structural row count.
+LOW_CARDINALITY_DIMENSION_ROWS = 50
+LOW_CARDINALITY_CONFIDENCE_CAP = 0.75
+
 register_contract("relationship_contracts.json", current_version=1)
 DEFAULT_REVIEW_DAYS = 180
 
@@ -1132,6 +1141,16 @@ def _relationships_from_diagram_sidecars(
                 profiles[right_dataset], right_column,
                 repo_root,
             )
+            # Low-cardinality dimension guard: a diagram join whose dimension/PK
+            # side has very few rows can satisfy RI by coincidence. Keep it
+            # executable but cap confidence and flag it so reviewers see the risk.
+            right_rows = _first_number(profiles[right_dataset], ("row_count",))
+            low_cardinality_dimension = (
+                right_rows is not None and right_rows < LOW_CARDINALITY_DIMENSION_ROWS
+            )
+            diagram_confidence = float(edge.get("confidence") or 0.8)
+            if low_cardinality_dimension:
+                diagram_confidence = min(diagram_confidence, LOW_CARDINALITY_CONFIDENCE_CAP)
             relationships.append(
                 _relationship(
                     left_dataset=left_dataset,
@@ -1139,7 +1158,7 @@ def _relationships_from_diagram_sidecars(
                     right_dataset=right_dataset,
                     right_column=right_column,
                     state="proven_data_model",
-                    confidence=float(edge.get("confidence") or 0.8),
+                    confidence=diagram_confidence,
                     evidence_sources=[
                         {
                             "type": "data_model_image_diagram",
@@ -1152,6 +1171,8 @@ def _relationships_from_diagram_sidecars(
                             "right_uniqueness_ratio": right_u,
                             "dimension_side_key_unique": dimension_key_unique,
                             "left_key_resolution_ratio": ri_ratio,
+                            "low_cardinality_dimension": low_cardinality_dimension,
+                            "dimension_row_count": right_rows,
                         }
                     ],
                     dimension_key_unique=dimension_key_unique,

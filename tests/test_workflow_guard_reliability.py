@@ -321,7 +321,10 @@ class RepeatedCommandTests(unittest.TestCase):
 
 
 class HandEditedGeneratedArtifactTests(unittest.TestCase):
-    def test_edit_under_generated_solutions_warns(self):
+    def test_edit_under_generated_solutions_errors(self):
+        # Hand-editing executable generated SQL is the BUG-024 cascade trigger
+        # (diverges SQL from execution-harness hash + result packet), so it is a
+        # blocker, not advice.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_trajectory(
@@ -337,7 +340,7 @@ class HandEditedGeneratedArtifactTests(unittest.TestCase):
             findings = _harness(root)._check_hand_edited_generated_artifacts()
             codes = [f["code"] for f in findings]
             self.assertIn("generated_artifact_hand_edited", codes)
-            self.assertTrue(all(f["severity"] == "warning" for f in findings))
+            self.assertTrue(all(f["severity"] == "error" for f in findings))
 
     def test_edit_path_in_metadata_warns(self):
         with tempfile.TemporaryDirectory() as tmp:

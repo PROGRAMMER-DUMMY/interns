@@ -13,7 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core.dashboard.inference import infer_chart
+from core.dashboard.inference import (
+    infer_chart,
+    parse_result_view_columns,
+    validate_spec_columns,
+)
 from core.onboarding.kpi.registry_loader import load_kpi_definitions
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -81,8 +85,32 @@ def build_kpi_spec(
     sql_path: str = "",
     result_columns: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Build the per-KPI dashboard spec payload (full file content)."""
-    machine_defaults = infer_chart(definition=definition, result_columns=result_columns)
+    """Build the per-KPI dashboard spec payload (full file content).
+
+    If *result_columns* is empty but *sql_path* points to an existing file,
+    the result-view column aliases are parsed directly from the SQL so that
+    ``x``, ``y``, and ``color`` can be resolved to real emitted aliases rather
+    than raw cut labels.
+
+    A ``_column_validation`` key is written into ``machine_defaults`` with a
+    list of error strings (empty list = clean).  This surfaces axis / column
+    mismatches at spec-build time rather than silently emitting broken charts.
+    """
+    # --- resolve result_columns from SQL when not supplied externally ---
+    resolved_columns: list[str] = list(result_columns or [])
+    if not resolved_columns and sql_path:
+        sql_file = Path(sql_path)
+        if not sql_file.is_absolute():
+            # Try relative to repo root (two levels above a typical workspace path).
+            # Accept whatever path is given; if it doesn't exist we get [].
+            pass
+        try:
+            sql_text = sql_file.read_text(encoding="utf-8")
+            resolved_columns = parse_result_view_columns(sql_text, kpi_id)
+        except OSError:
+            resolved_columns = []
+
+    machine_defaults = infer_chart(definition=definition, result_columns=resolved_columns)
     machine_defaults["sql_path"] = sql_path
     machine_defaults["definition"] = {
         "business_question": definition.get("business_question") or definition.get("name") or "",
@@ -90,6 +118,12 @@ def build_kpi_spec(
         "metric": definition.get("metric") or "",
         "cuts": definition.get("cuts") or "",
     }
+    # --- validate axis fields against known columns ---
+    validation_errors = validate_spec_columns(machine_defaults, resolved_columns)
+    machine_defaults["_column_validation"] = validation_errors
+    if resolved_columns:
+        machine_defaults["_result_columns"] = resolved_columns
+
     return {
         "artifact_type": "dashboard_spec",
         "version": SPEC_VERSION,

@@ -9,6 +9,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.onboarding.kpi.intent_coverage import (
+    denominator_scope_findings,
+    grain_coverage_findings,
+    join_correctness_findings,
+    prose_filter_findings,
+    _load_proven_join_pairs,
+)
 from core.onboarding.kpi.result_view_builder import parse_kpi
 from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
@@ -98,6 +105,11 @@ class KPIExecutionHarness:
         self.workspace = (self.repo_root / workspace).resolve()
         self.layout = WorkspaceLayout(project_root=self.workspace)
         self.sample_limit = sample_limit
+        self._registry_cache: dict[str, dict[str, Any]] | None = None
+        self._mapping_cache: dict[str, dict[str, Any]] | None = None
+        self._proven_pairs_cache: set[frozenset[str]] | None = None
+        # Cached pipeline_decisions.json (None = not yet loaded; {} = absent/unparseable)
+        self._pipeline_decisions_cache: dict[str, Any] | None = None
 
     def run(self) -> KPIExecutionHarnessResult:
         self.layout.ensure_runtime_dirs()
@@ -258,10 +270,110 @@ class KPIExecutionHarness:
                 errors.append(
                     f"SQL does not implement top {limit_value} ranking limit from KPI name"
                 )
+        # Grain coverage (BUG-024): every declared cut/grain dimension must be
+        # realized in the result view, not silently dropped. Derived by an
+        # INDEPENDENT tokenizer so a generator that drops a cut cannot pass a
+        # check that reused its own parser. Scope is the result view, so a cut
+        # present only in an upstream features view does not count.
+        # The registry KPI carries cuts but not features (those live in the
+        # feature mapping), so enrich it so cut tokens like "Department Name"
+        # resolve to their physical column ("Name") instead of false-flagging.
+        coverage_kpi = dict(kpi)
+        coverage_kpi.setdefault("kpi_id", kpi_id)
+        if not coverage_kpi.get("features"):
+            mapped = self._feature_mapping_by_id().get(kpi_id) or {}
+            if mapped.get("features"):
+                coverage_kpi["features"] = mapped["features"]
+        errors.extend(
+            finding.message
+            for finding in grain_coverage_findings(coverage_kpi, sql)
+            if finding.severity == "error"
+        )
+
+        # JOIN-CORRECTNESS: every JOIN ON clause must correspond to a proven
+        # relationship.  Loads relationship_contracts.json once per harness run.
+        # If the file is absent (single-dataset workspaces produce no joins),
+        # the check is skipped — missing contracts are not an error here.
+        proven_pairs = self._proven_join_pairs()
+        if proven_pairs is not None:
+            errors.extend(
+                finding.message
+                for finding in join_correctness_findings(sql, proven_pairs, kpi_id=kpi_id)
+                if finding.severity == "error"
+            )
+
+        # FILTER-REALIZATION (prose): high-confidence prose filters declared in
+        # the KPI name must appear in the generated SQL.  Conservative patterns
+        # only — "for <Value> <lob-word>" and "above/over N year[s]".
+        errors.extend(
+            finding.message
+            for finding in prose_filter_findings(coverage_kpi, sql)
+            if finding.severity == "error"
+        )
+
+        # DENOMINATOR-SCOPE (design/kpi_intent_contract.md §5): a recorded
+        # within-group denominator-scope decision must be realized in the
+        # generated SQL as OVER (PARTITION BY <group>), NOT a bare OVER ().
+        # A decision that is recorded in pipeline_decisions.json but silently
+        # ignored by the generator is a hard error — it was exactly this gap
+        # that let the kpi_002 review rubber-stamp unchanged SQL (BUG-025).
+        pipeline_decisions = self._pipeline_decisions_by_id()
+        scope = (pipeline_decisions.get("percentage_denominator_scopes") or {}).get(kpi_id)
+        errors.extend(
+            f"{finding.code}: {finding.message}"
+            for finding in denominator_scope_findings(coverage_kpi, sql, scope)
+            if finding.severity == "error"
+        )
+
         return errors
 
     def _kpi_registry_by_id(self) -> dict[str, dict[str, Any]]:
-        path = self.layout.contracts_dir / "kpi_registry.json"
+        if self._registry_cache is None:
+            self._registry_cache = self._load_kpis_by_id("kpi_registry.json")
+        return self._registry_cache
+
+    def _feature_mapping_by_id(self) -> dict[str, dict[str, Any]]:
+        if self._mapping_cache is None:
+            self._mapping_cache = self._load_kpis_by_id("kpi_feature_mapping.json")
+        return self._mapping_cache
+
+    def _proven_join_pairs(self) -> set[frozenset[str]] | None:
+        """Proven join column-pairs from relationship_contracts.json, cached.
+
+        Returns None when the contracts file is absent (single-dataset or test
+        workspaces produce no joins to prove), so the caller skips the
+        join-correctness check rather than flagging every join. When the file
+        exists, returns the (possibly empty) set of proven column pairs.
+        """
+        if self._proven_pairs_cache is None:
+            path = self.layout.contracts_dir / "relationship_contracts.json"
+            if not path.exists():
+                return None
+            self._proven_pairs_cache = _load_proven_join_pairs(path)
+        return self._proven_pairs_cache
+
+    def _pipeline_decisions_by_id(self) -> dict[str, Any]:
+        """Load ``pipeline_decisions.json`` once per harness run, cached.
+
+        Returns the full decisions dict (e.g. ``{"percentage_denominator_scopes":
+        {"kpi_002": "within_department"}}``) or an empty dict when the file is
+        absent, unreadable, or contains invalid JSON.  The harness uses this to
+        retrieve the per-KPI ``denominator_scope`` for the enforcement check.
+        """
+        if self._pipeline_decisions_cache is None:
+            path = self.layout.contracts_dir / "pipeline_decisions.json"
+            if path.exists():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    self._pipeline_decisions_cache = data if isinstance(data, dict) else {}
+                except (json.JSONDecodeError, OSError):
+                    self._pipeline_decisions_cache = {}
+            else:
+                self._pipeline_decisions_cache = {}
+        return self._pipeline_decisions_cache
+
+    def _load_kpis_by_id(self, filename: str) -> dict[str, dict[str, Any]]:
+        path = self.layout.contracts_dir / filename
         if not path.exists():
             return {}
         try:

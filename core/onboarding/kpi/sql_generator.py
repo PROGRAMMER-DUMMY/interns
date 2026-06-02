@@ -50,6 +50,8 @@ class DuckDBKPISQLGenerator:
         self.schema = schema
         if self.dialect not in {"duckdb", "databricks"}:
             raise ValueError(f"Unsupported SQL dialect: {self.dialect}")
+        # Cached pipeline_decisions.json (None = not yet loaded; {} = absent/unparseable)
+        self._pipeline_decisions_cache: dict[str, Any] | None = None
 
     def generate(self, kpi_id: str) -> SQLGenerationResult:
         mapping = self._load_mapping()
@@ -131,7 +133,17 @@ class DuckDBKPISQLGenerator:
                     select_items.append(f"    {expr} AS {self.quote_ident(feat_name)}")
         
         if not select_items:
-            select_items.append("    1 AS ready_marker")
+            # No feature expressions resolved — the KPI cannot produce
+            # executable SQL. Emitting a ready_marker placeholder creates SQL
+            # that is designed to fail the execution harness ("exposes only
+            # placeholder readiness columns"), which is a doomed-stub smell.
+            # Raise instead so callers record this KPI as blocked/skipped.
+            raise ValueError(
+                f"KPI {kpi_id} has no resolvable feature expressions. "
+                "All features either lack source_columns or could not be "
+                "matched to a dataset column. Resolve feature mappings "
+                "before generating SQL."
+            )
 
         # Build staging SQL — use Delta tables if they exist, fall back to CSV
         staging_sql_final = self._staging_with_delta(
@@ -629,18 +641,47 @@ class DuckDBKPISQLGenerator:
         complex shapes the builder returns a clearly-commented `SELECT *`
         fallback so the pipeline still produces a valid view but the
         reviewer sees the gap.
+
+        Loads the resolved ``denominator_scope`` facet from
+        ``pipeline_decisions.json`` (if present) so a recorded within-group
+        decision is wired through to the denominator window instead of being
+        silently ignored (design/kpi_intent_contract.md §7 phase 1 / BUG-025).
         """
         from core.onboarding.kpi.result_view_builder import build_result_view_sql
 
         feature_view = self.quote_ident(kpi_id + "_features")
         result_view = self.quote_ident(kpi_id + "_results")
+        decisions = self._pipeline_decisions()
+        denominator_scope = (
+            (decisions.get("percentage_denominator_scopes") or {}).get(kpi_id)
+        )
         return build_result_view_sql(
             kpi,
             kpi_id=kpi_id,
             feature_view=feature_view,
             result_view=result_view,
             dialect=self.dialect,
+            denominator_scope=denominator_scope,
         )
+
+    def _pipeline_decisions(self) -> dict[str, Any]:
+        """Load ``pipeline_decisions.json`` once per generator instance.
+
+        Returns an empty dict when the file is absent, unreadable, or contains
+        invalid JSON.  Cached so repeated KPI generations in one run don't hit
+        the filesystem multiple times.
+        """
+        if self._pipeline_decisions_cache is None:
+            path = self.layout.contracts_dir / "pipeline_decisions.json"
+            if path.exists():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    self._pipeline_decisions_cache = data if isinstance(data, dict) else {}
+                except (json.JSONDecodeError, OSError):
+                    self._pipeline_decisions_cache = {}
+            else:
+                self._pipeline_decisions_cache = {}
+        return self._pipeline_decisions_cache
 
     def quote_ident(self, value: str) -> str:
         if self.dialect == "databricks":

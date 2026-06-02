@@ -129,6 +129,15 @@ class ParsedKPI:
     limit: int | None = None
     ratio: tuple[Aggregation, Aggregation] | None = None
     fallback_reason: str = ""
+    # Denominator scope for percentage-share KPIs. Values: "grand_total" (default,
+    # OVER ()) or "per_<group>" (OVER PARTITION BY <group>). Recorded so the choice
+    # is auditable and not silently implied. None = not a percentage-share KPI.
+    denominator_scope: str | None = None
+    # Alternative denominator scope not chosen; recorded for audit.
+    denominator_scope_alternative: str | None = None
+    # Age-fallback note: set when age/date arithmetic falls back to CURRENT_DATE
+    # because no event-date grain column was found.
+    age_as_of_assumption: str | None = None
 
     @property
     def can_compose(self) -> bool:
@@ -500,8 +509,21 @@ def _detect_having(text: str, aggregations: list[Aggregation]) -> list[str]:
     return out
 
 
-def parse_kpi(kpi: dict[str, Any]) -> ParsedKPI:
-    """Parse a KPI registry entry into structured aggregations/dimensions/filters."""
+def parse_kpi(kpi: dict[str, Any], denominator_scope: str | None = None) -> ParsedKPI:
+    """Parse a KPI registry entry into structured aggregations/dimensions/filters.
+
+    Parameters
+    ----------
+    denominator_scope:
+        Optional denominator-scope decision for percentage-share KPIs.  When the
+        value is a within-group scope (``"within_<group>"`` or any value that is
+        not ``None`` / ``"grand_total"`` / ``"global_total"``), the denominator
+        window in the mismatched-grain percentage branch is emitted as
+        ``OVER (PARTITION BY <partition_col>)`` instead of the default
+        grand-total ``OVER ()``.  The resolved partition column is the same one
+        already computed for the numerator's group.  See design/kpi_intent_contract.md
+        §3 (denominator_scope facet).
+    """
     parsed = ParsedKPI()
     metric_text = str(kpi.get("metric") or "").strip()
     cuts_text = str(kpi.get("cuts") or "").strip()
@@ -532,68 +554,101 @@ def parse_kpi(kpi: dict[str, Any]) -> ParsedKPI:
             distinct = bool(inner.group(2))
             column = _resolve_column(inner.group(3).strip(), lookup)
 
-            # "percentage of <agg> / <same agg> for <group>" is a share-of-total
-            # BY <group>: each group's aggregate as a fraction of the grand total.
-            # Numerator and denominator are the SAME aggregation; only the
-            # partition scope differs (per-group numerator over grand-total
-            # denominator). The result grain is therefore the <group> itself —
-            # the descriptive cuts (e.g. gender/age/visit type) do NOT subdivide
-            # the share, so each row is one group and its percentage of the whole
-            # (shares sum to ~100% across groups).
-            #
-            # The other cuts still feed group resolution as a graceful fallback
-            # target, but are never emitted as grain dimensions in this shape.
+            # BUG-024: the descriptive cuts DO subdivide the share. The KPI asks
+            # for "percentage share ... by <cuts>", so every declared cut is part
+            # of the result grain. Previously only the "for <group>" column was
+            # emitted and the descriptive cuts (gender/age/visit type) were
+            # silently dropped, producing a group-only result that ignored the
+            # stated cuts and forced a manual SQL edit. Numerator now counts
+            # within each full-grain cell; the denominator stays the grand total
+            # (OVER ()), so each row is one cell and its percentage of the whole
+            # population (shares sum to ~100% across all cells). Denominator-scope
+            # semantics (per-group vs grand-total) are intentionally left as-is.
+            emitted = _emitted_columns(lookup)
+            grain_dimensions: list[Dimension] = []
+            grain_seen: set[str] = set()
+
+            def _add_grain(expression: str, alias: str) -> None:
+                if expression in grain_seen:
+                    return
+                grain_seen.add(expression)
+                grain_dimensions.append(Dimension(expression=expression, alias=alias))
+
             cut_columns: list[str] = []
             for token in _split_cuts(cuts_text):
-                if _detect_time_bucket(token):
+                bucket = _detect_time_bucket(token)
+                if bucket:
+                    unit, source, alias = bucket
+                    source_col = _resolve_column(source or alias, lookup) or alias
+                    expr = f"date_trunc('{unit}', CAST({_quote(source_col)} AS DATE))"
+                    _add_grain(expr, _norm_alias(alias))
                     continue
                 if _AGE_PATTERN.search(token) or _DAYS_SINCE_PATTERN.search(token):
+                    for expr, alias in _detect_date_arithmetic(token, lookup, as_of_expr):
+                        _add_grain(expr, alias)
                     continue
                 clean = re.sub(r"\(.*?\)", "", token).strip()
-                if clean:
-                    cut_columns.append(_resolve_column(clean, lookup))
+                if not clean:
+                    continue
+                col = _resolve_column(clean, lookup)
+                if col in emitted:
+                    cut_columns.append(col)
+                    _add_grain(_quote(col), _norm_alias(col))
 
-            # Resolve the "for <group>" token to a REAL emitted column. A raw
-            # token (e.g. a misspelled/aliased dimension whose redundant feature
-            # was dropped by BUG-001) must never reach PARTITION BY, or the view
-            # is non-executable (BUG-011). Cut columns are the graceful fallback.
+            # Resolve the "for <group>" token to a REAL emitted column (graceful
+            # fallback to the cut columns) and make sure it is part of the grain.
+            # A raw/aliased token must never reach PARTITION BY or the view is
+            # non-executable (BUG-011).
             partition_col = _resolve_group_column(
                 partition, lookup, kpi, tuple(cut_columns)
             ) if partition else ""
+            if partition_col and partition_col in emitted:
+                _add_grain(_quote(partition_col), _norm_alias(partition_col))
 
-            # Grain = the resolved group column. If the named group did not
-            # resolve to a real emitted column (e.g. a misspelled/aliased token),
-            # gracefully fall back to the emitted cut columns as the grain so the
-            # share is still meaningful and the view stays executable (BUG-011),
-            # rather than emitting a PARTITION BY on a phantom column.
-            emitted = _emitted_columns(lookup)
-            if partition_col:
-                grain_cols = [partition_col]
-            else:
-                grain_cols = [c for c in cut_columns if c in emitted]
-            grain_terms = tuple(_quote(c) for c in grain_cols)
-            for c in grain_cols:
-                parsed.dimensions.append(
-                    Dimension(expression=_quote(c), alias=_norm_alias(c))
-                )
+            # An empty grain is fine: the numerator then partitions by nothing
+            # (OVER ()), matching the denominator — degenerate but executable. We
+            # never emit a PARTITION BY on an UNRESOLVED token (BUG-011); that is
+            # already prevented above by only adding emitted columns / a resolved
+            # group column.
+            parsed.dimensions.extend(grain_dimensions)
+            grain_terms = tuple(d.expression for d in grain_dimensions)
 
-            group_label = partition_col or (grain_cols[0] if grain_cols else "group")
-            # Numerator = the group's own aggregate (PARTITION BY the grain).
+            # Numerator = lives within each full-grain cell (PARTITION BY grain).
             group_agg = Aggregation(
                 fn=fn, column=column,
-                alias=_norm_alias(f"{fn}_{column}_per_{group_label}"),
+                alias=_norm_alias(f"{fn}_{column}_per_group"),
                 distinct=distinct,
                 window=WindowSpec(partition_by=grain_terms),
             )
-            # Denominator = the grand total of the same aggregate (no partition).
-            # Each share is therefore the group's fraction of the whole.
+            # Denominator scope: grand_total (default, OVER ()) or within-group
+            # (OVER (PARTITION BY <partition_col>)).  The denominator_scope facet
+            # is recorded as a SQL comment so the choice is auditable and not
+            # silently implied.  DEFAULT is grand_total — no change to existing
+            # behaviour unless an explicit within-group scope is passed.
+            _denom_is_within = (
+                denominator_scope is not None
+                and denominator_scope not in {"grand_total", "global_total"}
+            )
+            if _denom_is_within and partition_col and partition_col in emitted:
+                _denom_window = WindowSpec(partition_by=(_quote(partition_col),))
+                _scope_label = denominator_scope
+            else:
+                _denom_window = WindowSpec()
+                _scope_label = denominator_scope or "grand_total"
             total_agg = Aggregation(
                 fn=fn, column=column,
                 alias=_norm_alias(f"{fn}_{column}_total"),
                 distinct=distinct,
-                window=WindowSpec(),
+                window=_denom_window,
             )
             parsed.aggregations.extend([group_agg, total_agg])
+            # Record the denominator scope as a ParsedKPI field for downstream
+            # audit and enforcement (intent_coverage denominator_scope_findings).
+            parsed.denominator_scope = _scope_label
+            parsed.denominator_scope_alternative = (
+                "grand_total" if _denom_is_within else
+                (f"within_{partition_col}" if partition_col else None)
+            )
             parsed.extra_select_exprs.append(
                 (
                     f"CAST({group_agg.alias} AS DOUBLE) / NULLIF({total_agg.alias}, 0) * 100",
@@ -601,7 +656,7 @@ def parse_kpi(kpi: dict[str, Any]) -> ParsedKPI:
                 )
             )
             # Window aggregations don't GROUP BY; they OVER. Dimensions still
-            # appear in SELECT, deduped to one row per group via SELECT DISTINCT
+            # appear in SELECT, deduped to one row per cell via SELECT DISTINCT
             # (BUG-012).
             return parsed
 
@@ -877,14 +932,26 @@ def build_result_view_sql(
     feature_view: str,
     result_view: str,
     dialect: str = "duckdb",
+    denominator_scope: str | None = None,
 ) -> str:
     """Compose the result-view SQL for a KPI. Always returns a valid CREATE VIEW.
 
     For KPIs whose metric/cuts shape is too complex for the generic builder,
     returns a clearly-commented fallback (`SELECT * FROM features`) so the
     pipeline still produces a valid view but the reviewer sees the gap.
+
+    Parameters
+    ----------
+    denominator_scope:
+        Resolved denominator-scope facet for percentage-share KPIs.
+        ``None`` or ``"grand_total"`` / ``"global_total"`` → OVER () (default,
+        grand total, no change to existing behaviour).
+        ``"within_<group>"`` or any other within-group value → OVER (PARTITION BY
+        <partition_col>) — the denominator sums only within the resolved group,
+        not across the whole population.  The choice is recorded as an auditable
+        SQL comment in the generated view.
     """
-    parsed = parse_kpi(kpi)
+    parsed = parse_kpi(kpi, denominator_scope=denominator_scope)
     if not parsed.can_compose or (not parsed.aggregations and not parsed.dimensions):
         reason = parsed.fallback_reason or (
             "KPI metric and cuts produced no parseable aggregation; "
@@ -952,7 +1019,13 @@ def build_result_view_sql(
     # both duckdb and databricks; safe because windowed-only mode has no
     # ORDER BY/LIMIT and every same-grain row is byte-identical. [ok]
     select_keyword = "SELECT DISTINCT" if windowed_only else "SELECT"
-    lines = [
+    lines: list[str] = []
+    # Auditable denominator-scope comment: always emitted for percentage-share
+    # KPIs so the chosen scope is visible in the generated SQL and not silently
+    # implied (design/kpi_intent_contract.md §2 "Reported" + §5).
+    if parsed.denominator_scope is not None:
+        lines.append(f"-- denominator_scope: {parsed.denominator_scope}")
+    lines += [
         f"CREATE OR REPLACE VIEW {result_view} AS",
         select_keyword,
         "  " + ",\n  ".join(select_terms),

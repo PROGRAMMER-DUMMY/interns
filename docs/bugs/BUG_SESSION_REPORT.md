@@ -754,6 +754,110 @@ leaving the diagram evidence unused despite the downstream consumer being in pla
 
 ---
 
+## BUG-024: percentage-share KPI dropped its declared cuts; no intent-coverage gate caught it
+
+Severity: High
+
+Status: Fixed (this change set)
+
+Fix:
+1. `result_view_builder.py` — the `mismatched_grain_percentage` branch now emits
+   EVERY declared descriptive cut (department + gender + visit type + age) as the
+   result grain, partitioning the numerator by the full cut set; the denominator
+   stays the grand total. Previously only the "for <group>" column was emitted and
+   the other cuts were silently dropped, so `kpi_002` ("percentage share of lives by
+   gender, age, visit type, department") came out grained by department alone. This
+   reverses the prior documented group-only-grain decision (`ShareOfTotalByGroupTests`)
+   under the KPI's stated intent; denominator-scope semantics are left unchanged.
+2. New `core/onboarding/kpi/intent_coverage.py` + `validate-kpi-intent-coverage`
+   harness — independently re-derives each KPI's declared intent (grain dimensions,
+   metric aggregation, explicit filters) from the raw registry fields and asserts the
+   generated result view realizes each one. Independent of `parse_kpi` on purpose, so
+   a generator that drops a cut cannot pass a check that reused its own parser.
+3. Enforcement: `KPIExecutionHarness._semantic_errors` now runs the grain-coverage
+   check (enriching the registry KPI with its feature mapping so cut tokens like
+   `Department Name` resolve to the physical column `Name`). A dropped cut fails the
+   execution harness, which blocks generation/review through the existing proof
+   boundary — turning the old advisory `gap` into a hard stop.
+4. Result-packet integrity: the packet records each KPI's `sql_sha256`; the presenter
+   blocks (wrapper) or banners (status) a packet whose on-disk SQL changed after the
+   packet was generated, so stale/mismatched results are never shown as `ok`. Hand-
+   editing generated executable SQL (`interns/generated/solutions/`) is now a
+   workflow-guard ERROR, not a warning.
+
+Finding:
+In a Gemini session `kpi_002` generated with only the department dimension; the
+kpi-analyst caught it and hand-edited `kpi_002.sql` to add gender/age/visit type.
+The hand-edit diverged the SQL from the execution-harness hash (stale-hash block) and
+left the result packet showing the old department-only table under `Status: ok` with
+a prose disclaimer. The platform had produced the right signal (`status --diff` showed
+`gaps 3`) but nothing forced a stop — the gaps were advisory and generation proceeded.
+
+Root cause area: (a) a deliberate but wrong grain decision in the percentage-share
+builder branch; (b) no check comparing generated SQL against the KPI's declared
+cuts/metric/filters; (c) packet presentation not gated on SQL freshness.
+
+Verification: clean RCM end-to-end run — `kpi_002` auto-emits the full grain and
+executes (7427 rows) with zero hand-edits; `validate-kpi-intent-coverage` passes
+42/42 KPIs with no false positives; green gate 197/0/0.
+
+---
+
+## BUG-025: assurance-hardening batch (5 parallel agents) — flaws surfaced by the post-BUG-024 audit
+
+Severity: Medium-High (assurance + correctness depth)
+
+Status: Fixed (this change set)
+
+Context: After BUG-024, an audit of a clean run surfaced structural flaws — gates
+validate declared *intent* not realized *output*; reviews are agent-asserted by
+default; KPI extraction was non-deterministic (3 vs 42 KPIs); a dashboard chart
+referenced columns absent from the result view; diagram joins proven on tiny
+dimensions were overconfident. Five Sonnet agents addressed these in parallel;
+they hit the account session limit mid-task, so the work was integrated and
+completed by the main session.
+
+Fixes:
+1. SQL-layer correctness gate (`intent_coverage.py` + `execution_harness.py`):
+   added `join_correctness_findings` (every JOIN must match a proven relationship
+   from `relationship_contracts.json` — else `join_not_proven`) and
+   `prose_filter_findings` (high-confidence `for <Value> <lob-word>` and
+   `above/over N years` filters must appear in the SQL). Enforced in
+   `_semantic_errors`. (Integrator fixed the missing `_proven_join_pairs()`
+   accessor the agent left after the limit cut it off.)
+2. Extraction determinism (`workbook_structure.py`): root cause of 3-vs-42 was
+   `openpyxl wb.active` returning an editor-dependent sheet; now always reads
+   `worksheets[0]` (document order). The `ready_marker` doomed-stub (SQL designed
+   to fail the harness) was replaced with a `ValueError` so unready KPIs are
+   recorded blocked, not emitted (`sql_generator.py`).
+3. Dashboard spec fidelity (`core/dashboard/inference.py` + `spec.py`): chart
+   `x`/`y`/`color` now resolve from the result view's emitted column aliases
+   (`parse_result_view_columns`) and are validated against them
+   (`validate_spec_columns`); fixes kpi_002's `x="Department Name"`/`y="value"`
+   pointing at non-existent columns. Integrator also fixed a parser defect where
+   `CAST(x AS DATE)` / `AS DOUBLE` were mis-extracted as output columns.
+4. Review provenance / human floor (`flow.py`): completion now states assurance
+   as `agent-asserted (not human-confirmed)` with the gates named, and
+   `--require-human-gates` blocks completion on agent-asserted gates.
+5. Semantics + diagram confidence (`result_view_builder.py`, `contracts.py`):
+   percentage-share denominator scope and age `CURRENT_DATE` fallback are recorded
+   as explicit, auditable decisions (not silent). Diagram joins proven by RI
+   against a dimension with `< LOW_CARDINALITY_DIMENSION_ROWS` (50) rows stay
+   executable but are flagged `low_cardinality_dimension` with capped confidence
+   (RI can pass coincidentally on tiny dimensions). In RCM this flags the
+   transactions→departments (20 rows) and transactions→providers (25 rows) joins.
+
+Not changed (re-assessed as non-bugs): the registry `status: needs_mapping` is a
+by-design onboarding snapshot — readiness is tracked in derived artifacts
+(data-understanding/source-to-target), and `blocker_workflow` documents that
+status intentionally does not flip until a user action.
+
+Verification: green gate 200 tests, 0 failing, 0 regressions; new tests cover
+join/filter correctness, extraction determinism, dashboard column fidelity, and
+the low-cardinality diagram guard.
+
+---
+
 ## Reproduction environment
 
 - Generated artifacts under `workspaces/Healthcare-RCM-Data-Platform/interns/` (gitignored).

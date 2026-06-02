@@ -1286,5 +1286,110 @@ class RootFactDatasetSelectionTests(unittest.TestCase):
             self.assertEqual(edge["state"], "proven_data_model")
 
 
+class LowCardinalityDimensionGuardTests(unittest.TestCase):
+    """A diagram-declared join proven only by RI against a very small dimension
+    can pass RI coincidentally. It stays executable (proven_data_model) but is
+    flagged `low_cardinality_dimension` and its confidence is capped."""
+
+    def _build(self, root: Path, *, dim_rows: int):
+        workspace = root / "workspaces" / "demo"
+        layout = WorkspaceLayout(project_root=workspace)
+        layout.ensure_runtime_dirs()
+        (workspace / "transactions.csv").write_text(
+            "PatientID\nP01\nP01\nP02\nP03\n", encoding="utf-8"
+        )
+        (workspace / "patients.csv").write_text(
+            "PatientID\nP01\nP02\nP03\n", encoding="utf-8"
+        )
+        profile_index = {
+            "profiles": [
+                {
+                    "path": str(workspace / "patients.csv"),
+                    "schema": {"PatientID": "String"},
+                    "row_count": dim_rows,
+                    "profile_path": "workspaces/demo/interns/generated/profiles/patients.csv.profile.json",
+                },
+                {
+                    "path": str(workspace / "transactions.csv"),
+                    "schema": {"PatientID": "String"},
+                    "row_count": 10000,
+                    "profile_path": "workspaces/demo/interns/generated/profiles/transactions.csv.profile.json",
+                },
+            ]
+        }
+        (layout.profiles_dir / "profile_index.json").write_text(
+            json.dumps(profile_index), encoding="utf-8"
+        )
+        sidecar_dir = layout.generated_dir / "data_model_images"
+        sidecar_dir.mkdir(parents=True, exist_ok=True)
+        (sidecar_dir / "datamodel.model.json").write_text(
+            json.dumps(
+                {
+                    "source_image": "workspaces/demo/docs/DataModel.png",
+                    "relationships": [
+                        {
+                            "relationship_id": "fact__patientid__dim_patient__patientid",
+                            "from_table": "Fact_Transactions",
+                            "from_column": "PatientID",
+                            "to_table": "Dim_Patient",
+                            "to_column": "PatientID",
+                            "confidence": 0.86,
+                        }
+                    ],
+                    "profile_matching": {
+                        "relationship_matches": [
+                            {
+                                "relationship_id": "fact__patientid__dim_patient__patientid",
+                                "state": "profile_matched",
+                                "confidence": 0.9,
+                                "from_match": {
+                                    "table_name": "Fact_Transactions",
+                                    "column_name": "PatientID",
+                                    "dataset": "workspaces/demo/transactions.csv",
+                                    "profile_column": "PatientID",
+                                },
+                                "to_match": {
+                                    "table_name": "Dim_Patient",
+                                    "column_name": "PatientID",
+                                    "dataset": "workspaces/demo/patients.csv",
+                                    "profile_column": "PatientID",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        RelationshipContractBuilder(root, "workspaces/demo").build()
+        contract = json.loads(
+            (layout.contracts_dir / "relationship_contracts.json").read_text()
+        )
+        return contract["relationships"][0]
+
+    def test_small_dimension_is_flagged_and_confidence_capped(self):
+        with tempfile.TemporaryDirectory() as td:
+            edge = self._build(Path(td), dim_rows=5)
+            # Still executable — the guard flags, it does not block.
+            self.assertEqual(edge["state"], "proven_data_model")
+            diagram_src = next(
+                src for src in edge["evidence_sources"]
+                if src.get("type") == "data_model_image_diagram"
+            )
+            self.assertTrue(diagram_src["low_cardinality_dimension"], diagram_src)
+            self.assertEqual(diagram_src["dimension_row_count"], 5)
+            self.assertLessEqual(edge["confidence"], 0.75)
+
+    def test_large_dimension_not_flagged_keeps_full_confidence(self):
+        with tempfile.TemporaryDirectory() as td:
+            edge = self._build(Path(td), dim_rows=5000)
+            diagram_src = next(
+                src for src in edge["evidence_sources"]
+                if src.get("type") == "data_model_image_diagram"
+            )
+            self.assertFalse(diagram_src["low_cardinality_dimension"], diagram_src)
+            self.assertGreater(edge["confidence"], 0.75)
+
+
 if __name__ == "__main__":
     unittest.main()

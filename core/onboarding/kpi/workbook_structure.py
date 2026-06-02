@@ -33,6 +33,23 @@ class WorkbookGrid:
     merged_spans: list[tuple[int, int, int]]
 
 
+def _first_sheet(wb: Any) -> Any:
+    """Return the first sheet in document order.
+
+    openpyxl's ``wb.active`` returns whichever sheet the file's internal
+    metadata marks as "active", which varies across xlsx editors and save
+    operations.  For a multi-sheet workbook this means two consecutive reads
+    of the same file can hit different sheets, producing different KPI counts
+    (the 3-vs-42 non-determinism).  Always using the first sheet in document
+    order (``wb.worksheets[0]``) is deterministic regardless of editor or save
+    history. This mirrors the XML fallback which hardcodes ``sheet1.xml``.
+    """
+    sheets = wb.worksheets
+    if not sheets:
+        return wb.active  # degenerate: trust openpyxl
+    return sheets[0]
+
+
 def read_merged_spans(path: str | Path, *, header_rows: int = 1) -> list[tuple[int, int, int]]:
     """Return merged-cell ranges as (col_index, row_start, row_end), 0-based into
     data rows (header excluded). Empty list if the file/engine can't be read."""
@@ -46,7 +63,7 @@ def read_merged_spans(path: str | Path, *, header_rows: int = 1) -> list[tuple[i
     except Exception:
         return []
     try:
-        ws = wb.active
+        ws = _first_sheet(wb)
         spans: list[tuple[int, int, int]] = []
         for rng in ws.merged_cells.ranges:
             col_index = rng.min_col - 1  # openpyxl is 1-based
@@ -61,12 +78,17 @@ def read_merged_spans(path: str | Path, *, header_rows: int = 1) -> list[tuple[i
 
 
 def read_workbook_grid(path: str | Path, *, header_rows: int = 1) -> WorkbookGrid:
-    """Read an .xlsx into columns + dict rows + merged spans for the detector."""
+    """Read an .xlsx into columns + dict rows + merged spans for the detector.
+
+    Always reads the first sheet in document order (index 0) rather than
+    ``wb.active``, which is non-deterministic across xlsx editors.  See
+    ``_first_sheet`` for the rationale.
+    """
     from openpyxl import load_workbook
 
     wb = load_workbook(path, read_only=False, data_only=True)
     try:
-        ws = wb.active
+        ws = _first_sheet(wb)
         matrix = [
             ["" if c is None else str(c).strip() for c in row]
             for row in ws.iter_rows(values_only=True)

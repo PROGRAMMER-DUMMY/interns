@@ -208,6 +208,12 @@ class KPIExecutionHarnessTests(unittest.TestCase):
                                     "percentage of sum(distinct PatientID) / "
                                     "sum(disitnct PatientID) for departement"
                                 ),
+                                "features": [
+                                    {"feature": "PatientID",
+                                     "source_columns": [{"column": "PatientID"}]},
+                                    {"feature": "Department Name",
+                                     "source_columns": [{"column": "name"}]},
+                                ],
                             }
                         ]
                     }
@@ -456,6 +462,161 @@ class KPIExecutionHarnessTests(unittest.TestCase):
 
             self.assertEqual(executable_gate["status"], "blocked")
             self.assertEqual(production_gate["status"], "blocked")
+
+
+class DenominatorScopeHarnessTests(unittest.TestCase):
+    """Phase 1: the execution harness must fail a KPI whose pipeline_decisions.json
+    records a within-group denominator scope but whose SQL uses OVER () instead
+    of OVER (PARTITION BY <group>).
+
+    This is the live BUG-025: the review rubber-stamped unchanged SQL because
+    the recorded decision was never enforced.
+    """
+
+    def _setup_workspace(
+        self,
+        tmp: str,
+        *,
+        denominator_scope: str | None,
+        sql: str,
+    ) -> "KPIExecutionHarness":  # type: ignore[name-defined]
+        root = Path(tmp)
+        workspace = root / "workspaces" / "demo"
+        solutions = workspace / "interns" / "generated" / "solutions"
+        contracts = workspace / "interns" / "generated" / "contracts"
+        solutions.mkdir(parents=True)
+        contracts.mkdir(parents=True)
+
+        registry = {
+            "kpis": [
+                {
+                    "kpi_id": "kpi_002",
+                    "name": "Percentage share of lives by department",
+                    "metric": (
+                        "percentage of sum(distinct PatientID) / "
+                        "sum(distinct PatientID) for departement"
+                    ),
+                    "cuts": "departement, Gender",
+                    "features": [
+                        {"feature": "PatientID",
+                         "source_columns": [{"column": "PatientID"}]},
+                        {"feature": "departement",
+                         "source_columns": [{"column": "departement"}]},
+                        {"feature": "Gender",
+                         "source_columns": [{"column": "Gender"}]},
+                    ],
+                }
+            ]
+        }
+        (contracts / "kpi_registry.json").write_text(
+            json.dumps(registry), encoding="utf-8"
+        )
+
+        if denominator_scope is not None:
+            decisions = {
+                "percentage_denominator_scopes": {"kpi_002": denominator_scope}
+            }
+            (contracts / "pipeline_decisions.json").write_text(
+                json.dumps(decisions), encoding="utf-8"
+            )
+
+        (solutions / "kpi_002.sql").write_text(sql, encoding="utf-8")
+        return KPIExecutionHarness(root, "workspaces/demo")
+
+    def test_harness_fails_when_within_scope_recorded_but_over_grand_total_used(self):
+        """Recorded within_department scope + OVER () in SQL → semantic error."""
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        sql = "\n".join([
+            'CREATE OR REPLACE VIEW "kpi_002_results" AS',
+            "SELECT DISTINCT",
+            '  "departement" AS departement,',
+            '  "Gender" AS gender,',
+            '  COUNT(DISTINCT "PatientID") OVER (PARTITION BY "departement", "Gender") AS per_group,',
+            '  COUNT(DISTINCT "PatientID") OVER () AS total,',
+            "  CAST(per_group AS DOUBLE) / NULLIF(total, 0) * 100 AS percentage_share",
+            "FROM (VALUES ('A', 1, 'M'), ('A', 2, 'F'), ('B', 3, 'M'))"
+            ' AS t("departement", "PatientID", "Gender");',
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = self._setup_workspace(
+                tmp,
+                denominator_scope="within_department",
+                sql=sql,
+            )
+            result = harness.run()
+
+        self.assertFalse(result.ok)
+        all_errors = " ".join(result.records[0].errors)
+        self.assertIn("denominator_scope_not_realized", all_errors)
+
+    def test_harness_passes_when_within_scope_and_partition_by_match(self):
+        """Recorded within_department scope + OVER (PARTITION BY ...) → passes."""
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        sql = "\n".join([
+            'CREATE OR REPLACE VIEW "kpi_002_results" AS',
+            "SELECT DISTINCT",
+            '  "departement" AS departement,',
+            '  "Gender" AS gender,',
+            '  COUNT(DISTINCT "PatientID") OVER (PARTITION BY "departement", "Gender") AS per_group,',
+            '  COUNT(DISTINCT "PatientID") OVER (PARTITION BY "departement") AS total,',
+            "  CAST(per_group AS DOUBLE) / NULLIF(total, 0) * 100 AS percentage_share",
+            "FROM (VALUES ('A', 1, 'M'), ('A', 2, 'F'), ('B', 3, 'M'))"
+            ' AS t("departement", "PatientID", "Gender");',
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = self._setup_workspace(
+                tmp,
+                denominator_scope="within_department",
+                sql=sql,
+            )
+            result = harness.run()
+
+        # Scope is realized — the denomination check should pass.
+        denom_errors = [
+            e for e in result.records[0].errors
+            if "denominator_scope_not_realized" in e
+        ]
+        self.assertEqual(
+            denom_errors, [],
+            f"unexpected denominator_scope errors: {result.records[0].errors}",
+        )
+
+    def test_harness_passes_when_no_pipeline_decisions_file(self):
+        """Absent pipeline_decisions.json → no denominator check → no extra errors."""
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        sql = "\n".join([
+            'CREATE OR REPLACE VIEW "kpi_002_results" AS',
+            "SELECT DISTINCT",
+            '  "departement" AS departement,',
+            '  COUNT(DISTINCT "PatientID") OVER () AS total',
+            "FROM (VALUES ('A', 1), ('B', 2))"
+            ' AS t("departement", "PatientID");',
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = self._setup_workspace(
+                tmp,
+                denominator_scope=None,  # no decisions file written
+                sql=sql,
+            )
+            result = harness.run()
+
+        denom_errors = [
+            e for e in result.records[0].errors
+            if "denominator_scope_not_realized" in e
+        ]
+        self.assertEqual(denom_errors, [])
 
 
 if __name__ == "__main__":

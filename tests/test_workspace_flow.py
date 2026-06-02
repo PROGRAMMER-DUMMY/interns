@@ -13,8 +13,59 @@ from core.onboarding.workspace.flow import (
     _compact_panel,
     main as workspace_flow_main,
     _render_panel_markdown,
+    _result_packet_stale_kpis,
     _result_view,
 )
+
+
+class ResultPacketStalenessTests(unittest.TestCase):
+    """BUG-015/BUG-024 follow-on: a result packet whose on-disk SQL changed after
+    the packet was generated must be detectable so the presenter never shows
+    mismatched results as authoritative `ok`."""
+
+    def _setup(self, tmp):
+        root = Path(tmp)
+        ws_rel = "workspaces/demo"
+        solutions = root / ws_rel / "interns" / "generated" / "solutions"
+        evidence = root / ws_rel / "interns" / "generated" / "evidence" / "kpi_results"
+        solutions.mkdir(parents=True)
+        evidence.mkdir(parents=True)
+        sql = 'CREATE OR REPLACE VIEW "kpi_001_results" AS SELECT 1 AS a;'
+        sql_path = solutions / "kpi_001.sql"
+        sql_path.write_text(sql, encoding="utf-8")
+        import hashlib
+
+        packet = {
+            "kpis": [
+                {
+                    "kpi_id": "kpi_001",
+                    "sql_path": f"{ws_rel}/interns/generated/solutions/kpi_001.sql",
+                    "sql_sha256": hashlib.sha256(sql.encode("utf-8")).hexdigest(),
+                }
+            ]
+        }
+        (evidence / "current.json").write_text(json.dumps(packet), encoding="utf-8")
+        return root, ws_rel, sql_path
+
+    def test_fresh_packet_reports_no_stale_kpis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws_rel, _ = self._setup(tmp)
+            self.assertEqual(_result_packet_stale_kpis(root, ws_rel), [])
+
+    def test_hand_edited_sql_is_detected_as_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws_rel, sql_path = self._setup(tmp)
+            sql_path.write_text(
+                'CREATE OR REPLACE VIEW "kpi_001_results" AS SELECT 2 AS a, 3 AS b;',
+                encoding="utf-8",
+            )
+            self.assertEqual(_result_packet_stale_kpis(root, ws_rel), ["kpi_001"])
+
+    def test_missing_sql_file_is_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws_rel, sql_path = self._setup(tmp)
+            sql_path.unlink()
+            self.assertEqual(_result_packet_stale_kpis(root, ws_rel), ["kpi_001"])
 
 
 class WorkspaceFlowTests(unittest.TestCase):
