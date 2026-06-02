@@ -238,6 +238,8 @@ def build_workspace_lexicon(
         "columns_indexed": 0,
         "accepted_definitions_carried": 0,
         "mappings_carried": 0,
+        "document_lexicon_terms_examined": 0,
+        "document_lexicon_terms_carried": 0,
     }
 
     _harvest_from_kpi_registry(
@@ -260,6 +262,12 @@ def build_workspace_lexicon(
     )
     _harvest_from_feature_mapping(
         feature_mapping,
+        column_aliases=column_aliases,
+        stats=stats,
+    )
+    # Human-confirmed PDF glossary terms enrich aliases for EXISTING columns only.
+    _harvest_from_document_candidates(
+        layout,
         column_aliases=column_aliases,
         stats=stats,
     )
@@ -502,6 +510,96 @@ def _harvest_from_feature_mapping(
                 entry.from_user_definitions.add(_normalize_token(feature_term))
                 entry.sources.add("kpi_feature_mapping")
                 stats["mappings_carried"] += 1
+
+
+_GLOSSARY_TERM_HEADERS = frozenset({
+    "term", "concept", "abbreviation", "acronym", "name", "field", "column",
+})
+_GLOSSARY_DEFINITION_HEADERS = frozenset({
+    "definition", "description", "meaning", "explanation",
+})
+
+
+def _glossary_header_role(header: str) -> str | None:
+    norm = _normalize_token(header)
+    if norm in _GLOSSARY_TERM_HEADERS:
+        return "term"
+    if norm in _GLOSSARY_DEFINITION_HEADERS:
+        return "definition"
+    return None
+
+
+def _harvest_from_document_candidates(
+    layout: WorkspaceLayout,
+    *,
+    column_aliases: dict[str, ColumnAliasEntry],
+    stats: dict[str, Any],
+) -> None:
+    """Enrich column aliases with human-confirmed PDF glossary terms.
+
+    GOVERNED: only ``lexicon_candidate`` entries a human accepted via
+    ``apply-document-candidate`` are consumed (never raw-extracted text). A
+    glossary term is attached as a ``from_dictionary`` alias ONLY to a profile
+    column that already exists and whose normalized name equals the term or is
+    named in the definition -- it NEVER invents a column. Unmatched terms are
+    counted but not injected (no confident inference from nothing -- the
+    "derive don't curate" rule).
+    """
+    try:
+        from core.onboarding.documents.candidate_apply import merge_accepted_candidates
+    except Exception:  # pragma: no cover - import guard
+        return
+    try:
+        merged = merge_accepted_candidates(layout)
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("document_lexicon_merge_failed:%s", exc)
+        return
+    candidates = merged.get("lexicon_candidates") or []
+    if not candidates:
+        return
+
+    # normalized profile-column name -> canonical column key (existing columns only)
+    norm_to_col = {_normalize_token(col): col for col in list(column_aliases)}
+    examined = 0
+    carried = 0
+    for entry in candidates:
+        content = entry.get("content") or {}
+        headers = [str(h) for h in (content.get("headers") or [])]
+        roles = {h: _glossary_header_role(h) for h in headers}
+        for row in content.get("sample_rows") or []:
+            if not isinstance(row, dict):
+                continue
+            term = definition = ""
+            for header, value in row.items():
+                role = roles.get(str(header)) or _glossary_header_role(str(header))
+                text = str(value).strip()
+                if role == "term" and not term:
+                    term = text
+                elif role == "definition" and not definition:
+                    definition = text
+            if not term:
+                continue
+            examined += 1
+            term_norm = _normalize_token(term)
+            def_norm = _normalize_token(definition)
+            target_col = norm_to_col.get(term_norm)
+            if target_col is None:
+                # definition names a known column (guard against short-token noise)
+                for col_norm, col in norm_to_col.items():
+                    if len(col_norm) >= 4 and col_norm in def_norm:
+                        target_col = col
+                        break
+            if target_col is None:
+                continue
+            col_entry = column_aliases.setdefault(
+                target_col, ColumnAliasEntry(canonical=target_col)
+            )
+            if term_norm:
+                col_entry.from_dictionary.add(term_norm)
+                col_entry.sources.add("document_pdf")
+                carried += 1
+    stats["document_lexicon_terms_examined"] = examined
+    stats["document_lexicon_terms_carried"] = carried
 
 
 def _phrases_from_name(name: str) -> list[str]:

@@ -54,6 +54,12 @@ generate-kpi-pyspark = "core.onboarding.kpi.pyspark_generator:main"
 generate-kpi-engines = "core.onboarding.kpi.generate_kpi_engines:main"
 warehouse = "core.onboarding.kpi.local_warehouse:main"
 run-kpi-execution-harness = "core.onboarding.kpi.execution_harness:main"
+validate-kpi-intent-coverage = "core.onboarding.harness.intent_coverage_harness:main"
+scan-document = "core.onboarding.documents.document_loader:main"
+prepare-document-candidate-review = "core.onboarding.documents.candidate_review:main"
+apply-document-candidate = "core.onboarding.documents.candidate_apply:main"
+build-intent-contract = "core.onboarding.kpi.intent_contract:main"
+assess-workspace-phi = "core.governance.phi_gate:main"
 verify-kpi-output = "core.onboarding.kpi.verify_kpi_output:main"
 recommend-kpi-engine = "core.onboarding.kpi.engine_recommender:main"
 run-layered-pipeline-harness = "core.onboarding.harness.layered_pipeline_harness:main"
@@ -186,6 +192,10 @@ documents = [
     "openpyxl>=3.1.5",
     "xlsxwriter>=3.2.0",
     "fastexcel>=0.12.0",
+    # Local-safe PDF document ingestion (opendataloader free mode: deterministic,
+    # no upload). Needs a Java 11+ runtime; the PDF path degrades gracefully
+    # (a [~] warning) when this extra or Java is absent.
+    "opendataloader-pdf==2.4.7",
 ]
 notebook = [
     "notebook>=7.5.6",

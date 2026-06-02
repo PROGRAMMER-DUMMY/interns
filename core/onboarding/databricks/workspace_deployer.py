@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 from core.config import load as load_config
 from core.execution.databricks_client import DatabricksClient
+from core.failures import WorkflowBlockedError
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -489,6 +490,14 @@ def run_deployment(
     if apply:
         _require_remote_approval(confirm_remote_mutation)
         cfg = load_config()
+        # PHI gate: refuse to upload identifiable PHI to a non-HIPAA-covered target.
+        from core.governance.phi_gate import enforce_remote_phi_gate
+
+        phi_failure = enforce_remote_phi_gate(
+            planner.layout, cfg, operation="databricks_workspace_deploy"
+        )
+        if phi_failure is not None:
+            raise WorkflowBlockedError(phi_failure)
         db_client = DatabricksClient(cfg.databricks)
         ok, msg = db_client.health_check()
         if not ok:

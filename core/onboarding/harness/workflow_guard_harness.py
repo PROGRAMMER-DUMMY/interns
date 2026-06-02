@@ -105,6 +105,7 @@ class WorkflowGuardHarness:
         findings.extend(self._check_trajectory())
         findings.extend(self._check_command_log())
         findings.extend(self._check_roster_utilization())
+        findings.extend(self._check_required_specialists_fired())
         findings.extend(self._check_stalled_steps())
         findings.extend(self._check_unsupported_commands())
         findings.extend(self._check_failed_without_retry())
@@ -419,6 +420,116 @@ class WorkflowGuardHarness:
                 )
         return findings
 
+    def _check_required_specialists_fired(self) -> list[dict[str, Any]]:
+        """Enforce that listed `required_specialists` actually FIRED -- not just
+        got printed in a panel. The runtime counterpart to roster_not_routed:
+        roster_not_routed warns when NO specialist is listed; this fires when a
+        COMPLETED stage listed specialists but the monitored session shows none of
+        them activated (no hand-off note, no recorded review, no trajectory step
+        naming them). Closes the advisory!=enforced gap (the session throughline).
+
+        Conservative by design: only fires on a TERMINAL/complete stage in a
+        MONITORED session (trajectory present). Mid-flight panels are skipped.
+        """
+        trajectory_path = self.layout.state_dir / "trajectory.jsonl"
+        if not trajectory_path.exists():
+            return []  # unmonitored session is handled by _check_session_monitored
+        records = load_trajectory(trajectory_path)
+        if not records:
+            return []
+
+        fired = self._fired_specialists(records)
+        findings: list[dict[str, Any]] = []
+        seen_panels: set[str] = set()
+        panels = list(_roster_panels(self.layout)) + [
+            (f"workflow:{data.get('stage')}", path)
+            for path, data in _workflow_stage_panels(self.layout)
+        ]
+        for label, path in panels:
+            path = Path(path)
+            if not path.exists():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            required = [str(s) for s in (data.get("required_specialists") or []) if str(s).strip()]
+            if not required:
+                continue
+            stage = str(data.get("stage") or "")
+            status = str(data.get("status") or "")
+            # Only enforce on a stage that has actually completed.
+            terminal = any(term in _key(stage) for term in TERMINAL_STAGE_KEYWORDS) or any(
+                term in _key(status) for term in TERMINAL_STAGE_KEYWORDS
+            )
+            if not terminal:
+                continue
+            unfired = [name for name in required if not self._specialist_fired(name, fired, records)]
+            if not unfired or len(unfired) < len(required):
+                # at least one required specialist fired -> the roster was used
+                continue
+            key = _rel(path, self.repo_root)
+            if key in seen_panels:
+                continue
+            seen_panels.add(key)
+            findings.append(
+                _finding(
+                    self.roster_severity,
+                    "required_specialist_not_fired",
+                    f"{label} stage completed but none of its required_specialists "
+                    f"({', '.join(required)}) fired in this monitored session — the roster "
+                    "was advisory only.",
+                    artifact=key,
+                    recommendation=(
+                        "Activate the routed specialist(s) (record a hand-off note or the "
+                        "specialist's review/decision) before completing the stage, or remove "
+                        "specialists that are not actually required for this stage."
+                    ),
+                    details={"required_specialists": required, "unfired": unfired},
+                )
+            )
+        return findings
+
+    def _fired_specialists(self, records: list[dict[str, Any]]) -> set[str]:
+        """Collect normalized tokens of specialists that show evidence of firing:
+        recorded hand-off notes, a recorded kpi-analyst review, and trajectory
+        commands/summaries that name an agent."""
+        fired: set[str] = set()
+        # Hand-off notes (one per specialist hand-off).
+        handoffs_dir = self.layout.state_dir / "handoffs"
+        if handoffs_dir.exists():
+            for note in handoffs_dir.glob("*.md"):
+                fired.add(_key(note.stem))
+        # Recorded kpi-analyst review in any workflow session.
+        for _path, data in _workflow_stage_panels(self.layout):
+            review = data.get("kpi_analyst_review") or (data.get("summary") or {}).get(
+                "kpi_analyst_review"
+            )
+            if review:
+                fired.add(_key("kpi-analyst"))
+                fired.add(_key("kpi_analyst"))
+            for name in data.get("activated_specialists") or []:
+                fired.add(_key(name))
+        # Trajectory commands/summaries naming an agent.
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            blob = _key(f"{record.get('command') or ''} {record.get('summary') or ''}")
+            if blob:
+                fired.add(blob)
+        return fired
+
+    def _specialist_fired(
+        self, name: str, fired: set[str], records: list[dict[str, Any]]
+    ) -> bool:
+        token = _key(name)
+        if not token:
+            return True  # cannot judge an empty name -> do not flag
+        for signal in fired:
+            if token and token in signal:
+                return True
+        return False
+
     def _check_stalled_steps(self) -> list[dict[str, Any]]:
         """Catch CLI-agent tool calls that never produced a result (stalled) and
         steps whose recorded duration crossed the slow-step threshold. Both point
@@ -695,9 +806,15 @@ class WorkflowGuardHarness:
                 directory = _generated_artifact_dir(path)
                 if not directory:
                     continue
+                # Hand-editing generated EXECUTABLE SQL (interns/generated/solutions/)
+                # is the failure mode that produced a stale, mismatched result packet
+                # (BUG-024 cascade): it diverges the SQL from the execution-harness
+                # hash and from the result packet. Treat it as a blocker, not advice.
+                # Other generated dirs (contracts/profiles) stay a warning.
+                severity = "error" if "solutions/" in directory else "warning"
                 findings.append(
                     _finding(
-                        "warning",
+                        severity,
                         "generated_artifact_hand_edited",
                         f"Generated artifact `{path}` under `{directory}` was hand-edited; "
                         "edits there are overwritten when the engine regenerates it.",

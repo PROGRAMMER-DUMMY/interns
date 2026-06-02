@@ -89,8 +89,29 @@ class BlockerQuestionPanelBuilder:
         mapping = json.loads(self.mapping_path.read_text(encoding="utf-8"))
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        questions = _build_questions(mapping, self.workspace, self.repo_root)
-        current = questions[0] if questions else _empty_panel(mapping, self.workspace, self.repo_root)
+        feature_questions = _build_questions(mapping, self.workspace, self.repo_root)
+        # `current` (the answerable / flow-blocking panel) is driven ONLY by
+        # unresolved feature-mapping clusters, preserving flow stop semantics.
+        current = (
+            feature_questions[0]
+            if feature_questions
+            else _empty_panel(mapping, self.workspace, self.repo_root)
+        )
+        # Route low-confidence KPI intent-contract facets into the panel SET
+        # (index.json) so they are visible/answerable, but NOT into `current`:
+        # intent ambiguities are surfaced + enforced via gate-provenance
+        # (--require-human-gates), not by hard-blocking the KPI flow. Additive;
+        # never breaks panel emission.
+        intent_questions: list[dict[str, Any]] = []
+        try:
+            from core.onboarding.kpi.intent_contract import intent_facet_panel_questions
+
+            intent_questions = intent_facet_panel_questions(
+                self.repo_root, _rel(self.workspace, self.repo_root)
+            )
+        except Exception:  # pragma: no cover - defensive; intent routing is additive
+            intent_questions = []
+        questions = feature_questions + intent_questions
         # Attach the new "real-ops-dashboard" preview sections to every
         # generated panel so the renderer has data to work with.
         try:

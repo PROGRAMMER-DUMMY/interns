@@ -41,6 +41,15 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_workflow_guard_roster",
     "tests.test_workflow_guard_monitoring",
     "tests.test_project_harness_gates",
+    "tests.test_intent_coverage",
+    "tests.test_kpi_extraction_determinism",
+    "tests.test_document_ingestion",
+    "tests.test_document_candidate_apply",
+    "tests.test_document_kpi_merge",
+    "tests.test_document_candidate_consumption",
+    "tests.test_intent_contract_routing",
+    "tests.test_phi_gate",
+    "tests.test_workflow_guard_specialist_firing",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
@@ -67,6 +76,9 @@ SWEEP_MODULES: tuple[str, ...] = (
     "tests.test_pipeline_execution_harness",
     "tests.test_pipeline_plan",
     "tests.test_pipeline_sql_generator",
+    "tests.test_relationship_contracts",
+    "tests.test_dashboard_spec_fidelity",
+    "tests.test_kpi_intent_contract",
 )
 
 # Pre-existing failures present on the clean tree as of 2026-05-30. A sweep failure

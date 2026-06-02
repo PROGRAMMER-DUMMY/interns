@@ -27,6 +27,10 @@ class DatabricksConfig:
     schema: str = "experiments"
     trace_redact: bool = True
     http_timeout_sec: int = 60
+    # HIPAA coverage: True only when a signed BAA + compliance security profile
+    # are in place for this target. Default False -> a trial/default workspace
+    # is NOT HIPAA-covered and the PHI gate blocks identifiable-PHI upload/exec.
+    phi_covered: bool = False
 
     def is_active(self) -> bool:
         return self.enabled and bool(self.host) and bool(self.token)
@@ -51,6 +55,7 @@ class DatabricksConfig:
             schema=block.get("schema", "experiments"),
             trace_redact=block.get("trace_redact", True),
             http_timeout_sec=block.get("http_timeout_sec", 60),
+            phi_covered=block.get("phi_covered", False),
         )
 
 ROOT = PROJECT_ROOT

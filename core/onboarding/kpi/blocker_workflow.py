@@ -223,6 +223,34 @@ def _apply_option(
     # ``user_confirmed`` immediately as before.
     accepted_state = "cli_agent_proposed" if via_cli_agent else "user_confirmed"
     note_prefix = "CLI agent proposal: " if via_cli_agent else ""
+    # Intent-contract facet answers (denominator_scope, temporal_anchor, etc.).
+    # Recorded in kpi_intent_answers.json; denominator_scope also mirrors into
+    # pipeline_decisions.json so it actually changes the generated SQL.
+    if intent := option.get("intent_facet"):
+        from core.onboarding.kpi.intent_contract import record_intent_answer
+
+        value = str(intent.get("value") or "").strip() or custom_definition.strip()
+        if not value:
+            raise ValueError(
+                "intent-facet answer requires a concrete value; pass "
+                "--custom-definition for the custom option"
+            )
+        record = record_intent_answer(
+            repo_root,
+            workspace,
+            kpi_id=str(intent.get("kpi_id") or ""),
+            facet=str(intent.get("facet") or ""),
+            value=value,
+            source=("agent" if via_cli_agent else "human"),
+            confirmed_by=("" if via_cli_agent else (evidence_note or "panel")),
+            reason=evidence_note,
+        )
+        return {
+            "resolution_type": "intent_facet",
+            "feature": feature,
+            "intent_facet": record,
+            "state": accepted_state,
+        }
     if option_id == "custom":
         if not custom_definition:
             raise ValueError("--custom-definition is required when applying the custom option")

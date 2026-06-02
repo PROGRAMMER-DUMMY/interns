@@ -405,6 +405,11 @@ class StrictJobsBackend(JobsBackend):
     """Jobs backend variant that can fail closed instead of local fallback."""
 
     def execute(self, task: dict, time_budget: int, hard_timeout: int, log_path: Path) -> ExecutionResult:
+        phi_failure = _phi_gate_failure_for_task(task, self.cfg)
+        if phi_failure is not None:
+            log_content = f"[backend:jobs] PHI gate blocked remote execution: {phi_failure.message}\n"
+            log_path.write_text(log_content, encoding="utf-8")
+            return ExecutionResult(1, log_content, 0, failure=phi_failure)
         start = time.time()
         try:
             print("[backend:jobs] Submitting Databricks job run...", flush=True)
@@ -438,6 +443,11 @@ class StrictWarehouseBackend(WarehouseBackend):
     """Warehouse backend with audit metadata and strict no-fallback support."""
 
     def execute(self, task: dict, time_budget: int, hard_timeout: int, log_path: Path) -> ExecutionResult:
+        phi_failure = _phi_gate_failure_for_task(task, self.cfg)
+        if phi_failure is not None:
+            log_content = f"[backend:warehouse] PHI gate blocked remote execution: {phi_failure.message}\n"
+            log_path.write_text(log_content, encoding="utf-8")
+            return ExecutionResult(1, log_content, 0, failure=phi_failure)
         sql_file = task.get("sql_file") or task.get("editable_file", "")
         if not sql_file or not str(sql_file).endswith(".sql"):
             if _strict_databricks(self.cfg):
@@ -555,6 +565,26 @@ def build_execution_backend(cfg: "Config") -> ExecutionBackend:
     if mode == "connect":
         return ConnectBackend(db_cfg)
     return DuckDBBackend()
+
+
+def _phi_gate_failure_for_task(task: dict, cfg):
+    """Return a blocking StructuredFailure if the task's workspace holds PHI and
+    the remote target is not HIPAA-covered; else None. Defense-in-depth for the
+    remote backends (the primary control is at the upload/deploy path)."""
+    workspace_value = task.get("workspace")
+    if not workspace_value:
+        return None
+    try:
+        from core.governance.phi_gate import enforce_remote_phi_gate
+        from core.storage.workspace_layout import WorkspaceLayout
+
+        ws = (ROOT / str(workspace_value)).resolve()
+        if not ws.exists() or not ws.is_relative_to(ROOT):
+            return None
+        layout = WorkspaceLayout(project_root=ws)
+        return enforce_remote_phi_gate(layout, cfg, operation="remote_execute")
+    except Exception:
+        return None
 
 
 def _resource_decision_for_task(task: dict) -> ResourceDecision | None:

@@ -976,6 +976,11 @@ class WorkspaceFlow:
                     "kpi_id": kpi_id,
                     "sql_path": _rel(sql_file, self.repo_root),
                     "sql_text": sql_text,
+                    # Hash of the exact SQL this packet was built from. A later
+                    # hand-edit to the .sql changes this, letting the presenter
+                    # detect a stale packet rather than show results that no
+                    # longer match the on-disk SQL (BUG-015 / BUG-024 follow-on).
+                    "sql_sha256": hashlib.sha256(sql_text.encode("utf-8")).hexdigest(),
                     "definition": kpi_definitions.get(kpi_id, {}),
                     "status": "ok",
                 }
@@ -1796,6 +1801,42 @@ def _read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _result_packet_stale_kpis(repo_root: Path, workspace_rel: str) -> list[str]:
+    """Return the kpi_ids whose on-disk SQL no longer matches the SQL the result
+    packet was generated from.
+
+    The packet records each KPI's `sql_sha256` at generation time (the SQL was
+    re-executed then, so the preview is fresh by construction). If a .sql file is
+    hand-edited afterwards and the flow blocks before regenerating, the packet on
+    disk is out of date. Comparing the recorded hash to the current file hash
+    catches that, so the presenter never shows results that no longer match the
+    on-disk SQL as authoritative `ok` (BUG-015 / BUG-024 follow-on)."""
+    packet = repo_root / workspace_rel / "interns" / "generated" / "evidence" / "kpi_results" / "current.json"
+    if not packet.exists():
+        return []
+    try:
+        data = json.loads(packet.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    stale: list[str] = []
+    for entry in data.get("kpis") or []:
+        if not isinstance(entry, dict):
+            continue
+        kpi_id = str(entry.get("kpi_id") or "")
+        recorded = entry.get("sql_sha256")
+        sql_rel = entry.get("sql_path")
+        if not kpi_id or not recorded or not sql_rel:
+            continue
+        sql_file = repo_root / str(sql_rel)
+        if not sql_file.exists():
+            stale.append(kpi_id)
+            continue
+        current = hashlib.sha256(sql_file.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+        if current != recorded:
+            stale.append(kpi_id)
+    return stale
+
+
 def _step(stage: str, status: str, detail: dict[str, Any]) -> dict[str, Any]:
     return {"stage": stage, "status": status, "detail": detail, "timestamp": _now()}
 
@@ -2118,6 +2159,51 @@ def _collect_gate_provenance(
             "label": f"KPI-analyst review (verdict: {verdict})",
         })
 
+    # (c) KPI intent-contract facets — low-confidence/defaulted facets are
+    # agent-asserted unless a human answered them via the blocker panel.
+    # Only present when build-intent-contract has been run for the workspace.
+    ic_path = layout.contracts_dir / "kpi_intent_contract.json"
+    if ic_path.exists():
+        try:
+            from core.onboarding.kpi.intent_contract import (
+                answer_key,
+                load_intent_answers,
+                low_confidence_facets,
+            )
+
+            ic_data = json.loads(ic_path.read_text(encoding="utf-8"))
+            answers = load_intent_answers(layout)
+            for contract in ic_data.get("contracts") or []:
+                if not isinstance(contract, dict):
+                    continue
+                kpi_id = str(contract.get("kpi_id") or "")
+                for facet_q in low_confidence_facets(contract):
+                    facet = str(facet_q.get("facet") or "")
+                    ans = answers.get(answer_key(kpi_id, facet))
+                    if ans:
+                        gates.append({
+                            "gate": f"intent:{kpi_id}:{facet}",
+                            "source": str(ans.get("source") or "human"),
+                            "confirmed_by": str(ans.get("confirmed_by") or ""),
+                            "label": (
+                                f"Intent facet `{facet}` for {kpi_id} = "
+                                f"{ans.get('value')!r}"
+                            ),
+                        })
+                    else:
+                        gates.append({
+                            "gate": f"intent:{kpi_id}:{facet}",
+                            "source": "agent",
+                            "confirmed_by": "",
+                            "label": (
+                                f"Intent facet `{facet}` for {kpi_id} is "
+                                f"{facet_q.get('confidence')}-confidence and unanswered "
+                                "(agent default)"
+                            ),
+                        })
+        except Exception:  # pragma: no cover - defensive; provenance is additive
+            pass
+
     return gates
 
 
@@ -2242,9 +2328,17 @@ def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
             if fallback.exists():
                 kpi_results_md = fallback.read_text(encoding="utf-8")
         if kpi_results_md:
+            # Packet integrity (BUG-015/BUG-024 follow-on): warn loudly if the
+            # on-disk SQL changed after this packet was generated, so the rows
+            # below are not mistaken for results that still match the SQL.
+            stale_kpis = _result_packet_stale_kpis(repo_root, result.workspace)
             print("")
             print("## KPI Result Packet")
             print("")
+            if stale_kpis:
+                print(f"[x] STALE — on-disk SQL changed after this packet was built for: {', '.join(stale_kpis)}.")
+                print("    Re-run `workspace-flow results` to regenerate; the rows below may not match the current SQL.")
+                print("")
             print(kpi_results_md.rstrip())
             print("")
     print("")
@@ -3057,6 +3151,23 @@ def pipeline_main(argv: list[str] | None = None) -> int:
             print(f"  workspace-flow review --session {result.session_id} --verdict ok --confirmed-by <reviewer>")
             print("")
             print("Re-run `run-kpi-pipeline` after resolving all agent-asserted gates.")
+            return 2
+
+        # Packet integrity (BUG-015/BUG-024 follow-on): never present a result
+        # packet whose on-disk SQL has changed since the packet was generated
+        # (e.g. a hand-edit). Block with a clear stale banner instead of showing
+        # results that no longer match the SQL.
+        stale_kpis = _result_packet_stale_kpis(repo_root, workspace_rel)
+        if stale_kpis:
+            print("[blocked] stale KPI result packet: the on-disk SQL changed after the")
+            print("          packet was generated, so its results no longer match the SQL:")
+            for kpi_id in stale_kpis:
+                print(f"  [x] {kpi_id}: SQL hash changed since the packet was built")
+            print("")
+            print("Regenerate results before completion (do not hand-edit generated SQL):")
+            print(f"  workspace-flow results --session {result.session_id}")
+            print("Then re-run `run-kpi-pipeline`. If the SQL is wrong, fix the generator,")
+            print("not the .sql file (hand-edits are overwritten on regeneration).")
             return 2
 
         if emit_json:

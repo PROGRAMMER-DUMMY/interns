@@ -43,7 +43,11 @@ jobs:
             tests.test_kpi_execution_harness \
             tests.test_kpi_format_detector \
             tests.test_workbook_structure \
-            tests.test_kpi_confirmation_panel
+            tests.test_kpi_confirmation_panel \
+            tests.test_document_candidate_consumption \
+            tests.test_intent_contract_routing \
+            tests.test_phi_gate \
+            tests.test_workflow_guard_specialist_firing
 
   pyspark-parity:
     runs-on: ubuntu-latest
