@@ -56,6 +56,43 @@ _PROSE_RULE_TOKENS: frozenset[str] = frozenset({
     "constraint", "business rule", "standard", "requirement",
 })
 
+# ---------------------------------------------------------------------------
+# Document-level type constants + signals (whole-document classification)
+# ---------------------------------------------------------------------------
+
+DOC_TYPE_DATA_DICTIONARY = "data_dictionary"
+DOC_TYPE_KPI_SPEC = "kpi_spec"
+DOC_TYPE_REPORT = "report"
+DOC_TYPE_REFERENCE = "reference"
+DOC_TYPE_MIXED = "mixed"
+
+# Distinct whole-document signal vocabularies. Kept disjoint enough that a real
+# data dictionary and a real KPI spec score on different tokens. Workspace-
+# agnostic: these are generic document-shape words, not domain vocabulary.
+_DOC_TYPE_SIGNALS: dict[str, frozenset[str]] = {
+    DOC_TYPE_DATA_DICTIONARY: frozenset({
+        "data dictionary", "dictionary", "glossary", "term", "terms",
+        "abbreviation", "acronym", "field name", "column name", "data type",
+    }),
+    DOC_TYPE_KPI_SPEC: frozenset({
+        "kpi", "metric", "measure", "indicator", "numerator", "denominator",
+        "target", "threshold", "formula", "grain", "dimension", "cut",
+    }),
+    DOC_TYPE_REPORT: frozenset({
+        "summary", "findings", "conclusion", "overview", "introduction",
+        "executive summary", "analysis", "results", "background",
+    }),
+}
+
+# Which candidate type a confirmed document type reinforces (confidence boost).
+_DOC_TYPE_BOOST: dict[str, str] = {
+    DOC_TYPE_DATA_DICTIONARY: CANDIDATE_LEXICON,
+    DOC_TYPE_KPI_SPEC: CANDIDATE_KPI_REGISTRY,
+    DOC_TYPE_REPORT: CANDIDATE_OPEN_QUESTION,
+}
+_DOC_TYPE_CONFIDENCE_BOOST = 0.15
+_DOC_TYPE_CONFIDENCE_CAP = 0.95
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -99,7 +136,7 @@ def classify_document(doc_json: dict[str, Any]) -> list[dict[str, Any]]:
         for node in tree_nodes:
             page_num = node.get("page number") or node.get("page_number") or node.get("page")
             candidates.extend(_classify_block(node, page_num))
-        return _deduplicate(candidates)
+        return _finalize_candidates(candidates, doc_json)
 
     # opendataloader-pdf (assumed) JSON shape: {"pages": [{..., "blocks": [...]}]}
     pages = doc_json.get("pages") or []
@@ -122,7 +159,7 @@ def classify_document(doc_json: dict[str, Any]) -> list[dict[str, Any]]:
             candidates.extend(block_candidates)
 
     # Deduplicate by (candidate_type, page, repr(content))
-    return _deduplicate(candidates)
+    return _finalize_candidates(candidates, doc_json)
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +563,112 @@ def _norm(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value).lower())
 
 
+def _collect_document_text(doc_json: dict[str, Any], *, limit: int = 20000) -> str:
+    """Gather a lowercased text blob from every string value in the document
+    (headers, cell text, paragraph content, prose) for whole-document type
+    detection. Bounded so a huge document does not blow up the scan."""
+    parts: list[str] = []
+
+    def walk(node: Any) -> None:
+        if len(parts) > 4000:
+            return
+        if isinstance(node, str):
+            s = node.strip()
+            if s:
+                parts.append(s)
+        elif isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(doc_json)
+    return " ".join(parts).lower()[:limit]
+
+
+def detect_document_type(doc_json: dict[str, Any]) -> dict[str, Any]:
+    """Classify the document AS A WHOLE (the layer above per-block routing).
+
+    Returns ``{document_type, confidence, signals, scores}``. Deterministic,
+    keyword-based, workspace-agnostic. ``reference`` means no actionable signal
+    (the document is context, not a source of KPI/lexicon/relationship facts).
+    ``mixed`` means two strong types tie.
+    """
+    text = _collect_document_text(doc_json) if isinstance(doc_json, dict) else ""
+    scores: dict[str, int] = {}
+    matched: dict[str, list[str]] = {}
+    for dtype, tokens in _DOC_TYPE_SIGNALS.items():
+        hits = sorted(t for t in tokens if t in text)
+        if hits:
+            scores[dtype] = len(hits)
+            matched[dtype] = hits
+
+    if not scores:
+        return {
+            "document_type": DOC_TYPE_REFERENCE,
+            "confidence": "none",
+            "signals": [],
+            "scores": {},
+        }
+
+    ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
+    top_type, top_score = ranked[0]
+    second_score = ranked[1][1] if len(ranked) > 1 else 0
+
+    # Two strong types within one hit of each other -> mixed.
+    if second_score and (top_score - second_score) <= 1 and top_score >= 2:
+        return {
+            "document_type": DOC_TYPE_MIXED,
+            "confidence": "medium",
+            "signals": sorted({s for hits in matched.values() for s in hits}),
+            "scores": dict(scores),
+        }
+
+    if top_score >= 3 or (top_score >= 2 and second_score == 0):
+        confidence = "high"
+    elif top_score >= 2:
+        confidence = "medium"
+    else:
+        confidence = "low"
+    return {
+        "document_type": top_type,
+        "confidence": confidence,
+        "signals": matched.get(top_type, []),
+        "scores": dict(scores),
+    }
+
+
+def _finalize_candidates(
+    candidates: list[dict[str, Any]],
+    doc_json: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Tag every candidate with the whole-document type and apply a small
+    confidence boost to the candidate type that the document type reinforces
+    (e.g. a data-dictionary document boosts lexicon candidates). Then dedupe.
+
+    The boost is bounded and recorded with a reason so it stays auditable; it
+    never fabricates a candidate, only reweights ones the block classifier
+    already found from real content."""
+    deduped = _deduplicate(candidates)
+    doc_type_info = detect_document_type(doc_json)
+    doc_type = doc_type_info["document_type"]
+    boost_target = _DOC_TYPE_BOOST.get(doc_type)
+    for cand in deduped:
+        cand["document_type"] = doc_type
+        if boost_target and cand.get("candidate_type") == boost_target:
+            old = float(cand.get("confidence") or 0.0)
+            new = round(min(old + _DOC_TYPE_CONFIDENCE_BOOST, _DOC_TYPE_CONFIDENCE_CAP), 3)
+            if new != old:
+                cand["confidence"] = new
+                cand["document_type_boost"] = {
+                    "from": old,
+                    "to": new,
+                    "reason": f"document_type={doc_type} reinforces {boost_target}",
+                }
+    return deduped
+
+
 def _deduplicate(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     result: list[dict[str, Any]] = []
@@ -544,5 +687,11 @@ __all__ = [
     "CANDIDATE_DATA_MODEL",
     "CANDIDATE_OPEN_QUESTION",
     "CANDIDATE_RAW_EVIDENCE",
+    "DOC_TYPE_DATA_DICTIONARY",
+    "DOC_TYPE_KPI_SPEC",
+    "DOC_TYPE_REPORT",
+    "DOC_TYPE_REFERENCE",
+    "DOC_TYPE_MIXED",
     "classify_document",
+    "detect_document_type",
 ]

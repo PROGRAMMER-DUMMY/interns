@@ -47,6 +47,7 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_document_candidate_apply",
     "tests.test_document_kpi_merge",
     "tests.test_document_candidate_consumption",
+    "tests.test_document_type_classification",
     "tests.test_intent_contract_routing",
     "tests.test_phi_gate",
     "tests.test_workflow_guard_specialist_firing",

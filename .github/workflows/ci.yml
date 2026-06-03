@@ -45,6 +45,7 @@ jobs:
             tests.test_workbook_structure \
             tests.test_kpi_confirmation_panel \
             tests.test_document_candidate_consumption \
+            tests.test_document_type_classification \
             tests.test_intent_contract_routing \
             tests.test_phi_gate \
             tests.test_workflow_guard_specialist_firing

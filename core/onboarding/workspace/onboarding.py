@@ -269,6 +269,7 @@ class WorkspaceOnboarder:
 
         workspace_rel = _rel(self.workspace, self.repo_root)
         all_candidates: list[dict[str, Any]] = []
+        document_types: dict[str, dict[str, Any]] = {}
         scanned = 0
         for pdf in pdfs:
             try:
@@ -289,16 +290,39 @@ class WorkspaceOnboarder:
             if result.status != "ok":
                 continue
             scanned += 1
+            pdf_rel = _rel(pdf, self.repo_root)
             try:
+                from core.onboarding.documents.classifier import (
+                    CANDIDATE_RAW_EVIDENCE,
+                    detect_document_type,
+                )
+
                 sidecar = json.loads(
                     (self.repo_root / result.sidecar_path).read_text(encoding="utf-8")
                 )
-                for cand in classify_document(sidecar.get("extracted_content") or {}):
-                    cand["source_document"] = _rel(pdf, self.repo_root)
+                extracted = sidecar.get("extracted_content") or {}
+                doc_type_info = detect_document_type(extracted)
+                document_types[pdf_rel] = doc_type_info
+                cands = classify_document(extracted)
+                for cand in cands:
+                    cand["source_document"] = pdf_rel
                     all_candidates.append(cand)
+                # "No actionable candidates" signal (the skill's `None` tier): a
+                # document that yielded nothing routable is reference-only, not a
+                # silent no-op. Raw-evidence-only counts as no actionable candidate.
+                routable = [
+                    c for c in cands
+                    if c.get("candidate_type") != CANDIDATE_RAW_EVIDENCE
+                ]
+                if not routable:
+                    warnings.append(
+                        f"[~] document_scanned_no_candidates:{pdf_rel}: "
+                        f"document_type={doc_type_info.get('document_type')} "
+                        "(reference-only; no KPI/lexicon/relationship/rule signals found)."
+                    )
             except Exception as exc:
                 warnings.append(
-                    f"[~] document_classify_failed:{_rel(pdf, self.repo_root)}:"
+                    f"[~] document_classify_failed:{pdf_rel}:"
                     f"{type(exc).__name__}:{exc}"
                 )
 
@@ -320,6 +344,7 @@ class WorkspaceOnboarder:
                 ),
                 "scanned_pdf_count": scanned,
                 "candidate_count": len(all_candidates),
+                "document_types": document_types,
                 "candidates": all_candidates,
             },
         )

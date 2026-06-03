@@ -22,7 +22,7 @@ comment instead of silently producing wrong SQL.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -97,6 +97,12 @@ class Aggregation:
     distinct: bool = False
     predicate: str | None = None
     window: WindowSpec | None = None
+    # When False, the aggregation is used internally (e.g. it still drives
+    # windowed-only/SELECT DISTINCT detection and is inlined into a composite
+    # expression) but is NOT projected as its own output column. Used so a
+    # percentage-share metric emits only cuts + the single share column rather
+    # than leaking its numerator/denominator scaffolding.
+    project: bool = True
 
 
 @dataclass(frozen=True)
@@ -614,11 +620,15 @@ def parse_kpi(kpi: dict[str, Any], denominator_scope: str | None = None) -> Pars
             grain_terms = tuple(d.expression for d in grain_dimensions)
 
             # Numerator = lives within each full-grain cell (PARTITION BY grain).
+            # project=False: it is inlined into percentage_share, NOT emitted as
+            # its own output column (the metric is a single share column; the
+            # numerator/denominator are internal scaffolding the cuts never named).
             group_agg = Aggregation(
                 fn=fn, column=column,
                 alias=_norm_alias(f"{fn}_{column}_per_group"),
                 distinct=distinct,
                 window=WindowSpec(partition_by=grain_terms),
+                project=False,
             )
             # Denominator scope: grand_total (default, OVER ()) or within-group
             # (OVER (PARTITION BY <partition_col>)).  The denominator_scope facet
@@ -640,7 +650,10 @@ def parse_kpi(kpi: dict[str, Any], denominator_scope: str | None = None) -> Pars
                 alias=_norm_alias(f"{fn}_{column}_total"),
                 distinct=distinct,
                 window=_denom_window,
+                project=False,
             )
+            # Kept in aggregations so windowed-only/SELECT DISTINCT detection still
+            # fires, but project=False so neither is emitted as an output column.
             parsed.aggregations.extend([group_agg, total_agg])
             # Record the denominator scope as a ParsedKPI field for downstream
             # audit and enforcement (intent_coverage denominator_scope_findings).
@@ -649,9 +662,13 @@ def parse_kpi(kpi: dict[str, Any], denominator_scope: str | None = None) -> Pars
                 "grand_total" if _denom_is_within else
                 (f"within_{partition_col}" if partition_col else None)
             )
+            # Inline the numerator/denominator window expressions directly so the
+            # view emits ONLY cuts + the single percentage_share column (no leaked
+            # sum_*_per_group / sum_*_total scaffolding columns).
             parsed.extra_select_exprs.append(
                 (
-                    f"CAST({group_agg.alias} AS DOUBLE) / NULLIF({total_agg.alias}, 0) * 100",
+                    f"CAST({_agg_expr_no_alias(group_agg)} AS DOUBLE) "
+                    f"/ NULLIF({_agg_expr_no_alias(total_agg)}, 0) * 100",
                     "percentage_share",
                 )
             )
@@ -682,30 +699,42 @@ def parse_kpi(kpi: dict[str, Any], denominator_scope: str | None = None) -> Pars
             # which short-circuits earlier).
             kind = window_intent.get("kind")
             if kind == "percent_of_total" and agg.fn in {"sum", "count", "avg"}:
+                # A percentage is one logical column. The base aggregate and the
+                # grand-total denominator are internal scaffolding: mark both
+                # project=False and inline them so the view emits only
+                # cuts + percent_of_total (consistent with the share-of-group path).
+                base_agg = replace(agg, project=False)
                 total_agg = Aggregation(
                     fn=agg.fn, column=agg.column,
                     alias=_norm_alias(f"total_{agg.alias}"),
                     distinct=agg.distinct, window=WindowSpec(),
+                    project=False,
                 )
-                parsed.aggregations.extend([agg, total_agg])
+                parsed.aggregations.extend([base_agg, total_agg])
                 parsed.extra_select_exprs.append(
                     (
-                        f"CAST({agg.alias} AS DOUBLE) / NULLIF({total_agg.alias}, 0) * 100",
+                        f"CAST({_agg_expr_no_alias(base_agg)} AS DOUBLE) "
+                        f"/ NULLIF({_agg_expr_no_alias(total_agg)}, 0) * 100",
                         "percent_of_total",
                     )
                 )
             elif kind == "percent_of_group":
                 group_col = _resolve_column(window_intent["group"], lookup)
+                # Same single-metric-column rule: inline base + per-group
+                # denominator, emit only cuts + percent_of_<group>.
+                base_agg = replace(agg, project=False)
                 group_agg = Aggregation(
                     fn=agg.fn, column=agg.column,
                     alias=_norm_alias(f"{agg.alias}_per_{group_col}"),
                     distinct=agg.distinct,
                     window=WindowSpec(partition_by=(_quote(group_col),)),
+                    project=False,
                 )
-                parsed.aggregations.extend([agg, group_agg])
+                parsed.aggregations.extend([base_agg, group_agg])
                 parsed.extra_select_exprs.append(
                     (
-                        f"CAST({agg.alias} AS DOUBLE) / NULLIF({group_agg.alias}, 0) * 100",
+                        f"CAST({_agg_expr_no_alias(base_agg)} AS DOUBLE) "
+                        f"/ NULLIF({_agg_expr_no_alias(group_agg)}, 0) * 100",
                         f"percent_of_{_norm_alias(group_col)}",
                     )
                 )
@@ -901,7 +930,12 @@ def _window_sql(window: WindowSpec) -> str:
 
 _ROUND_FNS = {"sum", "avg"}
 
-def _agg_sql(agg: Aggregation, dialect: str = "duckdb") -> str:
+def _agg_expr_no_alias(agg: Aggregation, dialect: str = "duckdb") -> str:
+    """Render an aggregation's SQL expression WITHOUT the trailing ``AS alias``.
+
+    Used both by _agg_sql (which appends the alias) and to inline an internal
+    (non-projected) window aggregation into a composite expression such as a
+    percentage-share numerator/denominator."""
     quoted_col = _quote(agg.column, dialect) if agg.column else ""
     if agg.fn == "row_number":
         body = "ROW_NUMBER()"
@@ -915,8 +949,12 @@ def _agg_sql(agg: Aggregation, dialect: str = "duckdb") -> str:
         raw = f"{agg.fn.upper()}({quoted_col})"
         body = f"ROUND({raw}, 2)" if agg.fn in _ROUND_FNS and agg.window is None else raw
     if agg.window is not None:
-        return f"{body} {_window_sql(agg.window)} AS {agg.alias}"
-    return f"{body} AS {agg.alias}"
+        return f"{body} {_window_sql(agg.window)}"
+    return body
+
+
+def _agg_sql(agg: Aggregation, dialect: str = "duckdb") -> str:
+    return f"{_agg_expr_no_alias(agg, dialect)} AS {agg.alias}"
 
 
 def _filter_sql(filt: FilterClause, dialect: str = "duckdb") -> str:
@@ -981,6 +1019,8 @@ def build_result_view_sql(
         if not windowed_only:
             group_by_terms.append(dim.expression)
     for agg in parsed.aggregations:
+        if not agg.project:
+            continue  # internal scaffolding (e.g. share numerator/denominator); inlined elsewhere
         select_terms.append(_agg_sql(agg, dialect))
     if parsed.ratio:
         numerator, denominator = parsed.ratio

@@ -411,6 +411,43 @@ class ShareOfTotalByGroupTests(unittest.TestCase):
             "result grain must be group + every declared descriptive cut",
         )
 
+    def test_share_emits_only_cuts_plus_single_metric_column(self):
+        # The metric is a single logical column (percentage_share). The numerator
+        # and denominator window aggregates are internal scaffolding and must NOT
+        # leak as their own output columns — the cuts never named them.
+        kpi = _kpi_uc(
+            name="percentage share of lives by department",
+            metric=(
+                "percentage of sum(distinct PatientID) / "
+                "sum(distinct PatientID) for departement"
+            ),
+            cuts="departement, Gender",
+            features=[
+                {"feature": "PatientID", "source_columns": [{"column": "PatientID"}]},
+                {"feature": "departement", "source_columns": [{"column": "departement"}]},
+                {"feature": "Gender", "source_columns": [{"column": "Gender"}]},
+            ],
+        )
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_002",
+            feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
+        )
+        # The scaffolding aliases must NOT be projected anywhere.
+        self.assertNotIn("per_group", sql)
+        self.assertNotIn("_total AS", sql)
+        self.assertNotIn("patientid_total", sql)
+        # Exactly the declared cuts + the single percentage_share column are output
+        # (DOUBLE is the inline CAST inside percentage_share, not an output column).
+        import re as _re
+        body = sql.split("SELECT DISTINCT", 1)[1].split("FROM", 1)[0]
+        output_aliases = [
+            a for a in _re.findall(r"\bAS\s+(\w+)", body) if a != "DOUBLE"
+        ]
+        self.assertEqual(output_aliases, ["departement", "gender", "percentage_share"])
+        # The numerator/denominator windows are inlined into percentage_share.
+        self.assertIn('OVER (PARTITION BY "departement", "Gender")', sql)
+        self.assertIn("OVER ()", sql)
+
     def test_no_for_group_keeps_global_percent_of_total(self):
         # Without a "for <group>", the existing global percent-of-total path
         # (OVER ()) must be preserved.
@@ -424,6 +461,48 @@ class ShareOfTotalByGroupTests(unittest.TestCase):
         )
         self.assertIn("OVER ()", sql)
         self.assertIn("percent_of_total", sql)
+
+
+class PercentageSingleMetricColumnTests(unittest.TestCase):
+    """A percentage metric is ONE logical output column across ALL percentage
+    phrasings. The base aggregate and the denominator are internal scaffolding
+    and must be inlined, never projected as their own columns."""
+
+    def _output_aliases(self, sql: str) -> list[str]:
+        import re as _re
+        head = sql.split("SELECT", 1)[1]
+        body = head[head.index("\n"):].split("FROM", 1)[0]
+        return [a for a in _re.findall(r"\bAS\s+(\w+)", body) if a != "DOUBLE"]
+
+    def test_percent_of_total_emits_single_metric_column(self):
+        kpi = _kpi_uc(
+            name="Percent of total revenue by channel",
+            metric="percent of total sum(revenue)",
+            cuts="channel",
+            features=[
+                {"feature": "revenue", "source_columns": [{"column": "revenue"}]},
+                {"feature": "channel", "source_columns": [{"column": "channel"}]},
+            ],
+        )
+        sql = build_result_view_sql(kpi, kpi_id="k", feature_view='"f"', result_view='"r"')
+        self.assertEqual(self._output_aliases(sql), ["channel", "percent_of_total"])
+        self.assertNotIn("total_sum", sql)  # denominator scaffolding not projected
+        self.assertIn("OVER ()", sql)       # grand-total inlined
+
+    def test_percent_of_group_emits_single_metric_column(self):
+        kpi = _kpi_uc(
+            name="share of region trend",
+            metric="sum(amount)",
+            cuts="region",
+            features=[
+                {"feature": "region", "source_columns": [{"column": "region"}]},
+                {"feature": "amount", "source_columns": [{"column": "amount"}]},
+            ],
+        )
+        sql = build_result_view_sql(kpi, kpi_id="k", feature_view='"f"', result_view='"r"')
+        self.assertEqual(self._output_aliases(sql), ["region", "percent_of_region"])
+        self.assertNotIn("_per_region AS", sql)  # per-group scaffolding not projected
+        self.assertIn('OVER (PARTITION BY "region")', sql)
 
 
 class WindowedOnlyDedupRegressionTests(unittest.TestCase):
