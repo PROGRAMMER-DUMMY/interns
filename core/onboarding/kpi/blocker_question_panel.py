@@ -1594,7 +1594,14 @@ def _evidence_files(items: list[dict[str, Any]], repo_root: Path) -> list[dict[s
 
 
 def _empty_panel(mapping: dict[str, Any], workspace: Path, repo_root: Path) -> dict[str, Any]:
-    return {
+    summary = mapping.get("summary", {}) or {}
+    blocked_count = 0
+    try:
+        blocked_count = int(summary.get("blocked_kpi_count") or 0)
+    except (TypeError, ValueError):
+        blocked_count = 0
+
+    panel = {
         "artifact_type": "blocker_question_panel/current.json",
         "version": PANEL_VERSION,
         "generated_by": "blocker-question-panel",
@@ -1610,8 +1617,38 @@ def _empty_panel(mapping: dict[str, Any], workspace: Path, repo_root: Path) -> d
         "why": "",
         "options": [],
         "interaction_contract": INTERACTION_CONTRACT,
-        "summary": mapping.get("summary", {}),
+        "summary": summary,
     }
+
+    # Dead-end guard: KPIs are still blocked, yet no answerable question was
+    # produced. Don't go silent -- carry the stage routing (specialists + skills)
+    # so the orchestrator activates the right help instead of looping. Generic:
+    # the routing roster comes from delegation.STAGE_ROUTING, not a domain list.
+    if blocked_count > 0:
+        panel["status"] = "blocked_without_question"
+        panel["blocker"] = (
+            f"{blocked_count} KPI(s) are blocked but produced no answerable feature "
+            "question -- likely an incomplete/undefined definition rather than a "
+            "feature-mapping gap. This needs definition help, not a column choice."
+        )
+        panel["question"] = (
+            "Define the metric and grain for the blocked KPI(s), or restart KPI "
+            "generation, before mapping features."
+        )
+        try:
+            from core.onboarding.workspace.delegation import routing_for
+
+            roster = routing_for("kpi_definition")
+            if roster.get("agents"):
+                panel["required_specialists"] = roster["agents"]
+            if roster.get("skills"):
+                panel["suggested_skills"] = [
+                    {"name": s, "why": "blocked KPI with no answerable question"}
+                    for s in roster["skills"]
+                ]
+        except Exception:  # pragma: no cover - routing is advisory
+            pass
+    return panel
 
 
 def _render_markdown(panel: dict[str, Any]) -> str:
