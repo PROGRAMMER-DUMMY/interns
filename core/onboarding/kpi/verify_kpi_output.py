@@ -189,8 +189,93 @@ class KPIOutputVerifier:
         self._check_cut_coverage(record, kpi, lowered)
         self._check_parser_filters(record, kpi, lowered)
         self._check_garbage_filters(record, kpi, sql)
+        self._check_semantic_gloss(record, kpi)
         if record.ok:
             record.intent_checks.append("metric, cuts, and name-derived filters present in SQL")
+
+    _MEASURE_RE = re.compile(
+        r"\b(?:avg|sum|count|min|max|median)\s*\(\s*(?:distinct\s+)?"
+        r"([A-Za-z_][A-Za-z0-9_]*)\s*\)",
+        re.IGNORECASE,
+    )
+    _GLOSS_STOPWORDS = frozenset(
+        {
+            "the", "a", "an", "of", "for", "each", "per", "by", "in", "on", "to",
+            "and", "or", "with", "how", "many", "number", "count", "total", "sum",
+            "average", "avg", "mean", "percentage", "percent", "share", "what",
+            "which", "is", "are", "was", "were", "do", "does", "did", "value",
+            "amount", "over", "time", "all", "every", "broken", "down", "this",
+            "that", "including", "excluding", "not", "line", "item", "items",
+            "data", "record", "records", "id", "code",
+        }
+    )
+
+    def _gloss_tokens(self, text: str) -> set[str]:
+        toks = {t for t in re.split(r"[^a-z0-9]+", str(text).lower()) if len(t) > 1}
+        toks = {t[:-1] if len(t) > 3 and t.endswith("s") else t for t in toks}
+        return toks - self._GLOSS_STOPWORDS
+
+    def _workspace_glosses(self) -> dict[str, str]:
+        """{normalized column -> description} from the workspace dictionaries.
+        Cached. Convention-based discovery; never raises."""
+        cache = getattr(self, "_gloss_cache", None)
+        if cache is not None:
+            return cache
+        import csv as _csv
+
+        glosses: dict[str, str] = {}
+        try:
+            for path in sorted(self.workspace.rglob("*dictionary*.csv")):
+                if not path.is_file() or "/interns/" in path.as_posix():
+                    continue
+                try:
+                    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                        reader = _csv.DictReader(handle)
+                        names = {str(n).strip().lower(): n for n in (reader.fieldnames or [])}
+                        fk = next((names[k] for k in ("field", "column", "name") if k in names), None)
+                        dk = next((names[k] for k in ("description", "definition", "meaning") if k in names), None)
+                        if not fk or not dk:
+                            continue
+                        for row in reader:
+                            field = str(row.get(fk) or "").strip().lower()
+                            desc = str(row.get(dk) or "").strip()
+                            if field and desc:
+                                glosses.setdefault(field, desc)
+                except OSError:
+                    continue
+        except OSError:
+            pass
+        self._gloss_cache = glosses
+        return glosses
+
+    def _check_semantic_gloss(self, record: VerifyRecord, kpi: dict[str, Any]) -> None:
+        """Non-blocking: flag when the chosen measure column's data-dictionary
+        gloss does not overlap the question's measure noun (e.g. question says
+        "claim cost" but the column is glossed "base cost excluding..."). Surfaces
+        for review at the gate without failing execution. Generic: tokens only,
+        no domain word list. No dictionary -> no-op."""
+        glosses = self._workspace_glosses()
+        if not glosses:
+            return
+        metric = str(kpi.get("metric") or "")
+        question = str(kpi.get("name") or kpi.get("business_question") or "")
+        question_tokens = self._gloss_tokens(question)
+        if not question_tokens:
+            return
+        for match in self._MEASURE_RE.finditer(metric):
+            column = match.group(1)
+            gloss = glosses.get(column.lower())
+            if not gloss:
+                continue
+            gloss_tokens = self._gloss_tokens(gloss)
+            # If the gloss shares no content token with the question's measure
+            # nouns, the column may not be what the question asked for.
+            if gloss_tokens and not (gloss_tokens & question_tokens):
+                record.warnings.append(
+                    f"[~] semantic_gloss_mismatch: measure column `{column}` glossed "
+                    f'"{gloss[:80]}" shares no term with the question measure '
+                    "-- confirm it answers the KPI before trusting the result"
+                )
 
     def _check_cut_coverage(self, record: VerifyRecord, kpi: dict[str, Any], lowered_sql: str) -> None:
         """Every cut must resolve to a known column and appear in the SQL.

@@ -807,6 +807,10 @@ def _build_draft_kpis(session: dict[str, Any], repo_root: Path) -> list[dict[str
     )
 
     evidence_columns = _load_profile_evidence_columns(session, repo_root)
+    # Ground the measure choice in the data model's column descriptions, not
+    # name similarity alone (AGENTS.md Data Model rule). Glosses are discovered
+    # from the workspace's dictionary evidence; absent dictionaries -> profile-only.
+    dictionary_entries = _load_session_glosses(session, repo_root)
     drafts = []
     for idx, kpi in enumerate(existing, start=1):
         quality = quality_by_name.get(kpi.get("name", ""), {})
@@ -824,7 +828,9 @@ def _build_draft_kpis(session: dict[str, Any], repo_root: Path) -> list[dict[str
         if not str(metric).strip() and not str(cuts).strip():
             question = str(kpi.get("name") or kpi.get("business_question") or "").strip()
             if question:
-                derivation = derive_metric_and_cuts(question, evidence_columns)
+                derivation = derive_metric_and_cuts(
+                    question, evidence_columns, dictionary_entries=dictionary_entries
+                )
                 if derivation["metric"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD:
                     metric = derivation["metric"]["value"]
                 if derivation["cuts"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD:
@@ -881,6 +887,64 @@ def _load_profile_evidence_columns(
     if not isinstance(payload, dict):
         return []
     return columns_from_profile_index(payload)
+
+
+def _load_session_glosses(session: dict[str, Any], repo_root: Path) -> list[dict[str, str]]:
+    """Discover column descriptions (glosses) from the session workspace's
+    data-model evidence: any ``*dictionary*`` CSV with field/description columns,
+    plus the onboarding-parsed ``data_dictionary/index.json``. Returns
+    ``[{"column","description"}]`` or ``[]``. Convention-based and generic; never
+    raises (advisory evidence)."""
+    import csv as _csv
+
+    workspace_rel = str(session.get("workspace") or "")
+    if not workspace_rel:
+        return []
+    workspace = (Path(repo_root) / workspace_rel).resolve()
+    entries: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(field: str, description: str) -> None:
+        field = str(field or "").strip()
+        description = str(description or "").strip()
+        if not field or not description or (field.lower(), description.lower()) in seen:
+            return
+        seen.add((field.lower(), description.lower()))
+        entries.append({"column": field, "description": description})
+
+    try:
+        for path in sorted(workspace.rglob("*dictionary*.csv")):
+            if not path.is_file() or "/interns/" in path.as_posix():
+                continue
+            try:
+                with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                    reader = _csv.DictReader(handle)
+                    names = {str(n).strip().lower(): n for n in (reader.fieldnames or [])}
+                    fk = next((names[k] for k in ("field", "column", "name") if k in names), None)
+                    dk = next((names[k] for k in ("description", "definition", "meaning") if k in names), None)
+                    if not fk or not dk:
+                        continue
+                    for row in reader:
+                        _add(row.get(fk, ""), row.get(dk, ""))
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+    index_path = workspace / "interns" / "generated" / "data_dictionary" / "index.json"
+    if index_path.exists():
+        try:
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+            for doc in payload.get("documents") or []:
+                for entry in (doc.get("entries") if isinstance(doc, dict) else None) or []:
+                    if isinstance(entry, dict):
+                        _add(
+                            entry.get("field") or entry.get("column") or "",
+                            entry.get("description") or entry.get("definition") or "",
+                        )
+        except (json.JSONDecodeError, OSError):
+            pass
+    return entries
 
 
 def _is_placeholder_only_draft(draft_kpis: list[dict[str, Any]]) -> bool:
