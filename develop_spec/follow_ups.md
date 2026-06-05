@@ -14,11 +14,13 @@ Item template: `- [ ] <area>: <what> — <why / where>`
       Fixed in `core/onboarding/kpi/result_view_builder.py` + regression test.
       (The earlier "global result_format" hypothesis was WRONG — result_format is
       not read by the generator at all.)
-- [ ] **flow: partial completion.** The `kpi_definition_incomplete` gate blocks
-      the whole batch if ANY KPI is undefined; the source-to-target + generation
-      gates cascade the same way. To produce results for the ready KPIs while
-      others stay undefined, the gates must defer (not hard-block) undefined
-      KPIs and the generation loop must skip them. Multi-gate change.
+- [~] **flow: partial completion (PARTIAL 2026-06-05).** Definition gate now
+      blocks only when EVERY KPI is undefined; generation loop skips deferred
+      undefined KPIs. REMAINING: thread the `deferred_kpis` set through the
+      feature-blocker panel and source-to-target gate so a MIX of defined+
+      undefined reaches generation and produces partial result tables (today a
+      mix still stops at the feature-blocker stage asking about the undefined
+      ones). Multi-gate change; deferred to avoid rushing the cascade.
 - [ ] **kpi_003 / kpi_010 definitions:** kpi_003 needs a derived duration
       column (`STOP-START > 24h`); kpi_010 needs a readmission self-join (within
       30d, like kpi_009). Deferred from the apply-kpi-definition pass.

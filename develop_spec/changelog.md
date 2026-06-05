@@ -17,6 +17,26 @@ Entry template:
 
 ---
 
+### 2026-06-05  Activation/reliability loop + semantic grill + derivation patterns (Phases 0-5)
+- what: convert advisory/CI-only guards into in-envelope hooks, generic + pipeline-wide.
+  - P0/1/2: core/governance/op_signals.py + cli_runner hooks (live tripwire
+    reliability + signal->skill activation) + empty-panel carries routing.
+  - P3: verify_kpi_output non-blocking semantic gloss mismatch; generation passes
+    dictionary glosses into derivation.
+  - P4: core/onboarding/features/derivation_patterns.py (duration bucket +
+    recurrence self-join), wired into the resolver's undefined-KPI branch.
+  - P5 (partial): definition gate blocks only when ALL undefined; generation skips
+    deferred. Full partial-result threading deferred (see follow_ups).
+- why: skills/reliability tools lived BESIDE the pipeline, never fired on the live
+  path (the "why didn't anything activate" gap); engine ignored its own kpi-analyst
+  rule; feature-derivation-library had no built-in patterns.
+- tests: test_op_signals, test_verify_semantic_gloss, test_derivation_patterns
+  (new) + flow/derivation/panel suites green on the venv interpreter.
+- commits: 4596bef, 05ad704, c43c663, e3e1ff0 (after base commit 981a0f7).
+- NOTE: parallel worktree agents were attempted first but failed -- worktrees
+  branch from the last commit and the whole session was uncommitted; committed the
+  base (981a0f7) then built inline.
+
 ### 2026-06-05  Dictionary-grounded + specificity-aware measure selection
 - what: derivation now obeys AGENTS.md "Data Model Driven Generation" (don't map
   on column-name similarity alone). Two generic, scenario-based rules:
