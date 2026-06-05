@@ -630,8 +630,18 @@ class WorkspaceOnboarder:
             kpi_registry_payload,
         )
 
+        # Human-confirmed KPI definitions are authoritative and applied FIRST, so
+        # they override derived/lexicon guesses and survive every re-onboard.
+        kpis = self._apply_accepted_kpi_definitions(kpis)
         lexicon = build_workspace_lexicon(self.layout, self.repo_root)
         kpis = self._fill_kpi_gaps_with_lexicon(kpis, lexicon)
+        # Evidence-based derivation for cells the lexicon could not fill. This
+        # recovers natural-language-question workspaces (empty metric/cuts) by
+        # deriving a measurable metric/grain from the workspace's own profiled
+        # columns, exactly as the KPI-generation interview does. Idempotent and
+        # workspace-agnostic; low-confidence/ambiguous cases stay empty so the
+        # definition-blocker gate still asks rather than fabricating.
+        kpis = self._fill_kpi_gaps_with_derivation(kpis, profiles)
         kpi_registry_payload["kpis"] = [asdict(kpi) for kpi in kpis]
 
         artifacts = {
@@ -765,7 +775,8 @@ class WorkspaceOnboarder:
                     f"kpi_registry_read_failed:{rel}:{type(exc).__name__}:{exc}"
                 )
         self._write_kpi_format_confirmation(detections)
-        return kpis, warnings
+        kpis, dedupe_warnings = _dedupe_kpis_by_name(kpis)
+        return kpis, warnings + dedupe_warnings
 
     def _write_kpi_format_confirmation(
         self,
@@ -829,6 +840,148 @@ class WorkspaceOnboarder:
                     cuts=cuts or inferred_cuts,
                 )
             )
+        return filled
+
+    def _apply_accepted_kpi_definitions(
+        self, kpis: list[KpiDefinition]
+    ) -> list[KpiDefinition]:
+        """Apply human-confirmed KPI definitions (metric/grain) from the decision
+        store. Authoritative: overrides empty/derived cells and survives
+        re-onboarding. No-op when no definitions have been accepted."""
+        try:
+            from core.onboarding.kpi.kpi_definition import (
+                apply_accepted_definitions_to_kpis,
+                load_kpi_definition_store,
+            )
+        except Exception:  # pragma: no cover - defensive import guard
+            return list(kpis)
+        store = load_kpi_definition_store(self.layout)
+        if not store:
+            return list(kpis)
+        return apply_accepted_definitions_to_kpis(kpis, store)
+
+    def _load_column_glosses(self) -> list[dict[str, str]]:
+        """Discover column descriptions from the workspace's data-model evidence.
+
+        Returns ``[{"column": <field>, "description": <gloss>}]`` aggregated from
+        any data-dictionary-style file the workspace carries (a ``*dictionary*``
+        CSV with field/description columns, or the onboarding-parsed
+        ``data_dictionary/index.json``). Generic and convention-based: it keys on
+        the presence of field/description structure, never a specific filename or
+        domain term. Returns ``[]`` when no such evidence exists, leaving
+        derivation profile-only. Failures are swallowed (advisory evidence).
+        """
+        import csv as _csv
+
+        entries: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def _add(field: str, description: str) -> None:
+            field = str(field or "").strip()
+            description = str(description or "").strip()
+            if not field or not description:
+                return
+            key = (field.lower(), description.lower())
+            if key in seen:
+                return
+            seen.add(key)
+            entries.append({"column": field, "description": description})
+
+        try:
+            for path in sorted(self.workspace.rglob("*dictionary*.csv")):
+                if not path.is_file() or "/interns/" in path.as_posix():
+                    continue
+                try:
+                    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                        reader = _csv.DictReader(handle)
+                        names = {str(n).strip().lower(): n for n in (reader.fieldnames or [])}
+                        field_key = next((names[k] for k in ("field", "column", "name") if k in names), None)
+                        desc_key = next((names[k] for k in ("description", "definition", "meaning") if k in names), None)
+                        if not field_key or not desc_key:
+                            continue
+                        for row in reader:
+                            _add(row.get(field_key, ""), row.get(desc_key, ""))
+                except OSError:
+                    continue
+        except OSError:
+            pass
+
+        index_path = self.layout.generated_dir / "data_dictionary" / "index.json"
+        if index_path.exists():
+            try:
+                payload = json.loads(index_path.read_text(encoding="utf-8"))
+                for doc in payload.get("documents") or []:
+                    for entry in (doc.get("entries") if isinstance(doc, dict) else None) or []:
+                        if isinstance(entry, dict):
+                            _add(
+                                entry.get("field") or entry.get("column") or "",
+                                entry.get("description") or entry.get("definition") or "",
+                            )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return entries
+
+    def _fill_kpi_gaps_with_derivation(
+        self,
+        kpis: list[KpiDefinition],
+        profiles: list[dict[str, Any]],
+    ) -> list[KpiDefinition]:
+        """Derive a measurable metric/grain for KPIs still missing one.
+
+        Mirrors the KPI-generation interview's derivation (same module, same
+        confidence threshold) so a workspace onboarded directly off a
+        natural-language-question registry reaches the same populated state as
+        one taken through the interview. Only empty cells are touched; a cell is
+        filled only when the derived facet clears the confidence threshold, so
+        ambiguous metrics (share %, top-N) stay empty for the blocker gate to
+        ask. Generic: column choices come from this workspace's profiles.
+        """
+        try:
+            from core.onboarding.kpi.metric_derivation import (
+                HIGH_CONFIDENCE_THRESHOLD,
+                columns_from_profile_index,
+                derive_metric_and_cuts,
+            )
+        except Exception:  # pragma: no cover - defensive import guard
+            return list(kpis)
+        columns = columns_from_profile_index({"profiles": profiles})
+        if not columns:
+            return list(kpis)
+        # Ground the measure choice in the data model's own column descriptions,
+        # not column-name similarity alone (AGENTS.md "Data Model Driven
+        # Generation Rule"). Glosses are discovered from the workspace's
+        # data-dictionary evidence; absent dictionaries leave derivation
+        # profile-only. Generic: no specific file or column is assumed.
+        dictionary_entries = self._load_column_glosses()
+        filled: list[KpiDefinition] = []
+        for kpi in kpis:
+            metric = kpi.metric
+            cuts = kpi.cuts
+            question = str(kpi.name or "").strip()
+            if (metric and cuts) or not question:
+                filled.append(kpi)
+                continue
+            try:
+                derivation = derive_metric_and_cuts(
+                    question, columns, dictionary_entries=dictionary_entries
+                )
+            except Exception:  # pragma: no cover - derivation must never break onboarding
+                filled.append(kpi)
+                continue
+            new_metric = metric
+            new_cuts = cuts
+            if not str(new_metric).strip() and (
+                derivation["metric"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD
+            ):
+                new_metric = derivation["metric"]["value"]
+            if not str(new_cuts).strip() and (
+                derivation["cuts"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD
+            ):
+                new_cuts = derivation["cuts"]["value"]
+            if new_metric != metric or new_cuts != cuts:
+                filled.append(replace(kpi, metric=new_metric, cuts=new_cuts))
+            else:
+                filled.append(kpi)
         return filled
 
     def profile_inputs(
@@ -1559,6 +1712,68 @@ def _read_xlsx_xml_kpis(path: Path) -> list[KpiDefinition]:
             )
         )
     return kpis
+
+
+def _kpi_name_key(name: str) -> str:
+    """Normalized identity for a KPI business question.
+
+    Lowercased, punctuation-stripped, whitespace-collapsed so the SAME question
+    text coming from two registries (e.g. a finalized
+    ``kpi_registry.generated.json`` plus the raw ``*.sql`` it was generated from)
+    collapses to one key. Generic: it keys on the question text only, never on a
+    source path or domain vocabulary.
+    """
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]+", " ", str(name or "").lower())).strip()
+
+
+def _kpi_richness(kpi: KpiDefinition) -> int:
+    """How completely a KPI is specified. Used to pick the survivor when the
+    same business question appears in multiple registries: the entry that
+    already carries a metric/cuts/refinement wins over a bare duplicate."""
+    score = 0
+    if str(kpi.metric or "").strip():
+        score += 2
+    if str(kpi.cuts or "").strip():
+        score += 2
+    if str(kpi.refinement_required or "").strip():
+        score += 1
+    if str(kpi.description or "").strip():
+        score += 1
+    return score
+
+
+def _dedupe_kpis_by_name(kpis: list[KpiDefinition]) -> tuple[list[KpiDefinition], list[str]]:
+    """Collapse KPIs that share a normalized business question across registries.
+
+    Onboarding can discover both a finalized generation registry and the raw
+    source file it was generated from; ingesting both double-counts every KPI.
+    Dedupe by normalized question text, keeping the richest entry (and the first
+    of equal-richness ones, preserving spec order). Workspace-agnostic — it never
+    inspects which file a KPI came from, only the question text and completeness.
+    """
+    survivors: dict[str, int] = {}
+    ordered: list[KpiDefinition] = []
+    collapsed = 0
+    for kpi in kpis:
+        key = _kpi_name_key(kpi.name)
+        if not key:
+            ordered.append(kpi)
+            continue
+        if key not in survivors:
+            survivors[key] = len(ordered)
+            ordered.append(kpi)
+            continue
+        existing_index = survivors[key]
+        if _kpi_richness(kpi) > _kpi_richness(ordered[existing_index]):
+            ordered[existing_index] = kpi
+        collapsed += 1
+    warnings: list[str] = []
+    if collapsed:
+        warnings.append(
+            f"[~] kpi_dedupe:{collapsed} duplicate KPI(s) collapsed by business question "
+            "(same question present in more than one registry)."
+        )
+    return ordered, warnings
 
 
 def _read_json_kpis(path: Path, repo_root: Path) -> list[KpiDefinition]:

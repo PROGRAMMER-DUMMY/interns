@@ -599,6 +599,34 @@ class AgeAsOfEventDateRegressionTests(unittest.TestCase):
             "date_diff('year', CAST(\"DOB\" AS DATE), CURRENT_DATE)", sql,
         )
 
+    def test_percentage_of_total_name_does_not_emit_phantom_age_dimension(self):
+        # Regression: "percent`age of` total" (and "aver`age of` X") must NOT be
+        # read as "age of <noun>". Without a leading word boundary on the age
+        # pattern this produced a phantom `date_diff('year', CAST("total" AS
+        # DATE)) AS age` dimension on a percentage KPI -> broken, ungrouped SQL.
+        kpi = _kpi_uc(
+            name=(
+                "How many encounters had zero payer coverage, and what percentage "
+                "of total encounters does this represent?"
+            ),
+            metric="count(*)",
+            cuts="PAYER_COVERAGE = 0",
+            features=[
+                {"feature": "PAYER_COVERAGE",
+                 "source_columns": [{"column": "PAYER_COVERAGE"}]},
+            ],
+        )
+        parsed = parse_kpi(kpi)
+        for dim in parsed.dimensions:
+            self.assertNotIn("date_diff", dim.expression)
+            self.assertNotEqual(dim.alias, "age")
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_x",
+            feature_view='"kpi_x_features"', result_view='"kpi_x_results"',
+        )
+        self.assertNotIn('CAST("total" AS DATE)', sql)
+        self.assertNotIn("AS age", sql)
+
     def test_age_falls_back_to_current_date_without_event_date(self):
         # No time-grain source column => no event date => CURRENT_DATE (legacy).
         kpi = _kpi_uc(

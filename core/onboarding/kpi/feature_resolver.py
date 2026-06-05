@@ -220,6 +220,29 @@ class KPIFeatureResolver:
                 "join_candidates": [],
                 "open_questions": [feature["question"]],
             }
+        # A KPI that arrives with neither a metric NOR a grain exposes no
+        # expression to extract features from. Without this branch the loop below
+        # is empty, the KPI is silently marked blocked with ZERO questions, and a
+        # direct `prepare-kpi-blocker-panel` run reports "no blocker question
+        # remains" while the KPI is still blocked — a dead end. Surface it as an
+        # answerable definition blocker. (In the full workspace-flow this case is
+        # caught earlier by the kpi_definition_incomplete gate; this keeps the
+        # standalone resolver/panel path honest too.) Generic: the condition is
+        # the same empty-metric-AND-cuts test the flow gate and validator use.
+        if not metric.strip() and not cuts.strip():
+            feature = _kpi_definition_feature(kpi)
+            return {
+                "kpi_id": f"kpi_{idx:03d}",
+                "name": kpi.get("name", ""),
+                "source": kpi.get("source", ""),
+                "metric": metric,
+                "cuts": cuts,
+                "status": "blocked_questions_pending",
+                "features": [feature],
+                "function_context": extracted.functions,
+                "join_candidates": [],
+                "open_questions": [feature["question"]],
+            }
         features = []
         for token in extracted.identifiers:
             norm = normalize_blocker(token)

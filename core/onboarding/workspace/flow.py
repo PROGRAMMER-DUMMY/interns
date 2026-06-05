@@ -37,8 +37,11 @@ from core.onboarding.workspace.delegation import (
     record_delegation,
     routing_for,
     verdict_from_dashboard_summary,
+    verdict_from_engine_generation,
     verdict_from_kpi_completion,
+    verdict_from_kpi_definition,
     verdict_from_relationship_summary,
+    verdict_from_result_review,
     verdict_from_source_to_target_summary,
     verdict_from_validation_summary,
     verdict_from_verification,
@@ -395,6 +398,60 @@ class WorkspaceFlow:
 
         orchestration_context = self._prepare_layer_route(state, data_quality=data_quality.get("harness", {}))
 
+        # Generic invariant: a KPI with no measurable definition (empty metric
+        # AND grain) cannot produce executable SQL. Definition-completeness is
+        # logically prior to feature-mapping, so this gate runs BEFORE the
+        # feature-blocker panel — otherwise an undefined KPI would either stop at
+        # a feature-blocker stage (wrong stage) or be silently skipped because it
+        # exposes no feature token to map. Surfacing it here keeps the flow
+        # generic: it fires for any registry shape, including natural-language
+        # question workspaces whose metric/grain were never derived. Mirrors the
+        # WorkspaceArtifactValidator condition.
+        registry = _read_json(self.layout.contracts_dir / "kpi_registry.json")
+        undefined = _undefined_kpis(registry)
+        if undefined:
+            listing = "\n".join(f"- `{u['kpi_id']}`: {u['kpi']}" for u in undefined)
+            return self._save_panel(
+                state,
+                panel={
+                    "stage": "kpi_definition_incomplete",
+                    "status": "blocked",
+                    "instruction": (
+                        "These KPIs have no measurable definition (empty metric and "
+                        "grain), so executable SQL cannot be generated for them. Define "
+                        "each KPI's metric (and grain/cuts) before generation continues. "
+                        "Do NOT hand-edit generated contracts or fabricate a result — "
+                        "resolve the definition, then re-run `workspace-flow start`.\n\n"
+                        + listing
+                    ),
+                    "question": (
+                        "Define the metric and grain for each KPI listed above before "
+                        "SQL generation."
+                    ),
+                    "options": [],
+                    "recommended_option_id": "",
+                    "artifact_paths": [
+                        self.workspace_rel
+                        + "/interns/generated/contracts/kpi_registry.json",
+                    ],
+                    "summary": {
+                        "undefined_kpi_count": len(undefined),
+                        "undefined_kpis": undefined,
+                    },
+                    "suggested_skills": [
+                        {
+                            "name": "kpi-clarification",
+                            "why": "Decompose an ambiguous business question into a concrete metric/grain/filter definition.",
+                        },
+                        {
+                            "name": "business-analyst",
+                            "why": "Confirm the intended measure and dimensions with the stakeholder.",
+                        },
+                    ],
+                },
+                source="kpi_definition_incomplete",
+            )
+
         prepared = prepare_kpi_blocker_panel(
             self.repo_root,
             self.workspace_rel,
@@ -418,6 +475,27 @@ class WorkspaceFlow:
                 ),
                 source="kpi_blocker",
             )
+
+        # business-analyst (kpi_definition): the feature-blocker panel can be clear
+        # while a KPI's intent is still ambiguous (e.g. a low-confidence share
+        # denominator). Surface those low-confidence intent facets so the
+        # definition gap is reviewed, not silently defaulted.
+        try:
+            from core.onboarding.kpi.intent_contract import intent_facet_panel_questions
+
+            _intent_questions = intent_facet_panel_questions(self.repo_root, self.workspace_rel)
+        except Exception:
+            _intent_questions = []
+        _kpi_count = len(
+            (_read_json(self.layout.contracts_dir / "kpi_registry.json").get("kpis") or [])
+        )
+        self._delegate_and_record(
+            state,
+            agent="business-analyst",
+            stage="kpi_definition",
+            reason="KPI definitions must be unambiguous (metric/grain/denominator/anchor) before generation",
+            verdict_fn=lambda: verdict_from_kpi_definition(len(_intent_questions), _kpi_count),
+        )
 
         relationships = RelationshipContractBuilder(self.repo_root, self.workspace_rel).build()
         self._record_step(state, "build_relationship_contracts", "ok", relationships.summary())
@@ -479,9 +557,59 @@ class WorkspaceFlow:
             )
 
         generated = []
+        blocked_generation: list[dict[str, str]] = []
         for idx in range(1, plan.kpi_count + 1):
             kpi_id = f"kpi_{idx:03d}"
-            generated.append(DuckDBKPISQLGenerator(self.repo_root, self.workspace_rel).generate(kpi_id).summary())
+            try:
+                generated.append(
+                    DuckDBKPISQLGenerator(self.repo_root, self.workspace_rel)
+                    .generate(kpi_id)
+                    .summary()
+                )
+            except ValueError as exc:
+                # Defense in depth: a KPI whose metric/grain looked present but
+                # whose features still could not be matched to a column reaches
+                # here. Collect rather than crash, then route to a blocker.
+                blocked_generation.append({"kpi_id": kpi_id, "reason": str(exc)})
+        if blocked_generation:
+            listing = "\n".join(
+                f"- `{b['kpi_id']}`: {b['reason']}" for b in blocked_generation
+            )
+            return self._save_panel(
+                state,
+                panel={
+                    "stage": "kpi_generation_blocked",
+                    "status": "blocked",
+                    "instruction": (
+                        "SQL generation could not resolve feature expressions for the "
+                        "KPIs below — their features lack source columns or could not be "
+                        "matched to a dataset column. Resolve the feature mappings (do "
+                        "NOT hand-edit generated contracts or fabricate a harness "
+                        "result), then re-run `workspace-flow start`.\n\n" + listing
+                    ),
+                    "question": (
+                        "Resolve feature mappings for the KPIs listed above before SQL "
+                        "generation."
+                    ),
+                    "options": [],
+                    "recommended_option_id": "",
+                    "artifact_paths": [
+                        self.workspace_rel
+                        + "/interns/generated/contracts/kpi_feature_mapping.json",
+                    ],
+                    "summary": {
+                        "blocked_kpi_count": len(blocked_generation),
+                        "blocked_kpis": blocked_generation,
+                    },
+                    "suggested_skills": [
+                        {
+                            "name": "source-to-target-reviewer",
+                            "why": "Confirm each KPI's selected sources and column mapping before SQL gen.",
+                        },
+                    ],
+                },
+                source="kpi_generation_blocked",
+            )
         self._record_step(state, "generate_kpi_sql", "ok", {"generated": generated})
         harness = KPIExecutionHarness(self.repo_root, self.workspace_rel).run()
         self._record_step(
@@ -490,6 +618,16 @@ class WorkspaceFlow:
             "ok" if harness.ok else "failed",
             harness.summary(),
             validation="run-kpi-execution-harness",
+        )
+        # sql-polars-pyspark-specialist (engine_generation): the query/runtime
+        # engine was selected + implemented for each KPI; confirm the chosen
+        # engine actually executed (parity-checked via the harness).
+        self._delegate_and_record(
+            state,
+            agent="sql-polars-pyspark-specialist",
+            stage="engine_generation",
+            reason="the selected query engine (sql/polars/pyspark) must generate + execute for every KPI",
+            verdict_fn=lambda: verdict_from_engine_generation(generated, harness.ok),
         )
         validation = WorkspaceArtifactValidator(self.repo_root, self.workspace_rel).run()
         self._record_step(
@@ -614,6 +752,16 @@ class WorkspaceFlow:
             stage="kpi_output_verification",
             reason="self-grill: execute generated KPI SQL and cross-check results+intent before completion",
             verdict_fn=lambda: verdict_from_verification(verification.summary()),
+        )
+        # data-analyst (result_review): results now exist — interpret/validate them
+        # for readiness + anomalies (e.g. a KPI that executed but returned no rows)
+        # before the run is declared complete.
+        self._delegate_and_record(
+            state,
+            agent="data-analyst",
+            stage="result_review",
+            reason="produced KPI results must be interpreted/validated for anomalies before completion",
+            verdict_fn=lambda: verdict_from_result_review(kpi_entries),
         )
         completed_kpis = [
             {
@@ -1801,6 +1949,32 @@ def _read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _undefined_kpis(registry: dict[str, Any]) -> list[dict[str, str]]:
+    """KPIs that carry no measurable definition (empty metric AND grain).
+
+    Such a KPI cannot produce executable SQL — the generator raises and the
+    flow would otherwise crash, or a downstream agent fabricates a result.
+    Surfacing them as a definition blocker keeps the flow generic: it works for
+    any workspace whose KPI source is natural-language questions rather than
+    pre-structured rows. The condition mirrors WorkspaceArtifactValidator
+    (validation.py) so the gate and the validator always agree. The kpi_id is
+    derived by enumeration to match the generator's `kpi_{idx:03d}` scheme.
+    """
+    undefined: list[dict[str, str]] = []
+    for idx, kpi in enumerate(registry.get("kpis") or [], start=1):
+        metric = str(kpi.get("metric") or "").strip()
+        cuts = str(kpi.get("cuts") or "").strip()
+        if metric or cuts:
+            continue
+        undefined.append(
+            {
+                "kpi_id": f"kpi_{idx:03d}",
+                "kpi": str(kpi.get("name") or kpi.get("business_question") or ""),
+            }
+        )
+    return undefined
+
+
 def _result_packet_stale_kpis(repo_root: Path, workspace_rel: str) -> list[str]:
     """Return the kpi_ids whose on-disk SQL no longer matches the SQL the result
     packet was generated from.
@@ -1981,6 +2155,18 @@ def compute_workflow_diff(repo_root: Path, workspace_rel: str) -> dict[str, Any]
     plan = _read_json(layout.source_to_target_plan_path)
     relationships = _read_json(layout.relationship_contracts_path)
     blocker_panel = _read_json(layout.reports_dir / "blocker_question_panel" / "current.json")
+    # The feature resolver (kpi_feature_mapping.json) is the authoritative view
+    # of per-KPI readiness; the source-to-target plan can be stale relative to a
+    # freshly-resolved mapping. Read it so the headline counts reconcile with the
+    # resolver instead of contradicting it (status once reported 20 ready while
+    # resolve-kpi-features reported 20 blocked, from a stale plan).
+    feature_mapping = _read_json(layout.contracts_dir / "kpi_feature_mapping.json")
+    mapping_blocked_ids = {
+        str(k.get("kpi_id") or "")
+        for k in (feature_mapping.get("kpis") or [])
+        if isinstance(k, dict) and k.get("status") != "ready_for_sql"
+    }
+    feature_mapping_summary = feature_mapping.get("summary") or {}
     rels_by_id: dict[str, dict[str, Any]] = {
         str(r.get("relationship_id", "")): r
         for r in (relationships.get("relationships") or [])
@@ -2095,6 +2281,26 @@ def compute_workflow_diff(repo_root: Path, workspace_rel: str) -> dict[str, Any]
             }
         )
 
+    # A KPI is "ready" only if BOTH gates agree: the plan marks it
+    # ready_for_generation AND the resolver did not leave it blocked. This makes
+    # the headline counts conservative and consistent with resolve-kpi-features —
+    # status can no longer claim a KPI is ready while the resolver blocks it.
+    plan_ready = [
+        g for g in kpi_gaps if g.get("status") == "ready_for_generation"
+    ]
+    reconciled_ready = [
+        g for g in plan_ready if g.get("kpi_id") not in mapping_blocked_ids
+    ]
+    ready_kpi_count = len(reconciled_ready)
+    blocked_kpi_count = sum(
+        1 for g in kpi_gaps if g.get("status") == "blocked"
+    ) + (len(plan_ready) - len(reconciled_ready))
+    mapping_blocked_count = feature_mapping_summary.get("blocked_kpi_count")
+    counts_consistent = (
+        not feature_mapping
+        or mapping_blocked_count is None
+        or len(plan_ready) - len(reconciled_ready) == 0
+    )
     return {
         "workspace": workspace_rel,
         "plan_present": bool(plan),
@@ -2102,8 +2308,12 @@ def compute_workflow_diff(repo_root: Path, workspace_rel: str) -> dict[str, Any]
         "executable_relationship_ids": executable_rel_ids,
         "pending_relationship_ids": pending_rel_ids,
         "kpi_gaps": kpi_gaps,
-        "ready_kpi_count": sum(1 for g in kpi_gaps if g.get("status") == "ready_for_generation"),
-        "blocked_kpi_count": sum(1 for g in kpi_gaps if g.get("status") == "blocked"),
+        "ready_kpi_count": ready_kpi_count,
+        "blocked_kpi_count": blocked_kpi_count,
+        "feature_mapping_summary": feature_mapping_summary,
+        # False when the plan claimed KPIs ready that the resolver still blocks
+        # (a stale source-to-target plan). Consumers should re-resolve/re-plan.
+        "counts_consistent": counts_consistent,
     }
 
 

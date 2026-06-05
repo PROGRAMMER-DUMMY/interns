@@ -11,11 +11,158 @@ from core.onboarding.workspace.flow import (
     WorkspaceFlow,
     _build_kpi_resolution_review,
     _compact_panel,
+    compute_workflow_diff,
     main as workspace_flow_main,
     _render_panel_markdown,
     _result_packet_stale_kpis,
     _result_view,
+    _undefined_kpis,
 )
+
+
+class StatusParityTests(unittest.TestCase):
+    """Phase 3: status --diff (compute_workflow_diff) reads the source-to-target
+    plan, which can be stale relative to a freshly-resolved feature mapping. The
+    headline counts must reconcile with the resolver — status must never report a
+    KPI ready while resolve-kpi-features blocks it (observed: 20 ready vs 20
+    blocked from a stale plan)."""
+
+    def _write(self, root: Path, ws_rel: str, plan_kpis, mapping_kpis):
+        contracts = root / ws_rel / "interns" / "generated" / "contracts"
+        contracts.mkdir(parents=True, exist_ok=True)
+        (contracts / "source_to_target_plan.json").write_text(
+            json.dumps({"kpis": plan_kpis}), encoding="utf-8"
+        )
+        if mapping_kpis is not None:
+            blocked = sum(1 for k in mapping_kpis if k.get("status") != "ready_for_sql")
+            (contracts / "kpi_feature_mapping.json").write_text(
+                json.dumps(
+                    {
+                        "kpis": mapping_kpis,
+                        "summary": {
+                            "kpi_count": len(mapping_kpis),
+                            "ready_kpi_count": len(mapping_kpis) - blocked,
+                            "blocked_kpi_count": blocked,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    def test_stale_plan_does_not_report_ready_when_resolver_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = "workspaces/demo"
+            # Plan says kpi_001 is ready; resolver still blocks it (stale plan).
+            self._write(
+                root,
+                ws,
+                plan_kpis=[{"kpi_id": "kpi_001", "status": "ready_for_generation"}],
+                mapping_kpis=[{"kpi_id": "kpi_001", "status": "blocked_questions_pending"}],
+            )
+            diff = compute_workflow_diff(root, ws)
+            self.assertEqual(diff["ready_kpi_count"], 0)
+            self.assertEqual(diff["blocked_kpi_count"], 1)
+            self.assertFalse(diff["counts_consistent"])
+
+    def test_consistent_plan_and_mapping_report_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = "workspaces/demo"
+            self._write(
+                root,
+                ws,
+                plan_kpis=[{"kpi_id": "kpi_001", "status": "ready_for_generation"}],
+                mapping_kpis=[{"kpi_id": "kpi_001", "status": "ready_for_sql"}],
+            )
+            diff = compute_workflow_diff(root, ws)
+            self.assertEqual(diff["ready_kpi_count"], 1)
+            self.assertEqual(diff["blocked_kpi_count"], 0)
+            self.assertTrue(diff["counts_consistent"])
+
+    def test_missing_mapping_falls_back_to_plan_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = "workspaces/demo"
+            self._write(
+                root,
+                ws,
+                plan_kpis=[{"kpi_id": "kpi_001", "status": "ready_for_generation"}],
+                mapping_kpis=None,
+            )
+            diff = compute_workflow_diff(root, ws)
+            self.assertEqual(diff["ready_kpi_count"], 1)
+            self.assertTrue(diff["counts_consistent"])
+
+
+class UndefinedKpiGateTests(unittest.TestCase):
+    """Phase 0 generic invariant: a KPI with no measurable definition (empty
+    metric AND grain) must surface as a definition blocker, never crash the
+    flow at SQL generation. This is what keeps the flow workspace-agnostic for
+    natural-language-question workspaces whose metric/grain were never derived
+    (the Hospital_Patient_Records failure mode)."""
+
+    def test_undefined_kpis_flags_only_empty_metric_and_cuts(self):
+        registry = {
+            "kpis": [
+                {"name": "How many encounters each year?", "metric": "", "cuts": ""},
+                {"name": "Encounters by class", "metric": "", "cuts": "encounter_class"},
+                {"name": "Total encounters", "metric": "count(Id)", "cuts": ""},
+                {"name": "Blank both", "metric": "  ", "cuts": "  "},
+            ]
+        }
+        undefined = _undefined_kpis(registry)
+        # Only rows 1 and 4 (both metric and cuts empty/blank) are undefined.
+        self.assertEqual([u["kpi_id"] for u in undefined], ["kpi_001", "kpi_004"])
+        self.assertEqual(undefined[0]["kpi"], "How many encounters each year?")
+
+    def test_undefined_kpis_prefers_name_then_business_question(self):
+        registry = {"kpis": [{"business_question": "Q1?", "metric": "", "cuts": ""}]}
+        self.assertEqual(_undefined_kpis(registry)[0]["kpi"], "Q1?")
+
+    def test_undefined_kpis_empty_registry(self):
+        self.assertEqual(_undefined_kpis({}), [])
+
+    def test_full_kpi_sql_stops_at_definition_blocker_not_crash(self):
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets").mkdir()
+            (workspace / "datasets" / "encounters.csv").write_text(
+                "Id,START,ENCOUNTERCLASS\nE1,2024-01-01,ambulatory\nE2,2024-01-02,inpatient\n",
+                encoding="utf-8",
+            )
+            # A natural-language KPI with no metric and no grain that ALSO cannot
+            # be auto-derived from profile evidence: a share/percentage question
+            # has no derivable numerator/denominator and names no grain, so
+            # onboarding's evidence-based derivation correctly leaves it empty and
+            # the definition gate must fire. (A plain "how many X each year?"
+            # count is now auto-derived from profiles, so it would no longer stop
+            # here — this fixture exercises the genuinely-undefined path.)
+            (workspace / "docs" / "kpi_registry.csv").write_text(
+                "Key business question,Description,Cuts / grain hints,Metric,Data model refinement required\n"
+                "What percentage of encounters were high complexity?,Encounters overview,,,\n",
+                encoding="utf-8",
+            )
+
+            result = WorkspaceFlow(root, "workspaces/demo").start(intent="full_kpi_sql")
+
+            # Must NOT raise ValueError and must NOT reach SQL gen / review.
+            self.assertEqual(result.status, "blocked")
+            self.assertEqual(result.stage, "kpi_definition_incomplete")
+            panel = json.loads(
+                (root / result.current_panel_path).read_text(encoding="utf-8")
+            )
+            self.assertEqual(panel["source"], "kpi_definition_incomplete")
+            self.assertGreaterEqual(panel["summary"]["undefined_kpi_count"], 1)
+            self.assertEqual(panel["summary"]["undefined_kpis"][0]["kpi_id"], "kpi_001")
 
 
 class ResultPacketStalenessTests(unittest.TestCase):
@@ -340,6 +487,18 @@ class WorkspaceFlowTests(unittest.TestCase):
             harness = workspace / "interns" / "generated" / "evidence" / "kpi_execution_harness.json"
             self.assertTrue(harness.exists())
             self.assertTrue(json.loads(harness.read_text(encoding="utf-8"))["ok"])
+            # The three specialists whose work happens on this path must now FIRE
+            # (produce a hand-off note), not just sit in the roster: business-analyst
+            # (kpi_definition), sql-polars-pyspark-specialist (engine_generation),
+            # data-analyst (result_review).
+            handoffs_dir = workspace / "interns" / "state" / "handoffs"
+            fired = {p.stem for p in handoffs_dir.glob("*.md")}
+            for expected in (
+                "kpi_definition__business-analyst",
+                "engine_generation__sql-polars-pyspark-specialist",
+                "result_review__data-analyst",
+            ):
+                self.assertIn(expected, fired, f"expected specialist hand-off `{expected}` to fire")
 
             # The dated runs/<date>/ snapshot is written by the executor and must
             # mirror the live results exactly — same combined body, per-KPI file present.

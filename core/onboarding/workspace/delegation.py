@@ -254,6 +254,10 @@ STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
         "agents": ["regression-sweep"],
         "skills": ["green-gate"],
     },
+    "parallel_kpi_completion": {
+        "agents": ["workspace-flow-orchestrator", "kpi-analyst"],
+        "skills": ["workspace-governance", "kpi-clarification", "feature-derivation-library"],
+    },
     "kpi_completion_review": {
         "agents": ["kpi-analyst"],
         "skills": ["kpi-analyst", "self-grill"],
@@ -601,6 +605,95 @@ def verdict_from_verification(summary: dict[str, Any]) -> DelegationVerdict:
     )
 
 
+def verdict_from_kpi_definition(
+    low_confidence_count: int, kpi_count: int
+) -> DelegationVerdict:
+    """business-analyst verdict for the kpi_definition stage.
+
+    Surfaces KPIs whose intent facets (metric / grain / denominator_scope /
+    temporal_anchor) parsed with low confidence — the ambiguity a blocker-feature
+    count alone misses (e.g. an ambiguous share denominator)."""
+    if kpi_count == 0:
+        return DelegationVerdict(
+            status="warning",
+            summary="No KPI definitions found to assess.",
+            details={"kpi_count": 0},
+        )
+    if low_confidence_count:
+        return DelegationVerdict(
+            status="needs_review",
+            summary=(
+                f"{low_confidence_count} KPI intent facet(s) are low-confidence "
+                "(ambiguous metric/grain/denominator/anchor) and need a governed definition."
+            ),
+            details={"kpi_count": kpi_count, "low_confidence_facets": low_confidence_count},
+        )
+    return DelegationVerdict(
+        status="ok",
+        summary=f"All {kpi_count} KPI definition(s) parsed with confident intent facets.",
+        details={"kpi_count": kpi_count},
+    )
+
+
+def verdict_from_engine_generation(
+    generated: list[dict[str, Any]], harness_ok: bool
+) -> DelegationVerdict:
+    """sql-polars-pyspark-specialist verdict for the engine_generation stage.
+
+    The engine (SQL/Polars/PySpark) was selected + implemented for each KPI; the
+    verdict confirms the chosen engine actually executed via the harness."""
+    total = len(generated or [])
+    if total == 0:
+        return DelegationVerdict(
+            status="warning",
+            summary="No KPI engine artifacts were generated.",
+            details={"kpi_count": 0},
+        )
+    if not harness_ok:
+        return DelegationVerdict(
+            status="blocked",
+            summary=f"{total} KPI engine(s) generated but the execution harness failed.",
+            details={"kpi_count": total, "harness_ok": False},
+        )
+    return DelegationVerdict(
+        status="ok",
+        summary=f"{total} KPI engine(s) generated and passed the execution harness.",
+        details={"kpi_count": total, "harness_ok": True},
+    )
+
+
+def verdict_from_result_review(entries: list[dict[str, Any]]) -> DelegationVerdict:
+    """data-analyst verdict for the result_review stage.
+
+    Confirms every KPI produced result rows for interpretation; flags any KPI that
+    executed but returned no rows (a readiness/anomaly signal worth a human look)."""
+    total = len(entries or [])
+    if total == 0:
+        return DelegationVerdict(
+            status="warning",
+            summary="No KPI results available to review.",
+            details={"kpi_count": 0},
+        )
+    produced = sum(1 for e in entries if str(e.get("status")) == "ok")
+    if produced < total:
+        return DelegationVerdict(
+            status="needs_review",
+            summary=f"{produced}/{total} KPIs produced result rows; review the remainder for anomalies.",
+            details={
+                "kpi_count": total,
+                "produced_count": produced,
+                "no_result_kpi_ids": [
+                    e.get("kpi_id") for e in entries if str(e.get("status")) != "ok"
+                ],
+            },
+        )
+    return DelegationVerdict(
+        status="ok",
+        summary=f"All {total} KPIs produced result rows for business interpretation.",
+        details={"kpi_count": total},
+    )
+
+
 def verdict_from_dashboard_summary(summary: dict[str, Any]) -> DelegationVerdict:
     """dashboard-engineer verdict for the dashboard-refresh stage."""
     kpi_count = int(summary.get("kpi_count") or 0)
@@ -625,8 +718,12 @@ __all__ = [
     "record_delegation",
     "render_delegation_markdown",
     "verdict_from_dashboard_summary",
+    "verdict_from_engine_generation",
     "verdict_from_kpi_completion",
+    "verdict_from_kpi_definition",
     "verdict_from_relationship_summary",
+    "verdict_from_result_review",
     "verdict_from_source_to_target_summary",
     "verdict_from_validation_summary",
+    "verdict_from_verification",
 ]

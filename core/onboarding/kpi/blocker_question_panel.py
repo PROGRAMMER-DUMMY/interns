@@ -291,8 +291,8 @@ def _question_for_cluster(
                 "metric expression, grain/dimensions, owner, and acceptance tests."
             ),
             "answer_type": "kpi_definition_required",
-            "recommended_option_id": "option_a",
-            "recommended_answer": "Provide a concrete RCM KPI definition before mapping features.",
+            "recommended_option_id": "custom",
+            "recommended_answer": "Provide a concrete KPI definition before mapping features.",
             "why": (
                 "Executable KPI logic needs a proven metric and grain. Mapping placeholder words "
                 "such as confirm, metric, or grain to columns would create invalid evidence."

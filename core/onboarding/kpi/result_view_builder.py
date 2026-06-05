@@ -47,8 +47,13 @@ _TIME_BUCKET_HINT = re.compile(
 _COMPARISON_FILTER = re.compile(
     r"([A-Za-z_][A-Za-z0-9_]*)\s*([=<>!]+)\s*(?:['\"]([^'\"]+)['\"]|([A-Za-z0-9_.]+))"
 )
+# NOTE: both alternatives need a leading word boundary. Without `\b` on the
+# second one, "age of/from <word>" matches INSIDE other words — e.g.
+# "percent`age of` total" or "aver`age of` order_value" — and wrongly treats the
+# trailing noun ("total", "order_value") as an age/date column. That produced
+# `date_diff('year', CAST("total" AS DATE)) AS age` on a percentage KPI.
 _AGE_PATTERN = re.compile(
-    r"\bage\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)|age\s+(?:from|of)\s+([A-Za-z_][A-Za-z0-9_]*)",
+    r"\bage\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)|\bage\s+(?:from|of)\s+([A-Za-z_][A-Za-z0-9_]*)",
     re.IGNORECASE,
 )
 _DAYS_SINCE_PATTERN = re.compile(

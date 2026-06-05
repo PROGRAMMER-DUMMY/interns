@@ -801,30 +801,86 @@ def _build_draft_kpis(session: dict[str, Any], repo_root: Path) -> list[dict[str
         else:
             existing = [_suggest_seed_kpi(session)]
 
+    from core.onboarding.kpi.metric_derivation import (
+        HIGH_CONFIDENCE_THRESHOLD,
+        derive_metric_and_cuts,
+    )
+
+    evidence_columns = _load_profile_evidence_columns(session, repo_root)
     drafts = []
     for idx, kpi in enumerate(existing, start=1):
         quality = quality_by_name.get(kpi.get("name", ""), {})
-        drafts.append(
-            {
-                "kpi_id": f"kpi_{idx:03d}",
-                "business_question": kpi.get("name", ""),
-                "description": kpi.get("description", ""),
-                "cuts": kpi.get("cuts", ""),
-                "metric": kpi.get("metric", ""),
-                "refinement_required": _merge_refinement(
-                    kpi.get("refinement_required", ""),
-                    quality.get("missing_discussion_points", []),
-                ),
-                "source": kpi.get("source", ""),
-                "status": "draft_needs_review"
-                if quality.get("missing_discussion_points")
-                else "draft_ready_for_evidence_mapping",
-                "advisor_notes": _advisor_notes(quality),
-            }
-        )
+        metric = kpi.get("metric", "")
+        cuts = kpi.get("cuts", "")
+        derivation: dict[str, Any] | None = None
+        # Generic derivation: a KPI that arrives with no measurable definition
+        # (natural-language-question workspaces) gets its metric/cuts derived
+        # from the question + profiled column evidence. Populate a cell only when
+        # the facet clears the confidence threshold; always attach the full
+        # proposal so a panel can ask on low-confidence/ambiguous cases. This is
+        # workspace-agnostic and evidence-driven (derive, don't curate). When
+        # confidence is low the cells stay empty and the definition-blocker gate
+        # in workspace flow handles them downstream.
+        if not str(metric).strip() and not str(cuts).strip():
+            question = str(kpi.get("name") or kpi.get("business_question") or "").strip()
+            if question:
+                derivation = derive_metric_and_cuts(question, evidence_columns)
+                if derivation["metric"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD:
+                    metric = derivation["metric"]["value"]
+                if derivation["cuts"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD:
+                    cuts = derivation["cuts"]["value"]
+        draft = {
+            "kpi_id": f"kpi_{idx:03d}",
+            "business_question": kpi.get("name", ""),
+            "description": kpi.get("description", ""),
+            "cuts": cuts,
+            "metric": metric,
+            "refinement_required": _merge_refinement(
+                kpi.get("refinement_required", ""),
+                quality.get("missing_discussion_points", []),
+            ),
+            "source": kpi.get("source", ""),
+            "status": "draft_needs_review"
+            if quality.get("missing_discussion_points")
+            else "draft_ready_for_evidence_mapping",
+            "advisor_notes": _advisor_notes(quality),
+        }
+        if derivation is not None:
+            draft["metric_derivation"] = derivation
+        drafts.append(draft)
     draft_path = Path(session["workspace"]) / "interns/generated/requirements/kpi_registry_draft.json"
     session["draft_registry_path"] = draft_path.as_posix()
     return drafts
+
+
+def _load_profile_evidence_columns(
+    session: dict[str, Any], repo_root: Path
+) -> list[dict[str, Any]]:
+    """Flatten the workspace's profile_index.json into evidence columns for
+    metric/cuts derivation. Returns [] when profiles are absent (no error) so
+    derivation degrades to low confidence rather than failing."""
+    from core.onboarding.kpi.metric_derivation import columns_from_profile_index
+
+    workspace_rel = str(session.get("workspace") or "")
+    if not workspace_rel:
+        return []
+    index_path = (
+        Path(repo_root)
+        / workspace_rel
+        / "interns"
+        / "generated"
+        / "profiles"
+        / "profile_index.json"
+    )
+    if not index_path.exists():
+        return []
+    try:
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+    return columns_from_profile_index(payload)
 
 
 def _is_placeholder_only_draft(draft_kpis: list[dict[str, Any]]) -> bool:
