@@ -78,3 +78,20 @@ rejected
 Generate authoritative solution SQL only when every required feature for the KPI is `proven_*` or
 `user_confirmed`. Exploratory SQL may be written under `interns/generated/evidence/exploratory/`,
 but it must never be treated as KPI truth.
+
+## Built-in derivation patterns (deterministic)
+
+`core/onboarding/features/derivation_patterns.py::detect_derivation_patterns(question, columns)`
+emits JSON-backed candidate options for two shapes a single metric/cuts cell cannot express. Both
+are evidence-driven (profiled column shape + generic English phrasing), `needs_user_confirmation`,
+and never ground truth until confirmed:
+
+- `duration_bucket` — a "over/under N hours/days" question + a start/stop temporal column pair ->
+  `date_diff('<unit>', CAST(<start> AS TIMESTAMP), CAST(<stop> AS TIMESTAMP)) >= N`.
+- `recurrence_within_window` — a "within N days of a previous ..." question + an entity id/fk and an
+  event timestamp -> a self-join / `EXISTS` sketch over the same entity ordered by the event time.
+
+Wiring point for the orchestrator/resolver: call `detect_derivation_patterns` for any KPI whose
+metric/cuts stay empty after evidence derivation, and attach the returned options to that KPI's
+blocker so the panel renders them as confirmable derived-feature options (same contract as
+`derived_feature_options`).

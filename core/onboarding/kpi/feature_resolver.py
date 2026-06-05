@@ -230,7 +230,16 @@ class KPIFeatureResolver:
         # standalone resolver/panel path honest too.) Generic: the condition is
         # the same empty-metric-AND-cuts test the flow gate and validator use.
         if not metric.strip() and not cuts.strip():
-            feature = _kpi_definition_feature(kpi)
+            # When the question matches a reusable derived-feature pattern (a
+            # duration bucket or a recurrence self-join), surface that as a
+            # confirmable derived option rather than only a generic "define this
+            # KPI" ask -- the feature-derivation-library path. Otherwise fall back
+            # to the definition blocker.
+            pattern_options = self._derivation_pattern_options(kpi)
+            if pattern_options:
+                feature = _derived_pattern_feature(pattern_options)
+            else:
+                feature = _kpi_definition_feature(kpi)
             return {
                 "kpi_id": f"kpi_{idx:03d}",
                 "name": kpi.get("name", ""),
@@ -372,6 +381,25 @@ class KPIFeatureResolver:
             "join_candidates": infer_join_candidates(features),
             "open_questions": [feature["question"] for feature in blocked if feature.get("question")],
         }
+
+    def _derivation_pattern_options(self, kpi: dict[str, Any]) -> list[dict[str, Any]]:
+        """Reusable derived-feature options (duration bucket / recurrence) that
+        match this KPI's question + profiled columns. Returns [] when none apply
+        or profiles are absent; never raises."""
+        try:
+            from core.onboarding.features.derivation_patterns import (
+                detect_derivation_patterns,
+            )
+            from core.onboarding.kpi.metric_derivation import columns_from_profile_index
+
+            question = str(kpi.get("name") or kpi.get("business_question") or "").strip()
+            path = self.layout.profiles_dir / "profile_index.json"
+            if not question or not path.exists():
+                return []
+            columns = columns_from_profile_index(json.loads(path.read_text(encoding="utf-8")))
+            return detect_derivation_patterns(question, columns)
+        except Exception:  # pragma: no cover - pattern detection is advisory
+            return []
 
     def _load_kpis(self) -> list[dict[str, Any]]:
         path = self.layout.contracts_dir / "kpi_registry.json"
@@ -939,6 +967,31 @@ def _requires_kpi_definition(
         return False
     identifiers = {identifier.lower() for identifier in extracted.identifiers}
     return not identifiers or identifiers.issubset(PLACEHOLDER_KPI_TERMS)
+
+
+def _derived_pattern_feature(options: list[dict[str, Any]]) -> dict[str, Any]:
+    """Blocker feature carrying reusable derived-feature pattern options so the
+    panel renders them as confirmable JSON-backed options (same contract as the
+    derived-formula path), instead of a generic definition ask."""
+    primary = options[0]
+    name = str(primary.get("derived_column_name") or "derived feature")
+    return {
+        "feature": name,
+        "state": "blocked_missing_evidence",
+        "resolution_type": "derived_formula",
+        "source_columns": [],
+        "grain": "derived",
+        "conflicts": [],
+        "decision_history": [],
+        "evidence": [],
+        "candidate_patterns": [],
+        "derived_feature_options": options,
+        "candidates": [],
+        "question": (
+            f"Confirm the derived feature `{name}` (pattern "
+            f"`{primary.get('source_pattern_id')}`) for this KPI, or supply a definition."
+        ),
+    }
 
 
 def _kpi_definition_feature(kpi: dict[str, Any]) -> dict[str, Any]:
