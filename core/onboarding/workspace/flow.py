@@ -409,7 +409,15 @@ class WorkspaceFlow:
         # WorkspaceArtifactValidator condition.
         registry = _read_json(self.layout.contracts_dir / "kpi_registry.json")
         undefined = _undefined_kpis(registry)
-        if undefined:
+        total_kpis = len(registry.get("kpis") or [])
+        # Partial-completion: only HARD-block here when NOTHING is generatable
+        # (every KPI undefined). When some KPIs are defined, proceed -- the
+        # undefined ones are carried as `deferred` and surfaced specifically at
+        # the feature-blocker stage (with derived-pattern options when they
+        # match), instead of a blanket "define everything" stop. The all-undefined
+        # case preserves the original gate (and its test).
+        deferred_kpis = undefined
+        if undefined and len(undefined) >= max(total_kpis, 1):
             listing = "\n".join(f"- `{u['kpi_id']}`: {u['kpi']}" for u in undefined)
             return self._save_panel(
                 state,
@@ -558,8 +566,14 @@ class WorkspaceFlow:
 
         generated = []
         blocked_generation: list[dict[str, str]] = []
+        # Undefined KPIs are deferred (no metric/grain), not generated -- skipping
+        # them lets the defined KPIs complete instead of the whole batch failing
+        # on an empty-definition KPI.
+        deferred_ids = {u["kpi_id"] for u in deferred_kpis}
         for idx in range(1, plan.kpi_count + 1):
             kpi_id = f"kpi_{idx:03d}"
+            if kpi_id in deferred_ids:
+                continue
             try:
                 generated.append(
                     DuckDBKPISQLGenerator(self.repo_root, self.workspace_rel)
@@ -610,7 +624,12 @@ class WorkspaceFlow:
                 },
                 source="kpi_generation_blocked",
             )
-        self._record_step(state, "generate_kpi_sql", "ok", {"generated": generated})
+        self._record_step(
+            state,
+            "generate_kpi_sql",
+            "ok",
+            {"generated": generated, "deferred_kpis": deferred_kpis},
+        )
         harness = KPIExecutionHarness(self.repo_root, self.workspace_rel).run()
         self._record_step(
             state,
