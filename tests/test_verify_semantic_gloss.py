@@ -62,6 +62,29 @@ class SemanticGlossCheckTests(unittest.TestCase):
             self.assertEqual(rec.warnings, [])
 
 
+class GrainExplosionTests(unittest.TestCase):
+    def _verifier(self, root):
+        (root / "workspaces" / "demo").mkdir(parents=True)
+        return KPIOutputVerifier(root, "workspaces/demo")
+
+    def test_raw_age_grouping_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            v = self._verifier(root)
+            rec = VerifyRecord(kpi_id="kpi_002", sql_path="x")
+            v._check_grain_explosion(rec, {"cuts": "Department, Gender, Age (DOB)"})
+            self.assertTrue(any("grain_explosion_risk" in w for w in rec.warnings))
+            self.assertTrue(rec.ok)  # non-blocking
+
+    def test_age_in_filter_does_not_warn(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            v = self._verifier(root)
+            rec = VerifyRecord(kpi_id="k", sql_path="x")
+            v._check_grain_explosion(rec, {"cuts": "Department, age >= 50"})
+            self.assertFalse(any("grain_explosion_risk" in w for w in rec.warnings))
+
+
 class GenerationGlossDiscoveryTests(unittest.TestCase):
     def test_load_session_glosses_discovers_dictionary(self) -> None:
         from core.onboarding.kpi.generation_workflow import _load_session_glosses

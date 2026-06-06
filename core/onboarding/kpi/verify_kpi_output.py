@@ -190,8 +190,27 @@ class KPIOutputVerifier:
         self._check_parser_filters(record, kpi, lowered)
         self._check_garbage_filters(record, kpi, sql)
         self._check_semantic_gloss(record, kpi)
+        self._check_grain_explosion(record, kpi)
         if record.ok:
             record.intent_checks.append("metric, cuts, and name-derived filters present in SQL")
+
+    _RAW_AGE_RE = re.compile(r"\bage\b", re.IGNORECASE)
+
+    def _check_grain_explosion(self, record: VerifyRecord, kpi: dict[str, Any]) -> None:
+        """Non-blocking: flag a cut that GROUPS BY a raw continuous value (exact
+        age) rather than a band. "share by age" almost always means age ranges;
+        grouping by exact age explodes the result to one row per value. Generic:
+        ``age`` is a generic temporal concept, not domain vocabulary. Filters
+        (tokens with =/<>) are skipped -- only grouping dimensions count."""
+        for token in _split_cuts(str(kpi.get("cuts") or "")):
+            if any(op in token for op in ("=", "<", ">")):
+                continue
+            if self._RAW_AGE_RE.search(token):
+                record.warnings.append(
+                    f"[~] grain_explosion_risk: grouping by raw `{token.strip()}` (exact "
+                    "value) can explode the result to one row per value; a band (e.g. age "
+                    "ranges) is usually intended -- confirm the grain."
+                )
 
     _MEASURE_RE = re.compile(
         r"\b(?:avg|sum|count|min|max|median)\s*\(\s*(?:distinct\s+)?"
