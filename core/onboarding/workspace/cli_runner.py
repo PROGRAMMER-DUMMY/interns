@@ -156,18 +156,48 @@ def run_workspace_command(
         if not allow_replay:
             prior = get_applied_op(workspace_path, op_id)
             if prior is not None:
+                # Do NOT echo the cached payload verbatim: count-like fields in
+                # it (e.g. executable_relationship_count) were frozen at the
+                # FIRST apply and may now be stale relative to current state, so
+                # echoing them makes the reported value jump backwards
+                # (non-monotonic) even though disk is correct. apply-* ops are
+                # idempotent by contract, so re-run fn() under the lock to get a
+                # result that reflects current persisted state, and report THAT
+                # as the replay result. Fall back to the cached payload only if
+                # the refresh raises (e.g. the artifact is gone). (Fixes the
+                # relationship-approval count non-monotonic display artifact.)
+                replay_result = prior.payload
+                replay_note = (
+                    "This exact call was already applied; counts re-read from "
+                    "current state. Pass --allow-replay to force re-execution."
+                )
+                try:
+                    with workspace_lock(workspace_path):
+                        refreshed = _payload_from_result(fn())
+                    if refreshed:
+                        replay_result = refreshed
+                except WorkspaceLockTimeout as exc:
+                    print(
+                        json.dumps(
+                            {"error": "workspace_lock_timeout", "detail": str(exc)},
+                            indent=2,
+                        )
+                    )
+                    return 2
+                except Exception:  # pragma: no cover - defensive; keep cache
+                    replay_note = (
+                        "This exact call was already applied; could not re-read "
+                        "current state, returning the cached result. Pass "
+                        "--allow-replay to force re-execution."
+                    )
                 print(
                     json.dumps(
                         {
                             "status": "idempotent_replay",
                             "op_id": op_id,
                             "previously_applied_at": prior.applied_at,
-                            "result": prior.payload,
-                            "note": (
-                                "Skipped re-apply because this exact call was "
-                                "already applied. Pass --allow-replay to force "
-                                "re-execution."
-                            ),
+                            "result": replay_result,
+                            "note": replay_note,
                         },
                         indent=2,
                     )

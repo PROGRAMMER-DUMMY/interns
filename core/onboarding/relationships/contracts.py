@@ -1613,9 +1613,15 @@ def _state_rank(state: str) -> int:
 
 def _executable_allowed(relationship: dict[str, Any]) -> bool:
     policy = relationship.get("executable_usage_policy") or {}
+    # Conservative default: a relationship is executable only when the policy
+    # EXPLICITLY allows it. An absent/unknown `allowed_in_sql_generation` means
+    # NOT executable -- matching the validator's `_relationship_executable`
+    # (workspace/validation.py) so the builder/apply/count path and the validator
+    # agree on one source of truth. Contract builders always emit the key, so
+    # this only changes behavior for malformed/partial contracts (fail safe).
     return (
         relationship.get("state") in EXECUTABLE_RELATIONSHIP_STATES
-        and bool(policy.get("allowed_in_sql_generation", True))
+        and policy.get("allowed_in_sql_generation") is True
     )
 
 

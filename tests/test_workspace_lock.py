@@ -5,11 +5,40 @@ from __future__ import annotations
 import json
 import os
 import socket
+import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
 from core.storage.workspace_lock import WorkspaceLockTimeout, workspace_lock
+
+# Cross-process worker: acquire the workspace lock, append an enter/exit event
+# pair with a brief hold, then release. Several of these launched together let
+# the test prove the lock excludes across *processes* (the real CLI scenario),
+# not just across threads in one process. The hold window forces waiters to be
+# mid-poll while the holder runs its release path (which unlinks the lock
+# file) -- the exact window where a faulty unlink-on-release would let two
+# processes hold simultaneously.
+_CROSS_PROCESS_WORKER = textwrap.dedent(
+    """
+    import json, os, sys, time
+    from pathlib import Path
+    from core.storage.workspace_lock import workspace_lock
+
+    ws = Path(sys.argv[1])
+    hold = float(sys.argv[2])
+    record = Path(sys.argv[3])
+    who = sys.argv[4]
+    with workspace_lock(ws, timeout_seconds=60.0):
+        with record.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"who": who, "ev": "enter", "t": time.time()}) + "\\n")
+        time.sleep(hold)
+        with record.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"who": who, "ev": "exit", "t": time.time()}) + "\\n")
+    """
+)
 
 
 class WorkspaceLockTests(unittest.TestCase):
@@ -63,6 +92,57 @@ class WorkspaceLockTests(unittest.TestCase):
         with workspace_lock(self.workspace) as lock_path:
             self.assertTrue(state_dir.is_dir())
             self.assertEqual(lock_path.parent, state_dir)
+
+    def test_cross_process_mutual_exclusion(self) -> None:
+        """Separate processes must never hold the lock simultaneously.
+
+        Mirrors the governed CLI envelope: each apply-* runs in its own
+        process, wrapping its read-modify-write in ``workspace_lock``. If the
+        lock fails to serialise across processes, overlapping applies clobber
+        each other (the reported non-monotonic count). Several overlapping
+        workers with a short hold window stress the release/unlink path.
+        """
+        worker_file = self.workspace / "_lock_worker.py"
+        worker_file.write_text(_CROSS_PROCESS_WORKER, encoding="utf-8")
+        record = self.workspace / "events.jsonl"
+        record.write_text("", encoding="utf-8")
+
+        repo_root = Path(__file__).resolve().parents[1]
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(repo_root) + os.pathsep + env.get("PYTHONPATH", "")
+
+        worker_count = 8
+        procs = [
+            subprocess.Popen(
+                [sys.executable, str(worker_file), str(self.workspace), "0.15", str(record), f"p{i}"],
+                cwd=str(repo_root),
+                env=env,
+            )
+            for i in range(worker_count)
+        ]
+        for proc in procs:
+            self.assertEqual(proc.wait(timeout=120), 0, "worker process must exit cleanly")
+
+        events = [
+            json.loads(line)
+            for line in record.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        enters = sum(1 for e in events if e["ev"] == "enter")
+        self.assertEqual(enters, worker_count, "every worker must have acquired the lock")
+
+        events.sort(key=lambda e: e["t"])
+        depth = 0
+        max_depth = 0
+        for event in events:
+            depth += 1 if event["ev"] == "enter" else -1
+            max_depth = max(max_depth, depth)
+        self.assertLessEqual(
+            max_depth,
+            1,
+            f"workspace_lock must give cross-process mutual exclusion; "
+            f"observed {max_depth} simultaneous holders",
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

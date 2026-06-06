@@ -1391,5 +1391,52 @@ class LowCardinalityDimensionGuardTests(unittest.TestCase):
             self.assertGreater(edge["confidence"], 0.75)
 
 
+class ExecutableDefaultAlignmentTests(unittest.TestCase):
+    """The contract-side executable check and the validator-side check must agree
+    on one conservative default: a relationship is executable ONLY when the policy
+    explicitly allows it. An absent `allowed_in_sql_generation` -> NOT executable.
+    """
+
+    def _rel(self, policy: dict | None) -> dict:
+        rel = {"state": "user_confirmed"}
+        if policy is not None:
+            rel["executable_usage_policy"] = policy
+        return rel
+
+    def test_absent_key_is_not_executable_and_both_checks_agree(self) -> None:
+        from core.onboarding.relationships.contracts import _executable_allowed
+        from core.onboarding.workspace.validation import _relationship_executable
+
+        for policy in (None, {}, {"some_other": True}):
+            rel = self._rel(policy)
+            self.assertFalse(_executable_allowed(rel), rel)
+            self.assertFalse(_relationship_executable(rel), rel)
+
+    def test_explicit_true_is_executable_in_both(self) -> None:
+        from core.onboarding.relationships.contracts import _executable_allowed
+        from core.onboarding.workspace.validation import _relationship_executable
+
+        rel = self._rel({"allowed_in_sql_generation": True})
+        self.assertTrue(_executable_allowed(rel))
+        self.assertTrue(_relationship_executable(rel))
+
+    def test_explicit_false_is_not_executable_in_both(self) -> None:
+        from core.onboarding.relationships.contracts import _executable_allowed
+        from core.onboarding.workspace.validation import _relationship_executable
+
+        rel = self._rel({"allowed_in_sql_generation": False})
+        self.assertFalse(_executable_allowed(rel))
+        self.assertFalse(_relationship_executable(rel))
+
+    def test_non_executable_state_is_never_executable(self) -> None:
+        from core.onboarding.relationships.contracts import _executable_allowed
+
+        rel = {
+            "state": "candidate_needs_review",
+            "executable_usage_policy": {"allowed_in_sql_generation": True},
+        }
+        self.assertFalse(_executable_allowed(rel))
+
+
 if __name__ == "__main__":
     unittest.main()
