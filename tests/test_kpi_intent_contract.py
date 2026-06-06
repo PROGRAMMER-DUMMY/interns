@@ -18,8 +18,11 @@ import unittest
 from pathlib import Path
 
 from core.onboarding.kpi.intent_contract import (
+    _load_pipeline_decisions,
     build_intent_contract,
+    intent_facet_panel_questions,
     low_confidence_facets,
+    record_intent_answer,
     write_intent_contract,
 )
 
@@ -401,7 +404,7 @@ class TestWriteIntentContractArtifact(unittest.TestCase):
             self.assertIn("kpi_001", ids)
             self.assertIn("kpi_002", ids)
 
-    def test_artifact_each_contract_has_seven_facets(self):
+    def test_artifact_each_contract_has_all_facets(self):
         registry = [
             {
                 "kpi_id": "kpi_010",
@@ -427,7 +430,8 @@ class TestWriteIntentContractArtifact(unittest.TestCase):
             facet_names = [f["facet"] for f in contract["facets"]]
             expected_facets = {
                 "metric", "grain", "filters", "denominator_scope",
-                "temporal_anchor", "output_shape", "null_zero_handling",
+                "grain_bucketing", "temporal_anchor", "output_shape",
+                "null_zero_handling",
             }
             self.assertEqual(set(facet_names), expected_facets)
 
@@ -476,7 +480,8 @@ class TestFacetSchemaInvariants(unittest.TestCase):
     REQUIRED_KEYS = {"facet", "value", "confidence", "source", "evidence", "alternatives"}
     EXPECTED_FACETS = {
         "metric", "grain", "filters", "denominator_scope",
-        "temporal_anchor", "output_shape", "null_zero_handling",
+        "grain_bucketing", "temporal_anchor", "output_shape",
+        "null_zero_handling",
     }
 
     def _check_contract(self, kpi: dict, decisions: dict | None = None) -> None:
@@ -648,6 +653,158 @@ class TestWorkspaceAgnostic(unittest.TestCase):
             self.assertNotIn(
                 word, source.lower(),
                 f"Domain word {word!r} found in intent_contract.py source — module must be workspace-agnostic",
+            )
+
+
+# ---------------------------------------------------------------------------
+# Test 12: grain_bucketing facet
+# ---------------------------------------------------------------------------
+
+class TestGrainBucketingFacet(unittest.TestCase):
+    """A share/percentage metric cut by a raw continuous dimension (exact age /
+    days-since) must yield grain_bucketing confidence=low and surface as a
+    blocker, unless a bucketing decision is recorded. Non-share or
+    categorical-only KPIs leave the facet not-applicable (none). Generic
+    fixtures only (customers/orders/region)."""
+
+    def _facet(self, kpi: dict, decisions: dict | None = None) -> dict:
+        contract = build_intent_contract(kpi, decisions or {})
+        return next(f for f in contract["facets"] if f["facet"] == "grain_bucketing")
+
+    def test_share_with_raw_age_cut_no_decision_is_low(self):
+        kpi = _kpi(
+            name="share of customers by age",
+            metric="share of count(*) for region",
+            cuts="region, age(date_of_birth)",
+            features=[_feature("region", "Region"),
+                      _feature("date_of_birth", "DateOfBirth")],
+        )
+        facet = self._facet(kpi)
+        self.assertEqual(facet["confidence"], "low")
+        self.assertEqual(facet["value"], "band_continuous_cuts")
+        self.assertIn("exact_value_grain", facet["alternatives"])
+
+    def test_low_grain_bucketing_surfaces_in_low_confidence_facets(self):
+        kpi = _kpi(
+            metric="percentage of count(*) for grp",
+            cuts="grp, days since signup_date",
+            features=[_feature("grp", "Group"),
+                      _feature("signup_date", "SignupDate")],
+        )
+        contract = build_intent_contract(kpi, {})
+        names = [q["facet"] for q in low_confidence_facets(contract)]
+        self.assertIn("grain_bucketing", names)
+
+    def test_recorded_decision_makes_grain_bucketing_high(self):
+        kpi = _kpi(
+            kpi_id="kpi_007",
+            metric="share of count(*) for region",
+            cuts="region, age(date_of_birth)",
+            features=[_feature("region", "Region"),
+                      _feature("date_of_birth", "DateOfBirth")],
+        )
+        decisions = {"grain_bucketing_decisions": {"kpi_007": "band_continuous_cuts"}}
+        facet = self._facet(kpi, decisions)
+        self.assertEqual(facet["confidence"], "high")
+        self.assertEqual(facet["value"], "band_continuous_cuts")
+        names = [q["facet"] for q in low_confidence_facets(
+            build_intent_contract(kpi, decisions))]
+        self.assertNotIn("grain_bucketing", names)
+
+    def test_non_share_age_kpi_is_not_applicable(self):
+        kpi = _kpi(
+            metric="count(distinct customer_id)",
+            cuts="region, age(date_of_birth)",
+            features=[_feature("customer_id", "CustomerID"),
+                      _feature("region", "Region"),
+                      _feature("date_of_birth", "DateOfBirth")],
+        )
+        facet = self._facet(kpi)
+        self.assertEqual(facet["confidence"], "none")
+        self.assertIsNone(facet["value"])
+
+    def test_share_categorical_only_is_not_applicable(self):
+        kpi = _kpi(
+            metric="share of count(*) for region",
+            cuts="region, channel",
+            features=[_feature("region", "Region"), _feature("channel", "Channel")],
+        )
+        facet = self._facet(kpi)
+        self.assertEqual(facet["confidence"], "none")
+
+    def test_age_threshold_filter_is_not_applicable(self):
+        # `age > 50` is a filter, not a grouping dimension.
+        kpi = _kpi(
+            metric="share of count(*) for region",
+            cuts="region, age > 50",
+            features=[_feature("region", "Region")],
+        )
+        facet = self._facet(kpi)
+        self.assertEqual(facet["confidence"], "none")
+
+
+class TestGrainBucketingPanelE2E(unittest.TestCase):
+    """End-to-end (in-process) seam for the grain_bucketing facet: a share KPI cut
+    by raw age must (1) surface as a blocker-panel question via
+    intent_facet_panel_questions, (2) persist to pipeline_decisions.json when
+    answered via record_intent_answer, and (3) converge (stop re-asking) on the
+    next panel build. Mirrors how prepare-kpi-blocker-panel / apply-kpi-panel-answer
+    drive these functions, without a subprocess CLI run. Generic fixtures only."""
+
+    def _registry(self):
+        return [
+            _kpi(
+                kpi_id="kpi_001",
+                name="share of customers by age",
+                metric="share of count(*) for region",
+                cuts="region, age(date_of_birth)",
+                features=[
+                    _feature("region", "Region"),
+                    _feature("date_of_birth", "DateOfBirth"),
+                ],
+            ),
+        ]
+
+    def test_panel_emits_then_persists_then_converges(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace_path = "workspaces/proj"
+            contracts_dir = root / workspace_path / "interns" / "generated" / "contracts"
+            contracts_dir.mkdir(parents=True)
+            (contracts_dir / "kpi_registry.json").write_text(
+                json.dumps(self._registry()), encoding="utf-8"
+            )
+
+            # (1) the facet surfaces as a routed blocker-panel question
+            questions = intent_facet_panel_questions(root, workspace_path)
+            gb = [q for q in questions if q.get("facet") == "grain_bucketing"]
+            self.assertTrue(
+                gb, f"grain_bucketing not surfaced by panel. Facets: "
+                f"{[q.get('facet') for q in questions]}",
+            )
+
+            # (2) answering it via the apply path persists to pipeline_decisions
+            record_intent_answer(
+                root,
+                workspace_path,
+                kpi_id="kpi_001",
+                facet="grain_bucketing",
+                value="band_continuous_cuts",
+                confirmed_by="tester",
+            )
+            decisions = _load_pipeline_decisions((root / workspace_path).resolve())
+            recorded = decisions.get("grain_bucketing_decisions") or {}
+            self.assertIn(
+                "kpi_001", recorded,
+                f"grain_bucketing answer not mirrored to pipeline_decisions: {decisions}",
+            )
+
+            # (3) the panel converges -- the answered facet is no longer re-asked
+            again = intent_facet_panel_questions(root, workspace_path)
+            self.assertFalse(
+                [q for q in again if q.get("facet") == "grain_bucketing"
+                 and q.get("kpi_id") == "kpi_001"],
+                "grain_bucketing should not be re-asked after it was answered",
             )
 
 

@@ -79,6 +79,18 @@ _RANK_WITHIN_PATTERN = re.compile(
     r"\brank(?:ed)?\s+(?:\w+\s+)?(?:within|per)\s+([A-Za-z_][A-Za-z0-9_]*)\b",
     re.IGNORECASE,
 )
+# Generic "share / percentage metric" signal. A metric whose result is a share or
+# percentage makes the per-row denominator load-bearing: if the grain explodes,
+# every cell becomes a tiny meaningless fraction. Derived from metric text alone
+# (e.g. "share of orders", "percentage of revenue"); domain-agnostic.
+_SHARE_METRIC_PATTERN = re.compile(
+    r"\b(?:percent(?:age)?|share)\b", re.IGNORECASE,
+)
+# Default proposed bucket width for a raw continuous cut, in the cut's own unit
+# (years for an age cut, days for a days-since cut). A width, not a domain value:
+# the same 10-unit banding applies to "age" (10-year bands) or "days since
+# signup" (10-day bands). The user can override via the grain-bucketing answer.
+_DEFAULT_BUCKET_WIDTH = 10
 
 
 @dataclass(frozen=True)
@@ -149,6 +161,13 @@ class ParsedKPI:
     # Age-fallback note: set when age/date arithmetic falls back to CURRENT_DATE
     # because no event-date grain column was found.
     age_as_of_assumption: str | None = None
+    # Grain-bucketing block: set (with fallback_reason) when a share/percentage
+    # metric is cut by a RAW continuous dimension (exact integer age / days-since)
+    # and no bucketing decision is recorded. Grouping a share by an exact
+    # continuous value fragments the denominator into one tiny row per value
+    # (e.g. ~7k rows each ~0.2%). The block proposes banding the cut into ranges
+    # instead of emitting the exploded GROUP BY. None = no bucketing block.
+    grain_bucketing_block: dict[str, Any] | None = None
 
     @property
     def can_compose(self) -> bool:
@@ -507,6 +526,98 @@ def _detect_date_arithmetic(
     return out
 
 
+def _is_share_metric(metric_text: str, window_intent: dict[str, Any]) -> bool:
+    """True when the metric's result is a share/percentage.
+
+    A share/percentage metric makes the per-cell denominator load-bearing, so an
+    exploded grain renders every cell a meaningless fraction. Detection is
+    generic: either the metric text carries a share/percent word, or the parsed
+    window-intent kind is one of the share-producing kinds. No domain words.
+    """
+    if _SHARE_METRIC_PATTERN.search(metric_text or ""):
+        return True
+    return window_intent.get("kind") in {
+        "mismatched_grain_percentage",
+        "percent_of_total",
+        "percent_of_group",
+    }
+
+
+def _detect_raw_continuous_cuts(
+    cuts_text: str, lookup: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Find cut tokens that GROUP BY a raw exact continuous value.
+
+    Reuses the existing generic date-arithmetic regexes (age / days-since): each
+    yields an exact integer grain (a person's exact age, the exact day count
+    since an event), so grouping by it produces one row per distinct value. A
+    comparison token (``age > 50``) is a FILTER, not a grouping dimension, and is
+    skipped. Returns one descriptor per raw continuous cut with the resolved
+    source column, the cut unit, and a proposed band width — domain-agnostic.
+    """
+    out: list[dict[str, Any]] = []
+    for token in _split_cuts(cuts_text):
+        if any(op in token for op in ("=", "<", ">")):
+            continue  # a threshold filter, not a grouping dimension
+        age_match = _AGE_PATTERN.search(token)
+        days_match = _DAYS_SINCE_PATTERN.search(token)
+        if age_match:
+            source = age_match.group(1) or age_match.group(2) or ""
+            unit = "year"
+        elif days_match:
+            source = days_match.group(1) or ""
+            unit = "day"
+        else:
+            continue
+        col = _resolve_column(source, lookup) if source else source
+        out.append({
+            "cut": token.strip(),
+            "source_column": col,
+            "unit": unit,
+            "proposed_band_width": _DEFAULT_BUCKET_WIDTH,
+        })
+    return out
+
+
+def _build_grain_bucketing_block(
+    raw_cuts: list[dict[str, Any]], metric_text: str
+) -> dict[str, Any]:
+    """Build the structured hard-block payload proposing age/range bands.
+
+    Mirrors the denominator_scope facet shape: a derived recommendation plus the
+    evidence the reviewer needs. The proposal is to band each raw continuous cut
+    into fixed-width ranges (default width) so the share denominator stays
+    meaningful, instead of emitting a per-exact-value GROUP BY.
+    """
+    proposals = [
+        {
+            "cut": rc["cut"],
+            "source_column": rc["source_column"],
+            "unit": rc["unit"],
+            "proposed_bucket": (
+                f"band {rc['source_column'] or rc['cut']} into "
+                f"{rc['proposed_band_width']}-{rc['unit']} ranges"
+            ),
+            "proposed_band_width": rc["proposed_band_width"],
+        }
+        for rc in raw_cuts
+    ]
+    cut_labels = ", ".join(rc["cut"] for rc in raw_cuts)
+    return {
+        "reason": (
+            f"share/percentage metric `{metric_text}` is cut by a raw continuous "
+            f"dimension ({cut_labels}); grouping a share by exact values "
+            f"fragments the denominator into one tiny row per value. Choose a "
+            f"band width (or confirm exact-value grain) before generating."
+        ),
+        "metric": metric_text,
+        "raw_continuous_cuts": [rc["cut"] for rc in raw_cuts],
+        "proposals": proposals,
+        "recommended": "band_continuous_cuts",
+        "alternatives": ["exact_value_grain"],
+    }
+
+
 def _detect_having(text: str, aggregations: list[Aggregation]) -> list[str]:
     """Detect HAVING clauses from KPI text. Returns a list of SQL fragments
     that go AFTER the HAVING keyword.
@@ -520,7 +631,11 @@ def _detect_having(text: str, aggregations: list[Aggregation]) -> list[str]:
     return out
 
 
-def parse_kpi(kpi: dict[str, Any], denominator_scope: str | None = None) -> ParsedKPI:
+def parse_kpi(
+    kpi: dict[str, Any],
+    denominator_scope: str | None = None,
+    grain_bucketing: str | None = None,
+) -> ParsedKPI:
     """Parse a KPI registry entry into structured aggregations/dimensions/filters.
 
     Parameters
@@ -534,6 +649,16 @@ def parse_kpi(kpi: dict[str, Any], denominator_scope: str | None = None) -> Pars
         grand-total ``OVER ()``.  The resolved partition column is the same one
         already computed for the numerator's group.  See design/kpi_intent_contract.md
         §3 (denominator_scope facet).
+    grain_bucketing:
+        Optional bucketing decision for a share/percentage metric that is cut by
+        a RAW continuous dimension (exact integer age / days-since). When such a
+        cut is present and NO decision is recorded (``grain_bucketing`` is
+        ``None``), ``parse_kpi`` sets a hard block (``fallback_reason`` +
+        ``grain_bucketing_block``) proposing fixed-width bands instead of
+        emitting the exploded GROUP BY. Any non-None value (e.g.
+        ``"band_continuous_cuts"`` or ``"exact_value_grain"``) records that the
+        grain was confirmed, so the generator proceeds. Mirrors the
+        denominator_scope facet pattern.
     """
     parsed = ParsedKPI()
     metric_text = str(kpi.get("metric") or "").strip()
@@ -541,6 +666,21 @@ def parse_kpi(kpi: dict[str, Any], denominator_scope: str | None = None) -> Pars
     name_text = str(kpi.get("name") or kpi.get("business_question") or "").strip()
     lookup = _column_lookup(kpi)
     window_intent = _detect_window_intent(metric_text, name_text)
+
+    # Grain-bucketing hard block: a share/percentage metric cut by a RAW
+    # continuous dimension (exact integer age / days-since) fragments the
+    # denominator into one tiny row per value (e.g. ~7k rows each ~0.2%). Block
+    # generation and PROPOSE bands until a bucketing decision is recorded. A
+    # recorded decision (any non-None grain_bucketing) confirms the grain and
+    # lets generation proceed unchanged. Comparison tokens (age > 50) are
+    # filters, not grouping dimensions, and never trigger this block.
+    if grain_bucketing is None:
+        raw_continuous_cuts = _detect_raw_continuous_cuts(cuts_text, lookup)
+        if raw_continuous_cuts and _is_share_metric(metric_text, window_intent):
+            block = _build_grain_bucketing_block(raw_continuous_cuts, metric_text)
+            parsed.grain_bucketing_block = block
+            parsed.fallback_reason = block["reason"]
+            return parsed
 
     # BUG-005: age (and other date arithmetic) must be measured as-of the
     # event/service date when the KPI has one, not as-of today. The event date
@@ -976,6 +1116,7 @@ def build_result_view_sql(
     result_view: str,
     dialect: str = "duckdb",
     denominator_scope: str | None = None,
+    grain_bucketing: str | None = None,
 ) -> str:
     """Compose the result-view SQL for a KPI. Always returns a valid CREATE VIEW.
 
@@ -993,8 +1134,34 @@ def build_result_view_sql(
         <partition_col>) — the denominator sums only within the resolved group,
         not across the whole population.  The choice is recorded as an auditable
         SQL comment in the generated view.
+    grain_bucketing:
+        Resolved grain-bucketing decision for a share/percentage metric cut by a
+        raw continuous dimension. ``None`` (no decision) → the view is BLOCKED
+        and emits a clearly-marked grain-bucketing proposal instead of the
+        exploded GROUP BY. Any non-None value confirms the grain and lets the
+        view generate normally.
     """
-    parsed = parse_kpi(kpi, denominator_scope=denominator_scope)
+    parsed = parse_kpi(
+        kpi,
+        denominator_scope=denominator_scope,
+        grain_bucketing=grain_bucketing,
+    )
+    if parsed.grain_bucketing_block is not None:
+        block = parsed.grain_bucketing_block
+        lines = [
+            "-- BLOCKED: grain-bucketing decision required (no exploded GROUP BY emitted).",
+            f"-- reason: {block['reason']}",
+            f"-- recommended: {block['recommended']} | alternatives: {block['alternatives']}",
+        ]
+        for proposal in block["proposals"]:
+            lines.append(f"--   propose: {proposal['proposed_bucket']}")
+        lines += [
+            f"-- KPI metric: {kpi.get('metric', '')!r}",
+            f"-- KPI cuts:   {kpi.get('cuts', '')!r}",
+            f"CREATE OR REPLACE VIEW {result_view} AS",
+            f"SELECT * FROM {feature_view};",
+        ]
+        return "\n".join(lines)
     if not parsed.can_compose or (not parsed.aggregations and not parsed.dimensions):
         reason = parsed.fallback_reason or (
             "KPI metric and cuts produced no parseable aggregation; "

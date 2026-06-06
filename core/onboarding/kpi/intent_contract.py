@@ -3,9 +3,9 @@
 Produces an explicit, per-facet contract for every KPI in the registry.
 This is Phase 3 of the intent-contract design (docs/design/kpi_intent_contract.md).
 
-The seven canonical facets (Section 3 of the design doc) are:
-  metric, grain, filters, denominator_scope, temporal_anchor, output_shape,
-  null_zero_handling
+The canonical facets (Section 3 of the design doc) are:
+  metric, grain, filters, denominator_scope, grain_bucketing, temporal_anchor,
+  output_shape, null_zero_handling
 
 Each facet record carries:
   { facet, value, confidence: high|medium|low|none,
@@ -50,6 +50,13 @@ Confidence rules (documented here, referenced in tests):
             in pipeline_decisions.json → genuinely ambiguous
     high  — scope is explicitly recorded in pipeline_decisions.json
     none  — KPI is NOT a percentage-share metric (facet not applicable)
+
+  grain_bucketing:
+    none  — not a share metric, OR no raw continuous cut (facet not applicable)
+    high  — a bucketing decision is recorded in pipeline_decisions.json
+    low   — share metric cut by a raw continuous dimension (exact age /
+            days-since) AND no bucketing decision recorded -> genuinely
+            ambiguous (band into ranges vs keep exact-value grain)
 
   temporal_anchor:
     high  — an explicit time-grain source column exists in cuts
@@ -132,6 +139,14 @@ _AGE_RE = re.compile(
     re.IGNORECASE,
 )
 _DAYS_SINCE_RE = re.compile(r"\bdays?\s+since\b", re.IGNORECASE)
+# A RAW continuous cut yields an exact integer grain (exact age, exact day count).
+# These same generic regexes drive the grain-bucketing facet: grouping a share by
+# such a value fragments the denominator. A comparison token (age > 50) is a
+# filter, not a grouping dimension, and is handled separately.
+_RAW_CONTINUOUS_CUT_RE = re.compile(
+    r"\bage\b|\bdays?\s+since\b", re.IGNORECASE,
+)
+_COMPARISON_OP_RE = re.compile(r"[<>]=?|!?=")
 
 # Top-N ranking in name
 _TOP_N_RE = re.compile(r"\btop\s+(\d+)\b", re.IGNORECASE)
@@ -249,6 +264,39 @@ def _denominator_scope_from_decisions(
         if scope:
             return str(scope)
     return None
+
+
+def _grain_bucketing_from_decisions(
+    kpi_id: str, decisions: dict[str, Any]
+) -> str | None:
+    """Look up a recorded grain-bucketing decision for kpi_id. None if absent."""
+    by_kpi = decisions.get(kpi_id) or {}
+    if isinstance(by_kpi, dict):
+        decision = by_kpi.get("grain_bucketing")
+        if decision:
+            return str(decision)
+    top_level = decisions.get("grain_bucketing_decisions") or {}
+    if isinstance(top_level, dict):
+        decision = top_level.get(kpi_id)
+        if decision:
+            return str(decision)
+    return None
+
+
+def _raw_continuous_cuts(cuts_text: str) -> list[str]:
+    """Cut tokens that GROUP BY a raw exact continuous value (age / days-since).
+
+    Comparison tokens (``age > 50``) are filters, not grouping dimensions, and
+    are excluded. Generic: age/days-since are temporal concepts, not domain
+    vocabulary.
+    """
+    out: list[str] = []
+    for token in _split_cuts(cuts_text):
+        if _COMPARISON_OP_RE.search(token):
+            continue
+        if _RAW_CONTINUOUS_CUT_RE.search(token):
+            out.append(token)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +619,73 @@ def _facet_denominator_scope(
     }
 
 
+def _facet_grain_bucketing(
+    kpi: dict[str, Any],
+    decisions: dict[str, Any],
+) -> dict[str, Any]:
+    """Extract the grain_bucketing facet.
+
+    A share/percentage metric cut by a RAW continuous dimension (exact age /
+    days-since) explodes the result into one tiny row per value, making the
+    share denominator meaningless. This facet forces a banding decision.
+
+    Confidence:
+      none   — not a share metric, OR no raw continuous cut (facet not applicable)
+      high   — a bucketing decision is recorded in pipeline_decisions
+      low    — share metric + raw continuous cut + NO decision recorded
+               (genuinely ambiguous: band into ranges vs keep exact-value grain)
+    """
+    metric_text = str(kpi.get("metric") or "").strip()
+    cuts_text = str(kpi.get("cuts") or "").strip()
+    kpi_id = str(kpi.get("kpi_id") or "")
+
+    is_share = bool(_SHARE_PATTERN_RE.search(metric_text))
+    raw_cuts = _raw_continuous_cuts(cuts_text)
+
+    if not is_share or not raw_cuts:
+        return {
+            "facet": "grain_bucketing",
+            "value": None,
+            "confidence": "none",
+            "source": "default",
+            "evidence": [
+                "not a share metric cut by a raw continuous dimension; "
+                "facet not applicable"
+            ],
+            "alternatives": [],
+        }
+
+    recorded = _grain_bucketing_from_decisions(kpi_id, decisions)
+    if recorded:
+        return {
+            "facet": "grain_bucketing",
+            "value": recorded,
+            "confidence": "high",
+            "source": "human",
+            "evidence": [
+                f"metric text: {metric_text!r}",
+                f"raw continuous cuts: {raw_cuts}",
+                f"pipeline_decisions recorded bucketing: {recorded!r}",
+            ],
+            "alternatives": ["exact_value_grain"],
+        }
+
+    # Share + raw continuous cut + no decision → hard block (low confidence).
+    return {
+        "facet": "grain_bucketing",
+        "value": "band_continuous_cuts",  # recommended default
+        "confidence": "low",
+        "source": "default",
+        "evidence": [
+            f"metric text: {metric_text!r}",
+            f"raw continuous cuts: {raw_cuts}",
+            "grouping a share by an exact continuous value fragments the "
+            "denominator into one tiny row per value; band into ranges instead",
+        ],
+        "alternatives": ["exact_value_grain"],
+    }
+
+
 def _facet_temporal_anchor(kpi: dict[str, Any]) -> dict[str, Any]:
     """Extract the temporal_anchor facet.
 
@@ -777,6 +892,7 @@ def build_intent_contract(
         _facet_grain(kpi),
         _facet_filters(kpi),
         _facet_denominator_scope(kpi, decisions),
+        _facet_grain_bucketing(kpi, decisions),
         _facet_temporal_anchor(kpi),
         _facet_output_shape(kpi),
         _facet_null_zero_handling(kpi),
@@ -873,6 +989,15 @@ def _panel_question_text(
             f"`{value}` (current default) or `{alts_str}` (within-group)? "
             f"Evidence: {'; '.join(evidence[:2])}"
         )
+    if facet == "grain_bucketing":
+        alts_str = " OR ".join(alternatives) if alternatives else "exact_value_grain"
+        return (
+            f"grain_bucketing: this share/percentage metric is cut by a raw "
+            f"continuous dimension. Grouping a share by exact values fragments "
+            f"the denominator into one tiny row per value. Band the cut into "
+            f"ranges (`{value}`) or keep the exact-value grain (`{alts_str}`)? "
+            f"Evidence: {'; '.join(evidence[:2])}"
+        )
     if facet == "temporal_anchor":
         return (
             f"temporal_anchor: age/date arithmetic is present but no event-date "
@@ -915,8 +1040,8 @@ INTENT_ANSWERS_FILENAME = "kpi_intent_answers.json"
 # questions in the panel. null_zero_handling is intentionally excluded: it is
 # always medium/default and would otherwise fire on every KPI.
 _ROUTED_FACETS = frozenset({
-    "metric", "grain", "denominator_scope", "temporal_anchor",
-    "output_shape", "filters",
+    "metric", "grain", "denominator_scope", "grain_bucketing",
+    "temporal_anchor", "output_shape", "filters",
 })
 
 
@@ -1003,6 +1128,14 @@ def record_intent_answer(
         from core.onboarding.pipeline_plan import PipelineDecisionRecorder
 
         PipelineDecisionRecorder(root, _rel(workspace_path, root)).record_denominator_scope(
+            kpi_id,
+            str(value),
+            reason=reason or f"intent-contract answer ({source})",
+        )
+    if facet == "grain_bucketing" and value:
+        from core.onboarding.pipeline_plan import PipelineDecisionRecorder
+
+        PipelineDecisionRecorder(root, _rel(workspace_path, root)).record_grain_bucketing(
             kpi_id,
             str(value),
             reason=reason or f"intent-contract answer ({source})",

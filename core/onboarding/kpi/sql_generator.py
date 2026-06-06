@@ -655,6 +655,9 @@ class DuckDBKPISQLGenerator:
         denominator_scope = (
             (decisions.get("percentage_denominator_scopes") or {}).get(kpi_id)
         )
+        grain_bucketing = (
+            (decisions.get("grain_bucketing_decisions") or {}).get(kpi_id)
+        )
         return build_result_view_sql(
             kpi,
             kpi_id=kpi_id,
@@ -662,6 +665,7 @@ class DuckDBKPISQLGenerator:
             result_view=result_view,
             dialect=self.dialect,
             denominator_scope=denominator_scope,
+            grain_bucketing=grain_bucketing,
         )
 
     def _pipeline_decisions(self) -> dict[str, Any]:

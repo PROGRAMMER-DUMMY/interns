@@ -73,6 +73,16 @@ class PipelineDecisionRecorder:
         data.setdefault("percentage_denominator_scope_reasons", {})[kpi_id] = reason
         return self._write(data)
 
+    def record_grain_bucketing(self, kpi_id: str, decision: str, *, reason: str = "") -> dict[str, Any]:
+        """Record a grain-bucketing decision for a share metric cut by a raw
+        continuous dimension (e.g. ``band_continuous_cuts`` or
+        ``exact_value_grain``). Once recorded, the generator stops blocking and
+        emits the view. Mirrors record_denominator_scope."""
+        data = self._load()
+        data.setdefault("grain_bucketing_decisions", {})[kpi_id] = decision
+        data.setdefault("grain_bucketing_reasons", {})[kpi_id] = reason
+        return self._write(data)
+
 
 class PipelineFormatPanel:
     def __init__(self, repo_root: str | Path, workspace: str | Path) -> None:

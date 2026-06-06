@@ -903,6 +903,157 @@ class DenominatorScopeTests(unittest.TestCase):
         self.assertIsNone(parsed.denominator_scope)
 
 
+class GrainBucketingBlockTests(unittest.TestCase):
+    """A share/percentage metric cut by a RAW exact continuous dimension (exact
+    integer age / days-since) must HARD-BLOCK and propose bands instead of
+    emitting the exploded GROUP BY that fragments the share into one tiny row per
+    value. A recorded bucketing decision lets generation proceed. A non-share KPI
+    with the same age cut is unaffected. Generic fixtures only (orders/customers).
+    """
+
+    def _share_age_kpi(self):
+        # percent_of_group share metric cut by a raw exact-age dimension.
+        return _kpi_uc(
+            name="share of customers by age",
+            metric="share of count(*) for region",
+            cuts="region, age(date_of_birth)",
+            features=[
+                {"feature": "region", "source_columns": [{"column": "region"}]},
+                {"feature": "date_of_birth",
+                 "source_columns": [{"column": "date_of_birth"}]},
+            ],
+        )
+
+    def test_share_with_raw_age_cut_blocks_parse_kpi(self):
+        parsed = parse_kpi(self._share_age_kpi())
+        self.assertFalse(parsed.can_compose)
+        self.assertIsNotNone(parsed.grain_bucketing_block)
+        # No exploded GROUP BY dimension on the exact age was emitted.
+        self.assertEqual(parsed.dimensions, [])
+        self.assertFalse(
+            any("date_diff" in (d.expression or "") for d in parsed.dimensions)
+        )
+
+    def test_block_proposes_bands_for_the_raw_continuous_cut(self):
+        parsed = parse_kpi(self._share_age_kpi())
+        block = parsed.grain_bucketing_block
+        self.assertEqual(block["recommended"], "band_continuous_cuts")
+        self.assertIn("exact_value_grain", block["alternatives"])
+        self.assertTrue(block["proposals"])
+        proposal = block["proposals"][0]
+        self.assertEqual(proposal["source_column"], "date_of_birth")
+        self.assertEqual(proposal["unit"], "year")
+        self.assertIn("band", proposal["proposed_bucket"].lower())
+
+    def test_build_sql_emits_blocked_marker_not_exploded_group_by(self):
+        sql = build_result_view_sql(
+            self._share_age_kpi(),
+            kpi_id="kpi_share", feature_view='"f"', result_view='"r"',
+        )
+        self.assertIn("-- BLOCKED: grain-bucketing decision required", sql)
+        self.assertIn("propose:", sql)
+        # The exploded per-exact-value GROUP BY must NOT be emitted: the body is
+        # the blocked SELECT * fallback, with no executable GROUP BY clause.
+        self.assertNotIn("date_diff('year'", sql)
+        self.assertIn('SELECT * FROM "f"', sql)
+        # No GROUP BY clause in the SQL body (the phrase may appear only inside
+        # the leading -- comment lines explaining what was suppressed).
+        body = "\n".join(
+            ln for ln in sql.splitlines() if not ln.lstrip().startswith("--")
+        )
+        self.assertNotIn("GROUP BY", body)
+
+    def test_recorded_bucketing_decision_lets_view_generate(self):
+        # With a recorded decision, generation proceeds (no block).
+        parsed = parse_kpi(
+            self._share_age_kpi(), grain_bucketing="band_continuous_cuts"
+        )
+        self.assertIsNone(parsed.grain_bucketing_block)
+        sql = build_result_view_sql(
+            self._share_age_kpi(),
+            kpi_id="kpi_share", feature_view='"f"', result_view='"r"',
+            grain_bucketing="band_continuous_cuts",
+        )
+        self.assertNotIn("-- BLOCKED: grain-bucketing", sql)
+
+    def test_age_threshold_filter_does_not_trigger_block(self):
+        # `age > 50` is a FILTER, not a grouping dimension — must not block.
+        kpi = _kpi_uc(
+            name="share of customers above 50 by region",
+            metric="share of count(*) for region",
+            cuts="region, age(date_of_birth) > 50",
+            features=[
+                {"feature": "region", "source_columns": [{"column": "region"}]},
+                {"feature": "date_of_birth",
+                 "source_columns": [{"column": "date_of_birth"}]},
+            ],
+        )
+        parsed = parse_kpi(kpi)
+        self.assertIsNone(parsed.grain_bucketing_block)
+
+    def test_non_share_kpi_with_age_cut_still_generates(self):
+        # A plain (non-share) aggregation cut by exact age generates as before.
+        kpi = _kpi_uc(
+            metric="count(distinct customer_id)",
+            cuts="region, age(date_of_birth)",
+            features=[
+                {"feature": "customer_id",
+                 "source_columns": [{"column": "customer_id"}]},
+                {"feature": "region", "source_columns": [{"column": "region"}]},
+                {"feature": "date_of_birth",
+                 "source_columns": [{"column": "date_of_birth"}]},
+            ],
+        )
+        parsed = parse_kpi(kpi)
+        self.assertIsNone(parsed.grain_bucketing_block)
+        self.assertTrue(parsed.can_compose)
+        sql = build_result_view_sql(
+            kpi, kpi_id="k", feature_view='"f"', result_view='"r"',
+        )
+        # Exact-age dimension still emitted for the non-share metric.
+        self.assertIn("date_diff('year'", sql)
+        self.assertIn("GROUP BY", sql)
+
+    def test_bug005_event_date_anchoring_unchanged_for_non_share_age_kpi(self):
+        # BUG-005 anchoring is untouched: a non-share age KPI with a time-grain
+        # cut still anchors age to the event date, not CURRENT_DATE.
+        kpi = _kpi_uc(
+            metric="sum(total_amount)",
+            cuts="Month (order_date), age(date_of_birth)",
+            features=[
+                {"feature": "total_amount",
+                 "source_columns": [{"column": "total_amount"}]},
+                {"feature": "order_date",
+                 "source_columns": [{"column": "order_date"}]},
+                {"feature": "date_of_birth",
+                 "source_columns": [{"column": "date_of_birth"}]},
+            ],
+        )
+        sql = build_result_view_sql(
+            kpi, kpi_id="k", feature_view='"f"', result_view='"r"',
+        )
+        self.assertIn(
+            "date_diff('year', CAST(\"date_of_birth\" AS DATE), "
+            "CAST(\"order_date\" AS DATE))",
+            sql,
+        )
+
+    def test_share_kpi_without_continuous_cut_is_not_blocked(self):
+        # A share metric cut only by categorical dimensions must still compose.
+        kpi = _kpi_uc(
+            name="share of customers by region",
+            metric="share of count(*) for region",
+            cuts="region, channel",
+            features=[
+                {"feature": "region", "source_columns": [{"column": "region"}]},
+                {"feature": "channel", "source_columns": [{"column": "channel"}]},
+            ],
+        )
+        parsed = parse_kpi(kpi)
+        self.assertIsNone(parsed.grain_bucketing_block)
+        self.assertTrue(parsed.can_compose)
+
+
 class PreviewRowCapTests(unittest.TestCase):
     """Task B: preview row cap — PREVIEW_ROW_CAP constant, truncation note, no magic numbers."""
 
