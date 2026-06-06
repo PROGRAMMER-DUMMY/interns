@@ -283,8 +283,11 @@ class WorkspaceFlow:
             completed = panel_summary.get("completed_kpis") or []
             stored_kpi_signature = _kpi_review_signature(completed)
         # BUG-014: record provenance so downstream can distinguish agent-asserted
-        # verdicts from human-confirmed ones.
-        source = "human" if confirmed_by else "agent"
+        # verdicts from human-confirmed ones. An agent identity in confirmed_by
+        # (e.g. "agent"/"claude") is agent-asserted, NOT human.
+        from core.governance.provenance import decision_source as _decision_source
+
+        source = _decision_source(confirmed_by)
         recorded = {
             "verdict": verdict,
             "summary": summary,

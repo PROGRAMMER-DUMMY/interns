@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from core.governance.provenance import decision_source as decision_source_for
 from core.storage.workspace_layout import WorkspaceLayout
 from core.contracts.versioning import register_contract
 
@@ -255,9 +256,10 @@ def apply_relationship_answer(
     now = _now()
     confirmed_by = (confirmed_by or "").strip()
     # BUG-014: distinguish a human-confirmed decision from an agent-asserted one.
-    # An empty --confirmed-by means the answer was issued by the driving agent
-    # without explicit human sign-off; a non-empty value records who confirmed it.
-    decision_source = "human" if confirmed_by else "agent"
+    # Empty --confirmed-by OR an agent identity (e.g. "agent"/"claude"/"gemini")
+    # is agent-asserted; only a real human name records source:human. (An agent
+    # passing --confirmed-by agent must NOT masquerade as human.)
+    decision_source = decision_source_for(confirmed_by)
     if normalized_answer == "approve":
         target["state"] = "user_confirmed"
         target.setdefault("approval", {})
@@ -1764,7 +1766,7 @@ def apply_main(argv: list[str] | None = None) -> int:
         metadata={
             "relationship_id": args.relationship_id,
             "answer": args.answer,
-            "source": "human" if args.confirmed_by.strip() else "agent",
+            "source": decision_source_for(args.confirmed_by),
             "confirmed_by": args.confirmed_by,
         },
         record_idempotent=True,
