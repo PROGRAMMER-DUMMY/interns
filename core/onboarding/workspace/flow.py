@@ -2206,6 +2206,23 @@ def compute_workflow_diff(repo_root: Path, workspace_rel: str) -> dict[str, Any]
             continue
         kpi_id = str(kpi.get("kpi_id") or "")
         status = str(kpi.get("status") or "")
+        # Partial-completion: a `deferred` KPI (no measurable definition) is
+        # intentionally skipped this pass. It is not a blocker and must not emit
+        # feature/relationship recovery commands -- record it as a deferred gap
+        # so it stays visible, then move on.
+        if status == "deferred" or kpi.get("deferred"):
+            kpi_gaps.append(
+                {
+                    "kpi_id": kpi_id,
+                    "status": "deferred",
+                    "blockers": [],
+                    "deferred_reason": str(kpi.get("deferred_reason") or ""),
+                    "missing_features": [],
+                    "selected_source_datasets": [],
+                    "recovery_commands": [],
+                }
+            )
+            continue
         blockers = kpi.get("blockers") or []
         selected_sources = {
             _norm(s) for s in (
@@ -3238,6 +3255,37 @@ def pipeline_main(argv: list[str] | None = None) -> int:
             f"  [~] {candidate_count} candidate relationship(s) not auto-proven from the "
             "data-model diagram; proceeding -- only a join an in-scope KPI needs will gate."
         )
+
+    # ------------------------------------------------------------------ #
+    # Completion planning: build the dependency-aware plan and record the  #
+    # parallel-vs-sequential dispatch decision (instead of only emitting a #
+    # plan artifact on demand). Advisory + deterministic: it always writes  #
+    # the plan so the decision is auditable, and above the ready-KPI        #
+    # threshold it recommends the `parallel_kpi_completion` delegation route #
+    # for the orchestrator to fan out. Spawning workers stays with the      #
+    # delegation layer; below threshold the pipeline runs sequentially as    #
+    # before. Never breaks the run -- planning failures degrade to a note.   #
+    # ------------------------------------------------------------------ #
+    try:
+        from core.onboarding.kpi.parallel_completion import (
+            dispatch_parallel_completion,
+        )
+
+        dispatch = dispatch_parallel_completion(repo_root, workspace_rel)
+        if dispatch.fan_out:
+            _log(
+                f"  [~] completion plan: {dispatch.ready_kpi_count} ready KPIs "
+                f"> threshold {dispatch.threshold} -> parallel route "
+                f"`parallel_kpi_completion` recommended ({dispatch.reason})."
+            )
+        else:
+            _log(
+                f"  [ok] completion plan: sequential "
+                f"({dispatch.ready_kpi_count} ready KPIs at/under threshold "
+                f"{dispatch.threshold})."
+            )
+    except Exception as exc:  # planner is advisory; never break the pipeline
+        _log(f"  [~] completion planning skipped: {exc}")
 
     # ------------------------------------------------------------------ #
     # STEP 4: workspace-flow start / resume (full_kpi_sql)                #

@@ -68,10 +68,20 @@ class BlockerQuestionPanelBuilder:
         *,
         mapping_path: str | Path | None = None,
         output_dir: str | Path | None = None,
+        deferred_kpi_ids: set[str] | None = None,
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
         self.layout = WorkspaceLayout(project_root=self.workspace)
+        # Partial-completion: KPIs with no measurable definition (empty metric AND
+        # grain) are DEFERRED, not blocked. Their unresolved feature tokens must
+        # NOT create feature-blocker questions -- otherwise a defined KPI is held
+        # hostage by an undefined sibling's features. The id set comes from the
+        # caller (the flow owns the definition gate); if not supplied, the builder
+        # self-derives it from the KPI registry so it is correct standalone.
+        if deferred_kpi_ids is None:
+            deferred_kpi_ids = _deferred_kpi_ids_from_registry(self.workspace)
+        self.deferred_kpi_ids = set(deferred_kpi_ids or set())
         self.mapping_path = (
             (self.repo_root / mapping_path).resolve()
             if mapping_path
@@ -89,7 +99,9 @@ class BlockerQuestionPanelBuilder:
         mapping = json.loads(self.mapping_path.read_text(encoding="utf-8"))
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        feature_questions = _build_questions(mapping, self.workspace, self.repo_root)
+        feature_questions = _build_questions(
+            mapping, self.workspace, self.repo_root, self.deferred_kpi_ids
+        )
         # `current` (the answerable / flow-blocking panel) is driven ONLY by
         # unresolved feature-mapping clusters, preserving flow stop semantics.
         current = (
@@ -164,15 +176,57 @@ class BlockerQuestionPanelBuilder:
         )
 
 
+def _deferred_kpi_ids_from_registry(workspace: Path) -> set[str]:
+    """Derive the set of DEFERRED (undefined) KPI ids from the KPI registry.
+
+    A KPI carries no measurable definition when BOTH its metric and grain/cuts
+    are empty; such KPIs are deferred from this pass (not feature-blockers), so
+    their unresolved feature tokens must not create blocker questions. Mirrors
+    ``flow._undefined_kpis`` / the source-to-target planner / the validator so
+    every gate agrees on one rule. The id is the registry entry's explicit
+    ``kpi_id`` when present, else the generator's enumerated ``kpi_{idx:03d}``
+    scheme. Generic (no domain vocabulary); never raises -> empty set on any
+    missing/malformed registry so panel emission is never broken.
+    """
+    try:
+        layout = WorkspaceLayout(project_root=workspace)
+        registry_path = layout.contracts_dir / "kpi_registry.json"
+        if not registry_path.exists():
+            return set()
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    deferred: set[str] = set()
+    for idx, kpi in enumerate(registry.get("kpis") or [], start=1):
+        if not isinstance(kpi, dict):
+            continue
+        metric = str(kpi.get("metric") or "").strip()
+        cuts = str(kpi.get("cuts") or "").strip()
+        if metric or cuts:
+            continue
+        kpi_id = str(kpi.get("kpi_id") or "").strip() or f"kpi_{idx:03d}"
+        deferred.add(kpi_id)
+    return deferred
+
+
 def _build_questions(
     mapping: dict[str, Any],
     workspace: Path,
     repo_root: Path,
+    deferred_kpi_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    feature_items = _feature_items(mapping)
+    feature_items = _feature_items(mapping, deferred_kpi_ids)
     clusters = mapping.get("blocker_clusters") or []
     if not clusters:
         clusters = _clusters_from_features(feature_items)
+    else:
+        # Drop any pre-computed cluster whose unresolved items all belong to
+        # deferred KPIs -- nothing left to ask once those features are filtered.
+        clusters = [
+            cluster
+            for cluster in clusters
+            if feature_items.get(_norm(str(cluster.get("feature") or "")))
+        ]
     questions = []
     for cluster in clusters:
         feature = str(cluster.get("feature") or "")
@@ -185,9 +239,18 @@ def _build_questions(
     return questions
 
 
-def _feature_items(mapping: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def _feature_items(
+    mapping: dict[str, Any],
+    deferred_kpi_ids: set[str] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    deferred = set(deferred_kpi_ids or set())
     items: dict[str, list[dict[str, Any]]] = {}
     for kpi in mapping.get("kpis", []):
+        # Partial-completion: skip deferred (undefined) KPIs so their unresolved
+        # feature tokens do not become feature-blocker questions. Defined KPIs
+        # still surface their own blockers normally.
+        if str(kpi.get("kpi_id") or "") in deferred:
+            continue
         for feature in kpi.get("features", []):
             if feature.get("state") in READY_STATES:
                 continue

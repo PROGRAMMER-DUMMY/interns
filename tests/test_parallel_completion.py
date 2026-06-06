@@ -7,14 +7,20 @@ with the worker count scaling off the number of independent components.
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
 from core.onboarding.kpi.parallel_completion import (
+    DEFAULT_PARALLEL_KPI_THRESHOLD,
+    PARALLEL_KPI_THRESHOLD_ENV,
     build_completion_graph,
+    count_ready_kpis,
     decide_worker_count,
+    dispatch_parallel_completion,
     plan_parallel_completion,
+    resolve_parallel_threshold,
 )
 
 
@@ -135,6 +141,137 @@ class PlanArtifactTests(unittest.TestCase):
             self._write_mapping(root, kpis)
             result = plan_parallel_completion(root, "workspaces/demo")
             self.assertEqual(result.worker_count, 1)
+
+
+class ReadyKpiCountTests(unittest.TestCase):
+    def test_counts_only_fully_resolved_kpis(self) -> None:
+        mapping = {
+            "kpis": [
+                {"kpi_id": "kpi_001", "features": [_ready("region", "orders.csv", "region")]},
+                {"kpi_id": "kpi_002", "features": [_blocked("amount")]},
+                {
+                    "kpi_id": "kpi_003",
+                    "features": [
+                        _ready("region", "orders.csv", "region"),
+                        _blocked("amount"),
+                    ],
+                },
+            ]
+        }
+        # Only kpi_001 has no unresolved feature/join.
+        self.assertEqual(count_ready_kpis(mapping), 1)
+
+    def test_ready_kpi_with_unproven_join_is_not_ready(self) -> None:
+        join = {"key": "order_id", "datasets": ["orders.csv", "shipments.csv"]}
+        mapping = {
+            "kpis": [
+                {
+                    "kpi_id": "kpi_001",
+                    "features": [_ready("region", "orders.csv", "region")],
+                    "join_candidates": [join],
+                }
+            ]
+        }
+        self.assertEqual(count_ready_kpis(mapping), 0)
+
+
+class ThresholdResolutionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._saved = os.environ.pop(PARALLEL_KPI_THRESHOLD_ENV, None)
+
+    def tearDown(self) -> None:
+        if self._saved is None:
+            os.environ.pop(PARALLEL_KPI_THRESHOLD_ENV, None)
+        else:
+            os.environ[PARALLEL_KPI_THRESHOLD_ENV] = self._saved
+
+    def test_default_when_unset(self) -> None:
+        self.assertEqual(resolve_parallel_threshold(), DEFAULT_PARALLEL_KPI_THRESHOLD)
+
+    def test_explicit_arg_wins_over_env(self) -> None:
+        os.environ[PARALLEL_KPI_THRESHOLD_ENV] = "10"
+        self.assertEqual(resolve_parallel_threshold(2), 2)
+
+    def test_env_override(self) -> None:
+        os.environ[PARALLEL_KPI_THRESHOLD_ENV] = "7"
+        self.assertEqual(resolve_parallel_threshold(), 7)
+
+    def test_malformed_env_falls_back_to_default(self) -> None:
+        os.environ[PARALLEL_KPI_THRESHOLD_ENV] = "not-a-number"
+        self.assertEqual(resolve_parallel_threshold(), DEFAULT_PARALLEL_KPI_THRESHOLD)
+
+
+class DispatchDecisionTests(unittest.TestCase):
+    def _write_mapping(self, root: Path, kpis: list[dict]) -> Path:
+        ws = root / "workspaces" / "demo"
+        contracts = ws / "interns" / "generated" / "contracts"
+        contracts.mkdir(parents=True)
+        (contracts / "kpi_feature_mapping.json").write_text(
+            json.dumps({"kpis": kpis, "blocker_clusters": []}), encoding="utf-8"
+        )
+        return ws
+
+    def test_below_threshold_stays_sequential(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # 2 ready, independent KPIs; threshold 3 -> sequential.
+            kpis = [
+                {"kpi_id": "kpi_001", "features": [_ready("a", "orders.csv", "a")]},
+                {"kpi_id": "kpi_002", "features": [_ready("b", "orders.csv", "b")]},
+            ]
+            self._write_mapping(root, kpis)
+            decision = dispatch_parallel_completion(
+                root, "workspaces/demo", threshold=3
+            )
+            self.assertEqual(decision.mode, "sequential")
+            self.assertFalse(decision.fan_out)
+            self.assertEqual(decision.ready_kpi_count, 2)
+            # Plan artifact still written for auditability.
+            self.assertTrue((root / decision.plan.plan_path).exists())
+
+    def test_above_threshold_fans_out_via_parallel_route(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # 8 ready, independent KPIs; threshold 3 -> parallel fan-out.
+            kpis = [
+                {
+                    "kpi_id": f"kpi_{i:03d}",
+                    "features": [_ready(f"f{i}", "orders.csv", f"c{i}")],
+                }
+                for i in range(1, 9)
+            ]
+            self._write_mapping(root, kpis)
+            decision = dispatch_parallel_completion(
+                root, "workspaces/demo", threshold=3
+            )
+            self.assertEqual(decision.mode, "parallel")
+            self.assertTrue(decision.fan_out)
+            self.assertEqual(decision.ready_kpi_count, 8)
+            self.assertGreater(decision.plan.worker_count, 1)
+            # The parallel_kpi_completion delegation route is carried for the caller.
+            self.assertIn("workspace-flow-orchestrator", decision.route["agents"])
+            self.assertIn("kpi-analyst", decision.route["agents"])
+
+    def test_single_component_stays_sequential(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # 5 KPIs all sharing one join -> 1 connected component -> 1 worker ->
+            # no independent work to spread, so sequential regardless of count.
+            join = {"key": "order_id", "datasets": ["orders.csv", "shipments.csv"]}
+            kpis = [
+                {
+                    "kpi_id": f"kpi_{i:03d}",
+                    "features": [_ready(f"f{i}", "orders.csv", f"c{i}")],
+                    "join_candidates": [join],
+                }
+                for i in range(1, 6)
+            ]
+            self._write_mapping(root, kpis)
+            decision = dispatch_parallel_completion(
+                root, "workspaces/demo", threshold=3
+            )
+            self.assertEqual(decision.plan.component_count, 1)
+            self.assertEqual(decision.mode, "sequential")
 
 
 if __name__ == "__main__":

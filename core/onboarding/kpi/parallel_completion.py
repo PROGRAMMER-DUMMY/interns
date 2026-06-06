@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +47,53 @@ READY_STATES = {
 }
 
 PLAN_VERSION = 1
+
+# Above this many ready KPIs, `run-kpi-pipeline` fans completion out across
+# workers via the `parallel_kpi_completion` delegation route instead of resolving
+# them one at a time. At or below it, behavior is unchanged (sequential).
+# Overridable per call (``threshold=``) or via the env var below. The default is
+# conservative: it lines up with the worker ladder's first fan-out step
+# (>3 independent units -> >=2 workers) so we only parallelize once there is
+# enough independent work to be worth the coordination.
+DEFAULT_PARALLEL_KPI_THRESHOLD = 3
+PARALLEL_KPI_THRESHOLD_ENV = "AUTORESEARCH_PARALLEL_KPI_THRESHOLD"
+
+
+def resolve_parallel_threshold(threshold: int | None = None) -> int:
+    """Resolve the ready-KPI fan-out threshold.
+
+    Precedence: explicit ``threshold`` arg > ``AUTORESEARCH_PARALLEL_KPI_THRESHOLD``
+    env var > ``DEFAULT_PARALLEL_KPI_THRESHOLD``. A non-integer or negative env
+    value is ignored (falls back to the default) so a malformed override can never
+    silently disable or invert the gate.
+    """
+    if threshold is not None:
+        return max(0, int(threshold))
+    raw = os.environ.get(PARALLEL_KPI_THRESHOLD_ENV)
+    if raw is not None:
+        try:
+            parsed = int(str(raw).strip())
+        except (TypeError, ValueError):
+            return DEFAULT_PARALLEL_KPI_THRESHOLD
+        if parsed >= 0:
+            return parsed
+    return DEFAULT_PARALLEL_KPI_THRESHOLD
+
+
+def count_ready_kpis(mapping: dict[str, Any]) -> int:
+    """Count KPIs that have no unresolved feature/join blockers left.
+
+    A KPI is "ready" for completion when every one of its features is in a
+    READY_STATE (proven/confirmed). Derived from the mapping only -- no domain
+    vocabulary.
+    """
+    ready = 0
+    for kpi in mapping.get("kpis") or []:
+        if not isinstance(kpi, dict):
+            continue
+        if not _unresolved_features(kpi) and not _join_keys(kpi):
+            ready += 1
+    return ready
 
 
 def decide_worker_count(parallel_units: int, *, max_workers: int = 6) -> int:
@@ -310,6 +358,124 @@ def plan_parallel_completion(
         worker_count=worker_count,
         component_count=len(components),
         shared_blocker_count=len(shared_items),
+    )
+
+
+@dataclass(frozen=True)
+class DispatchDecision:
+    """Outcome of the run-kpi-pipeline fan-out decision.
+
+    ``mode`` is ``"parallel"`` when the ready-KPI count exceeds the threshold AND
+    the dependency plan actually has independent work to spread (>1 worker);
+    otherwise ``"sequential"`` and the caller proceeds exactly as today. The plan
+    artifact is always written so the decision is auditable either way.
+    """
+
+    mode: str
+    ready_kpi_count: int
+    threshold: int
+    plan: ParallelPlanResult
+    route: dict[str, list[str]]
+    reason: str
+
+    @property
+    def fan_out(self) -> bool:
+        return self.mode == "parallel"
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "fan_out": self.fan_out,
+            "ready_kpi_count": self.ready_kpi_count,
+            "threshold": self.threshold,
+            "reason": self.reason,
+            "route": self.route,
+            "plan": self.plan.summary(),
+        }
+
+
+def dispatch_parallel_completion(
+    repo_root: str | Path,
+    workspace: str | Path,
+    *,
+    mapping: dict[str, Any] | None = None,
+    threshold: int | None = None,
+    max_workers: int = 6,
+) -> DispatchDecision:
+    """Decide whether run-kpi-pipeline should fan KPI completion out in parallel.
+
+    Always builds the dependency-aware completion plan (so the artifact exists and
+    the decision is auditable), then compares the ready-KPI count against the
+    resolved threshold:
+
+      ready_kpi_count > threshold AND plan.worker_count > 1
+          -> mode="parallel": the caller dispatches the plan's worker
+             assignments concurrently using the ``parallel_kpi_completion``
+             delegation route.
+      otherwise
+          -> mode="sequential": the caller proceeds one KPI at a time as today.
+
+    Deterministic and workspace-agnostic. Performs no remote mutation and spawns
+    no workers itself -- it returns the decision + plan + delegation route for the
+    orchestrating caller (run-kpi-pipeline / workspace flow) to act on.
+    """
+    root = Path(repo_root).resolve()
+    workspace_path = (root / workspace).resolve()
+    if mapping is None:
+        layout = WorkspaceLayout(project_root=workspace_path)
+        mapping_path = layout.contracts_dir / "kpi_feature_mapping.json"
+        if not mapping_path.exists():
+            raise FileNotFoundError(
+                f"kpi_feature_mapping.json not found: {_rel(mapping_path, root)}; "
+                "run resolve-kpi-features first."
+            )
+        mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+
+    resolved_threshold = resolve_parallel_threshold(threshold)
+    ready = count_ready_kpis(mapping)
+    plan = plan_parallel_completion(
+        root, workspace, mapping=mapping, max_workers=max_workers
+    )
+
+    # Import locally to avoid any import-order coupling with the delegation module.
+    from core.onboarding.workspace.delegation import routing_for
+
+    route = routing_for("parallel_kpi_completion")
+
+    over_threshold = ready > resolved_threshold
+    has_parallel_work = plan.worker_count > 1
+    if over_threshold and has_parallel_work:
+        reason = (
+            f"{ready} ready KPI(s) > threshold {resolved_threshold} and "
+            f"{plan.worker_count} workers across {plan.component_count} independent "
+            "component(s): fan out via parallel_kpi_completion."
+        )
+        return DispatchDecision(
+            mode="parallel",
+            ready_kpi_count=ready,
+            threshold=resolved_threshold,
+            plan=plan,
+            route=route,
+            reason=reason,
+        )
+
+    if over_threshold and not has_parallel_work:
+        reason = (
+            f"{ready} ready KPI(s) > threshold {resolved_threshold}, but the plan "
+            "has a single worker (no independent work to spread): run sequentially."
+        )
+    else:
+        reason = (
+            f"{ready} ready KPI(s) <= threshold {resolved_threshold}: "
+            "run sequentially."
+        )
+    return DispatchDecision(
+        mode="sequential",
+        ready_kpi_count=ready,
+        threshold=resolved_threshold,
+        plan=plan,
+        route=route,
+        reason=reason,
     )
 
 
