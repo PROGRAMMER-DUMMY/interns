@@ -31,26 +31,76 @@ class PipelineSQLGenerator:
             raise ValueError("pipeline plan has blockers")
         catalog = _load_json(self.layout.contracts_dir / "catalog_contract.json")
         table_format = plan.get("table_format", "local_parquet")
+
+        # Raw dataset paths are allowed ONLY inside the catalog bootstrap block.
+        # Every downstream medallion layer references the bootstrap view, never a
+        # raw path, so the business SQL stays portable across engines/storage.
+        bootstrap_lines: list[str] = ["-- BEGIN CATALOG BOOTSTRAP"]
+        layer_lines: list[str] = []
+        for obj in catalog.get("objects", []):
+            source = _object_source(obj)
+            stem = _object_stem(obj)
+            if not stem:
+                continue
+            raw_view = f"catalog_raw_{stem}"
+            reader = _reader_for(source, table_format)
+            bootstrap_lines.append(
+                f'CREATE OR REPLACE VIEW "{raw_view}" AS '
+                f"SELECT * FROM {reader}('{source}');"
+            )
+            layer_lines.extend(
+                [
+                    f'CREATE OR REPLACE VIEW "bronze_{stem}" AS '
+                    f'SELECT * FROM "{raw_view}";',
+                    f'CREATE OR REPLACE VIEW "silver_{stem}" AS '
+                    f'SELECT DISTINCT * FROM "bronze_{stem}";',
+                    f'CREATE OR REPLACE VIEW "gold_{stem}" AS '
+                    f'SELECT * FROM "silver_{stem}";',
+                ]
+            )
+        bootstrap_lines.append("-- END CATALOG BOOTSTRAP")
+
         lines = ["-- Generated pipeline layer SQL", ""]
-        for idx, obj in enumerate(catalog.get("objects", []), start=1):
-            source = obj.get("source_path", "")
-            view = f"catalog_raw_{idx:03d}_{obj.get('name', 'source')}"
-            reader = "read_parquet" if table_format in {"local_parquet", "parquet"} else "read_csv_auto"
-            if str(source).lower().endswith(".parquet"):
-                reader = "read_parquet"
-            lines.append(f'CREATE OR REPLACE VIEW {view} AS SELECT * FROM {reader}(\'{source}\');')
-        lines.extend(
-            [
-                "",
-                "CREATE OR REPLACE VIEW bronze_source AS SELECT * FROM catalog_raw_001_transactions;",
-                "CREATE OR REPLACE VIEW silver_source AS SELECT DISTINCT * FROM bronze_source;",
-                "CREATE OR REPLACE VIEW gold_kpi AS SELECT * FROM silver_source;",
-            ]
-        )
+        lines.extend(bootstrap_lines)
+        lines.append("")
+        lines.extend(layer_lines)
         out = self.layout.generated_dir / "pipeline" / "pipeline_layers.sql"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return PipelineSQLResult(_rel(out, self.repo_root), "generated")
+
+
+def _object_source(obj: dict[str, Any]) -> str:
+    """Raw dataset path for an object, tolerant of contract shape drift."""
+    return str(obj.get("source_path") or obj.get("dataset") or "")
+
+
+def _object_stem(obj: dict[str, Any]) -> str:
+    """Stable, filesystem-safe stem used to name layer views.
+
+    Prefer the catalog ``name``; fall back to the dataset filename stem so the
+    generator works on minimal contracts that only carry ``dataset``.
+    """
+    name = obj.get("name")
+    if not name:
+        source = _object_source(obj)
+        if source:
+            name = Path(source.replace("\\", "/")).stem
+    return _safe_name(str(name or ""))
+
+
+def _reader_for(source: str, table_format: str) -> str:
+    """Pick the DuckDB reader. File extension wins; otherwise table format."""
+    lowered = str(source).lower()
+    if lowered.endswith(".parquet"):
+        return "read_parquet"
+    if lowered.endswith(".csv"):
+        return "read_csv_auto"
+    return "read_parquet" if table_format in {"local_parquet", "parquet"} else "read_csv_auto"
+
+
+def _safe_name(value: str) -> str:
+    return "".join(ch.lower() if ch.isalnum() else "_" for ch in value).strip("_") or "source"
 
 
 def _load_json(path: Path) -> dict[str, Any]:

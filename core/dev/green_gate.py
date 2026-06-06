@@ -80,16 +80,14 @@ SWEEP_MODULES: tuple[str, ...] = (
     "tests.test_relationship_contracts",
     "tests.test_dashboard_spec_fidelity",
     "tests.test_kpi_intent_contract",
+    "tests.test_metric_derivation",
+    "tests.test_kpi_nl_chain_e2e",
 )
 
 # Pre-existing failures present on the clean tree as of 2026-05-30. A sweep failure
 # in this set is "known" (reported, not a regression); anything else is a regression.
 KNOWN_BASELINE: frozenset[str] = frozenset(
     {
-        "tests.test_pipeline_sql_generator.PipelineSQLGeneratorTests."
-        "test_generates_format_specific_bootstrap_reader",
-        "tests.test_pipeline_sql_generator.PipelineSQLGeneratorTests."
-        "test_generates_layer_sql_with_raw_paths_only_in_bootstrap",
         "tests.test_kpi_proof_packet.KPIProofPacketTests."
         "test_packet_includes_catalog_route_pipeline_and_layered_harness_evidence_when_present",
     }

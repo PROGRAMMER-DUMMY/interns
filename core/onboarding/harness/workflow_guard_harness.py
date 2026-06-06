@@ -59,6 +59,32 @@ _VOLATILE_COMMAND_FLAGS = ("--quiet", "--verbose", "--diff", "--render-only")
 # Recognizes a throwaway one-off reader script created at the repo root, e.g.
 # read_panel.py / read_results.py.
 _READER_SCRIPT_RE = re.compile(r"(?:^|[\\/])(read_[a-z0-9_]*\.py)$", re.IGNORECASE)
+# Tokens that mark a step as a *mutation* (an apply/answer/finalize/commit-style op
+# that changes workspace state). A failed mutation that is never retried/recovered
+# is the one that must not be papered over by a later completion claim. Generic and
+# structural -- matched on the invoked tool/command verb, not on any domain.
+MUTATION_COMMAND_TOKENS = (
+    "apply-", "apply_", "finalize-", "finalize_", "answer", "confirm", "commit",
+)
+# Tokens that mark a step as a *completion / results / proof* claim -- the point at
+# which the workflow asserts work is done and emits results. Read from the command,
+# event_type, status, or summary so the signal survives whichever surface carries
+# it. Kept domain-agnostic (no workspace/tool vocabulary).
+COMPLETION_CLAIM_TOKENS = (
+    "run-kpi-pipeline", "kpi-results", "kpi_results", "results", "proof",
+    "proven", "complete", "completed", "finalized", "fully",
+)
+# Recovery is a retry of the *same operation* or an explicit recovery/validation
+# routing -- NOT merely "some other uv-run command followed". A completion/results
+# claim is a `uv run ...` too, so the bare "uv run " heuristic must never count it
+# as recovery. These are the tool verbs that genuinely re-attempt or validate.
+RECOVERY_COMMAND_TOKENS = (
+    "validate-workflow-guardrails",
+    "validate-workspace-artifacts",
+    "run-reliability-suite",
+    "validate-project-harness",
+    "profile_index.json",
+)
 
 
 @dataclass(frozen=True)
@@ -109,6 +135,7 @@ class WorkflowGuardHarness:
         findings.extend(self._check_stalled_steps())
         findings.extend(self._check_unsupported_commands())
         findings.extend(self._check_failed_without_retry())
+        findings.extend(self._check_completion_after_unrecovered_failures())
         findings.extend(self._check_incomplete_workflow())
         findings.extend(self._check_session_monitored())
         findings.extend(self._check_repeated_commands())
@@ -706,6 +733,93 @@ class WorkflowGuardHarness:
             )
         return findings
 
+    def _check_completion_after_unrecovered_failures(self) -> list[dict[str, Any]]:
+        """Block a completion/results/proof claim that follows unrecovered mutation
+        failures. This is the Issue #6 gap: a run of failed `apply` commands
+        (ValueError: Feature not found) was immediately followed by an "all KPIs
+        fully proven / complete" claim, and nothing blocked it -- the completion
+        command, being a `uv run ...`, was even mistaken for a recovery of those
+        failures.
+
+        Walks the trajectory in order; tracks whether there is an outstanding
+        mutation failure that has NOT since been retried/recovered/validated. When a
+        completion claim arrives while such a failure is outstanding, raises an
+        error. Generic: failures, mutations, recoveries, and completion claims are
+        all derived from structural tokens, never from a domain or a tool brand.
+        """
+        trajectory_path = self.layout.state_dir / "trajectory.jsonl"
+        if not trajectory_path.exists():
+            return []
+        records = load_trajectory(trajectory_path)
+        if not records:
+            return []
+
+        findings: list[dict[str, Any]] = []
+        outstanding: list[dict[str, Any]] = []  # unrecovered mutation failures so far
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            command = str(record.get("command") or "")
+            status = str(record.get("status") or "")
+            event_type = str(record.get("event_type") or "")
+            summary = str(record.get("summary") or "")
+            exit_code = record.get("exit_code")
+
+            failed = _failed(status, exit_code)
+            if failed and command and _is_mutation_command(command):
+                outstanding.append(record)
+                continue
+
+            # A successful re-attempt of an outstanding mutation, or an explicit
+            # recovery/validation event, clears the outstanding failures.
+            if outstanding and not failed:
+                recovered = (
+                    event_type.lower() in {"retry", "recovery", "validation"}
+                    or bool(record.get("recovery_for"))
+                    or (
+                        bool(command)
+                        and _is_mutation_command(command)
+                        and not _is_completion_claim(command=command)
+                    )
+                    or (
+                        bool(command)
+                        and not _is_completion_claim(command=command)
+                        and any(term in command.lower() for term in RECOVERY_COMMAND_TOKENS)
+                    )
+                )
+                if recovered:
+                    outstanding = []
+
+            if outstanding and _is_completion_claim(
+                command=command, event_type=event_type, status=status, summary=summary
+            ):
+                failed_commands = [
+                    str(item.get("command") or "") for item in outstanding
+                ]
+                findings.append(
+                    _finding(
+                        "error",
+                        "completion_claim_over_unrecovered_failures",
+                        f"A completion/results claim was made while {len(outstanding)} "
+                        "mutation command(s) had failed and were never retried, "
+                        "recovered, or validated.",
+                        artifact=_rel(trajectory_path, self.repo_root),
+                        command=command or summary,
+                        recommendation=(
+                            "Resolve or retry the failed mutation(s), or record an "
+                            "explicit recovery/validation, before claiming completion "
+                            "or emitting results."
+                        ),
+                        details={
+                            "event_type": event_type,
+                            "unrecovered_failed_commands": failed_commands,
+                            "completion_summary": summary,
+                        },
+                    )
+                )
+                outstanding = []  # one finding per completion claim is enough
+        return findings
+
     def _check_incomplete_workflow(self) -> list[dict[str, Any]]:
         """Conservatively flag a workflow session whose latest stage is a non-terminal
         awaiting stage while the trajectory shows no later progress. Only clear cases
@@ -1075,14 +1189,52 @@ def _failed(status: str, exit_code: Any) -> bool:
 
 
 def _has_retry_or_recovery(commands: list[str]) -> bool:
-    recovery_terms = (
-        "uv run ",
-        "get-content",
-        "select-object",
-        "profile_index.json",
-        "validate-workflow-guardrails",
+    """True when a following command is a genuine recovery/validation step.
+
+    A recovery is an explicit re-attempt or a validation/recovery routing -- not
+    merely "any later uv-run command". A completion/results claim is itself a
+    ``uv run ...`` invocation, so treating every ``uv run`` as recovery let a
+    completion claim silence the unrecovered failures that preceded it (Issue #6).
+    Read profiles also count (the agent inspected evidence to recover).
+    """
+    for command in commands:
+        lowered = command.lower()
+        if _is_completion_claim(command=command):
+            # A completion/results claim is the opposite of a recovery.
+            continue
+        if any(term in lowered for term in RECOVERY_COMMAND_TOKENS):
+            return True
+        if "get-content" in lowered or "select-object" in lowered:
+            return True
+    return False
+
+
+def _is_mutation_command(command: str) -> bool:
+    """A command that changes workspace state (apply/answer/finalize/commit-style)."""
+    name = _invoked_tool_name(command)
+    lowered = command.lower()
+    return any(token in name for token in MUTATION_COMMAND_TOKENS) or any(
+        token in lowered for token in MUTATION_COMMAND_TOKENS
     )
-    return any(any(term in command.lower() for term in recovery_terms) for command in commands)
+
+
+def _is_completion_claim(
+    *,
+    command: str = "",
+    event_type: str = "",
+    status: str = "",
+    summary: str = "",
+) -> bool:
+    """True when any surface of a step asserts work is done / results are proven.
+
+    Structural and domain-agnostic: matches completion/results/proof tokens in the
+    command, event type, status, or summary so the claim is detected whichever
+    surface carries it.
+    """
+    blob = " ".join((command, event_type, status, summary)).lower()
+    if not blob.strip():
+        return False
+    return any(token in blob for token in COMPLETION_CLAIM_TOKENS)
 
 
 def _trajectory_has_recovery(next_records: list[dict[str, Any]], next_commands: list[str]) -> bool:
