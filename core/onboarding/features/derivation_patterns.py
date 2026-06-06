@@ -23,17 +23,43 @@ _DATE_VALUE_RE = re.compile(
 )
 _DATE_DTYPE_TOKENS = ("date", "time", "timestamp", "datetime")
 
-# "over / under / more than / at least N hours" -> threshold + unit.
+# "over / under / more than / exceeds N hours" -> threshold + unit. Covers the
+# common comparator verbs and prepositions English uses for a duration cut,
+# generically (no domain vocabulary).
 _DURATION_RE = re.compile(
-    r"\b(?:over|under|more than|less than|greater than|at least|longer than|"
-    r"shorter than|above|below)\s+(\d+)\s+(hour|day|week|minute)s?\b",
+    r"\b(?:over|under|more than|less than|greater than|at least|at most|"
+    r"longer than|shorter than|above|below|beyond|past|exceed(?:s|ing)?|"
+    r"lasting (?:more|over)|up to|no more than|no less than)\s+"
+    r"(\d+)\s+(hour|day|week|minute)s?\b",
+    re.IGNORECASE,
+)
+# Explicit subtraction form: "STOP - START > 24 hours" / "end minus start over 2
+# days" -> the interval between two operands compared to a threshold. The two
+# operands are matched generically (any token) and resolved to temporal columns
+# via profile evidence, not by name.
+_DURATION_DIFF_RE = re.compile(
+    r"\b[\w\"'.]+\s*(?:-|minus)\s*[\w\"'.]+\s*"
+    r"(?:>=?|over|exceed(?:s|ing)?|more than|greater than|above|beyond|"
+    r"at least|longer than)\s+(\d+)\s+(hour|day|week|minute)s?\b",
     re.IGNORECASE,
 )
 # "within N days of a previous / prior ..." -> window + unit.
 _WINDOW_RE = re.compile(
     r"\bwithin\s+(\d+)\s+(hour|day|week|month)s?\b", re.IGNORECASE
 )
-_RECURRENCE_HINTS = ("previous", "prior", "again", "repeat", "readmit", "re-", "another", "subsequent")
+# Recurrence semantics, generic. Word-stem regex so noun AND verb forms
+# (recurrence/recurring/recurred; repeat/repeated; readmission/readmitted) all
+# hit, plus the comparison words English uses for a "second/again" event. The
+# "re-<stem>" alternatives are spelled out generically (a second occurrence of an
+# action) rather than matching any word that starts with "re", which would
+# false-positive on release/review/region. No domain vocabulary.
+_RECURRENCE_RE = re.compile(
+    r"\b(?:recur\w*|repeat\w*|reoccur\w*|readmi\w*|reorder\w*|"
+    r"re-?(?:order|visit|admi\w*|occur\w*|purchase\w*|book\w*|turn\w*|"
+    r"peat\w*|cur\w*)|"
+    r"again|prior|previous|subsequent|another|repeated|back)\b",
+    re.IGNORECASE,
+)
 
 _START_HINTS = ("start", "begin", "from", "open", "admit", "in")
 _STOP_HINTS = ("stop", "end", "to", "close", "discharge", "out", "finish")
@@ -122,7 +148,7 @@ def _temporal_pair(columns: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[
 
 
 def detect_duration_bucket(question: str, columns: list[dict[str, Any]]) -> dict[str, Any] | None:
-    match = _DURATION_RE.search(question or "")
+    match = _DURATION_RE.search(question or "") or _DURATION_DIFF_RE.search(question or "")
     if not match:
         return None
     n, unit = int(match.group(1)), match.group(2).lower()
@@ -156,8 +182,7 @@ def detect_recurrence_within_window(
     question: str, columns: list[dict[str, Any]]
 ) -> dict[str, Any] | None:
     match = _WINDOW_RE.search(question or "")
-    low = (question or "").lower()
-    if not match or not any(h in low for h in _RECURRENCE_HINTS):
+    if not match or not _RECURRENCE_RE.search(question or ""):
         return None
     n, unit = int(match.group(1)), match.group(2).lower()
     entity = next((c for c in columns if _looks_like_id(c)), None)

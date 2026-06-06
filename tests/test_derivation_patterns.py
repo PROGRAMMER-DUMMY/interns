@@ -3,12 +3,16 @@ Generic, non-domain fixtures (shipments / orders)."""
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
+from core.onboarding.features import derivation_patterns as _dp
 from core.onboarding.features.derivation_patterns import (
     detect_derivation_patterns,
     detect_duration_bucket,
     detect_recurrence_within_window,
 )
+
+_MODULE_PATH = Path(_dp.__file__)
 
 
 def _shipments_cols() -> list[dict]:
@@ -58,6 +62,32 @@ class DurationBucketTests(unittest.TestCase):
         cols = [{"column": "id", "dataset": "d.csv", "dtype": "String", "sample_values": ["x"]}]
         self.assertIsNone(detect_duration_bucket("events over 24 hours", cols))
 
+    def test_exceeds_verb_emits_duration(self) -> None:
+        # "exceeds / exceeding" is a common duration-threshold phrasing that the
+        # comparator-verb list must cover.
+        for phrase in (
+            "shipments whose duration exceeds 24 hours",
+            "shipments exceeding 24 hours in transit",
+        ):
+            opt = detect_duration_bucket(phrase, _shipments_cols())
+            self.assertIsNotNone(opt, phrase)
+            self.assertEqual(opt["source_pattern_id"], "duration_bucket")
+            self.assertIn(">= 24", opt["formula"])
+
+    def test_explicit_subtraction_form_emits_duration(self) -> None:
+        # "STOP - START > 24 hours" / "stop minus start over 1 day": the explicit
+        # interval-subtraction phrasing must resolve to the same date_diff cut.
+        for phrase in ("stop - start > 24 hours", "stop minus start over 1 day"):
+            opt = detect_duration_bucket(phrase, _shipments_cols())
+            self.assertIsNotNone(opt, phrase)
+            self.assertEqual(opt["source_pattern_id"], "duration_bucket")
+            cols = {c["column"] for c in opt["input_columns"]}
+            self.assertEqual(cols, {"start", "stop"})
+            # Formula always computes date_diff(start, stop) regardless of the
+            # operand order written in the question.
+            self.assertIn('date_diff(', opt["formula"])
+            self.assertIn('CAST("start" AS TIMESTAMP)', opt["formula"])
+
 
 class RecurrenceWindowTests(unittest.TestCase):
     def test_within_30_days_of_previous_emits_self_join(self) -> None:
@@ -79,6 +109,32 @@ class RecurrenceWindowTests(unittest.TestCase):
             )
         )
 
+    def test_noun_form_recurrence_emits_self_join(self) -> None:
+        # Noun/standalone recurrence phrasings (recurrence / recurring / reorder /
+        # repeat) must hit, not only "...within N days of a previous order".
+        for phrase in (
+            "customers with a recurrence within 30 days",
+            "recurring orders within 30 days",
+            "customers who reorder within 30 days",
+            "repeat orders within 30 days",
+        ):
+            opt = detect_recurrence_within_window(phrase, _orders_cols())
+            self.assertIsNotNone(opt, phrase)
+            self.assertEqual(opt["source_pattern_id"], "recurrence_within_window")
+            self.assertIn("INTERVAL 30 DAY", opt["formula"])
+
+    def test_re_prefix_noun_does_not_false_positive(self) -> None:
+        # A windowed question whose only "re" word is unrelated (release / review /
+        # region) must NOT be treated as recurrence.
+        for phrase in (
+            "How many orders within 30 days of release?",
+            "reviews within 30 days of launch",
+            "region totals within 30 days",
+        ):
+            self.assertIsNone(
+                detect_recurrence_within_window(phrase, _orders_cols()), phrase
+            )
+
 
 class DispatchTests(unittest.TestCase):
     def test_detect_returns_matching_patterns_only(self) -> None:
@@ -93,6 +149,22 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(
             detect_derivation_patterns("average amount by carrier", _orders_cols()), []
         )
+
+
+class GenericityGuardTest(unittest.TestCase):
+    def test_no_domain_terms_hardcoded(self) -> None:
+        # The detection logic must be domain-agnostic: no baked workspace
+        # vocabulary. Detection rides on generic temporal/entity-key evidence and
+        # generic English duration/recurrence phrasing only.
+        text = _MODULE_PATH.read_text(encoding="utf-8").lower()
+        forbidden = [
+            "healthcare", "hospital", "rcm", "encounter", "patient",
+            "diagnosis", "claim", "payer", "drg", "icd",
+        ]
+        for term in forbidden:
+            self.assertNotIn(
+                term, text, f"forbidden domain term '{term}' in derivation_patterns.py"
+            )
 
 
 if __name__ == "__main__":
