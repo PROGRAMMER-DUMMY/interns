@@ -51,6 +51,9 @@ failures as of the latest changelog entry:
 
 - `tests.test_kpi_pipeline_wrapper` relationship-gate assertion.
 - `tests.test_kpi_proof_packet` `data_engineering_evidence` KeyError.
+- `tests.test_failure_contracts` 3 failures (BEGIN/END CATALOG BOOTSTRAP +
+  raw-pipeline-SQL-path-outside-bootstrap assertions). Confirmed pre-existing on
+  2026-06-07 (fail with that day's changes stashed).
 
 If a suite fails, `git stash` your changes and re-run that one test; if it still
 fails, it is pre-existing — note it, don't "fix" it by accident. Update this list

@@ -382,6 +382,13 @@ memory or session context. Emitting the packet from memory caused a fabricated d
 (BUG-015: `read_csv_auto` shown when the on-disk SQL used `delta_scan`). Show the emitted packet
 once; do not paraphrase the SQL or table rows.
 
+Present results automatically on completion — do not wait to be asked. When the pipeline reaches
+the `complete` or `results` stage, that stage's panel markdown already renders each KPI's
+definition + generated SQL + result table inline (`render_kpi_block`), and `kpi_results/current.md`
+holds the same packet. Forward it in the same turn the run finishes. The operator should never have
+to type "show results" / "show me the results" to see the tables — if they do, the completion turn
+under-presented and should be treated as a bug, not a normal step.
+
 (Residual from BUG-015; the completion path now auto-emits this packet, but any explicit "show
 results" turn must still forward the file, not reconstruct from memory.)
 

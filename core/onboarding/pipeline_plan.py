@@ -357,31 +357,62 @@ def decision_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
     parser.add_argument("--kpi-id", required=True)
-    parser.add_argument("--percentage-denominator-scope", required=True)
+    parser.add_argument("--percentage-denominator-scope", default=None)
+    parser.add_argument(
+        "--grain-bucketing", default=None,
+        help=(
+            "Grain decision for a share metric cut by a raw continuous dimension: "
+            "`band_continuous_cuts` (optionally `band_continuous_cuts:<width>`) or "
+            "`exact_value_grain`. Direct path that does not require the full blocker "
+            "panel, so it never deadlocks on a not-yet-resolved grain block."
+        ),
+    )
     parser.add_argument("--allow-replay", action="store_true")
     args = parser.parse_args(argv)
+
+    scope = args.percentage_denominator_scope
+    grain = args.grain_bucketing
+    if (scope is None) == (grain is None):
+        parser.error(
+            "pass exactly one of --percentage-denominator-scope or --grain-bucketing"
+        )
+
+    recorder = PipelineDecisionRecorder(args.repo_root, args.workspace)
+    if scope is not None:
+        return run_workspace_command(
+            command="apply-pipeline-decision",
+            workspace=args.workspace,
+            repo_root=args.repo_root,
+            fn=lambda: recorder.record_denominator_scope(
+                args.kpi_id, scope,
+                reason="Accepted percentage denominator scope.",
+            ),
+            op_args={
+                "workspace": args.workspace,
+                "kpi_id": args.kpi_id,
+                "percentage_denominator_scope": scope,
+            },
+            allow_replay=args.allow_replay,
+            decision=scope,
+            metadata={"kpi_id": args.kpi_id, "percentage_denominator_scope": scope},
+            record_idempotent=True,
+        )
     return run_workspace_command(
         command="apply-pipeline-decision",
         workspace=args.workspace,
         repo_root=args.repo_root,
-        fn=lambda: PipelineDecisionRecorder(
-            args.repo_root, args.workspace
-        ).record_denominator_scope(
-            args.kpi_id,
-            args.percentage_denominator_scope,
-            reason="Accepted percentage denominator scope.",
+        fn=lambda: recorder.record_grain_bucketing(
+            args.kpi_id, grain,
+            reason="Accepted grain-bucketing decision.",
         ),
         op_args={
             "workspace": args.workspace,
             "kpi_id": args.kpi_id,
-            "percentage_denominator_scope": args.percentage_denominator_scope,
+            "grain_bucketing": grain,
         },
         allow_replay=args.allow_replay,
-        decision=args.percentage_denominator_scope,
-        metadata={
-            "kpi_id": args.kpi_id,
-            "percentage_denominator_scope": args.percentage_denominator_scope,
-        },
+        decision=grain,
+        metadata={"kpi_id": args.kpi_id, "grain_bucketing": grain},
         record_idempotent=True,
     )
 

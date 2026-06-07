@@ -126,12 +126,19 @@ class Aggregation:
 class Dimension:
     """A GROUP BY column.
 
-    - `expression` is the SQL fragment used in both SELECT and GROUP BY
-      (e.g. `date_trunc('month', "order_date")` or just `"channel"`)
+    - `expression` is the SQL fragment used in GROUP BY / ORDER BY / PARTITION BY
+      (e.g. `date_trunc('month', "order_date")` or just `"channel"`). It is also
+      the SELECT projection unless `display_expression` overrides it.
+    - `display_expression` (optional) is what appears in SELECT instead of
+      `expression`. It must be functionally determined by `expression` (built from
+      the same grouped sub-expressions) so GROUP BY stays valid. Used for banded
+      continuous cuts: GROUP BY the numeric band lower bound (sorts correctly),
+      but display a readable `20-29` range. `None` -> SELECT uses `expression`.
     - `alias` is the AS name in SELECT
     """
     expression: str
     alias: str
+    display_expression: str | None = None
 
 
 @dataclass(frozen=True)
@@ -488,41 +495,80 @@ def _detect_event_date_column(cuts_text: str, lookup: dict[str, str]) -> str:
     return ""
 
 
+def _band_expr(base: str, band_width: int) -> str:
+    """Band a continuous integer expression into fixed-width ranges.
+
+    Returns the band's lower bound: ``CAST(FLOOR(base / width) AS BIGINT) *
+    width``. Grouping by the lower bound keeps the share denominator meaningful
+    (one row per band, not per exact value) and sorts numerically; the BIGINT cast
+    drops the float ``.0`` so labels read ``30-39`` not ``30.0-39.0``.
+    Domain-agnostic — the same form bands years (age) or days (days-since), and
+    ``CAST AS BIGINT`` is valid in both DuckDB and Spark/Databricks.
+    """
+    return f"(CAST(FLOOR(({base}) / {band_width}) AS BIGINT) * {band_width})"
+
+
+def _band_label_expr(base: str, band_width: int) -> str:
+    """Readable ``lo-hi`` range label for a banded continuous value.
+
+    Built from the same lower-bound expression as :func:`_band_expr`, so it is
+    functionally determined by the GROUP BY key (display-only; the numeric lower
+    bound still drives GROUP BY / ORDER BY for correct numeric sort). ``CONCAT``
+    coerces the numeric bounds to text in both DuckDB and Spark/Databricks, so no
+    dialect-specific string cast is needed.
+    """
+    lo = _band_expr(base, band_width)
+    hi = f"({lo} + {band_width} - 1)"
+    return f"CONCAT({lo}, '-', {hi})"
+
+
 def _detect_date_arithmetic(
     cuts_text: str,
     lookup: dict[str, str],
     as_of_expr: str = "CURRENT_DATE",
-) -> list[tuple[str, str]]:
+    band_width: int | None = None,
+) -> list[tuple[str, str, str | None]]:
     """Detect age/date-arithmetic expressions in cuts text. Returns
-    [(sql_expression, alias), ...] to add to SELECT.
+    [(group_expression, alias, display_expression), ...] to add to SELECT.
+
+    ``group_expression`` is used for GROUP BY / ORDER BY / PARTITION BY;
+    ``display_expression`` (or ``None``) is the SELECT projection override.
 
     ``as_of_expr`` is the reference point the arithmetic is measured against.
     For a historical/trend KPI the caller passes the event-date expression
     (e.g. ``CAST("ServiceDate" AS DATE)``) so age is computed as-of the event,
     not as-of today (BUG-005). Defaults to ``CURRENT_DATE`` when the KPI has no
     event date available, preserving the original behavior.
+
+    ``band_width`` (when set) bands the raw continuous value into fixed-width
+    ranges instead of emitting the exact integer grain. This is how a recorded
+    ``band_continuous_cuts`` grain decision actually changes the SQL: a share
+    metric cut by age then groups by 10-year bands (numeric lower bound), shown as
+    a readable ``20-29`` label, not one row per exact age. ``None`` keeps the
+    exact-value grain (the pre-existing behavior) with no display override.
     """
-    out: list[tuple[str, str]] = []
+    out: list[tuple[str, str, str | None]] = []
     for match in _AGE_PATTERN.finditer(cuts_text):
         source = match.group(1) or match.group(2)
         if not source:
             continue
         col = _resolve_column(source, lookup)
-        out.append(
-            (
-                f"date_diff('year', CAST({_quote(col)} AS DATE), {as_of_expr})",
-                "age",
-            )
-        )
+        base = f"date_diff('year', CAST({_quote(col)} AS DATE), {as_of_expr})"
+        if band_width:
+            out.append((_band_expr(base, band_width), "age_band",
+                        _band_label_expr(base, band_width)))
+        else:
+            out.append((base, "age", None))
     for match in _DAYS_SINCE_PATTERN.finditer(cuts_text):
         source = match.group(1)
         col = _resolve_column(source, lookup)
-        out.append(
-            (
-                f"date_diff('day', CAST({_quote(col)} AS DATE), {as_of_expr})",
-                f"days_since_{_norm_alias(col)}",
-            )
-        )
+        base = f"date_diff('day', CAST({_quote(col)} AS DATE), {as_of_expr})"
+        alias = f"days_since_{_norm_alias(col)}"
+        if band_width:
+            out.append((_band_expr(base, band_width), f"{alias}_band",
+                        _band_label_expr(base, band_width)))
+        else:
+            out.append((base, alias, None))
     return out
 
 
@@ -618,6 +664,33 @@ def _build_grain_bucketing_block(
     }
 
 
+def _band_width_from_decision(grain_bucketing: str | None) -> int | None:
+    """Resolve the band width (in the cut's own unit) from a grain decision.
+
+    This is what turns a recorded grain-bucketing answer into actual banded SQL:
+
+    - ``None`` / ``"exact_value_grain"`` -> ``None`` (keep the exact-value grain;
+      the reviewer explicitly accepted one row per exact value).
+    - ``"band_continuous_cuts"`` -> the default width (``_DEFAULT_BUCKET_WIDTH``).
+    - An explicit width may be encoded as ``"band_continuous_cuts:15"`` or a bare
+      integer string to override the default.
+
+    Width-agnostic across units (10 years for an age cut, 10 days for a
+    days-since cut) so it stays domain-agnostic.
+    """
+    if not grain_bucketing:
+        return None
+    text = str(grain_bucketing).strip().lower()
+    if text in {"exact_value_grain", "exact", "exact_value"}:
+        return None
+    match = re.search(r"\d+", text)
+    if match:
+        width = int(match.group())
+        if width > 0:
+            return width
+    return _DEFAULT_BUCKET_WIDTH
+
+
 def _detect_having(text: str, aggregations: list[Aggregation]) -> list[str]:
     """Detect HAVING clauses from KPI text. Returns a list of SQL fragments
     that go AFTER the HAVING keyword.
@@ -682,6 +755,11 @@ def parse_kpi(
             parsed.fallback_reason = block["reason"]
             return parsed
 
+    # A recorded band decision turns the raw continuous cut into fixed-width
+    # bands when the date-arithmetic dimensions are emitted below; exact_value_grain
+    # (and None) leave band_width None so the exact grain is preserved.
+    band_width = _band_width_from_decision(grain_bucketing)
+
     # BUG-005: age (and other date arithmetic) must be measured as-of the
     # event/service date when the KPI has one, not as-of today. The event date
     # is the KPI's time-grain source column (e.g. Month(ServiceDate)); when none
@@ -719,11 +797,18 @@ def parse_kpi(
             grain_dimensions: list[Dimension] = []
             grain_seen: set[str] = set()
 
-            def _add_grain(expression: str, alias: str) -> None:
+            def _add_grain(
+                expression: str, alias: str, display: str | None = None
+            ) -> None:
                 if expression in grain_seen:
                     return
                 grain_seen.add(expression)
-                grain_dimensions.append(Dimension(expression=expression, alias=alias))
+                grain_dimensions.append(
+                    Dimension(
+                        expression=expression, alias=alias,
+                        display_expression=display,
+                    )
+                )
 
             cut_columns: list[str] = []
             for token in _split_cuts(cuts_text):
@@ -735,8 +820,10 @@ def parse_kpi(
                     _add_grain(expr, _norm_alias(alias))
                     continue
                 if _AGE_PATTERN.search(token) or _DAYS_SINCE_PATTERN.search(token):
-                    for expr, alias in _detect_date_arithmetic(token, lookup, as_of_expr):
-                        _add_grain(expr, alias)
+                    for expr, alias, display in _detect_date_arithmetic(
+                        token, lookup, as_of_expr, band_width
+                    ):
+                        _add_grain(expr, alias, display)
                     continue
                 clean = re.sub(r"\(.*?\)", "", token).strip()
                 if not clean:
@@ -948,7 +1035,7 @@ def parse_kpi(
     # e.g. "for Medicare LOB" → col=LineOfBusiness, val=Medicare
     #      "for Commercial segment" → col=Segment, val=Commercial
     for dim in parsed.dimensions:
-        if dim.alias in {"month", "quarter", "year", "week", "day", "age"}:
+        if dim.alias in {"month", "quarter", "year", "week", "day", "age", "age_band"}:
             continue
         col = dim.expression.strip('"').strip('`')
         col_label = col.lower().replace("_", "").replace(" ", "")
@@ -1012,14 +1099,18 @@ def parse_kpi(
 
     # Date arithmetic (age, days-since) — must run BEFORE prose filter detection
     # so the date_diff dimension exists when we look for it.
-    for expr, alias in _detect_date_arithmetic(cuts_text + " " + name_text, lookup, as_of_expr):
+    for expr, alias, display in _detect_date_arithmetic(
+        cuts_text + " " + name_text, lookup, as_of_expr, band_width
+    ):
         parsed.extra_select_exprs.append((expr, alias))
-        parsed.dimensions.append(Dimension(expression=expr, alias=alias))
+        parsed.dimensions.append(
+            Dimension(expression=expr, alias=alias, display_expression=display)
+        )
 
     # Prose categorical filter: "for <Value> <col_ref>" where col_ref matches the
     # column name, its alias, OR a first-letter abbreviation (e.g. LOB → LineOfBusiness).
     for dim in parsed.dimensions:
-        if dim.alias in {"month", "quarter", "year", "week", "day", "age"}:
+        if dim.alias in {"month", "quarter", "year", "week", "day", "age", "age_band"}:
             continue
         col = dim.expression.strip('"').strip('`')
         # Build reference names: column name, alias, and first-letter abbreviation
@@ -1138,8 +1229,11 @@ def build_result_view_sql(
         Resolved grain-bucketing decision for a share/percentage metric cut by a
         raw continuous dimension. ``None`` (no decision) → the view is BLOCKED
         and emits a clearly-marked grain-bucketing proposal instead of the
-        exploded GROUP BY. Any non-None value confirms the grain and lets the
-        view generate normally.
+        exploded GROUP BY. ``"band_continuous_cuts"`` (optionally
+        ``"band_continuous_cuts:<width>"``) → the continuous cut is emitted as
+        fixed-width bands (``FLOOR(value / width) * width``, default width 10) so
+        the share denominator stays meaningful. ``"exact_value_grain"`` confirms
+        the exact-value grain and generates one row per value unchanged.
     """
     parsed = parse_kpi(
         kpi,
@@ -1187,7 +1281,7 @@ def build_result_view_sql(
     select_terms: list[str] = []
     group_by_terms: list[str] = []
     for dim in parsed.dimensions:
-        select_terms.append(f"{dim.expression} AS {dim.alias}")
+        select_terms.append(f"{dim.display_expression or dim.expression} AS {dim.alias}")
         if not windowed_only:
             group_by_terms.append(dim.expression)
     for agg in parsed.aggregations:

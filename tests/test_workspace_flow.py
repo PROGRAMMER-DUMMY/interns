@@ -215,6 +215,60 @@ class ResultPacketStalenessTests(unittest.TestCase):
             self.assertEqual(_result_packet_stale_kpis(root, ws_rel), ["kpi_001"])
 
 
+class ResultsPanelInlineRenderTests(unittest.TestCase):
+    """The `results` stage must render the full packet (definition + SQL + result
+    table) inline in its panel markdown, not only artifact paths. Otherwise the
+    operator has to ask "show results" every time — the command output should be
+    self-contained so any CLI agent forwards the tables automatically.
+    """
+
+    def _results_panel(self):
+        return {
+            "stage": "results",
+            "status": "complete",
+            "session_id": "s1",
+            "workspace": "workspaces/demo",
+            "instruction": "Review generated KPI SQL and result previews.",
+            "summary": {
+                "json_path": "a.json",
+                "markdown_path": "a.md",
+                "kpi_count": 1,
+                "error_count": 0,
+                "kpis": [
+                    {
+                        "kpi_id": "kpi_001",
+                        "sql_path": "interns/generated/solutions/kpi_001.sql",
+                        "status": "ok",
+                        "definition": {
+                            "business_question": "Top payers by paid amount",
+                            "metric": "sum(paid_amount)",
+                            "cuts": "payor",
+                        },
+                        "sql_text": "SELECT payor, sum(paid_amount) FROM t GROUP BY payor;",
+                        "preview_markdown": "| payor | paid |\n| --- | --- |\n| P1 | 100 |",
+                    }
+                ],
+            },
+        }
+
+    def test_results_panel_embeds_definition_sql_and_table_inline(self):
+        markdown = _render_panel_markdown(self._results_panel())
+        self.assertIn("## KPI Results", markdown)
+        self.assertIn("Top payers by paid amount", markdown)
+        self.assertIn("```sql", markdown)
+        self.assertIn("GROUP BY payor", markdown)
+        self.assertIn("| payor | paid |", markdown)
+
+    def test_completed_kpis_still_take_precedence_when_present(self):
+        # When a panel carries completed_kpis (the `complete` stage), that block
+        # renders and the results fallback must not double-render.
+        panel = self._results_panel()
+        panel["summary"]["completed_kpis"] = panel["summary"]["kpis"]
+        markdown = _render_panel_markdown(panel)
+        self.assertIn("## Completed KPIs", markdown)
+        self.assertNotIn("## KPI Results", markdown)
+
+
 class WorkspaceFlowTests(unittest.TestCase):
     def test_start_kpi_generation_creates_compact_session_panel(self):
         with tempfile.TemporaryDirectory() as tmp:

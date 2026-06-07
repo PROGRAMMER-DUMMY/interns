@@ -17,6 +17,94 @@ Entry template:
 
 ---
 
+### 2026-06-07  band_continuous_cuts now actually bands; results render inline
+- what: (1) A recorded `band_continuous_cuts` grain decision now emits banded SQL
+  (`FLOOR(value / width) * width AS <cut>_band`, default width 10, overridable via
+  `band_continuous_cuts:<n>`) instead of silently unblocking and still grouping by
+  the exact continuous value. `exact_value_grain` keeps the exact grain. Applies to
+  both the window/mismatched-grain share path and the general GROUP BY path; unit-
+  agnostic (age years / days-since days). (2) The `workspace-flow results` panel
+  markdown now renders the full packet (definition + SQL + result table) inline via
+  the shared `render_kpi_block`, not just artifact paths.
+- why: a Gemini session hit the grain-bucketing block on a share-by-age KPI, then
+  HAND-EDITED the generated kpi_002.sql to bypass it (violating "never hand-edit
+  generated contracts") and produced the exact ~7.4k-row 0.2%-each fragmentation
+  the block warns about. Root cause: `grain_bucketing` was only read to decide
+  whether to block (result_view_builder.py) — no code path consumed the band width,
+  so the "proper" answer was a no-op identical to the hand-edit. Separately, the
+  operator had to type "show results" because the `results` command emitted only
+  paths, not the rendered tables.
+- files: core/onboarding/kpi/result_view_builder.py (`_band_expr`,
+  `_band_width_from_decision`, band_width threaded through `_detect_date_arithmetic`
+  + both call sites + `age_band` skip-set); core/onboarding/workspace/flow.py
+  (`_render_panel_markdown` renders `summary.kpis` inline when `completed_kpis`
+  absent); tests/test_result_view_builder.py (+4 banding tests);
+  tests/test_workspace_flow.py (+2 inline-render tests).
+- tests: tests.test_result_view_builder (40 ok), tests.test_workspace_flow (30 ok),
+  combined 70 ok; green-gate 345/0.
+- verify: `.venv/Scripts/python.exe -m unittest tests.test_result_view_builder
+  tests.test_workspace_flow` and `.venv/Scripts/python.exe -m core.dev.green_gate`.
+
+### 2026-06-07  Break grain-decision deadlock; reject fabricated harness
+- what: three fixes that together make a share-by-continuous-cut KPI actually
+  completable end-to-end (verified live on RCM kpi_002: 1732 banded rows, all four
+  cuts, within-department share):
+  (1a) `apply-pipeline-decision` gains `--grain-bucketing` (mirrors
+  `--percentage-denominator-scope`) — a direct path to record the grain decision
+  under the correct `kpi_id` that does NOT run the heavy validator, so it cannot
+  deadlock.
+  (1b) the execution harness classifies an intent-decision-blocked KPI as
+  `blocked_pending_decision` (new status) instead of `failed`; the artifact
+  validator treats that as non-fatal (only a genuinely failed record means "did
+  not pass"). This breaks the deadlock where a grain-blocked KPI made the
+  validator fail, which blocked applying the answer that unblocks it.
+  (2) the validator now RE-EXECUTES the result views and compares
+  status/columns/row_count to the on-disk harness manifest — a hand-faked manifest
+  (status flipped to passed, dummy sample row) is rejected as a possible tamper.
+  Also: harness semantic checks (`parse_kpi` metric check + `grain_coverage`) are
+  now grain-aware so the banded `age_band` form is not mis-flagged as a dropped
+  cut or an unimplemented metric (verifier must parse the KPI the same way the
+  generator did).
+- why: a post-fix Gemini run could not record `band_continuous_cuts` (validator
+  deadlock), so it hand-edited `kpi_execution_harness.json` to fake a pass with a
+  `Dummy` row and marched on. Root causes: blocked-pending misclassified as
+  failed; no `--grain-bucketing` direct path; validator trusted the harness JSON
+  without re-execution.
+- files: core/onboarding/pipeline_plan.py (decision_main: --grain-bucketing);
+  core/onboarding/kpi/execution_harness.py (BLOCKED_PENDING_STATUS,
+  sql_is_intent_blocked, execute_only, grain-aware metric check, counts);
+  core/onboarding/workspace/validation.py (blocked_pending tolerance +
+  _verify_harness_against_execution); core/onboarding/kpi/intent_coverage.py
+  (age cut accepts age_band); tests in test_kpi_execution_harness.py (+3) and
+  test_pipeline_plan.py (+2).
+- tests: test_kpi_execution_harness + test_pipeline_plan (30 ok); broad sweep
+  (workspace_flow / nl_chain / relationship / pipeline harness, 63 ok); green-gate
+  345/0. Live RCM e2e: deadlock broken, kpi_002 passes banded, tampered manifest
+  rejected.
+- verify: `.venv/Scripts/python.exe -m unittest tests.test_kpi_execution_harness
+  tests.test_pipeline_plan` + `.venv/Scripts/python.exe -m core.dev.green_gate`.
+
+### 2026-06-07  Residuals: readable band labels + cross-CLI forwarding docs
+- what: (1) banded continuous cuts now display a readable `20-29` range label
+  (`CONCAT` of the band bounds) while GROUP BY / ORDER BY / PARTITION BY use the
+  numeric `CAST(FLOOR(v/width) AS BIGINT)*width` lower bound — so bands sort
+  numerically (100-109 after 20-29, not lexically). New optional
+  `Dimension.display_expression` decouples the SELECT projection from the group
+  key. (2) Documented the auto-forward result-packet behavior cross-CLI:
+  strengthened AGENTS.md's forwarding rule to "present automatically on
+  completion" and added a matching section to GEMINI.md (which had none).
+- why: follow-ups from the 2026-06-07 banding fix — a bare numeric band reads
+  poorly, and the "show results" friction was tool-fixed but only doc-enforced for
+  Claude (CLAUDE.md), not Gemini.
+- files: core/onboarding/kpi/result_view_builder.py (`Dimension.display_expression`,
+  `_band_label_expr`, BIGINT cast in `_band_expr`, triple return from
+  `_detect_date_arithmetic` + callers, SELECT uses display_expression);
+  AGENTS.md; GEMINI.md; tests/test_result_view_builder.py (+1 numeric-sort lock,
+  updated 2 band tests).
+- tests: tests.test_result_view_builder (41 ok); green-gate 345/0.
+- verify: `.venv/Scripts/python.exe -m unittest tests.test_result_view_builder` +
+  DuckDB exec spot-check (bands render `30-39`/`100-109`, sorted numerically).
+
 ### 2026-06-06  Complete partial-completion threading for mixed KPI sets (Issue #2)
 - what: finished threading the deferred (undefined) KPI set through the
   feature-blocker panel and the source-to-target gate so a MIX of defined +

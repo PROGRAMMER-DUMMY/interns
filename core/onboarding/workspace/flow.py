@@ -1514,11 +1514,23 @@ def _render_panel_markdown(panel: dict[str, Any]) -> str:
                     "",
                 ]
             )
-    completed_kpis = (panel.get("summary") or {}).get("completed_kpis") or []
+    summary = panel.get("summary") or {}
+    completed_kpis = summary.get("completed_kpis") or []
     if completed_kpis:
         lines.extend(["## Completed KPIs", ""])
         for entry in completed_kpis:
             lines.extend(render_kpi_block(entry, heading_level=3))
+    else:
+        # The `results` stage carries per-KPI previews under `summary.kpis`
+        # (definition + SQL + result table), not `completed_kpis`. Render them
+        # inline too so `workspace-flow results` emits the full result packet in
+        # its own output — the operator does not have to ask "show results"; the
+        # presenter forwards the rendered tables automatically.
+        result_kpis = summary.get("kpis") or []
+        if result_kpis:
+            lines.extend(["## KPI Results", ""])
+            for entry in result_kpis:
+                lines.extend(render_kpi_block(entry, heading_level=3))
     recovery_commands = (panel.get("summary") or {}).get("recovery_commands") or panel.get("recovery_commands") or []
     if recovery_commands:
         lines.extend(["## Recovery Commands", ""])

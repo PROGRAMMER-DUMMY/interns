@@ -50,6 +50,88 @@ class KPIExecutionHarnessTests(unittest.TestCase):
             )
             self.assertTrue(manifest["ok"])
 
+    def test_intent_blocked_sql_is_pending_decision_not_failed(self):
+        # A KPI whose SQL carries the intent-decision block marker is a PENDING
+        # USER DECISION, not an execution failure. Mislabeling it `failed` made
+        # the artifact validator hard-fail, which blocked applying the very answer
+        # that unblocks it (the grain-bucketing deadlock).
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            solutions = root / "workspaces" / "demo" / "interns" / "generated" / "solutions"
+            solutions.mkdir(parents=True)
+            (solutions / "kpi_002.sql").write_text(
+                "-- BLOCKED: grain-bucketing decision required (no exploded GROUP BY emitted).\n"
+                "-- reason: share metric cut by a raw continuous dimension\n"
+                'CREATE OR REPLACE VIEW "kpi_002_results" AS SELECT * FROM "kpi_002_features";',
+                encoding="utf-8",
+            )
+            result = KPIExecutionHarness(root, "workspaces/demo").run()
+            rec = result.records[0]
+            self.assertEqual(rec.status, "blocked_pending_decision")
+            self.assertFalse(rec.errors)
+            summary = result.summary()
+            self.assertEqual(summary["blocked_pending_count"], 1)
+            self.assertEqual(summary["failed_count"], 0)
+
+    def test_validator_tolerates_blocked_pending_but_rejects_genuine_failure(self):
+        from core.onboarding.kpi.execution_harness import BLOCKED_PENDING_STATUS
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = root / "workspaces" / "demo"
+            solutions = ws / "interns" / "generated" / "solutions"
+            solutions.mkdir(parents=True)
+            sql = (
+                "-- BLOCKED: grain-bucketing decision required\n"
+                "-- reason: pending\n"
+                'CREATE OR REPLACE VIEW "kpi_002_results" AS SELECT * FROM "kpi_002_features";'
+            )
+            (solutions / "kpi_002.sql").write_text(sql, encoding="utf-8")
+            import hashlib
+            payload = {
+                "artifact_type": "kpi_execution_harness.json",
+                "version": 1,
+                "generated_by": "run-kpi-execution-harness",
+                "ok": False,
+                "records": [{
+                    "kpi_id": "kpi_002",
+                    "sql_path": "workspaces/demo/interns/generated/solutions/kpi_002.sql",
+                    "status": BLOCKED_PENDING_STATUS,
+                    "result_view": "kpi_002_results",
+                    "sql_sha256": hashlib.sha256(sql.encode("utf-8")).hexdigest(),
+                    "columns": [], "row_count": None, "sample_output_table": "",
+                }],
+            }
+            self._write_harness_artifact(root, payload)
+            errs = WorkspaceArtifactValidator(root, "workspaces/demo").run().errors
+            self.assertFalse([e for e in errs if "did not pass" in e or "has no result columns" in e])
+
+    def test_validator_rejects_tampered_passed_manifest(self):
+        # The exact fabrication seen in the wild: flip a record to passed with a
+        # dummy sample. Re-execution must catch the mismatch.
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            solutions = root / "workspaces" / "demo" / "interns" / "generated" / "solutions"
+            solutions.mkdir(parents=True)
+            sql = 'CREATE OR REPLACE VIEW "kpi_001_results" AS SELECT 1 AS a UNION ALL SELECT 2;'
+            (solutions / "kpi_001.sql").write_text(sql, encoding="utf-8")
+            # Produce a real manifest, then tamper the row_count.
+            KPIExecutionHarness(root, "workspaces/demo").run()
+            path = root / "workspaces" / "demo" / "interns" / "generated" / "evidence" / "kpi_execution_harness.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["records"][0]["row_count"] = 999
+            data["records"][0]["sample_output_table"] = "| a |\n| --- |\n| Dummy |"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            errs = WorkspaceArtifactValidator(root, "workspaces/demo").run().errors
+            self.assertTrue([e for e in errs if "tampered" in e.lower()])
+
     def test_sql_generator_produces_generic_aggregation_from_metric_and_cuts(self):
         """The result-view SQL is now built by a workspace-agnostic generic
         builder that parses `kpi.metric` + `kpi.cuts` into structural SQL.

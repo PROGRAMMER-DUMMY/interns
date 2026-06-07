@@ -7,6 +7,41 @@ Item template: `- [ ] <area>: <what> — <why / where>`
 
 ## Open
 
+- [ ] **intent-contract apply path mis-keys decisions to an empty kpi_id.**
+      `record_intent_answer` for `grain_bucketing` (and `denominator_scope`) was
+      observed writing `pipeline_decisions.json` under key `""` instead of the real
+      kpi_id (e.g. `{"grain_bucketing_decisions": {"": "band_continuous_cuts"}}`),
+      so the generator (which looks up `[kpi_id]`) never applied it. The direct CLI
+      `apply-pipeline-decision --kpi-id ... --grain-bucketing ...` (added 2026-06-07)
+      keys correctly and is the reliable path; the panel/intent-answer path still
+      needs its kpi_id plumbed through `record_intent_answer`'s caller. Until fixed,
+      the blocker-panel route to a grain answer remains unreliable even though the
+      deadlock is gone.
+- [ ] **pre-existing: `tests.test_failure_contracts` has 3 failing tests**
+      (BEGIN/END CATALOG BOOTSTRAP + raw-pipeline-SQL-path assertions). Confirmed
+      pre-existing (fail on baseline with 2026-06-07 changes stashed); NOT caused by
+      the grain/harness work. Triage separately. (Added to testing.md.)
+
+- [x] **generation: band_continuous_cuts emitted a NO-OP (FIXED 2026-06-07).** The
+      grain block (2026-06-06) and the facet seam (line 22) only proved the decision
+      *unblocked* generation — `grain_bucketing` was never consumed by the SQL, so
+      `band_continuous_cuts` produced the SAME exact-value explosion as the block
+      warned about (a Gemini session hand-edited kpi_002.sql and shipped ~7.4k
+      0.2%-each rows). Now `band_continuous_cuts` emits `FLOOR(v/width)*width AS
+      <cut>_band`; `exact_value_grain` keeps exact grain. `result_view_builder.py` +
+      tests. See changelog 2026-06-07.
+- [x] **presentation: band label now a readable range string (FIXED 2026-06-07).**
+      `age_band` displays `20-29` via `CONCAT` while GROUP BY / ORDER BY / PARTITION BY
+      use the numeric `CAST(FLOOR(v/width) AS BIGINT)*width` lower bound, so bands sort
+      numerically (100-109 after 20-29, not lexically). `Dimension.display_expression`
+      decouples SELECT from the group key. `result_view_builder.py` + tests
+      (`test_band_groups_and_orders_by_numeric_not_label`).
+- [x] **operating docs: auto-forward result packet now doc-enforced cross-CLI
+      (FIXED 2026-06-07).** AGENTS.md "KPI Result Packet Forwarding Rule" strengthened
+      to "present automatically on completion; needing to type 'show results' is a bug";
+      added an equivalent "KPI Result Packet Forwarding Rule" section to GEMINI.md
+      (previously had none). CLAUDE.md already carried the rule.
+
 - [x] **generation: raw continuous-grain explosion now BLOCKS for share metrics
       (FIXED 2026-06-06).** Escalated the exact-age/days-since continuous cut from
       WARN (e9d9d2c) to a hard blocker for share/percentage metrics; generator

@@ -976,6 +976,92 @@ class GrainBucketingBlockTests(unittest.TestCase):
         )
         self.assertNotIn("-- BLOCKED: grain-bucketing", sql)
 
+    def test_band_continuous_cuts_actually_bands_the_age(self):
+        # The decision must CHANGE the SQL: the continuous cut is emitted as
+        # fixed-width bands (lower bound CAST(FLOOR(value / 10) AS BIGINT) * 10),
+        # shown as a readable CONCAT range, NOT one row per exact age. This is the
+        # gap that let a hand-edited exact-age GROUP BY ship even though the
+        # "band" decision was recorded.
+        sql = build_result_view_sql(
+            self._share_age_kpi(),
+            kpi_id="kpi_share", feature_view='"f"', result_view='"r"',
+            grain_bucketing="band_continuous_cuts",
+        )
+        self.assertNotIn("-- BLOCKED: grain-bucketing", sql)
+        self.assertIn("age_band", sql)
+        self.assertIn("FLOOR(", sql)
+        self.assertIn("AS BIGINT) * 10", sql)
+        # Readable lo-hi range label in the projection.
+        self.assertIn("CONCAT(", sql)
+        # The exact-value grain alias must NOT be emitted as an output column.
+        self.assertNotIn(" AS age\n", sql)
+        self.assertNotIn(" AS age,", sql)
+
+    def test_band_groups_and_orders_by_numeric_not_label(self):
+        # The readable CONCAT label is display-only: GROUP BY / ORDER BY must use
+        # the numeric band lower bound so bands sort numerically (100-109 AFTER
+        # 20-29), not lexically. Lock the decoupling against regression.
+        sql = build_result_view_sql(
+            self._share_age_kpi(),
+            kpi_id="kpi_share", feature_view='"f"', result_view='"r"',
+            grain_bucketing="band_continuous_cuts",
+        )
+        group_line = next(
+            ln for ln in sql.splitlines() if ln.startswith("GROUP BY")
+        )
+        order_line = next(
+            ln for ln in sql.splitlines() if ln.startswith("ORDER BY")
+        )
+        # The grouping/ordering key is the numeric band, never the CONCAT label.
+        self.assertIn("AS BIGINT) * 10", group_line)
+        self.assertNotIn("CONCAT(", group_line)
+        self.assertIn("AS BIGINT) * 10", order_line)
+        self.assertNotIn("CONCAT(", order_line)
+
+    def test_band_width_override_from_decision(self):
+        # An explicit width ("band_continuous_cuts:5") overrides the default 10.
+        sql = build_result_view_sql(
+            self._share_age_kpi(),
+            kpi_id="kpi_share", feature_view='"f"', result_view='"r"',
+            grain_bucketing="band_continuous_cuts:5",
+        )
+        self.assertIn("AS BIGINT) * 5", sql)
+        self.assertNotIn("AS BIGINT) * 10", sql)
+
+    def test_exact_value_grain_keeps_exact_age_unbanded(self):
+        # The explicit exact-value opt-out keeps one row per exact age (no FLOOR).
+        sql = build_result_view_sql(
+            self._share_age_kpi(),
+            kpi_id="kpi_share", feature_view='"f"', result_view='"r"',
+            grain_bucketing="exact_value_grain",
+        )
+        self.assertNotIn("-- BLOCKED: grain-bucketing", sql)
+        self.assertNotIn("FLOOR(", sql)
+        self.assertNotIn("age_band", sql)
+        self.assertIn(
+            "date_diff('year', CAST(\"date_of_birth\" AS DATE), CURRENT_DATE)", sql
+        )
+
+    def test_band_continuous_cuts_is_generic_for_days_since(self):
+        # Banding is unit-agnostic: a share metric cut by a raw days-since value
+        # bands into 10-day ranges, mirroring the age path. No domain words.
+        kpi = _kpi_uc(
+            name="share of orders by days since signup",
+            metric="share of count(*) for region",
+            cuts="region, days since signup_date",
+            features=[
+                {"feature": "region", "source_columns": [{"column": "region"}]},
+                {"feature": "signup_date",
+                 "source_columns": [{"column": "signup_date"}]},
+            ],
+        )
+        sql = build_result_view_sql(
+            kpi, kpi_id="k", feature_view='"f"', result_view='"r"',
+            grain_bucketing="band_continuous_cuts",
+        )
+        self.assertIn("days_since_signup_date_band", sql)
+        self.assertIn("FLOOR((date_diff('day'", sql)
+
     def test_age_threshold_filter_does_not_trigger_block(self):
         # `age > 50` is a FILTER, not a grouping dimension — must not block.
         kpi = _kpi_uc(

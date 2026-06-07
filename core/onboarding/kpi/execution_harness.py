@@ -26,6 +26,16 @@ RESULT_VIEW_PATTERN = re.compile(
     re.IGNORECASE,
 )
 KPI_SQL_PATTERN = re.compile(r"^kpi_\d{3}(?:_[a-z0-9_]+)?\.sql$", re.IGNORECASE)
+# An intent-decision block (e.g. grain bucketing) is a PENDING USER DECISION, not
+# an execution failure. The generator emits a `-- BLOCKED: <facet> decision
+# required` marker and a passthrough result view. Detect it generically so the
+# harness can classify the KPI as `blocked_pending_decision` instead of `failed`
+# — otherwise the artifact validator hard-fails and the very command that records
+# the decision (apply-kpi-panel-answer / apply-pipeline-decision) deadlocks.
+INTENT_BLOCK_PATTERN = re.compile(
+    r"^--\s*BLOCKED:.*decision required", re.IGNORECASE | re.MULTILINE
+)
+BLOCKED_PENDING_STATUS = "blocked_pending_decision"
 SUM_INPUT_PATTERN = re.compile(
     r"sum\s*\(\s*(?:(?:distinct|disitnct)\s+)?([A-Za-z_][A-Za-z0-9_]*)",
     re.IGNORECASE,
@@ -86,7 +96,14 @@ class KPIExecutionHarnessResult:
             "ok": self.ok,
             "kpi_count": len(self.records),
             "passed_count": sum(1 for record in self.records if record.ok),
-            "failed_count": sum(1 for record in self.records if not record.ok),
+            "blocked_pending_count": sum(
+                1 for record in self.records
+                if record.status == BLOCKED_PENDING_STATUS
+            ),
+            "failed_count": sum(
+                1 for record in self.records
+                if not record.ok and record.status != BLOCKED_PENDING_STATUS
+            ),
             "records": [record.summary() for record in self.records],
             "manifest_path": self.manifest_path,
             "report_path": self.report_path,
@@ -125,6 +142,13 @@ class KPIExecutionHarness:
         manifest_path.write_text(json.dumps(result.summary(), indent=2), encoding="utf-8")
         report_path.write_text(_render_report(result), encoding="utf-8")
         return result
+
+    def execute_only(self) -> list[KPIExecutionRecord]:
+        """Execute the generated KPI SQL and return records WITHOUT writing the
+        manifest/report. Used by the artifact validator to re-verify an on-disk
+        manifest against real execution (tamper detection) with no side effects.
+        """
+        return self._execute_records()
 
     def _execute_records(self) -> list[KPIExecutionRecord]:
         try:
@@ -183,6 +207,13 @@ class KPIExecutionHarness:
         )
         sql = sql_path.read_text(encoding="utf-8")
         record.sql_sha256 = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+        if sql_is_intent_blocked(sql):
+            # Pending user decision, not a failure: record it as such and skip
+            # execution/semantic checks. The validator treats this as non-fatal so
+            # the decision that unblocks it can actually be recorded.
+            record.status = BLOCKED_PENDING_STATUS
+            record.warnings.append(_block_reason(sql))
+            return record
         if not sql_defines_result_view(sql, result_view):
             record.errors.append(
                 f"SQL must define final result view `{result_view}`; feature/staging views are not enough"
@@ -238,6 +269,13 @@ class KPIExecutionHarness:
         name = str(kpi.get("name") or kpi.get("description") or "")
         lowered_sql = sql.lower()
         lowered_metric = metric.lower()
+        # The verifier must parse the KPI the SAME way the generator did: with the
+        # recorded grain-bucketing decision. Without it, parse_kpi short-circuits
+        # at the grain block and returns no aggregations, which would make the
+        # metric check below spuriously fail for a share-by-continuous-cut KPI.
+        grain_decision = (
+            self._pipeline_decisions_by_id().get("grain_bucketing_decisions") or {}
+        ).get(kpi_id)
         if "sum(" in lowered_metric:
             # An aggregation over DISTINCT values is rendered by the generator as
             # COUNT(DISTINCT ...) (summing distinct values is meaningless), so a
@@ -248,7 +286,8 @@ class KPIExecutionHarness:
             # generator for every workspace and inherits its metric-token handling
             # (no metric-spelling rules duplicated in the verifier).
             expects_distinct_count = any(
-                agg.distinct for agg in parse_kpi(kpi).aggregations
+                agg.distinct
+                for agg in parse_kpi(kpi, grain_bucketing=grain_decision).aggregations
             )
             implements_sum = "sum(" in lowered_sql or (
                 expects_distinct_count and "count(distinct" in lowered_sql
@@ -392,6 +431,23 @@ class KPIExecutionHarness:
 def sql_defines_result_view(sql: str, result_view: str) -> bool:
     pattern = RESULT_VIEW_PATTERN.pattern.format(view=re.escape(result_view))
     return re.search(pattern, sql, flags=re.IGNORECASE) is not None
+
+
+def sql_is_intent_blocked(sql: str) -> bool:
+    """True when generated SQL carries an intent-decision block marker.
+
+    Generic across facets (grain bucketing today, any future `... decision
+    required` block) — it keys off the marker convention, not a domain word.
+    """
+    return bool(INTENT_BLOCK_PATTERN.search(sql or ""))
+
+
+def _block_reason(sql: str) -> str:
+    for line in (sql or "").splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("-- reason:"):
+            return "blocked pending decision: " + stripped[len("-- reason:"):].strip()
+    return "KPI generation is blocked pending a user decision (e.g. grain bucketing)."
 
 
 def _placeholder_result_columns(columns: list[str]) -> bool:

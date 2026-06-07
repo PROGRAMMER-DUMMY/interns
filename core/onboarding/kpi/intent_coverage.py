@@ -206,9 +206,16 @@ def declared_grain(kpi: dict[str, Any]) -> list[tuple[str, list[str]]]:
             out.append((token, [unit]))
             continue
         if _AGE_RE.search(low):
-            out.append((token, ["age"]))
+            # An age cut is realized either as the exact `age` or, when a
+            # band_continuous_cuts grain decision is in effect, as `age_band`.
+            # Accept either so the banded form is not flagged as a dropped cut.
+            # Stays independent of the generator's parser (BUG-024 rationale);
+            # it just knows the banding alias convention.
+            out.append((token, ["age", "age_band"]))
             continue
         if _DAYS_SINCE_RE.search(low):
+            # `date_diff` covers both the exact days-since and the banded
+            # `days_since_<col>_band` form (the band wraps the same date_diff).
             out.append((token, ["days_since", "date_diff"]))
             continue
         clean = re.sub(r"\(.*?\)", "", token).strip()
