@@ -441,6 +441,7 @@ databricks-full = [
 ]
 documents = [
     { name = "fastexcel" },
+    { name = "opendataloader-pdf" },
     { name = "openpyxl" },
     { name = "pdfplumber" },
     { name = "xlsxwriter" },
@@ -487,6 +488,7 @@ requires-dist = [
     { name = "notebook", specifier = ">=7.5.6" },
     { name = "notebook", marker = "extra == 'notebook'", specifier = ">=7.5.6" },
     { name = "numpy", specifier = ">=1.26,<2.0" },
+    { name = "opendataloader-pdf", marker = "extra == 'documents'", specifier = "==2.4.7" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "openpyxl", marker = "extra == 'documents'", specifier = ">=3.1.5" },
     { name = "pandas", marker = "extra == 'databricks-full'", specifier = ">=2.2" },
@@ -3299,6 +3301,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0b/5f/19930f824ffeb0ad4372da4812c50edbd1434f678c90c2733e1188edfc63/oauthlib-3.3.1.tar.gz", hash = "sha256:0f0f8aa759826a193cf66c12ea1af1637f87b9b4622d46e866952bb022e538c9", size = 185918, upload-time = "2025-06-19T22:48:08.269Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/be/9c/92789c596b8df838baa98fa71844d84283302f7604ed565dafe5a6b5041a/oauthlib-3.3.1-py3-none-any.whl", hash = "sha256:88119c938d2b8fb88561af5f6ee0eec8cc8d552b7bb1f712743136eb7523b7a1", size = 160065, upload-time = "2025-06-19T22:48:06.508Z" },
+]
+
+[[package]]
+name = "opendataloader-pdf"
+version = "2.4.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1d/5a/98cd2079f2828f7886ee447eae21ee60a858930596aebcc8d275a1fe2b12/opendataloader_pdf-2.4.7.tar.gz", hash = "sha256:a16e995f2f526d706045218d9e359a31f50371a0bc0e3bb1bc15abb467c08fb7", size = 22554865, upload-time = "2026-05-27T10:04:54.285Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/14/f897eabf04eab4e6a40dce9214d921558165f3eaed68335892a5b1a004d0/opendataloader_pdf-2.4.7-py3-none-any.whl", hash = "sha256:1c359183650f4c012875010c156f13b6d3477b00762b8e3fbd8479fa03feb628", size = 22568934, upload-time = "2026-05-27T10:04:49.902Z" },
 ]
 
 [[package]]

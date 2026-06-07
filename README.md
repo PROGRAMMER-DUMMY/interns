@@ -29,6 +29,8 @@ Every decision is captured. Every mapping has evidence. Bad data never silently 
 - **Governed blocker question panels** — when a mapping is ambiguous, generates a structured question with JSON-backed options ranked by evidence; accepts answers through governed wrappers
 - **Relationship/FK contracts** — proves or requires approval for every multi-table join before any SQL is generated; profile-only candidates are advisory only
 - **KPI SQL generation** — emits executable DuckDB SQL locally; swaps to catalog table references for Databricks enterprise; generates only from fully proven or user-confirmed mappings
+- **Grain-bucketing for share metrics** — a share/percentage metric cut by a raw continuous dimension (exact age, days-since) blocks pending a decision instead of fragmenting into one tiny row per value; `apply-pipeline-decision --grain-bucketing band_continuous_cuts` emits fixed-width bands (readable `20-29` labels, numeric sort), or `exact_value_grain` keeps the exact grain
+- **Tamper-evident execution evidence** — the artifact validator re-executes generated result views and compares columns/row counts to the recorded harness, so a hand-edited or fabricated result manifest is rejected rather than trusted
 - **Run reports** — every `generate-kpi-sql` call writes `interns/runs/{date}/results.md` containing KPI definition, full SQL, and executed result table
 - **Workspace allowlisting** — scope any workspace to specific dataset subsets without touching code
 - **Workspace memory** — accepted decisions (feature mappings, relationship approvals) persist across runs so the same questions are never asked twice
