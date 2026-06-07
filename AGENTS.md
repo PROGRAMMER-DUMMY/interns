@@ -36,10 +36,15 @@ What do you want to do with this project right now, and which workspace/files sh
 ```
 
 3. If the user says only `set <workspace>` or names a workspace/project, treat that as a workspace
-   selection command. Recursively list file paths from the workspace root only, summarize what will
-   be active, ask for confirmation, and then continue from the highest-priority blocker. For KPI/query
-   workspaces, if feature mappings or business definitions are blocked, start the automatic blocker
-   grilling session after confirmation.
+   selection command. During the selection turn, the agent MUST NOT call Edit, Write, or any
+   file-creating/deleting tool on any file — including `.gitignore`, `.geminiignore`, settings
+   files, generated artifacts, or any repo file — until the user has confirmed the workspace AND
+   explicitly authorized continuing past selection. Allowed actions during selection: read-only
+   listing via `list-workspace-files`, bounded PowerShell fallback, `git status --short`, and
+   reading `config/tasks.json`. Recursively list file paths from the workspace root only, summarize
+   what will be active, ask for confirmation, and then continue from the highest-priority blocker.
+   For KPI/query workspaces, if feature mappings or business definitions are blocked, start the
+   automatic blocker grilling session after confirmation.
 
 Then scan likely sources with bounded listing only:
 
@@ -81,6 +86,9 @@ Workspace selection scans must be bounded. For `set <workspace>`:
 - After the listing command returns, do not run more scans or perform extended reasoning. Respond
   within 10 seconds using only the returned path list and `config/tasks.json`.
 - The response must contain only the likely active file-set summary and the confirmation question.
+- HARD STOP: do not call Edit, Write, or any mutation tool on any file during the selection turn.
+  This includes `.gitignore`, `.geminiignore`, `settings.json`, generated artifacts, and all other
+  repo or workspace files. Any mutation before explicit post-confirmation authorization is forbidden.
 
 Summarize the likely active set:
 
@@ -342,6 +350,75 @@ Review `interns/generated/contracts/source_to_target_plan.json` and
 `interns/reports/source_to_target_plan.md`. If any KPI in the plan is blocked, resolve that blocker
 before generating SQL, Polars, PySpark, or medallion pipeline code.
 
+## Human-Gate Provenance Rule
+
+When a human answers an approval or review gate — a relationship-join approval or the kpi-analyst
+review — the agent MUST pass `--confirmed-by <name>` to the relevant CLI:
+
+```powershell
+uv run apply-relationship-answer --workspace workspaces/<project> --confirmed-by "<reviewer>"
+uv run workspace-flow review      --workspace workspaces/<project> --confirmed-by "<reviewer>"
+```
+
+An empty `--confirmed-by` records the decision as agent-asserted (`source: agent`). A human "yes"
+in an Ask-User prompt must be recorded as `source: human`. Do not clear a human gate while
+recording it as agent-asserted. If `--confirmed-by` is not available from context, ask for the
+reviewer name before applying the decision.
+
+(Residual from BUG-014; the harness now stores `source`/`confirmed_by` but relies on the agent
+passing the flag correctly.)
+
+## KPI Result Packet Forwarding Rule
+
+When presenting KPI results, forward the canonical artifact verbatim:
+
+```powershell
+# Read and display — do not retype or paraphrase
+workspaces/<project>/interns/reports/kpi_results/current.md
+```
+
+The agent MUST NOT re-author, re-type, or reconstruct the generated SQL or result tables from
+memory or session context. Emitting the packet from memory caused a fabricated data-source render
+(BUG-015: `read_csv_auto` shown when the on-disk SQL used `delta_scan`). Show the emitted packet
+once; do not paraphrase the SQL or table rows.
+
+Present results automatically on completion — do not wait to be asked. When the pipeline reaches
+the `complete` or `results` stage, that stage's panel markdown already renders each KPI's
+definition + generated SQL + result table inline (`render_kpi_block`), and `kpi_results/current.md`
+holds the same packet. Forward it in the same turn the run finishes. The operator should never have
+to type "show results" / "show me the results" to see the tables — if they do, the completion turn
+under-presented and should be treated as a bug, not a normal step.
+
+(Residual from BUG-015; the completion path now auto-emits this packet, but any explicit "show
+results" turn must still forward the file, not reconstruct from memory.)
+
+## Token Discipline
+
+Per-run token cost is currently ~44 pp of model quota. These habits reduce it materially:
+
+- Use `run-kpi-pipeline` for the deterministic KPI chain instead of issuing each step
+  (onboard / blocker / contracts / start / results) as a separate LLM-driven call. The wrapper
+  stops only at genuine human gates and emits the result packet once:
+
+  ```powershell
+  uv run run-kpi-pipeline --workspace workspaces/<project> --domain <domain>
+  ```
+
+- Never read large JSON audit files whole. The following are machine audit trails (thousands of
+  lines); read the paired `.md` summary instead and treat the JSON as machine-only:
+  - `interns/state/**/session.json`
+  - `**/trajectory*.json`
+  - workflow `current.json`
+  - `kpi_feature_mapping.json`
+
+- Pass `--quiet` on workspace-flow subcommands (accepted per-subcommand since BUG-019) so panels
+  are not dumped in full each call.
+
+- Use a cheaper model tier for mechanical/deterministic pipeline steps (profiling, contract
+  building, validation, execution harness). Reserve the top tier for genuine semantic decisions:
+  KPI clarification, derived-feature judgment, and the kpi-analyst review. See the `control-pane`
+  skill for model-tier routing.
+
 ## Quiet Execution Rule
 
 Keep main-chat workflow output concise. Show only the stage, key result, blocker or risk,
@@ -349,6 +426,31 @@ recommendation, and next deterministic command. Do not paste long shell output, 
 raw logs, or validation traces unless the user asks to inspect them. Save details under
 `workspaces/<project>/interns/generated/` and `workspaces/<project>/interns/reports/`, then point to
 the artifact path.
+
+Pass `--quiet` to high-volume CLIs so they emit a compact summary instead of the full JSON. These
+commands write the full result to disk regardless; quiet mode prints a pass/fail line, counts,
+and the artifact path to read when detail is actually needed. Use it by default for status,
+validation, listing, and execution checks:
+
+```powershell
+uv run validate-project-harness --workspace workspaces/<project> --domain <domain> --quiet
+uv run run-kpi-execution-harness --workspace workspaces/<project> --quiet
+uv run list-workspace-files --workspace workspaces/<project> --quiet
+uv run workspace-flow status --diff --workspace workspaces/<project> --quiet
+```
+
+Quiet-mode discipline:
+
+- Default to `--quiet` for any command run to check state or progress (harness, execution, diff,
+  listing). Reach for the full JSON (`--json` or no flag) only when a specific field is needed that
+  the quiet summary does not surface, and say which field.
+- Run each deterministic command once. Do not re-run `validate-project-harness`, `workspace-flow
+  start`, or `list-workspace-files` repeatedly in one turn; if a command resumed an existing session
+  or already produced an artifact, read the artifact path it printed instead of re-running.
+- Do not write throwaway reader scripts (`read_*.py`) to view an artifact. Read the file directly,
+  or re-run the producing command with `--quiet` and read the `detail:` path it prints.
+- Repeated-identical warnings and blockers are already collapsed to one line with an `(xN)` count
+  suffix; do not expand them back out.
 
 ## Tool And Evidence Discovery
 
@@ -615,15 +717,29 @@ missing, ask for it and save the request under the active workspace's `interns/r
 
 ## Verification
 
-Run focused checks before commit:
+Run the portable green gate before claiming done or committing. It runs the curated
+CI suite plus the enterprise suite the same way `.github/workflows/ci.yml` does:
 
 ```powershell
-uv run python -m unittest tests.test_enterprise_optimization
-uv run python -m compileall core interns tools tests dashboard.py
-uv run ruff check core interns\base.py interns\insights.py tools\databricks_setup.py tools\methodology_parser.py tests\test_enterprise_optimization.py dashboard.py
+green-gate            # curated + enterprise suites (strict gate)
+green-gate --sweep    # also sweep blast-radius modules; flag NEW vs known failures
 ```
 
-Use broader lint only if you are ready to clean legacy tools too.
+Hard rule: run tests with the venv interpreter, NOT `uv run`. `uv run` resyncs and
+reinstalls pre-release pyspark 4.1.1 (no Delta), which breaks the pyspark-backed
+tests. If `green-gate` is not on PATH, call it via the venv interpreter:
+
+```powershell
+.venv\Scripts\python.exe -m core.dev.green_gate --sweep
+.venv\Scripts\python.exe -m unittest tests.test_enterprise_optimization
+.venv\Scripts\python.exe -m compileall core interns tools tests dashboard.py
+.venv\Scripts\python.exe -m ruff check core
+```
+
+Governed `uv run` wrappers (onboard-workspace, resolve-kpi-features, ...) are still
+the right entry points for workspace flows -- the venv rule applies to tests, pyspark,
+and engine generation only. Use broader lint only if you are ready to clean legacy
+tools too.
 
 ## Git
 

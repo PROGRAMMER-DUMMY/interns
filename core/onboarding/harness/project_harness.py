@@ -53,10 +53,12 @@ class ProjectHarness:
         threshold: float = 95.0,
         sample_limit: int = 10,
         ai_cli_dataset: str | Path | None = None,
+        cross_engine: bool = False,
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
         self.workspace_rel = _rel(self.workspace, self.repo_root)
+        self.cross_engine = cross_engine
         self.domain = domain
         self.threshold = threshold
         self.sample_limit = sample_limit
@@ -82,10 +84,13 @@ class ProjectHarness:
         layered_pipeline = self._run_layered_pipeline()
         pipeline_execution_harness = self._run_pipeline_execution_harness()
         data_quality_harness = self._run_data_quality_harness()
+        cross_engine_parity = self._run_cross_engine_parity()
+        generation_scoring = self._run_generation_scoring()
 
         checks = {
             "workspace_artifacts": validation,
             "kpi_execution": kpi_execution,
+            "cross_engine_parity": cross_engine_parity,
             "agent_benchmark": {
                 **benchmark.summary(),
                 "scorecard": benchmark_payload,
@@ -98,6 +103,7 @@ class ProjectHarness:
             "layered_pipeline": layered_pipeline,
             "pipeline_execution_harness": pipeline_execution_harness,
             "data_quality_harness": data_quality_harness,
+            "generation_scoring": generation_scoring,
         }
         blockers = _collect_blockers(checks)
         warnings = _collect_warnings(checks)
@@ -138,6 +144,47 @@ class ProjectHarness:
             sample_limit=self.sample_limit,
         ).run()
         return result.summary()
+
+    def _run_cross_engine_parity(self) -> dict[str, Any]:
+        """Block when a generated Polars/PySpark script diverges from SQL.
+
+        Only fires when imperative-engine scripts exist; otherwise skipped. Treats
+        only parity/execution divergence as the signal (SQL correctness is already
+        covered by the KPI execution harness).
+        """
+        if not self.cross_engine:
+            return {
+                "status": "skipped",
+                "ok": True,
+                "reason": "cross-engine parity is opt-in (executes generated scripts); pass --cross-engine",
+            }
+        if not self.layout.solutions_dir.exists():
+            return {"status": "skipped", "ok": True, "reason": "no solutions dir"}
+        if not list(self.layout.solutions_dir.glob("kpi_*_polars.py")) and not list(
+            self.layout.solutions_dir.glob("kpi_*_pyspark.py")
+        ):
+            return {"status": "skipped", "ok": True, "reason": "no Polars/PySpark scripts to cross-check"}
+        try:
+            from core.onboarding.kpi.verify_kpi_output import KPIOutputVerifier
+
+            result = KPIOutputVerifier(
+                self.repo_root, self.workspace_rel, cross_engine=True
+            ).verify()
+        except Exception as exc:
+            return {"status": "failed", "ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        summary = result.summary()
+        parity_errors = [
+            error
+            for record in summary.get("records", [])
+            for error in record.get("errors", [])
+            if "cross-engine" in error or "PySpark" in error or "Polars script failed" in error
+        ]
+        return {
+            "status": "passed" if not parity_errors else "blocked",
+            "ok": not parity_errors,
+            "kpi_count": summary.get("kpi_count", 0),
+            "parity_errors": parity_errors,
+        }
 
     def _git_hygiene(self) -> dict[str, Any]:
         try:
@@ -252,6 +299,55 @@ class ProjectHarness:
             "path": _rel(path, self.repo_root),
         }
 
+    def _run_generation_scoring(self) -> dict[str, Any]:
+        """Require any present generation panel to carry an understanding score.
+
+        Warning-level gate (never a hard blocker). KPI generation panels must
+        carry ``quality_score.understanding_score``; data-model generation panels
+        must carry an ``understanding`` block with a numeric ``score``. A panel
+        present without a usable understanding score is flagged ``ok=False``; if
+        no generation panel exists the gate is skipped. Fully defensive: missing
+        files, malformed JSON, or absent keys never raise.
+        """
+        candidates = (
+            ("kpi", self.layout.reports_dir / "kpi_generation" / "current.json"),
+            ("data_model", self.layout.reports_dir / "data_model_generation" / "current.json"),
+        )
+        panels: list[dict[str, Any]] = []
+        for kind, path in candidates:
+            if not path.exists():
+                continue
+            payload = _load_json(path)
+            score = _generation_understanding_score(kind, payload)
+            panels.append(
+                {
+                    "kind": kind,
+                    "path": _rel(path, self.repo_root),
+                    "has_score": score is not None,
+                    "understanding_score": score,
+                }
+            )
+        if not panels:
+            return {
+                "status": "skipped",
+                "ok": True,
+                "reason": "No generation panel found.",
+                "panels": [],
+            }
+        missing = [panel for panel in panels if not panel["has_score"]]
+        ok = not missing
+        if ok:
+            reason = "All generation panels carry an understanding/confidence score."
+        else:
+            kinds = ", ".join(panel["kind"] for panel in missing)
+            reason = f"Generation panel(s) missing an understanding/confidence score: {kinds}."
+        return {
+            "status": "passed" if ok else "blocked",
+            "ok": ok,
+            "reason": reason,
+            "panels": panels,
+        }
+
     def _validate_workspace(self) -> None:
         if not self.workspace.exists():
             raise FileNotFoundError(f"workspace not found: {self.workspace}")
@@ -294,6 +390,8 @@ def _hard_blockers(checks: dict[str, Any]) -> list[str]:
         blockers.append("workspace artifact validation failed")
     if not checks["kpi_execution"].get("ok"):
         blockers.append("KPI execution harness failed")
+    if not checks.get("cross_engine_parity", {}).get("ok", True):
+        blockers.append("cross-engine parity failed")
     if not checks["git_hygiene"].get("ok"):
         blockers.append("git hygiene failed")
     if not checks.get("workflow_guardrails", {}).get("ok", True):
@@ -313,6 +411,74 @@ def _hard_blockers(checks: dict[str, Any]) -> list[str]:
     return blockers
 
 
+# Reliability findings the guard emits as recoverable warnings, plus the roster
+# routing signal. Surfaced with a "workflow reliability:" prefix when severity is
+# warning; escalated to a blocker only when severity is error.
+_WORKFLOW_RELIABILITY_WARNING_CODES = frozenset(
+    {
+        "roster_not_routed",
+        "stalled_step",
+        "slow_step",
+        "unsupported_command",
+        "workflow_incomplete",
+        "session_not_monitored",
+        "repeated_identical_command",
+        "generated_artifact_hand_edited",
+        "throwaway_reader_script",
+    }
+)
+# Reliability finding codes that are always blockers when present (regardless of
+# the severity the guard assigns).
+_WORKFLOW_RELIABILITY_BLOCKER_CODES = frozenset({"failed_without_recovery"})
+# All reliability codes (warning or error) that should be considered for blocker
+# escalation when their severity is "error".
+_WORKFLOW_RELIABILITY_CODES = _WORKFLOW_RELIABILITY_WARNING_CODES | {
+    "failed_without_recovery"
+}
+
+
+def _workflow_reliability_blockers(workflow: dict[str, Any]) -> list[str]:
+    """Collect reliability/roster guard findings that must block the release.
+
+    Blocks on (a) any ``failed_without_recovery`` finding and (b) any reliability
+    finding emitted at ``severity == "error"``. Fully defensive about missing
+    report/findings shapes.
+    """
+    if not isinstance(workflow, dict):
+        return []
+    report = workflow.get("report") or {}
+    blockers: list[str] = []
+    seen: set[str] = set()
+    for finding in report.get("findings") or []:
+        if not isinstance(finding, dict):
+            continue
+        code = finding.get("code")
+        severity = finding.get("severity")
+        is_blocker = code in _WORKFLOW_RELIABILITY_BLOCKER_CODES or (
+            severity == "error" and code in _WORKFLOW_RELIABILITY_CODES
+        )
+        if not is_blocker:
+            continue
+        message = f"workflow reliability: {code} - {finding.get('message')}"
+        if message not in seen:
+            seen.add(message)
+            blockers.append(message)
+    return blockers
+
+
+def _has_workflow_reliability_findings(workflow: dict[str, Any]) -> bool:
+    """True when the guard report carries any roster/reliability finding."""
+    if not isinstance(workflow, dict):
+        return False
+    report = workflow.get("report") or {}
+    for finding in report.get("findings") or []:
+        if not isinstance(finding, dict):
+            continue
+        if finding.get("code") in _WORKFLOW_RELIABILITY_CODES:
+            return True
+    return False
+
+
 def _collect_blockers(checks: dict[str, Any]) -> list[str]:
     blockers = []
     blockers.extend(str(error) for error in checks["workspace_artifacts"].get("errors") or [])
@@ -327,6 +493,9 @@ def _collect_blockers(checks: dict[str, Any]) -> list[str]:
         for finding in report.get("findings") or []:
             if finding.get("severity") == "error":
                 blockers.append(f"workflow guardrail: {finding.get('code')} - {finding.get('message')}")
+    # Reliability + roster signals: surface error-severity reliability findings and
+    # any failed_without_recovery finding as blockers regardless of overall guard ok.
+    blockers.extend(_workflow_reliability_blockers(workflow))
     graph = checks.get("evidence_graph", {})
     if graph and graph.get("ok") is False:
         blockers.append(f"evidence graph: {graph.get('error') or graph.get('status')}")
@@ -336,6 +505,8 @@ def _collect_blockers(checks: dict[str, Any]) -> list[str]:
     data_quality = checks.get("data_quality_harness", {})
     if data_quality and data_quality.get("ok") is False:
         blockers.append(f"data quality harness `{data_quality.get('status')}`")
+    for error in checks.get("cross_engine_parity", {}).get("parity_errors") or []:
+        blockers.append(f"cross-engine parity: {error}")
     kpi = checks["kpi_execution"]
     for record in kpi.get("records") or []:
         for error in record.get("errors") or []:
@@ -343,7 +514,9 @@ def _collect_blockers(checks: dict[str, Any]) -> list[str]:
     release = (checks["agent_benchmark"].get("release_gate") or {}).get("blocked_gates") or []
     for gate in release:
         blockers.append(f"release gate `{gate.get('gate')}` blocked: {gate.get('reason')}")
-    return blockers
+    # Reliability findings repeat per failed trajectory step; collapse identical
+    # blocker lines to one + a count suffix.
+    return _dedupe_with_counts(blockers)
 
 
 def _collect_warnings(checks: dict[str, Any]) -> list[str]:
@@ -356,12 +529,35 @@ def _collect_warnings(checks: dict[str, Any]) -> list[str]:
     if workflow:
         report = workflow.get("report") or {}
         for finding in report.get("findings") or []:
-            if finding.get("severity") == "warning":
-                warnings.append(f"workflow guardrail: {finding.get('code')} - {finding.get('message')}")
+            code = finding.get("code")
+            if finding.get("severity") != "warning":
+                continue
+            if code in _WORKFLOW_RELIABILITY_WARNING_CODES:
+                warnings.append(
+                    f"workflow reliability: {code} - {finding.get('message')}"
+                )
+            else:
+                warnings.append(f"workflow guardrail: {code} - {finding.get('message')}")
     graph = checks.get("evidence_graph", {})
     for warning in graph.get("warnings") or []:
         warnings.append(f"evidence graph: {warning}")
-    return warnings
+    generation = checks.get("generation_scoring", {})
+    if generation and generation.get("ok") is False:
+        warnings.append(f"generation scoring: {generation.get('reason')}")
+    # Collapse identical warnings to one line + a count suffix. Reliability
+    # findings (e.g. trajectory_failed_step_without_recovery) routinely repeat
+    # per trajectory step and otherwise flood the output dozens of times.
+    return _dedupe_with_counts(warnings)
+
+
+def _dedupe_with_counts(items: list[str]) -> list[str]:
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for item in items:
+        if item not in counts:
+            order.append(item)
+        counts[item] = counts.get(item, 0) + 1
+    return [f"{item} (x{counts[item]})" if counts[item] > 1 else item for item in order]
 
 
 def _next_commands(workspace: str, domain: str, checks: dict[str, Any]) -> list[str]:
@@ -370,12 +566,21 @@ def _next_commands(workspace: str, domain: str, checks: dict[str, Any]) -> list[
         commands.append(f"uv run validate-workspace-artifacts --workspace {workspace}")
     if not checks["kpi_execution"].get("ok"):
         commands.append(f"uv run run-kpi-execution-harness --workspace {workspace}")
+    if checks.get("cross_engine_parity", {}).get("ok") is False:
+        commands.append(f"uv run verify-kpi-output --workspace {workspace} --cross-engine")
     if checks["git_hygiene"].get("issues"):
         commands.append("uv run validate-git-hygiene")
     if checks.get("ai_cli_harness", {}).get("ok") is False:
         commands.append(f"uv run run-ai-cli-harness --workspace {workspace} --dataset <dataset>")
+    workflow_command = f"uv run validate-workflow-guardrails --workspace {workspace}"
     if checks.get("workflow_guardrails", {}).get("ok") is False:
-        commands.append(f"uv run validate-workflow-guardrails --workspace {workspace}")
+        commands.append(workflow_command)
+    elif _has_workflow_reliability_findings(checks.get("workflow_guardrails", {})):
+        # Roster/reliability signals can surface even when the overall guard is ok.
+        if workflow_command not in commands:
+            commands.append(workflow_command)
+    if checks.get("generation_scoring", {}).get("ok") is False:
+        commands.append(f"uv run validate-generation-scoring --workspace {workspace}")
     if checks.get("evidence_graph", {}).get("ok") is False:
         commands.append(f"uv run build-workspace-evidence-graph --workspace {workspace}")
     if checks.get("pipeline_execution_harness", {}).get("ok") is False:
@@ -415,6 +620,7 @@ def _render_markdown(result: ProjectHarnessResult) -> str:
         f"- Pipeline execution harness: `{checks.get('pipeline_execution_harness', {}).get('status', 'skipped')}`",
         f"- Data quality harness: `{checks.get('data_quality_harness', {}).get('status', 'skipped')}`",
         f"- AI CLI harness: `{checks.get('ai_cli_harness', {}).get('status', 'skipped')}`",
+        f"- Generation scoring: `{checks.get('generation_scoring', {}).get('status', 'skipped')}`",
         "",
         "## Release Gates",
         "",
@@ -430,6 +636,35 @@ def _render_markdown(result: ProjectHarnessResult) -> str:
     lines.extend(["", "## Next Commands", ""])
     lines.extend(f"- `{command}`" for command in result.next_commands)
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _generation_understanding_score(kind: str, payload: dict[str, Any]) -> float | None:
+    """Extract the numeric understanding score from a generation panel payload.
+
+    KPI panels expose ``quality_score.understanding_score``; data-model panels
+    expose ``understanding.score``. Returns ``None`` when absent or non-numeric.
+    Tolerates panels nested under a ``panel`` key.
+    """
+    if not isinstance(payload, dict):
+        return None
+    sources: list[dict[str, Any]] = [payload]
+    nested = payload.get("panel")
+    if isinstance(nested, dict):
+        sources.append(nested)
+    for source in sources:
+        if kind == "kpi":
+            block = source.get("quality_score")
+            if isinstance(block, dict):
+                value = block.get("understanding_score")
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    return float(value)
+        else:
+            block = source.get("understanding")
+            if isinstance(block, dict):
+                value = block.get("score")
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    return float(value)
+    return None
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -457,6 +692,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--threshold", type=float, default=95.0)
     parser.add_argument("--sample-limit", type=int, default=10)
     parser.add_argument("--ai-cli-dataset")
+    parser.add_argument(
+        "--cross-engine", action="store_true",
+        help="Enforce SQL↔Polars/PySpark parity by executing generated scripts (opt-in; runs code).",
+    )
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Print a compact pass/fail summary + artifact paths instead of the full JSON.",
+    )
     args = parser.parse_args(argv)
 
     result = ProjectHarness(
@@ -466,9 +709,30 @@ def main(argv: list[str] | None = None) -> int:
         threshold=args.threshold,
         sample_limit=args.sample_limit,
         ai_cli_dataset=args.ai_cli_dataset,
+        cross_engine=args.cross_engine,
     ).run()
-    print(json.dumps(result.summary(), indent=2, default=str))
+    if args.quiet:
+        for line in _quiet_summary_lines(result):
+            print(line)
+    else:
+        print(json.dumps(result.summary(), indent=2, default=str))
     return 0 if result.ok else 1
+
+
+def _quiet_summary_lines(result: ProjectHarnessResult) -> list[str]:
+    status = "[ok] pass" if result.ok else "[x] fail"
+    lines = [
+        f"{status} project-harness: {result.workspace} (score {result.score:.1f}/{result.threshold:.0f})",
+        f"blockers: {len(result.blockers)} | warnings: {len(result.warnings)}",
+    ]
+    for blocker in result.blockers:
+        lines.append(f"  [x] {blocker}")
+    for warning in result.warnings:
+        lines.append(f"  [~] {warning}")
+    lines.append(f"detail: {result.report_path} (full JSON: {result.manifest_path})")
+    if result.next_commands:
+        lines.append(f"next: {result.next_commands[0]}")
+    return lines
 
 
 if __name__ == "__main__":

@@ -4,7 +4,10 @@ import unittest
 from pathlib import Path
 
 from core.onboarding.kpi.blocker_question_panel import BlockerQuestionPanelBuilder
-from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
+from core.onboarding.kpi.feature_resolver import (
+    KPIFeatureResolver,
+    _dedupe_features_by_physical_column,
+)
 from core.onboarding.workspace.onboarding import WorkspaceOnboarder
 
 
@@ -188,6 +191,167 @@ class ContextualDictionaryMappingTests(unittest.TestCase):
             self.assertIn("|", demo["sample_output_table"])
             self.assertIn("source_column_samples", demo)
             self.assertIn("|", demo["source_column_samples"][0]["sample_output_table"])
+
+
+class PhysicalColumnDedupTests(unittest.TestCase):
+    """BUG-001: multiple features for one KPI that resolve to the SAME physical
+    column must collapse to one, and a candidate duplicate must not raise a
+    phantom blocker when a sibling already proves the column."""
+
+    def _feature(self, name, state, dataset, column):
+        return {
+            "feature": name,
+            "state": state,
+            "resolution_type": "direct_column",
+            "source_columns": [{"dataset": dataset, "column": column}],
+            "question": None
+            if state in {"proven_direct", "proven_alias"}
+            else f"Which physical column should define `{name}`?",
+        }
+
+    def test_collapses_same_physical_column_and_drops_phantom_blocker(self):
+        # The "Department Name" dimension split into three tokens, all of which
+        # resolve to departments.Name. One is an unconfirmed misspelling.
+        features = [
+            self._feature("PatientID", "proven_direct", "datasets/patients.csv", "PatientID"),
+            self._feature("departement", "candidate_unconfirmed", "datasets/departments.csv", "Name"),
+            self._feature("Department", "proven_alias", "datasets/departments.csv", "Name"),
+            self._feature("Name", "proven_direct", "datasets/departments.csv", "Name"),
+            self._feature("VisitType", "proven_direct", "datasets/visits.csv", "VisitType"),
+        ]
+
+        deduped = _dedupe_features_by_physical_column(features)
+
+        # departments.Name collapsed from 3 features to 1; distinct columns kept.
+        dept_features = [
+            f for f in deduped
+            if f["source_columns"][0]["column"] == "Name"
+            and "departments" in f["source_columns"][0]["dataset"]
+        ]
+        self.assertEqual(len(dept_features), 1)
+
+        # The phantom candidate_unconfirmed for the misspelling is gone; the
+        # surviving feature for that column is proven.
+        self.assertNotIn(
+            "candidate_unconfirmed",
+            [f["state"] for f in deduped],
+        )
+        self.assertIn(dept_features[0]["state"], {"proven_direct", "proven_alias"})
+
+        # Features resolving to genuinely different columns are untouched.
+        kept_columns = {f["source_columns"][0]["column"] for f in deduped}
+        self.assertEqual(kept_columns, {"PatientID", "Name", "VisitType"})
+
+    def _contextual_candidate_feature(self, name, ranked_pairs):
+        """An unresolved contextual feature carrying a ranked candidate list.
+
+        Mirrors the real resolver shape: ``source_columns`` and ``candidates``
+        hold every scored candidate in descending-score order, so index 0 is
+        the top-ranked target the feature would resolve to.
+        """
+        return {
+            "feature": name,
+            "state": "candidate_unconfirmed",
+            "resolution_type": "contextual_column_candidate",
+            "source_columns": [
+                {"dataset": dataset, "column": column} for dataset, column in ranked_pairs
+            ],
+            "candidates": [
+                {"state": "candidate_unconfirmed", "source": dataset, "column": column}
+                for dataset, column in ranked_pairs
+            ],
+            "question": f"Should `{name}` use context/dictionary candidate(s)?",
+        }
+
+    def test_multi_candidate_unconfirmed_collapses_into_proven_sibling(self):
+        # The real BUG-001 shape: a candidate_unconfirmed feature whose
+        # top-ranked CANDIDATE column equals a proven sibling's RESOLVED
+        # column, while carrying many lower-ranked candidates as well. The
+        # frozenset of all its source_columns never equals the proven sibling's
+        # single-column key, so the same-key collapse cannot catch it — the
+        # candidate-vs-proven pass must.
+        features = [
+            self._feature("PatientID", "proven_direct", "datasets/patients.csv", "PatientID"),
+            self._contextual_candidate_feature(
+                "departement",
+                [
+                    ("datasets/departments.csv", "Name"),  # top-ranked target
+                    ("datasets/patients.csv", "DOB"),
+                    ("datasets/patients.csv", "Gender"),
+                    ("datasets/transactions.csv", "VisitType"),
+                ],
+            ),
+            self._feature("Name", "proven_direct", "datasets/departments.csv", "Name"),
+            self._feature("VisitType", "proven_direct", "datasets/transactions.csv", "VisitType"),
+        ]
+
+        deduped = _dedupe_features_by_physical_column(features)
+
+        # The phantom candidate_unconfirmed for departments.Name is dropped.
+        self.assertNotIn("candidate_unconfirmed", [f["state"] for f in deduped])
+        self.assertNotIn("departement", [f["feature"] for f in deduped])
+        # Every proven feature survives untouched.
+        self.assertEqual(
+            [(f["feature"], f["state"]) for f in deduped],
+            [
+                ("PatientID", "proven_direct"),
+                ("Name", "proven_direct"),
+                ("VisitType", "proven_direct"),
+            ],
+        )
+
+    def test_multi_candidate_unconfirmed_kept_when_no_proven_sibling_matches(self):
+        # A genuine blocker: the top-ranked candidate column is NOT proven by
+        # any sibling, so the feature must remain a blocker.
+        features = [
+            self._feature("PatientID", "proven_direct", "datasets/patients.csv", "PatientID"),
+            self._contextual_candidate_feature(
+                "mystery",
+                [
+                    ("datasets/lookup.csv", "Code"),  # top-ranked, not proven anywhere
+                    ("datasets/patients.csv", "Gender"),
+                ],
+            ),
+            self._feature("Name", "proven_direct", "datasets/departments.csv", "Name"),
+        ]
+
+        deduped = _dedupe_features_by_physical_column(features)
+
+        self.assertIn("mystery", [f["feature"] for f in deduped])
+        self.assertIn("candidate_unconfirmed", [f["state"] for f in deduped])
+        self.assertEqual(len(deduped), 3)
+
+    def test_distinct_columns_are_never_merged(self):
+        features = [
+            self._feature("a", "proven_direct", "datasets/t.csv", "ColA"),
+            self._feature("b", "candidate_unconfirmed", "datasets/t.csv", "ColB"),
+        ]
+        deduped = _dedupe_features_by_physical_column(features)
+        self.assertEqual(len(deduped), 2)
+        self.assertEqual(
+            [f["state"] for f in deduped],
+            ["proven_direct", "candidate_unconfirmed"],
+        )
+
+    def test_unresolved_features_without_columns_are_preserved(self):
+        features = [
+            self._feature("a", "proven_direct", "datasets/t.csv", "ColA"),
+            {
+                "feature": "mystery",
+                "state": "blocked_missing_evidence",
+                "source_columns": [],
+                "question": "What defines `mystery`?",
+            },
+            {
+                "feature": "enigma",
+                "state": "blocked_missing_evidence",
+                "source_columns": [],
+                "question": "What defines `enigma`?",
+            },
+        ]
+        deduped = _dedupe_features_by_physical_column(features)
+        # No physical column => never collapsed together.
+        self.assertEqual(len(deduped), 3)
 
 
 if __name__ == "__main__":

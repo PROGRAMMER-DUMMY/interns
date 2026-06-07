@@ -9,6 +9,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.onboarding.kpi.intent_coverage import (
+    denominator_scope_findings,
+    grain_coverage_findings,
+    join_correctness_findings,
+    prose_filter_findings,
+    _load_proven_join_pairs,
+)
+from core.onboarding.kpi.result_view_builder import parse_kpi
 from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -18,6 +26,16 @@ RESULT_VIEW_PATTERN = re.compile(
     re.IGNORECASE,
 )
 KPI_SQL_PATTERN = re.compile(r"^kpi_\d{3}(?:_[a-z0-9_]+)?\.sql$", re.IGNORECASE)
+# An intent-decision block (e.g. grain bucketing) is a PENDING USER DECISION, not
+# an execution failure. The generator emits a `-- BLOCKED: <facet> decision
+# required` marker and a passthrough result view. Detect it generically so the
+# harness can classify the KPI as `blocked_pending_decision` instead of `failed`
+# — otherwise the artifact validator hard-fails and the very command that records
+# the decision (apply-kpi-panel-answer / apply-pipeline-decision) deadlocks.
+INTENT_BLOCK_PATTERN = re.compile(
+    r"^--\s*BLOCKED:.*decision required", re.IGNORECASE | re.MULTILINE
+)
+BLOCKED_PENDING_STATUS = "blocked_pending_decision"
 SUM_INPUT_PATTERN = re.compile(
     r"sum\s*\(\s*(?:(?:distinct|disitnct)\s+)?([A-Za-z_][A-Za-z0-9_]*)",
     re.IGNORECASE,
@@ -78,7 +96,14 @@ class KPIExecutionHarnessResult:
             "ok": self.ok,
             "kpi_count": len(self.records),
             "passed_count": sum(1 for record in self.records if record.ok),
-            "failed_count": sum(1 for record in self.records if not record.ok),
+            "blocked_pending_count": sum(
+                1 for record in self.records
+                if record.status == BLOCKED_PENDING_STATUS
+            ),
+            "failed_count": sum(
+                1 for record in self.records
+                if not record.ok and record.status != BLOCKED_PENDING_STATUS
+            ),
             "records": [record.summary() for record in self.records],
             "manifest_path": self.manifest_path,
             "report_path": self.report_path,
@@ -97,6 +122,11 @@ class KPIExecutionHarness:
         self.workspace = (self.repo_root / workspace).resolve()
         self.layout = WorkspaceLayout(project_root=self.workspace)
         self.sample_limit = sample_limit
+        self._registry_cache: dict[str, dict[str, Any]] | None = None
+        self._mapping_cache: dict[str, dict[str, Any]] | None = None
+        self._proven_pairs_cache: set[frozenset[str]] | None = None
+        # Cached pipeline_decisions.json (None = not yet loaded; {} = absent/unparseable)
+        self._pipeline_decisions_cache: dict[str, Any] | None = None
 
     def run(self) -> KPIExecutionHarnessResult:
         self.layout.ensure_runtime_dirs()
@@ -112,6 +142,13 @@ class KPIExecutionHarness:
         manifest_path.write_text(json.dumps(result.summary(), indent=2), encoding="utf-8")
         report_path.write_text(_render_report(result), encoding="utf-8")
         return result
+
+    def execute_only(self) -> list[KPIExecutionRecord]:
+        """Execute the generated KPI SQL and return records WITHOUT writing the
+        manifest/report. Used by the artifact validator to re-verify an on-disk
+        manifest against real execution (tamper detection) with no side effects.
+        """
+        return self._execute_records()
 
     def _execute_records(self) -> list[KPIExecutionRecord]:
         try:
@@ -170,6 +207,13 @@ class KPIExecutionHarness:
         )
         sql = sql_path.read_text(encoding="utf-8")
         record.sql_sha256 = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+        if sql_is_intent_blocked(sql):
+            # Pending user decision, not a failure: record it as such and skip
+            # execution/semantic checks. The validator treats this as non-fatal so
+            # the decision that unblocks it can actually be recorded.
+            record.status = BLOCKED_PENDING_STATUS
+            record.warnings.append(_block_reason(sql))
+            return record
         if not sql_defines_result_view(sql, result_view):
             record.errors.append(
                 f"SQL must define final result view `{result_view}`; feature/staging views are not enough"
@@ -225,8 +269,30 @@ class KPIExecutionHarness:
         name = str(kpi.get("name") or kpi.get("description") or "")
         lowered_sql = sql.lower()
         lowered_metric = metric.lower()
+        # The verifier must parse the KPI the SAME way the generator did: with the
+        # recorded grain-bucketing decision. Without it, parse_kpi short-circuits
+        # at the grain block and returns no aggregations, which would make the
+        # metric check below spuriously fail for a share-by-continuous-cut KPI.
+        grain_decision = (
+            self._pipeline_decisions_by_id().get("grain_bucketing_decisions") or {}
+        ).get(kpi_id)
         if "sum(" in lowered_metric:
-            if "sum(" not in lowered_sql:
+            # An aggregation over DISTINCT values is rendered by the generator as
+            # COUNT(DISTINCT ...) (summing distinct values is meaningless), so a
+            # metric's sum(distinct X) legitimately appears as COUNT(DISTINCT X)
+            # in the SQL. Ask the SAME canonical parser the generator uses whether
+            # the metric is a distinct aggregation, rather than re-scanning the
+            # raw metric text here. This keeps the gate consistent with the
+            # generator for every workspace and inherits its metric-token handling
+            # (no metric-spelling rules duplicated in the verifier).
+            expects_distinct_count = any(
+                agg.distinct
+                for agg in parse_kpi(kpi, grain_bucketing=grain_decision).aggregations
+            )
+            implements_sum = "sum(" in lowered_sql or (
+                expects_distinct_count and "count(distinct" in lowered_sql
+            )
+            if not implements_sum:
                 errors.append(f"SQL does not implement workbook metric `{metric}`")
             for column in _metric_input_columns(metric):
                 if column.lower() not in lowered_sql:
@@ -243,10 +309,110 @@ class KPIExecutionHarness:
                 errors.append(
                     f"SQL does not implement top {limit_value} ranking limit from KPI name"
                 )
+        # Grain coverage (BUG-024): every declared cut/grain dimension must be
+        # realized in the result view, not silently dropped. Derived by an
+        # INDEPENDENT tokenizer so a generator that drops a cut cannot pass a
+        # check that reused its own parser. Scope is the result view, so a cut
+        # present only in an upstream features view does not count.
+        # The registry KPI carries cuts but not features (those live in the
+        # feature mapping), so enrich it so cut tokens like "Department Name"
+        # resolve to their physical column ("Name") instead of false-flagging.
+        coverage_kpi = dict(kpi)
+        coverage_kpi.setdefault("kpi_id", kpi_id)
+        if not coverage_kpi.get("features"):
+            mapped = self._feature_mapping_by_id().get(kpi_id) or {}
+            if mapped.get("features"):
+                coverage_kpi["features"] = mapped["features"]
+        errors.extend(
+            finding.message
+            for finding in grain_coverage_findings(coverage_kpi, sql)
+            if finding.severity == "error"
+        )
+
+        # JOIN-CORRECTNESS: every JOIN ON clause must correspond to a proven
+        # relationship.  Loads relationship_contracts.json once per harness run.
+        # If the file is absent (single-dataset workspaces produce no joins),
+        # the check is skipped — missing contracts are not an error here.
+        proven_pairs = self._proven_join_pairs()
+        if proven_pairs is not None:
+            errors.extend(
+                finding.message
+                for finding in join_correctness_findings(sql, proven_pairs, kpi_id=kpi_id)
+                if finding.severity == "error"
+            )
+
+        # FILTER-REALIZATION (prose): high-confidence prose filters declared in
+        # the KPI name must appear in the generated SQL.  Conservative patterns
+        # only — "for <Value> <lob-word>" and "above/over N year[s]".
+        errors.extend(
+            finding.message
+            for finding in prose_filter_findings(coverage_kpi, sql)
+            if finding.severity == "error"
+        )
+
+        # DENOMINATOR-SCOPE (design/kpi_intent_contract.md §5): a recorded
+        # within-group denominator-scope decision must be realized in the
+        # generated SQL as OVER (PARTITION BY <group>), NOT a bare OVER ().
+        # A decision that is recorded in pipeline_decisions.json but silently
+        # ignored by the generator is a hard error — it was exactly this gap
+        # that let the kpi_002 review rubber-stamp unchanged SQL (BUG-025).
+        pipeline_decisions = self._pipeline_decisions_by_id()
+        scope = (pipeline_decisions.get("percentage_denominator_scopes") or {}).get(kpi_id)
+        errors.extend(
+            f"{finding.code}: {finding.message}"
+            for finding in denominator_scope_findings(coverage_kpi, sql, scope)
+            if finding.severity == "error"
+        )
+
         return errors
 
     def _kpi_registry_by_id(self) -> dict[str, dict[str, Any]]:
-        path = self.layout.contracts_dir / "kpi_registry.json"
+        if self._registry_cache is None:
+            self._registry_cache = self._load_kpis_by_id("kpi_registry.json")
+        return self._registry_cache
+
+    def _feature_mapping_by_id(self) -> dict[str, dict[str, Any]]:
+        if self._mapping_cache is None:
+            self._mapping_cache = self._load_kpis_by_id("kpi_feature_mapping.json")
+        return self._mapping_cache
+
+    def _proven_join_pairs(self) -> set[frozenset[str]] | None:
+        """Proven join column-pairs from relationship_contracts.json, cached.
+
+        Returns None when the contracts file is absent (single-dataset or test
+        workspaces produce no joins to prove), so the caller skips the
+        join-correctness check rather than flagging every join. When the file
+        exists, returns the (possibly empty) set of proven column pairs.
+        """
+        if self._proven_pairs_cache is None:
+            path = self.layout.contracts_dir / "relationship_contracts.json"
+            if not path.exists():
+                return None
+            self._proven_pairs_cache = _load_proven_join_pairs(path)
+        return self._proven_pairs_cache
+
+    def _pipeline_decisions_by_id(self) -> dict[str, Any]:
+        """Load ``pipeline_decisions.json`` once per harness run, cached.
+
+        Returns the full decisions dict (e.g. ``{"percentage_denominator_scopes":
+        {"kpi_002": "within_department"}}``) or an empty dict when the file is
+        absent, unreadable, or contains invalid JSON.  The harness uses this to
+        retrieve the per-KPI ``denominator_scope`` for the enforcement check.
+        """
+        if self._pipeline_decisions_cache is None:
+            path = self.layout.contracts_dir / "pipeline_decisions.json"
+            if path.exists():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    self._pipeline_decisions_cache = data if isinstance(data, dict) else {}
+                except (json.JSONDecodeError, OSError):
+                    self._pipeline_decisions_cache = {}
+            else:
+                self._pipeline_decisions_cache = {}
+        return self._pipeline_decisions_cache
+
+    def _load_kpis_by_id(self, filename: str) -> dict[str, dict[str, Any]]:
+        path = self.layout.contracts_dir / filename
         if not path.exists():
             return {}
         try:
@@ -265,6 +431,23 @@ class KPIExecutionHarness:
 def sql_defines_result_view(sql: str, result_view: str) -> bool:
     pattern = RESULT_VIEW_PATTERN.pattern.format(view=re.escape(result_view))
     return re.search(pattern, sql, flags=re.IGNORECASE) is not None
+
+
+def sql_is_intent_blocked(sql: str) -> bool:
+    """True when generated SQL carries an intent-decision block marker.
+
+    Generic across facets (grain bucketing today, any future `... decision
+    required` block) — it keys off the marker convention, not a domain word.
+    """
+    return bool(INTENT_BLOCK_PATTERN.search(sql or ""))
+
+
+def _block_reason(sql: str) -> str:
+    for line in (sql or "").splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("-- reason:"):
+            return "blocked pending decision: " + stripped[len("-- reason:"):].strip()
+    return "KPI generation is blocked pending a user decision (e.g. grain bucketing)."
 
 
 def _placeholder_result_columns(columns: list[str]) -> bool:
@@ -353,10 +536,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", required=True, help="Workspace path, for example workspaces/demo")
     parser.add_argument("--repo-root", default=".", help="Repository root. Defaults to current directory.")
     parser.add_argument("--sample-limit", type=int, default=20, help="Rows to show per KPI result sample.")
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Print a compact per-KPI status summary + report path instead of the full JSON.",
+    )
     args = parser.parse_args(argv)
 
     result = KPIExecutionHarness(args.repo_root, args.workspace, sample_limit=args.sample_limit).run()
-    print(json.dumps(result.summary(), indent=2))
+    if args.quiet:
+        status = "[ok] passed" if result.ok else "[x] failed"
+        print(f"{status} kpi-execution: {result.workspace} ({len(result.records)} KPI SQL files)")
+        for record in result.records:
+            marker = "[ok]" if record.status in {"ok", "passed"} else "[x]"
+            rows = "" if record.row_count is None else f" - {record.row_count} rows"
+            print(f"  {marker} {record.kpi_id}: {record.status}{rows}")
+            for error in record.errors:
+                print(f"      [x] {error}")
+        report_path = _rel(Path(args.repo_root).resolve() / args.workspace / "interns/reports/kpi_execution_harness.md", Path(args.repo_root).resolve())
+        print(f"detail: {report_path}")
+    else:
+        print(json.dumps(result.summary(), indent=2))
     return 0 if result.ok else 1
 
 

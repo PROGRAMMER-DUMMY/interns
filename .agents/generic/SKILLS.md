@@ -244,6 +244,12 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Outputs: interns/generated/data_model_images/<image>.model.json; interns/reports/data_model_images/<image>.model.md; interns/reports/data_model_images/current.json; interns/reports/data_model_images/current.md
   - Safety: local_safe_review_gated_no_remote_vision_without_explicit_sensitive_upload_confirmation
   - Required skills: workspace-governance; domain-model; data-engineering-pipeline-design
+- `understand-data`
+  - Command: `uv run understand-data --workspace <workspace>`
+  - Use when: classify a workspace data-quality tier and schema type before KPI/SQL generation; surface tier-scoped data-processing options from generated profiles; inspect the BUG-010 data-understanding gate standalone
+  - Outputs: interns/reports/data_understanding/current.json; interns/reports/data_understanding/current.md
+  - Safety: local_safe_reads_generated_profiles_only_no_raw_dataset_reads
+  - Required skills: workspace-governance; data-engineering-pipeline-design
 - `export-data-model-diagram`
   - Command: `uv run export-data-model-diagram --workspace <workspace>`
   - Use when: stakeholders need a presentable data model diagram; finalized or draft data model should be rendered as static SVG; Mermaid ERD should be exported for review
@@ -490,6 +496,11 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Path: `skills/data-engineering-pipeline-design/SKILL.md`
 - Description: Design source-to-target SQL, Polars, PySpark, ETL/ELT, and medallion-layer workflows from KPI requirements, data model evidence, profiles, and accepted workspace definitions.
 
+### data-model-creation
+
+- Path: `skills/data-model-creation/SKILL.md`
+- Description: Create a data model WITH the user through conversation, not by guessing from column names. Interview for grain, entities, keys, facts/dimensions, relationships, cardinality, temporal anchors, and SCD policy; score how well the model is understood; then produce a governed model + ERD/SVG. Use when a workspace needs a data model created, refined, or proven before SQL/pipeline generation, or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[clarify-ambiguity]], [[domain-model]], [[stakeholder-memory]], and [[dashboard-design]] (for the diagram export).
+
 ### databricks-access-gates
 
 - Path: `skills/databricks-access-gates/SKILL.md`
@@ -510,6 +521,11 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Path: `skills/feature-derivation-library/SKILL.md`
 - Description: Use when KPI/query work needs reusable derived-feature patterns, candidate formulas, temporal anchors, join-derived features, taxonomy-derived features, or SQL/Polars derivation templates. This skill helps propose derivations while preserving the rule that candidates are not proof.
 
+### green-gate
+
+- Path: `skills/green-gate/SKILL.md`
+- Description: Run the project's portable green gate -- the curated CI suite plus the enterprise suite, the same way ci.yml does -- and report pass/fail with any failures. Use before claiming work is done, before commit, or when the user asks to "run the tests", "check it's green", or "run the green gate". With a sweep, also classify broader blast-radius failures as new vs. known-baseline.
+
 ### grill-requirements
 
 - Path: `skills/grill-requirements/SKILL.md`
@@ -524,6 +540,11 @@ Use the narrowest role that fits the task and keep write access limited to imple
 
 - Path: `skills/kpi-analyst/SKILL.md`
 - Description: Use this skill when the user uploads, shares, pastes, or describes a KPI sheet, KPI tracker, metrics document, dashboard metric list, or structured business analytics metric definitions; when asked to understand a metric, write queries for KPIs, calculate a KPI, build a dashboard from KPIs, or inspect files with columns such as Key Business Question, Metric, Dimension, Cut, Filter, Grain, or Description; also use when validating generated KPI SQL and result samples against KPI intent.
+
+### kpi-clarification
+
+- Path: `skills/kpi-clarification/SKILL.md`
+- Description: Converts ambiguous or loosely written KPI descriptions into precise, unambiguous business metric definitions. Use this skill whenever a user mentions a KPI, metric, business measure, or indicator that needs to be defined, clarified, structured, or documented — even if they don't use the word "KPI" explicitly. Trigger examples: "define this metric", "what does this KPI mean", "help me document our conversion rate", "clarify this measure for our BI team", "we track X, can you write it up properly", "our dashboard shows Y, not sure what it means", "turn this into a proper metric definition". Always use this skill when the user presents any business performance metric, OKR component, or analytics measure that needs structured decomposition.
 
 ### self-grill
 

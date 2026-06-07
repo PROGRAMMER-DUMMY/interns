@@ -71,15 +71,60 @@ class WorkspacePresentationExporter:
             warnings=warnings,
         )
 
+    def export_kpi_proof_packet(self) -> PresentationExportResult:
+        # Imported lazily so the data-model / Excel exports do not depend on the
+        # proof-packet builder (and its validator) being importable.
+        from core.onboarding.kpi.proof_packet import KPIProofPacketBuilder
+
+        self._validate_workspace()
+        self.layout.ensure_runtime_dirs()
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        md_path = self.output_dir / "kpi-proof-packet.md"
+        json_path = self.output_dir / "kpi-proof-packet.json"
+        try:
+            packet = KPIProofPacketBuilder(self.repo_root, self.workspace).run()
+        except Exception as exc:  # pragma: no cover - defensive
+            return self._write_manifest(
+                export_type="kpi_proof_packet",
+                generated_paths=[],
+                source_state="missing",
+                sources=[],
+                warnings=[f"KPI proof packet could not be generated: {exc}"],
+            )
+        md_path.write_text(
+            (self.repo_root / packet.report_path).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        json_path.write_text(
+            (self.repo_root / packet.report_json_path).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        return self._write_manifest(
+            export_type="kpi_proof_packet",
+            generated_paths=[md_path, json_path],
+            source_state="generated",
+            sources=[packet.report_path, packet.report_json_path],
+            warnings=[],
+        )
+
     def export_workspace_presentation(self) -> PresentationExportResult:
         data_model = self.export_data_model_diagram()
         kpi = self.export_kpi_registry_excel()
-        generated = [*(self.repo_root / path for path in data_model.generated_paths), *(self.repo_root / path for path in kpi.generated_paths)]
-        warnings = [*data_model.warnings, *kpi.warnings]
+        proof = self.export_kpi_proof_packet()
+        generated = [
+            *(self.repo_root / path for path in data_model.generated_paths),
+            *(self.repo_root / path for path in kpi.generated_paths),
+            *(self.repo_root / path for path in proof.generated_paths),
+        ]
+        warnings = [*data_model.warnings, *kpi.warnings, *proof.warnings]
         return self._write_manifest(
             export_type="workspace_presentation",
             generated_paths=generated,
-            source_state=f"data_model={data_model.source_state};kpi={kpi.source_state}",
+            source_state=(
+                f"data_model={data_model.source_state};"
+                f"kpi={kpi.source_state};"
+                f"kpi_proof_packet={proof.source_state}"
+            ),
             sources=[],
             warnings=warnings,
         )

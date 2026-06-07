@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Callable
 
 from core.storage.workspace_layout import WorkspaceLayout
@@ -76,6 +75,7 @@ class DelegationEvent:
     completed_at: str
     verdict: DelegationVerdict
     delegation_request: DelegationRequest | None = None
+    handoff_path: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -88,6 +88,8 @@ class DelegationEvent:
         }
         if self.delegation_request is not None:
             out["delegation_request"] = self.delegation_request.to_dict()
+        if self.handoff_path:
+            out["handoff_path"] = self.handoff_path
         return out
 
     def to_trajectory_event(self, *, workspace_rel: str) -> dict[str, Any]:
@@ -187,7 +189,114 @@ _STAGE_BRIEFS: dict[str, dict[str, Any]] = {
             "preserves any user_overrides already set."
         ),
     },
+    "kpi_output_verification": {
+        "context_keys": [
+            "interns/reports/kpi_output_verification.md",
+            "interns/generated/evidence/kpi_output_verification.json",
+            "summary.completed_kpis",
+        ],
+        "expected_return": (
+            "verdict: ok / blocked + per-KPI judgement on whether the executed result rows actually "
+            "answer the business question (semantic correctness, not just 'it ran')"
+        ),
+        "prompt_template": (
+            "Act as the kpi-analyst / self-grill specialist for workspace `{workspace}`. The self-grill "
+            "gate already EXECUTED each KPI and cross-checked metric, cuts, filters, and cross-engine "
+            "parity: `{verdict_status}` — {verdict_summary}. Read "
+            "`interns/reports/kpi_output_verification.md`. For each KPI, judge whether the actual result "
+            "rows answer the original business question (beyond merely executing), and flag any result "
+            "that would mislead a stakeholder."
+        ),
+    },
 }
+
+
+# Canonical routing: which specialists and which skills own each workflow stage.
+# This is the single source of truth that keeps the FULL agent + skill roster
+# reachable. Panels/flows attach `routing_for(stage)` so the orchestrator (and the
+# user) stay in control of which to activate — nothing is force-run. The coverage
+# test (tests/test_agent_skill_routing.py) fails if any agent or skill is unrouted.
+STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
+    "flow_entry": {
+        "agents": ["agent-advisor-router", "workspace-flow-orchestrator"],
+        "skills": ["workspace-governance", "task-onboarding", "handoff"],
+    },
+    "kpi_definition": {
+        "agents": ["business-analyst", "kpi-analyst"],
+        "skills": ["grill-requirements", "clarify-ambiguity", "kpi-clarification",
+                   "stakeholder-memory", "to-solution-brief", "workspace-kpi-query-optimizer"],
+    },
+    "data_model_design": {
+        "agents": ["data-engineer", "source-to-target-reviewer"],
+        "skills": ["data-model-creation", "domain-model", "grill-requirements", "clarify-ambiguity"],
+    },
+    "relationship_review": {
+        "agents": ["data-engineer"],
+        "skills": ["domain-model"],
+    },
+    "source_to_target_review": {
+        "agents": ["source-to-target-reviewer", "sql-polars-pyspark-specialist"],
+        "skills": ["data-engineering-pipeline-design"],
+    },
+    "engine_generation": {
+        "agents": ["sql-polars-pyspark-specialist"],
+        "skills": ["data-engineering-pipeline-design", "feature-derivation-library"],
+    },
+    "feature_derivation": {
+        "agents": ["feature-derivation-library"],
+        "skills": ["feature-derivation-library"],
+    },
+    "artifact_validation": {
+        "agents": ["validation-gatekeeper"],
+        "skills": ["workspace-governance"],
+    },
+    "regression_review": {
+        "agents": ["regression-sweep"],
+        "skills": ["green-gate"],
+    },
+    "parallel_kpi_completion": {
+        "agents": ["workspace-flow-orchestrator", "kpi-analyst"],
+        "skills": ["workspace-governance", "kpi-clarification", "feature-derivation-library"],
+    },
+    "kpi_completion_review": {
+        "agents": ["kpi-analyst"],
+        "skills": ["kpi-analyst", "self-grill"],
+    },
+    "kpi_output_verification": {
+        "agents": ["kpi-analyst", "validation-gatekeeper"],
+        "skills": ["kpi-analyst", "self-grill"],
+    },
+    "result_review": {
+        "agents": ["data-analyst"],
+        "skills": ["clarify-ambiguity"],
+    },
+    "dashboard_refresh": {
+        "agents": ["dashboard-engineer"],
+        "skills": ["dashboard-design"],
+    },
+    "remote_execution": {
+        "agents": ["databricks-engineer", "databricks-access-gates"],
+        "skills": ["databricks-access-gates"],
+    },
+    "notification": {
+        "agents": ["integration-notification-operator"],
+        "skills": [],
+    },
+    "evolution": {
+        "agents": [],
+        "skills": ["evolution"],
+    },
+}
+
+
+def routing_for(stage: str) -> dict[str, list[str]]:
+    """Return {'agents': [...], 'skills': [...]} that own a workflow stage.
+
+    Panels call this to attach `required_specialists` + `suggested_skills` so the
+    orchestrator activates the right roster for the stage (never force-run).
+    """
+    entry = STAGE_ROUTING.get(stage) or {}
+    return {"agents": list(entry.get("agents") or []), "skills": list(entry.get("skills") or [])}
 
 
 def _build_delegation_request(
@@ -235,6 +344,11 @@ def record_delegation(
             details={"error": str(exc)},
         )
     completed = _now()
+    request = _build_delegation_request(agent, stage, workspace_rel, verdict)
+    # Materialize a compact handoff doc the side agent reads, so the orchestrator
+    # transfers context by reference (file path) instead of pasting a long brief —
+    # keeping the main orchestrator's own context lean.
+    handoff_path = _write_delegation_handoff(layout, workspace_rel, agent, stage, request, verdict)
     event = DelegationEvent(
         agent=agent,
         stage=stage,
@@ -242,10 +356,55 @@ def record_delegation(
         started_at=started,
         completed_at=completed,
         verdict=verdict,
-        delegation_request=_build_delegation_request(agent, stage, workspace_rel, verdict),
+        delegation_request=request,
+        handoff_path=handoff_path,
     )
     _append_trajectory(layout, event.to_trajectory_event(workspace_rel=workspace_rel))
     return event
+
+
+def _write_delegation_handoff(
+    layout: WorkspaceLayout,
+    workspace_rel: str,
+    agent: str,
+    stage: str,
+    request: DelegationRequest | None,
+    verdict: DelegationVerdict,
+) -> str:
+    """Write a per-delegation handoff doc (task + artifacts-by-reference + expected
+    return + verdict + suggested skills). The side agent reads this file; the
+    orchestrator only passes its path. Returns the repo-relative path ("" on failure)."""
+    if request is None:
+        return ""
+    handoffs = layout.state_dir / "handoffs"
+    skills = routing_for(stage).get("skills", [])
+    lines = [
+        f"# Handoff -> {agent} ({stage})",
+        "",
+        f"- Workspace: `{workspace_rel}`",
+        f"- Programmatic verdict: `{verdict.status}` - {verdict.summary}",
+        "",
+        "## Task",
+        "",
+        request.prompt,
+        "",
+        "## Read these (referenced, not pasted)",
+        "",
+    ]
+    lines.extend(f"- `{key}`" for key in request.context_keys)
+    if not request.context_keys:
+        lines.append("- (none)")
+    lines += ["", "## Expected return", "", request.expected_return, ""]
+    if skills:
+        lines += ["## Suggested skills", "", ", ".join(f"`{s}`" for s in skills), ""]
+    try:
+        handoffs.mkdir(parents=True, exist_ok=True)
+        path = handoffs / f"{stage}__{agent}.md"
+        path.write_text("\n".join(lines), encoding="utf-8")
+    except OSError:
+        return ""
+    rel = path.relative_to(layout.project_root).as_posix()
+    return f"{workspace_rel}/{rel}" if workspace_rel else rel
 
 
 def _append_trajectory(layout: WorkspaceLayout, event: dict[str, Any]) -> None:
@@ -413,6 +572,128 @@ def verdict_from_kpi_completion(entries: list[dict[str, Any]]) -> DelegationVerd
     )
 
 
+def verdict_from_verification(summary: dict[str, Any]) -> DelegationVerdict:
+    """self-grill verdict from an executed KPIOutputVerifier run.
+
+    `ok` only when every KPI executed AND matched its metric/cuts/filters (and any
+    cross-engine check that ran); otherwise `blocked` with the failing KPI errors.
+    """
+    records = summary.get("records") or []
+    if not records:
+        return DelegationVerdict(
+            status="warning",
+            summary="No generated KPI SQL to self-grill yet.",
+            details={"kpi_count": 0},
+        )
+    blocked = [r for r in records if str(r.get("status")) != "passed"]
+    total = int(summary.get("kpi_count") or len(records))
+    passed = int(summary.get("passed_count") or (total - len(blocked)))
+    if not blocked:
+        return DelegationVerdict(
+            status="ok",
+            summary=f"All {passed} KPI outputs executed and matched intent (+ cross-engine where checked).",
+            details={"kpi_count": total, "passed_count": passed},
+        )
+    return DelegationVerdict(
+        status="blocked",
+        summary=f"{len(blocked)}/{total} KPI outputs failed self-grill (execution or intent mismatch).",
+        details={
+            "kpi_count": total,
+            "blocked_kpi_ids": [r.get("kpi_id") for r in blocked],
+            "errors": {r.get("kpi_id"): r.get("errors") for r in blocked},
+        },
+    )
+
+
+def verdict_from_kpi_definition(
+    low_confidence_count: int, kpi_count: int
+) -> DelegationVerdict:
+    """business-analyst verdict for the kpi_definition stage.
+
+    Surfaces KPIs whose intent facets (metric / grain / denominator_scope /
+    temporal_anchor) parsed with low confidence — the ambiguity a blocker-feature
+    count alone misses (e.g. an ambiguous share denominator)."""
+    if kpi_count == 0:
+        return DelegationVerdict(
+            status="warning",
+            summary="No KPI definitions found to assess.",
+            details={"kpi_count": 0},
+        )
+    if low_confidence_count:
+        return DelegationVerdict(
+            status="needs_review",
+            summary=(
+                f"{low_confidence_count} KPI intent facet(s) are low-confidence "
+                "(ambiguous metric/grain/denominator/anchor) and need a governed definition."
+            ),
+            details={"kpi_count": kpi_count, "low_confidence_facets": low_confidence_count},
+        )
+    return DelegationVerdict(
+        status="ok",
+        summary=f"All {kpi_count} KPI definition(s) parsed with confident intent facets.",
+        details={"kpi_count": kpi_count},
+    )
+
+
+def verdict_from_engine_generation(
+    generated: list[dict[str, Any]], harness_ok: bool
+) -> DelegationVerdict:
+    """sql-polars-pyspark-specialist verdict for the engine_generation stage.
+
+    The engine (SQL/Polars/PySpark) was selected + implemented for each KPI; the
+    verdict confirms the chosen engine actually executed via the harness."""
+    total = len(generated or [])
+    if total == 0:
+        return DelegationVerdict(
+            status="warning",
+            summary="No KPI engine artifacts were generated.",
+            details={"kpi_count": 0},
+        )
+    if not harness_ok:
+        return DelegationVerdict(
+            status="blocked",
+            summary=f"{total} KPI engine(s) generated but the execution harness failed.",
+            details={"kpi_count": total, "harness_ok": False},
+        )
+    return DelegationVerdict(
+        status="ok",
+        summary=f"{total} KPI engine(s) generated and passed the execution harness.",
+        details={"kpi_count": total, "harness_ok": True},
+    )
+
+
+def verdict_from_result_review(entries: list[dict[str, Any]]) -> DelegationVerdict:
+    """data-analyst verdict for the result_review stage.
+
+    Confirms every KPI produced result rows for interpretation; flags any KPI that
+    executed but returned no rows (a readiness/anomaly signal worth a human look)."""
+    total = len(entries or [])
+    if total == 0:
+        return DelegationVerdict(
+            status="warning",
+            summary="No KPI results available to review.",
+            details={"kpi_count": 0},
+        )
+    produced = sum(1 for e in entries if str(e.get("status")) == "ok")
+    if produced < total:
+        return DelegationVerdict(
+            status="needs_review",
+            summary=f"{produced}/{total} KPIs produced result rows; review the remainder for anomalies.",
+            details={
+                "kpi_count": total,
+                "produced_count": produced,
+                "no_result_kpi_ids": [
+                    e.get("kpi_id") for e in entries if str(e.get("status")) != "ok"
+                ],
+            },
+        )
+    return DelegationVerdict(
+        status="ok",
+        summary=f"All {total} KPIs produced result rows for business interpretation.",
+        details={"kpi_count": total},
+    )
+
+
 def verdict_from_dashboard_summary(summary: dict[str, Any]) -> DelegationVerdict:
     """dashboard-engineer verdict for the dashboard-refresh stage."""
     kpi_count = int(summary.get("kpi_count") or 0)
@@ -437,8 +718,12 @@ __all__ = [
     "record_delegation",
     "render_delegation_markdown",
     "verdict_from_dashboard_summary",
+    "verdict_from_engine_generation",
     "verdict_from_kpi_completion",
+    "verdict_from_kpi_definition",
     "verdict_from_relationship_summary",
+    "verdict_from_result_review",
     "verdict_from_source_to_target_summary",
     "verdict_from_validation_summary",
+    "verdict_from_verification",
 ]

@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core.onboarding.data_model.image_parser import DataModelImageParser, _parse_ocr_schema_text
+from core.onboarding.workspace.onboarding import WorkspaceOnboarder
 
 
 PNG_1X1 = bytes.fromhex(
@@ -208,6 +209,128 @@ class DataModelImageParserTests(unittest.TestCase):
             ]
             self.assertGreaterEqual(len(matched_relationships), 3)
             self.assertTrue(all(not item["executable_usage_allowed"] for item in matched_relationships))
+
+
+class OnboardingDiagramParseIntegrationTests(unittest.TestCase):
+    """BUG-023: onboard-workspace must invoke DataModelImageParser so that
+    relationship-contract builder can consume diagram sidecars."""
+
+    # Minimal valid 1x1 PNG reused from the sibling tests above.
+    PNG_1X1 = PNG_1X1
+
+    def _create_workspace(self, root: Path, *, with_png: bool) -> Path:
+        workspace = root / "workspaces" / "demo"
+        (workspace / "datasets").mkdir(parents=True)
+        (workspace / "docs").mkdir(parents=True)
+        (workspace / "datasets" / "transactions.csv").write_text(
+            "ClaimID,PaidAmount\nC1,10.50\nC2,20.25\n",
+            encoding="utf-8",
+        )
+        (workspace / "docs" / "kpi_registry.csv").write_text(
+            "Key business question,Metric\nTotal paid,sum(PaidAmount)\n",
+            encoding="utf-8",
+        )
+        if with_png:
+            (workspace / "docs" / "DataModel.png").write_bytes(self.PNG_1X1)
+        return workspace
+
+    def test_onboarding_produces_diagram_sidecar_when_png_present(self):
+        """With a DataModel.png under docs/, onboarding must write the sidecar
+        directory and include its path in the result artifacts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._create_workspace(root, with_png=True)
+
+            result = WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+
+            sidecar_dir = workspace / "interns" / "generated" / "data_model_images"
+            self.assertTrue(
+                sidecar_dir.exists(),
+                "data_model_images sidecar directory must be created by onboarding",
+            )
+            sidecars = list(sidecar_dir.glob("*.model.json"))
+            self.assertEqual(len(sidecars), 1, "exactly one sidecar for DataModel.png")
+
+            # Sidecar must be review-gated (not executable).
+            sidecar = json.loads(sidecars[0].read_text(encoding="utf-8"))
+            self.assertFalse(sidecar["executable_usage_allowed"])
+            self.assertEqual(sidecar["source_image"], "workspaces/demo/docs/DataModel.png")
+
+            # Artifact paths must be surfaced in the onboarding result.
+            self.assertIn("diagram_current_json", result.artifacts)
+            self.assertIn("diagram_sidecar_dir", result.artifacts)
+
+    def test_onboarding_skips_gracefully_when_no_png(self):
+        """Without any data-model image, onboarding must still succeed and must
+        NOT create the sidecar directory."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._create_workspace(root, with_png=False)
+
+            result = WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+
+            sidecar_dir = workspace / "interns" / "generated" / "data_model_images"
+            # No images -> DataModelImageParser returns image_count=0; the sidecar
+            # dir is only created when images are found.
+            self.assertNotIn("diagram_sidecar_dir", result.artifacts)
+            # No hard failures expected.
+            diagram_errors = [w for w in result.warnings if "data_model_image_parse_failed" in w]
+            self.assertEqual(diagram_errors, [])
+
+    def test_onboarding_ocr_unavailable_degrades_gracefully(self):
+        """When Tesseract is absent the sidecar is still written (OCR state is
+        provider_not_configured) but onboarding does not hard-fail; it surfaces
+        a [~] warning and the sidecar dir is still present."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._create_workspace(root, with_png=True)
+
+            with patch(
+                "core.onboarding.data_model.image_parser._find_tesseract",
+                return_value=None,
+            ):
+                result = WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+
+            # No hard failure.
+            hard_failures = [w for w in result.warnings if "data_model_image_parse_failed" in w]
+            self.assertEqual(hard_failures, [])
+
+            sidecar_dir = workspace / "interns" / "generated" / "data_model_images"
+            self.assertTrue(sidecar_dir.exists(), "sidecar dir created even without OCR")
+            sidecars = list(sidecar_dir.glob("*.model.json"))
+            self.assertEqual(len(sidecars), 1)
+
+            sidecar = json.loads(sidecars[0].read_text(encoding="utf-8"))
+            ocr_state = sidecar["parsers"]["ocr_layout"]["state"]
+            # OCR was attempted (auto) but found no Tesseract -> provider_not_configured.
+            self.assertIn(ocr_state, {"provider_not_configured", "disabled"})
+
+            # A [~] advisory warning should appear when OCR is unavailable.
+            ocr_warnings = [
+                w for w in result.warnings
+                if "data_model_image_ocr_unavailable" in w or "ocr" in w.lower()
+            ]
+            self.assertTrue(
+                len(ocr_warnings) >= 1,
+                f"expected at least one OCR-unavailable advisory warning; got: {result.warnings}",
+            )
+
+    def test_onboarding_is_idempotent_for_diagram_sidecars(self):
+        """Re-running onboarding refreshes sidecars instead of duplicating them."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._create_workspace(root, with_png=True)
+
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+
+            sidecar_dir = workspace / "interns" / "generated" / "data_model_images"
+            sidecars = list(sidecar_dir.glob("*.model.json"))
+            self.assertEqual(
+                len(sidecars),
+                1,
+                "re-running onboarding must refresh sidecars, not duplicate them",
+            )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,30 @@
+{
+  "$comment": "Checked-in MCP servers for this repo. context7 needs no credentials. github and databricks require the env vars noted below -- set them in your shell (or .env, never committed) before launching the CLI. MCP is an open standard, so these same servers work in any MCP-capable CLI (Claude Code, Cursor, Gemini CLI, ...); only the config file location differs per client.",
+
+  "mcpServers": {
+    "context7": {
+      "$comment": "Live, version-correct docs for the libraries this repo leans on (polars, duckdb, pyspark, sqlglot, dash, databricks-sdk, mlflow). No credentials required.",
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"]
+    },
+
+    "github": {
+      "$comment": "Issues, PRs, and Actions for the branch->commit->PR->CI flow. Requires GITHUB_PERSONAL_ACCESS_TOKEN (a fine-grained PAT). Alternatively the `gh` CLI (already allowed) covers most of this.",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    },
+
+    "databricks": {
+      "$comment": "Unity Catalog discovery, lineage, and SQL execution for the source-to-target / KPI work. Requires DATABRICKS_HOST and DATABRICKS_TOKEN (or a configured profile in ~/.databrickscfg). This community server is one option; Databricks also ships managed MCP servers governed via Unity AI Gateway -- see https://docs.databricks.com/aws/en/generative-ai/mcp/ . Disabled by default until creds are set.",
+      "command": "uvx",
+      "args": ["mcp-databricks-server"],
+      "env": {
+        "DATABRICKS_HOST": "${DATABRICKS_HOST}",
+        "DATABRICKS_TOKEN": "${DATABRICKS_TOKEN}"
+      }
+    }
+  }
+}

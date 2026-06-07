@@ -294,6 +294,40 @@ class PipelinePlanTests(unittest.TestCase):
             )
             self.assertEqual(plan["blockers"], [])
 
+    def test_apply_pipeline_decision_grain_bucketing_keys_under_kpi_id(self):
+        # A direct, non-deadlocking path to record a grain decision. It must key
+        # under the given kpi_id (the intent-contract panel path mis-keyed it to
+        # an empty string, so the generator never applied banding).
+        from core.onboarding.pipeline_plan import decision_main
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_workspace(root)
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            rc = decision_main([
+                "--workspace", "workspaces/demo", "--repo-root", str(root),
+                "--kpi-id", "kpi_002", "--grain-bucketing", "band_continuous_cuts",
+            ])
+            self.assertEqual(rc, 0)
+            decisions = json.loads(
+                (root / "workspaces" / "demo" / "interns" / "generated"
+                 / "contracts" / "pipeline_decisions.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                decisions["grain_bucketing_decisions"]["kpi_002"],
+                "band_continuous_cuts",
+            )
+            self.assertNotIn("", decisions["grain_bucketing_decisions"])
+
+    def test_apply_pipeline_decision_requires_exactly_one_facet(self):
+        from core.onboarding.pipeline_plan import decision_main
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaises(SystemExit):
+                decision_main([
+                    "--workspace", "workspaces/demo", "--repo-root", str(root),
+                    "--kpi-id", "kpi_002",
+                ])  # neither facet -> error
+
 
 if __name__ == "__main__":
     unittest.main()

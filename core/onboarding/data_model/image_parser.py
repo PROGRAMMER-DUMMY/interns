@@ -862,6 +862,67 @@ def _best_table_profile_match(table: dict[str, Any], profiles: list[dict[str, An
     return best
 
 
+def _generic_fact_table_profile_match(
+    table_name: str,
+    column_name: str,
+    profiles: list[dict[str, Any]],
+    *,
+    exclude_datasets: set[str] | None = None,
+) -> dict[str, Any] | None:
+    """Resolve a generic/unmatched diagram table (e.g. bare 'Fact') to the physical
+    profile dataset that actually contains the normalized FK column.
+
+    When a diagram uses an abstract fact-table name with no business suffix (e.g.
+    'Fact' or 'Fact_Table'), _best_table_profile_match produces no match because
+    the role_suffix is empty. This fallback searches all profiles for one that
+    contains a column matching `column_name` after normalization.
+
+    `exclude_datasets`: profiles already claimed by the other endpoint of the same
+    relationship edge are excluded. This handles the case where the FK column appears
+    in both the fact table (transactions) and the dimension table (patients) — the
+    dimension's dataset is excluded so the fact table is chosen unambiguously.
+
+    If no single match remains after exclusion the function returns None; never
+    fabricates a mapping. Workspace-agnostic: no dataset or column names are hardcoded.
+    """
+    col_norm = _norm(column_name)
+    if not col_norm:
+        return None
+    excluded = exclude_datasets or set()
+    matching_profiles = []
+    for profile in profiles:
+        dataset = str(profile.get("dataset") or "")
+        if dataset in excluded:
+            continue
+        for profile_column in profile.get("columns") or []:
+            profile_column_name = str(profile_column.get("name") or "")
+            if _norm(profile_column_name) == col_norm:
+                matching_profiles.append(profile)
+                break
+    if len(matching_profiles) != 1:
+        # Ambiguous (column appears in multiple non-excluded profiles) or absent -> no match.
+        return None
+    profile = matching_profiles[0]
+    # Find the physical column name (preserving original casing).
+    physical_col = next(
+        (
+            str(c.get("name") or "")
+            for c in (profile.get("columns") or [])
+            if _norm(str(c.get("name") or "")) == col_norm
+        ),
+        column_name,
+    )
+    return {
+        "table_name": table_name,
+        "dataset": str(profile.get("dataset") or ""),
+        "profile_column": physical_col,
+        "profile_path": profile.get("profile_path", ""),
+        "match_type": "column_resolved_fact",
+        "confidence": 0.85,
+        "state": "profile_matched",
+    }
+
+
 def _best_column_profile_match(
     column: dict[str, Any],
     profiles: list[dict[str, Any]],
@@ -932,23 +993,77 @@ def _add_relationship_endpoint_profile_matches(
         (str(match.get("table_name")), str(match.get("column_name")))
         for match in column_matches
     }
+    # Build a running lookup of resolved column matches (seeded from columns already
+    # matched in the main pass) so the generic-fact resolver can exclude datasets
+    # claimed by the other endpoint of the same relationship.
+    match_by_key: dict[tuple[str, str], dict[str, Any]] = {
+        (str(m.get("table_name")), str(m.get("column_name"))): m
+        for m in column_matches
+    }
     updated = list(column_matches)
+
+    # Process each relationship in two ordered passes per edge so that named-table
+    # endpoints (dimension tables) are resolved first, enabling the generic-fact
+    # resolver in pass 2 to exclude the dimension's dataset and unambiguously land
+    # on the physical fact table. Workspace-agnostic: no dataset names hardcoded.
     for relationship in relationships:
-        for table_key, column_key in (("from_table", "from_column"), ("to_table", "to_column")):
-            table_name = str(relationship.get(table_key) or "")
-            column_name = str(relationship.get(column_key) or "")
-            key = (table_name, column_name)
-            if not table_name or not column_name or key in existing:
-                continue
-            match = _best_column_profile_match(
-                {"table_name": table_name, "column_name": column_name},
-                profiles,
-                table_match_by_name,
-            )
-            if match:
-                match = {**match, "source": "relationship_endpoint"}
-                updated.append(match)
-                existing.add(key)
+        endpoint_pairs = [
+            ("from_table", "from_column", "to_table", "to_column"),
+            ("to_table", "to_column", "from_table", "from_column"),
+        ]
+        for pass_num in (1, 2):
+            for table_key, column_key, other_table_key, other_column_key in endpoint_pairs:
+                table_name = str(relationship.get(table_key) or "")
+                column_name = str(relationship.get(column_key) or "")
+                key = (table_name, column_name)
+                if not table_name or not column_name or key in existing:
+                    continue
+                has_table_match = table_match_by_name.get(table_name) is not None
+
+                # Pass 1: only resolve endpoints that have a direct table match
+                # (named dim tables).  Pass 2: resolve remaining endpoints (generic
+                # fact tables) now that the dim side is in match_by_key.
+                if pass_num == 1 and not has_table_match:
+                    continue
+                if pass_num == 2 and has_table_match:
+                    continue
+
+                match = _best_column_profile_match(
+                    {"table_name": table_name, "column_name": column_name},
+                    profiles,
+                    table_match_by_name,
+                )
+                if not match and not has_table_match:
+                    # Generic/unmatched fact table (e.g. bare 'Fact' with no
+                    # business suffix): resolve to the profile that actually holds
+                    # this FK column, excluding the dataset already claimed by the
+                    # other endpoint so the two sides land on distinct datasets.
+                    other_table = str(relationship.get(other_table_key) or "")
+                    other_col = str(relationship.get(other_column_key) or "")
+                    other_match = match_by_key.get((other_table, other_col))
+                    exclude: set[str] = set()
+                    if other_match and other_match.get("dataset"):
+                        exclude.add(str(other_match["dataset"]))
+                    fact_match = _generic_fact_table_profile_match(
+                        table_name, column_name, profiles, exclude_datasets=exclude
+                    )
+                    if fact_match:
+                        match = {
+                            "table_name": table_name,
+                            "column_name": column_name,
+                            "dataset": fact_match["dataset"],
+                            "profile_column": fact_match["profile_column"],
+                            "profile_path": fact_match.get("profile_path", ""),
+                            "match_type": fact_match["match_type"],
+                            "confidence": fact_match["confidence"],
+                            "state": fact_match["state"],
+                            "source": "relationship_endpoint_fact_resolved",
+                        }
+                if match:
+                    match = {**match, "source": match.get("source", "relationship_endpoint")}
+                    updated.append(match)
+                    existing.add(key)
+                    match_by_key[key] = match
     return updated
 
 

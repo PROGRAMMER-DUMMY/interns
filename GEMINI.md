@@ -160,3 +160,19 @@ parallel agent work, subagents, workers, or a review team.
 ## Data Isolation Rule
 
 For any active workspace, always restrict dataset processing strictly to EMR data from Hospital A (datasets/EMR/trendytech-hospital-a). Ensure interns/state/workspace_settings.json is created or updated with a dataset_allowlist enforcing this path before running workspace commands like onboarding or profiling.
+
+## KPI Result Packet Forwarding Rule
+
+When the KPI pipeline finishes, present the results automatically in the same turn — the user must
+never have to type "show results" / "show me the results" to see the tables. The `complete` and
+`results` stages render each KPI's definition + generated SQL + result table inline in their panel
+markdown, and the same packet is written to `interns/reports/kpi_results/current.md`.
+
+- Forward the emitted packet verbatim. Read and display
+  `workspaces/<project>/interns/reports/kpi_results/current.md`; do NOT re-type, paraphrase, or
+  reconstruct the generated SQL or result rows from memory (re-authoring from memory caused a
+  fabricated data-source render, BUG-015).
+- Do not stop at "Next Step: review result artifacts" and wait for the user to ask. If a run finished
+  but you only printed paths or a one-line status, that is an under-presentation bug — surface the
+  rendered tables.
+- If the user does ask "show results" after the fact, still forward the file; never rebuild it.

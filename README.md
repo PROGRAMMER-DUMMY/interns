@@ -1,34 +1,70 @@
 # Autoresearch
 
-Autoresearch is a governed optimization control plane for scoreable data-engineering artifacts. The first supported domain is SQL/data-pipeline optimization: propose a candidate change, run it in an isolated backend, evaluate correctness and performance, trace the run, and record what was learned.
+Autoresearch solves a specific enterprise problem: **business teams have KPI questions written in business language, but translating those questions into correct, trusted SQL from complex multi-table datasets requires deep domain + data engineering knowledge that most teams don't have time to apply carefully.**
+
+The platform automates that translation pipeline with governance — from a KPI question like *"What is the trend for amount paid for Medicare LOB by gender and payer for patients above 50?"* to a verified, executable SQL query against the right tables, joins, and filters — with every mapping decision traced and approved.
+
+```
+Business KPI question + raw datasets
+          ↓
+  [Onboard] Profile datasets, normalize KPI registry
+          ↓
+  [Resolve] Map business terms → physical columns (evidence-backed scoring)
+          ↓
+  [Govern] Ask blocking questions when mappings are ambiguous
+          ↓
+  [Prove]  Build FK/relationship contracts between tables
+          ↓
+  [Generate] Emit executable SQL (DuckDB local or Databricks enterprise)
+          ↓
+  [Results] KPI definition + SQL + result table stored in runs/
+```
+
+Every decision is captured. Every mapping has evidence. Bad data never silently reaches Gold.
 
 ## Current Capabilities
 
-- Governed workspace kickstart and onboarding for KPI/query optimization projects
-- Local DuckDB execution backend
-- Optional Databricks execution and telemetry scaffolding
-- Semantic contracts from KPI registries, methodology JSON, and task-level rules
-- Optimization memory for adaptive learning across runs
-- Enterprise policy contracts for execution modes, SLA, approvals, failure behavior, and downcasting
-- Governance decisions with evidence packs, policy gates, approval state, and human alerts
-- Metadata-first data model profiling with sample/exact bounds and conservative downcast recommendations
-- Dataset profiling, representation checks, and guardrail scoring
-- Evidence-backed KPI feature discovery with unresolved mappings recorded as open questions
-- Dashboard for run history, reviewer proof, intern activity, governance decisions, and human alerts
+- **Workspace onboarding** — profiles datasets (row counts, schema, quality), normalizes KPI registries, builds semantic contracts
+- **Evidence-backed feature resolution** — maps KPI business terms to physical columns using dataset profiles, data dictionaries, lexicon, and scoring; auto-proves high-confidence mappings
+- **Governed blocker question panels** — when a mapping is ambiguous, generates a structured question with JSON-backed options ranked by evidence; accepts answers through governed wrappers
+- **Relationship/FK contracts** — proves or requires approval for every multi-table join before any SQL is generated; profile-only candidates are advisory only
+- **KPI SQL generation** — emits executable DuckDB SQL locally; swaps to catalog table references for Databricks enterprise; generates only from fully proven or user-confirmed mappings
+- **Grain-bucketing for share metrics** — a share/percentage metric cut by a raw continuous dimension (exact age, days-since) blocks pending a decision instead of fragmenting into one tiny row per value; `apply-pipeline-decision --grain-bucketing band_continuous_cuts` emits fixed-width bands (readable `20-29` labels, numeric sort), or `exact_value_grain` keeps the exact grain
+- **Tamper-evident execution evidence** — the artifact validator re-executes generated result views and compares columns/row counts to the recorded harness, so a hand-edited or fabricated result manifest is rejected rather than trusted
+- **Run reports** — every `generate-kpi-sql` call writes `interns/runs/{date}/results.md` containing KPI definition, full SQL, and executed result table
+- **Workspace allowlisting** — scope any workspace to specific dataset subsets without touching code
+- **Workspace memory** — accepted decisions (feature mappings, relationship approvals) persist across runs so the same questions are never asked twice
+- **Decision history** — every feature mapping decision and relationship approval is appended to `interns/generated/memory/decision_history.md`
+- **Databricks enterprise path** — generate Databricks-dialect SQL targeting Unity Catalog tables; deploy asset manifests, Genie workspace specs, and deployment plans
+- **KPI generation mode** — BA/product-led KPI definition interview that scores, refines, and governs KPI creation before implementation
+- **Dashboard** — run history, reviewer proof, intern activity, governance decisions, and human alerts
+- **Validation harnesses** — artifact validators, workflow guardrail checks, AI app harness, AI CLI harness, and reliability suite
 
 ## Core Layout
 
 The platform engine is organized by responsibility:
 
-- `core/orchestration/` wires runs together.
-- `core/execution/` owns local and Databricks execution.
-- `core/governance/` owns contracts, policies, approvals, and promotion gates.
-- `core/optimization/` owns planning, memory, diff classification, and decision strategy.
-- `core/context/` owns bounded context indexes, task manifests, and context wiki reports.
-- `core/profiling/` owns data model diagnostics.
-- `core/agents/` owns intern and LLM routing.
-- `core/observability/` owns metric parsing and telemetry.
-- `core/storage/` owns SQLite/Git state.
+**Primary pipeline** (`core/onboarding/`) — this is where the KPI-to-SQL work lives:
+- `core/onboarding/kpi/` — feature resolver, blocker question panel, SQL generator, execution harness, KPI generation workflow
+- `core/onboarding/features/` — feature expression parsing, derived feature markdown, blocker detection
+- `core/onboarding/relationships/` — FK/relationship contract builder and approval
+- `core/onboarding/workspace/` — workspace onboarding, kickstart, delegation, flow orchestration
+- `core/onboarding/lexicon/` — workspace vocabulary and term normalization
+- `core/onboarding/memory/` — workspace definitions, decision history, user decisions
+- `core/onboarding/data_model/` — data model document parsing and image extraction
+- `core/onboarding/sources/` — source catalog ingestion and external source intake
+- `core/onboarding/databricks/` — Databricks asset manifests and Genie workspace specs
+
+**Supporting infrastructure:**
+- `core/medallion/` — Bronze/Silver/Gold medallion architect (design and build pipeline)
+- `core/execution/` — local DuckDB and Databricks execution backends
+- `core/governance/` — contracts, policies, approvals, and promotion gates
+- `core/context/` — bounded context indexes, task manifests, and context wiki reports
+- `core/storage/` — workspace layout, metadata store, SQLite/Delta state
+- `core/optimization/` — optimization memory and diff classification
+- `core/observability/` — metric parsing and telemetry
+- `core/agents/` — LLM routing and intern activity
+- `core/presentation/` — console tables, markdown rendering
 
 ## Agent Guidance
 
@@ -79,12 +115,28 @@ The CLI is not a loose query generator. It is a governed control plane that:
 Current operator path for a fresh KPI/query workspace:
 
 ```powershell
-uv run list-workspace-files --workspace workspaces/<project>
-uv run prepare-kpi-generation --workspace workspaces/<project>
-uv run apply-kpi-generation-answer --workspace workspaces/<project> --answer option_b
+# 1. Scope the workspace (optional — limit to specific datasets)
+#    Set workspace_settings.json with dataset_allowlist before onboarding.
+
+# 2. Onboard — profiles datasets, normalizes KPI registry, writes contracts
 uv run onboard-workspace --workspace workspaces/<project>
-uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain healthcare
-uv run validate-workspace-artifacts --workspace workspaces/<project>
+
+# 3. Resolve KPI features — maps business terms to physical columns
+uv run resolve-kpi-features --workspace workspaces/<project> --domain <domain> --include-candidates
+
+# 4. Answer blockers — if blocked_kpi_count > 0, read the panel and answer
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
+uv run apply-kpi-panel-answer --workspace workspaces/<project> --domain <domain> --answer option_a
+
+# 5. Build relationship contracts — prove FK joins between tables
+uv run build-relationship-contracts --workspace workspaces/<project>
+uv run apply-relationship-answer --workspace workspaces/<project> --relationship-id <id> --answer approve
+
+# 6. Generate SQL — emits executable SQL and result table
+uv run generate-kpi-sql --workspace workspaces/<project> --kpi-id kpi_001
+
+# 7. Review results
+#    interns/runs/{date}/results.md  ← KPI definition + SQL + result table
 ```
 
 Use the generated panel files for stakeholder questions. Do not hand-edit generated contracts such
@@ -944,11 +996,11 @@ status.
 
 For a team-oriented overview of ingestion patterns, Bronze/Silver/Gold responsibilities, data
 cleaning techniques, serving patterns, and modern data tooling, see
-`docs/data_workflow_medallion_reference.md`.
+`docs/reference/data_workflow_medallion_reference.md`.
 
 For the current Databricks production practices reference, including Unity Catalog, Lakeflow,
 Auto Loader, Delta maintenance, SQL warehouses, CI/CD, security, cost, and observability guidance,
-see `docs/databricks_production_practices.md`.
+see `docs/reference/databricks_production_practices.md`.
 
 ## Tool-Agnostic Skills
 

@@ -220,11 +220,50 @@ class KPIFeatureResolver:
                 "join_candidates": [],
                 "open_questions": [feature["question"]],
             }
+        # A KPI that arrives with neither a metric NOR a grain exposes no
+        # expression to extract features from. Without this branch the loop below
+        # is empty, the KPI is silently marked blocked with ZERO questions, and a
+        # direct `prepare-kpi-blocker-panel` run reports "no blocker question
+        # remains" while the KPI is still blocked — a dead end. Surface it as an
+        # answerable definition blocker. (In the full workspace-flow this case is
+        # caught earlier by the kpi_definition_incomplete gate; this keeps the
+        # standalone resolver/panel path honest too.) Generic: the condition is
+        # the same empty-metric-AND-cuts test the flow gate and validator use.
+        if not metric.strip() and not cuts.strip():
+            # When the question matches a reusable derived-feature pattern (a
+            # duration bucket or a recurrence self-join), surface that as a
+            # confirmable derived option rather than only a generic "define this
+            # KPI" ask -- the feature-derivation-library path. Otherwise fall back
+            # to the definition blocker.
+            pattern_options = self._derivation_pattern_options(kpi)
+            if pattern_options:
+                feature = _derived_pattern_feature(pattern_options)
+            else:
+                feature = _kpi_definition_feature(kpi)
+            return {
+                "kpi_id": f"kpi_{idx:03d}",
+                "name": kpi.get("name", ""),
+                "source": kpi.get("source", ""),
+                "metric": metric,
+                "cuts": cuts,
+                "status": "blocked_questions_pending",
+                "features": [feature],
+                "function_context": extracted.functions,
+                "join_candidates": [],
+                "open_questions": [feature["question"]],
+            }
         features = []
         for token in extracted.identifiers:
             norm = normalize_blocker(token)
             contextual_candidates = contextual_column_candidates(token, full_context, schema_index)
-            if contextual_candidates and contextual_candidates[0].get("auto_proven"):
+            # An exact physical-column hit is a direct mapping, not an alias: let the
+            # schema_index branch below classify it as proven_direct. The contextual
+            # auto-proven path only applies when the token is NOT a literal column name.
+            if (
+                norm not in schema_index
+                and contextual_candidates
+                and contextual_candidates[0].get("auto_proven")
+            ):
                 features.append(_contextual_feature(token, contextual_candidates, proven=True))
                 continue
             if norm in schema_index:
@@ -328,6 +367,7 @@ class KPIFeatureResolver:
                 "candidates": [],
                 "question": f"What source, formula, or accepted rule should define `{token}` for this KPI?",
             })
+        features = _dedupe_features_by_physical_column(features)
         blocked = [feature for feature in features if feature.get("state") not in READY_STATES]
         return {
             "kpi_id": f"kpi_{idx:03d}",
@@ -341,6 +381,25 @@ class KPIFeatureResolver:
             "join_candidates": infer_join_candidates(features),
             "open_questions": [feature["question"] for feature in blocked if feature.get("question")],
         }
+
+    def _derivation_pattern_options(self, kpi: dict[str, Any]) -> list[dict[str, Any]]:
+        """Reusable derived-feature options (duration bucket / recurrence) that
+        match this KPI's question + profiled columns. Returns [] when none apply
+        or profiles are absent; never raises."""
+        try:
+            from core.onboarding.features.derivation_patterns import (
+                detect_derivation_patterns,
+            )
+            from core.onboarding.kpi.metric_derivation import columns_from_profile_index
+
+            question = str(kpi.get("name") or kpi.get("business_question") or "").strip()
+            path = self.layout.profiles_dir / "profile_index.json"
+            if not question or not path.exists():
+                return []
+            columns = columns_from_profile_index(json.loads(path.read_text(encoding="utf-8")))
+            return detect_derivation_patterns(question, columns)
+        except Exception:  # pragma: no cover - pattern detection is advisory
+            return []
 
     def _load_kpis(self) -> list[dict[str, Any]]:
         path = self.layout.contracts_dir / "kpi_registry.json"
@@ -438,6 +497,179 @@ class KPIFeatureResolver:
             except OSError:
                 continue
         return rows
+
+
+def _column_pair(source: dict[str, Any]) -> tuple[str, str] | None:
+    """Normalized ``(dataset, column)`` identity for one source-column entry.
+
+    The dataset basename is used (not the full path) so the same physical
+    column matches whether one feature recorded an absolute path and another a
+    repo-relative one. Returns ``None`` when no column is present.
+    """
+    column = normalize_blocker(str(source.get("column") or ""))
+    if not column:
+        return None
+    raw_dataset = str(source.get("dataset") or source.get("source") or "")
+    dataset = normalize_blocker(Path(raw_dataset).name or raw_dataset)
+    return (dataset, column)
+
+
+def _physical_column_key(feature: dict[str, Any]) -> frozenset[tuple[str, str]]:
+    """Identity of the physical column(s) a feature resolves to.
+
+    Keyed on normalized (dataset, column) pairs so the dedup is workspace
+    agnostic — it never inspects feature names, only the resolved physical
+    columns. Features that resolved to no physical column (e.g.
+    ``blocked_missing_evidence``) return an empty key and are never collapsed.
+    """
+    key: set[tuple[str, str]] = set()
+    for source in feature.get("source_columns") or []:
+        pair = _column_pair(source)
+        if pair:
+            key.add(pair)
+    return frozenset(key)
+
+
+def _resolved_physical_columns(feature: dict[str, Any]) -> set[tuple[str, str]]:
+    """Physical columns a PROVEN feature resolves to.
+
+    A proven feature's ``source_columns`` are its resolved columns, so every
+    entry counts. Used as the set a candidate sibling must match to be
+    considered already-covered.
+    """
+    columns: set[tuple[str, str]] = set()
+    for source in feature.get("source_columns") or []:
+        pair = _column_pair(source)
+        if pair:
+            columns.add(pair)
+    return columns
+
+
+def _candidate_physical_column(feature: dict[str, Any]) -> tuple[str, str] | None:
+    """Top-ranked CANDIDATE physical column for an UNRESOLVED feature.
+
+    An unresolved contextual/alias feature does not have a single resolved
+    column; instead it carries one or more ranked candidate columns. The
+    target it would resolve to is the highest-ranked candidate — index 0 of
+    ``candidates`` (preferred) or, failing that, ``source_columns``, both of
+    which preserve descending-score order. Returns ``None`` when no candidate
+    column is present.
+    """
+    for entry in feature.get("candidates") or []:
+        pair = _column_pair(entry)
+        if pair:
+            return pair
+    for entry in feature.get("source_columns") or []:
+        pair = _column_pair(entry)
+        if pair:
+            return pair
+    return None
+
+
+def _dedupe_features_by_physical_column(
+    features: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse features of one KPI that resolve to the SAME physical column.
+
+    When a misspelling/cut-label/column-word are all extracted as separate
+    features but resolve to the same physical ``dataset.column``, keep a single
+    feature. If any sibling in the group is already proven (a ``READY_STATES``
+    member), the canonical survivor is that proven feature, so a duplicate that
+    only reached ``candidate_unconfirmed`` no longer raises a phantom blocker —
+    it inherits the proven resolution. The earliest feature in spec order wins
+    ties, preserving the canonical name the registry expects downstream.
+
+    Features without a resolved physical column are passed through untouched so
+    legitimately distinct (or still-unresolved) features are never merged.
+
+    A second pass handles unresolved features (e.g. ``candidate_unconfirmed``)
+    that carry a *ranked candidate* column rather than a resolved one: if such a
+    feature's top-ranked candidate column equals a proven sibling's resolved
+    column, the candidate is a phantom blocker for an already-proven column and
+    is dropped. Its remaining lower-ranked candidates are ignored — the proven
+    sibling already covers the column it would have resolved to.
+    """
+    groups: dict[frozenset[tuple[str, str]], list[int]] = {}
+    for position, feature in enumerate(features):
+        key = _physical_column_key(feature)
+        if not key:
+            continue
+        groups.setdefault(key, []).append(position)
+
+    drop: set[int] = set()
+    for key, positions in groups.items():
+        if len(positions) < 2:
+            continue
+        # A proven sibling wins over an unconfirmed one — the unconfirmed
+        # duplicate (a misspelling/cut-label artifact) inherits that proof
+        # instead of raising a phantom blocker.
+        proven = [pos for pos in positions if features[pos].get("state") in READY_STATES]
+        candidates = proven or positions
+        survivor = _canonical_survivor(features, candidates)
+        for pos in positions:
+            if pos != survivor:
+                drop.add(pos)
+
+    # Columns already proven by some sibling in this KPI. An unresolved
+    # feature whose top-ranked candidate column is in this set is redundant.
+    proven_columns: set[tuple[str, str]] = set()
+    for position, feature in enumerate(features):
+        if position in drop:
+            continue
+        if feature.get("state") in READY_STATES:
+            proven_columns.update(_resolved_physical_columns(feature))
+
+    if proven_columns:
+        for position, feature in enumerate(features):
+            if position in drop:
+                continue
+            if feature.get("state") in READY_STATES:
+                continue
+            candidate_column = _candidate_physical_column(feature)
+            if candidate_column is not None and candidate_column in proven_columns:
+                drop.add(position)
+
+    return [feature for position, feature in enumerate(features) if position not in drop]
+
+
+def _canonical_survivor(
+    features: list[dict[str, Any]],
+    candidates: list[int],
+) -> int:
+    """Pick which feature name survives a same-physical-column collapse.
+
+    Workspace-agnostic preference, in order:
+
+    1. A feature whose normalized name is a word of the resolved column name
+       (the dimension's own column word, e.g. ``Name`` for ``departments.Name``
+       or ``cost`` for ``BASE_COST``) — and among those, the one matching the
+       column's trailing/head word, which is the canonical noun.
+    2. Otherwise the earliest feature in spec order.
+
+    Keying is purely on resolved column tokens, never on specific business
+    vocabulary, so it generalises across workspaces.
+    """
+    column_words: list[str] = []
+    for pos in candidates:
+        for source in features[pos].get("source_columns") or []:
+            column = str(source.get("column") or "")
+            for word in re.findall(r"[a-z0-9]+", _split_identifier(column).lower()):
+                norm = normalize_blocker(word)
+                if norm and norm not in column_words:
+                    column_words.append(norm)
+
+    def rank(pos: int) -> tuple[int, int, int]:
+        name = normalize_blocker(str(features[pos].get("feature") or ""))
+        is_column_word = name in column_words
+        # Prefer the trailing column word (head noun) when several names are words.
+        trailing_index = column_words.index(name) if is_column_word else -1
+        return (
+            0 if is_column_word else 1,
+            -trailing_index,  # later word in the column name ranks first
+            candidates.index(pos),  # stable spec-order tie-break
+        )
+
+    return min(candidates, key=rank)
 
 
 def extract_expression(
@@ -735,6 +967,31 @@ def _requires_kpi_definition(
         return False
     identifiers = {identifier.lower() for identifier in extracted.identifiers}
     return not identifiers or identifiers.issubset(PLACEHOLDER_KPI_TERMS)
+
+
+def _derived_pattern_feature(options: list[dict[str, Any]]) -> dict[str, Any]:
+    """Blocker feature carrying reusable derived-feature pattern options so the
+    panel renders them as confirmable JSON-backed options (same contract as the
+    derived-formula path), instead of a generic definition ask."""
+    primary = options[0]
+    name = str(primary.get("derived_column_name") or "derived feature")
+    return {
+        "feature": name,
+        "state": "blocked_missing_evidence",
+        "resolution_type": "derived_formula",
+        "source_columns": [],
+        "grain": "derived",
+        "conflicts": [],
+        "decision_history": [],
+        "evidence": [],
+        "candidate_patterns": [],
+        "derived_feature_options": options,
+        "candidates": [],
+        "question": (
+            f"Confirm the derived feature `{name}` (pattern "
+            f"`{primary.get('source_pattern_id')}`) for this KPI, or supply a definition."
+        ),
+    }
 
 
 def _kpi_definition_feature(kpi: dict[str, Any]) -> dict[str, Any]:

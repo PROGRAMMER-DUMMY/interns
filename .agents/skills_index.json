@@ -24,6 +24,11 @@
       "path": "skills/data-engineering-pipeline-design/SKILL.md"
     },
     {
+      "name": "data-model-creation",
+      "description": "Create a data model WITH the user through conversation, not by guessing from column names. Interview for grain, entities, keys, facts/dimensions, relationships, cardinality, temporal anchors, and SCD policy; score how well the model is understood; then produce a governed model + ERD/SVG. Use when a workspace needs a data model created, refined, or proven before SQL/pipeline generation, or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[clarify-ambiguity]], [[domain-model]], [[stakeholder-memory]], and [[dashboard-design]] (for the diagram export).",
+      "path": "skills/data-model-creation/SKILL.md"
+    },
+    {
       "name": "databricks-access-gates",
       "description": "Use when Databricks work hits or may hit missing permissions, token scopes, Unity Catalog grants, workspace API access, SQL warehouse paths, storage policies, compute policies, Genie/dashboard/job creation permissions, data registration approvals, or any remote mutation gate. Ask the user for the exact missing access or approval before retrying remote Databricks actions.",
       "path": "skills/databricks-access-gates/SKILL.md"
@@ -44,6 +49,11 @@
       "path": "skills/feature-derivation-library/SKILL.md"
     },
     {
+      "name": "green-gate",
+      "description": "Run the project's portable green gate -- the curated CI suite plus the enterprise suite, the same way ci.yml does -- and report pass/fail with any failures. Use before claiming work is done, before commit, or when the user asks to \"run the tests\", \"check it's green\", or \"run the green gate\". With a sweep, also classify broader blast-radius failures as new vs. known-baseline.",
+      "path": "skills/green-gate/SKILL.md"
+    },
+    {
       "name": "grill-requirements",
       "description": "Interview stakeholders to understand what they want optimized, what must not change, how success is measured, and what preferences or constraints should shape the solution. Use for new workspace onboarding, KPI/data model discovery, product scoping, or when business/data/platform requirements are incomplete.",
       "path": "skills/grill-requirements/SKILL.md"
@@ -57,6 +67,11 @@
       "name": "kpi-analyst",
       "description": "Use this skill when the user uploads, shares, pastes, or describes a KPI sheet, KPI tracker, metrics document, dashboard metric list, or structured business analytics metric definitions; when asked to understand a metric, write queries for KPIs, calculate a KPI, build a dashboard from KPIs, or inspect files with columns such as Key Business Question, Metric, Dimension, Cut, Filter, Grain, or Description; also use when validating generated KPI SQL and result samples against KPI intent.",
       "path": "skills/kpi-analyst/SKILL.md"
+    },
+    {
+      "name": "kpi-clarification",
+      "description": "Converts ambiguous or loosely written KPI descriptions into precise, unambiguous business metric definitions. Use this skill whenever a user mentions a KPI, metric, business measure, or indicator that needs to be defined, clarified, structured, or documented \u2014 even if they don't use the word \"KPI\" explicitly. Trigger examples: \"define this metric\", \"what does this KPI mean\", \"help me document our conversion rate\", \"clarify this measure for our BI team\", \"we track X, can you write it up properly\", \"our dashboard shows Y, not sure what it means\", \"turn this into a proper metric definition\". Always use this skill when the user presents any business performance metric, OKR component, or analytics measure that needs structured decomposition.",
+      "path": "skills/kpi-clarification/SKILL.md"
     },
     {
       "name": "self-grill",
@@ -860,6 +875,24 @@
         "required_skills": [
           "workspace-governance",
           "domain-model",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
+        "name": "understand-data",
+        "command": "uv run understand-data --workspace <workspace>",
+        "use_when": [
+          "classify a workspace data-quality tier and schema type before KPI/SQL generation",
+          "surface tier-scoped data-processing options from generated profiles",
+          "inspect the BUG-010 data-understanding gate standalone"
+        ],
+        "outputs": [
+          "interns/reports/data_understanding/current.json",
+          "interns/reports/data_understanding/current.md"
+        ],
+        "safety": "local_safe_reads_generated_profiles_only_no_raw_dataset_reads",
+        "required_skills": [
+          "workspace-governance",
           "data-engineering-pipeline-design"
         ]
       },

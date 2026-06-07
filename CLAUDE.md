@@ -4,8 +4,27 @@ Read `AGENTS.md` first and follow it as the canonical operating guide for this r
 Then inspect `TOOLS.md` and `.agents/tools.json` before inventing workflows or helper scripts.
 
 For startup commands such as `set <workspace>`, `set current workspace to ...`, or a bare project
-name, treat the message as workspace selection only. Do not create, edit, or write files from that
-command.
+name, treat the message as workspace selection only. File mutation during selection is a hard stop.
+
+## Selection-only checklist
+
+[ok] Allowed during workspace selection:
+- `uv run list-workspace-files --workspace workspaces/<project>` (read-only scan)
+- Bounded PowerShell fallback: `Get-ChildItem -LiteralPath workspaces/<project> -Force -File -Recurse | Select-Object -First 200 -ExpandProperty FullName`
+- `git status --short` (read-only)
+- Reading `config/tasks.json` (read-only)
+- Presenting the file-set summary and asking the confirmation question
+
+[x] Forbidden until the user has confirmed the workspace AND explicitly authorized continuing:
+- Any call to Edit, Write, or a file-creation tool on ANY file
+- Any call to Bash/PowerShell that creates, overwrites, deletes, or moves a file
+- Editing or touching `.gitignore`, `.geminiignore`, `settings.json`, `settings.local.json`,
+  generated artifacts, workspace files, or repo-root files of any kind
+- Running onboarding, profiling, feature resolution, or any `apply-*`/`finalize-*` command
+- Staging or committing files
+
+If the agent finds itself about to call Edit/Write during a selection turn, it must stop, discard
+the mutation, and ask the confirmation question instead.
 
 Resolve fuzzy workspace names against existing folders under `workspaces/` and entries in
 `config/tasks.json`. Then scan likely files, summarize the active workflow, ask for confirmation,
@@ -95,3 +114,43 @@ bounded samples only when profiles are insufficient.
 
 Repo skills are indexed in `.agents/claude/SKILLS.md`, but the canonical skill bodies live in
 `skills/*/SKILL.md`.
+
+## Human-Gate Provenance Rule
+
+When a human answers a relationship-join approval or the kpi-analyst review gate, pass
+`--confirmed-by <name>` to the relevant CLI:
+
+```powershell
+uv run apply-relationship-answer --workspace <workspace> --confirmed-by "<reviewer>"
+uv run workspace-flow review      --workspace <workspace> --confirmed-by "<reviewer>"
+```
+
+An empty `--confirmed-by` records the decision as agent-asserted (`source: agent`). A human "yes"
+in an Ask-User prompt must be recorded as `source: human`. Do not clear a human gate while
+recording it as agent-asserted. (Residual from BUG-014.)
+
+## KPI Result Packet Forwarding Rule
+
+When presenting KPI results, read and forward the canonical artifact verbatim:
+`workspaces/<project>/interns/reports/kpi_results/current.md`
+
+Do NOT re-type or reconstruct the generated SQL or result tables from memory. Re-authoring from
+memory caused a fabricated data-source render (BUG-015). Show the emitted packet once; do not
+paraphrase the SQL. (Residual from BUG-015.)
+
+## Token Discipline
+
+Per-run token cost is ~44 pp of quota. These habits reduce it:
+
+- Prefer `uv run run-kpi-pipeline --workspace <workspace> --domain <domain>` for the deterministic
+  KPI chain instead of issuing each step (onboard/blocker/contracts/start/results) as a separate
+  LLM-driven call. The wrapper stops only at genuine human gates and emits the result packet once.
+- Never read large JSON audit files whole — `interns/state/**/session.json`,
+  `**/trajectory*.json`, workflow `current.json`, and `kpi_feature_mapping.json` are machine audit
+  trails (thousands of lines). Read the paired `.md` summary instead; treat the JSON as
+  machine-only.
+- Pass `--quiet` on workspace-flow subcommands (now accepted per-subcommand per BUG-019 fix) so
+  panels are not dumped in full each call.
+- Use a cheaper model tier for mechanical/deterministic steps (profiling, contract building,
+  validation, execution harness) and reserve the top tier for KPI clarification, derived-feature
+  judgment, and kpi-analyst review. See the `control-pane` skill for model-tier routing.

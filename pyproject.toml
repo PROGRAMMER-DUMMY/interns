@@ -20,7 +20,7 @@ dependencies = [
     "polars>=1.40.1",
     "rich>=15.0.0",
     "deltalake>=1.5.1",
-    "pyspark>=3.5.1",    # NOTE: Lowered from 4.1.1 (Spark 4 is not officially released yet)
+    "pyspark>=3.5.1,<4",  # Pin <4: Spark 4.x (pre-release here) has no matching Delta build
     "sqlalchemy>=2.0.49",
     "pyarrow>=4.0.0",    # relaxed upper bound — mlflow 3.x requires pyarrow<24
     "numpy>=1.26,<2.0",  # <--- THE FIX: Capped below 2.0 to prevent ancient numba fallback
@@ -43,12 +43,27 @@ dependencies = [
 
 [project.scripts]
 loop      = "core.orchestration.loop:main"
+retrieve-docs = "core.context.doc_retrieval_cli:main"
 cli-inspect = "core.agents.cli_inspector:main"
 onboard-workspace = "core.onboarding.workspace.onboarding:main"
 kickstart-workspace = "core.onboarding.workspace.kickstart:main"
 resolve-kpi-features = "core.onboarding.kpi.feature_resolver:main"
+plan-kpi-completion = "core.onboarding.kpi.parallel_completion:main"
+apply-kpi-definition = "core.onboarding.kpi.kpi_definition:main"
 generate-kpi-sql = "core.onboarding.kpi.sql_generator:main"
+generate-kpi-polars = "core.onboarding.kpi.polars_generator:main"
+generate-kpi-pyspark = "core.onboarding.kpi.pyspark_generator:main"
+generate-kpi-engines = "core.onboarding.kpi.generate_kpi_engines:main"
+warehouse = "core.onboarding.kpi.local_warehouse:main"
 run-kpi-execution-harness = "core.onboarding.kpi.execution_harness:main"
+validate-kpi-intent-coverage = "core.onboarding.harness.intent_coverage_harness:main"
+scan-document = "core.onboarding.documents.document_loader:main"
+prepare-document-candidate-review = "core.onboarding.documents.candidate_review:main"
+apply-document-candidate = "core.onboarding.documents.candidate_apply:main"
+build-intent-contract = "core.onboarding.kpi.intent_contract:main"
+assess-workspace-phi = "core.governance.phi_gate:main"
+verify-kpi-output = "core.onboarding.kpi.verify_kpi_output:main"
+recommend-kpi-engine = "core.onboarding.kpi.engine_recommender:main"
 run-layered-pipeline-harness = "core.onboarding.harness.layered_pipeline_harness:main"
 run-pipeline-execution-harness = "core.onboarding.harness.pipeline_execution_harness:main"
 run-data-quality-harness = "core.onboarding.data_quality:run_main"
@@ -64,12 +79,15 @@ run-reliability-suite = "core.onboarding.harness.reliability_suite:main"
 run-ai-app-harness = "core.onboarding.harness.ai_app_harness:main"
 run-ai-cli-harness = "core.onboarding.harness.ai_cli_harness:main"
 validate-workflow-guardrails = "core.onboarding.harness.workflow_guard_harness:main"
+validate-engine-generation = "core.onboarding.harness.engine_generation_harness:main"
 record-workspace-trajectory = "core.onboarding.harness.trajectory_recorder:main"
 build-workspace-evidence-graph = "core.onboarding.evidence_graph:main"
 query-workspace-evidence-graph = "core.onboarding.evidence_graph:query_main"
 prepare-workspace-bug-report = "core.onboarding.workspace.bugs:main"
 prepare-workspace-workflow = "core.onboarding.workspace.workflow:prepare_main"
 workspace-flow = "core.onboarding.workspace.flow:main"
+run-kpi-pipeline = "core.onboarding.workspace.flow:pipeline_main"
+handoff = "core.onboarding.workspace.handoff_cli:main"
 workspace-dashboard = "tools.workspace_dashboard:main"
 prepare-bronze-silver-standards = "core.onboarding.bronze_silver_standards:main"
 prepare-wiki-memory = "core.onboarding.memory.wiki_memory:prepare_main"
@@ -92,6 +110,7 @@ finalize-data-model-generation = "core.onboarding.data_model.generation_cli:fina
 prepare-data-model-blocker-panel = "core.onboarding.data_model.generation_cli:prepare_blocker_main"
 apply-data-model-blocker-answer = "core.onboarding.data_model.generation_cli:apply_blocker_main"
 parse-data-model-images = "core.onboarding.data_model.image_parser:main"
+understand-data = "core.onboarding.data_model.data_understanding_cli:main"
 export-data-model-diagram = "core.presentation.exports:export_data_model_diagram_main"
 export-kpi-registry-excel = "core.presentation.exports:export_kpi_registry_excel_main"
 export-workspace-presentation = "core.presentation.exports:export_workspace_presentation_main"
@@ -115,6 +134,7 @@ prepare-databricks-assets = "core.onboarding.databricks.assets:main"
 prepare-genie-workspace = "core.onboarding.databricks.genie_workspace:main"
 deploy-databricks-workspace = "core.onboarding.databricks.workspace_deployer:main"
 generate-skill-adapters = "core.skills.adapter_generator:main"
+green-gate = "core.dev.green_gate:main"
 list-workspace-files = "tools.list_workspace_files:main"
 prepare-workspace-selection = "tools.workspace_selection_harness:main"
 session-snapshot = "tools.session_snapshot:main"
@@ -174,6 +194,10 @@ documents = [
     "openpyxl>=3.1.5",
     "xlsxwriter>=3.2.0",
     "fastexcel>=0.12.0",
+    # Local-safe PDF document ingestion (opendataloader free mode: deterministic,
+    # no upload). Needs a Java 11+ runtime; the PDF path degrades gracefully
+    # (a [~] warning) when this extra or Java is absent.
+    "opendataloader-pdf==2.4.7",
 ]
 notebook = [
     "notebook>=7.5.6",
@@ -181,7 +205,7 @@ notebook = [
 databricks = [
     "databricks-sdk>=0.20",
     "mlflow>=3.0",
-    "pyspark>=3.5.1",
+    "pyspark>=3.5.1,<4",
     "deltalake>=1.5.1",
 ]
 

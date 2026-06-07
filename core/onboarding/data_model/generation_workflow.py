@@ -21,7 +21,6 @@ PATTERN_LIBRARY_PATH = Path(__file__).with_name("patterns.json")
 TEXT_MODEL_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml"}
 IMAGE_MODEL_SUFFIXES = {".png", ".jpg", ".jpeg", ".svg"}
 MODEL_NAME_TOKENS = ("model", "schema", "diagram", "erd", "dictionary", "contract")
-PREFERRED_JOIN_KEYS = ("patientid", "encounterid", "transactionid", "claimid", "deptid", "departmentid", "providerid")
 
 
 @dataclass(frozen=True)
@@ -172,6 +171,7 @@ class DataModelGenerationWorkflow:
         draft = self._load_draft(session)
         blockers = _model_blockers(draft)
         panel = blockers[0] if blockers else _empty_model_blocker_panel(session, draft)
+        panel = {**panel, "understanding": _understanding_score(draft)}
         session["current_model_blocker_id"] = str(panel.get("blocker_id") or "")
         session["updated_at"] = _now()
         self._write_session(session)
@@ -312,6 +312,7 @@ class DataModelGenerationWorkflow:
             },
         }
         draft["readiness"] = _readiness(draft)
+        draft["understanding"] = _understanding_score(draft)
         return draft
 
     def _model_files(self) -> list[str]:
@@ -408,6 +409,13 @@ class DataModelGenerationWorkflow:
         return json.loads((self.repo_root / draft_path_value).read_text(encoding="utf-8"))
 
     def _write_panel(self, session: dict[str, Any], panel: dict[str, Any]) -> DataModelGenerationResult:
+        # Route the orchestrating CLI agent to the right conversation skill for this
+        # turn, driven by the data-model understanding score.
+        panel.setdefault("suggested_skills", _dm_conversation_skills(panel))
+        from core.onboarding.panel_contract import normalize_decision_panel
+        normalize_decision_panel(
+            panel, workspace=_rel(self.workspace, self.repo_root), routing_stage="data_model_design"
+        )
         current_json = self._current_json_path()
         current_md = self._current_markdown_path()
         current_json.parent.mkdir(parents=True, exist_ok=True)
@@ -847,7 +855,8 @@ def _candidate_relationships(tables: list[dict[str, Any]]) -> list[dict[str, Any
             match = _shared_key(left, right)
             if not match:
                 continue
-            left_col, right_col = match
+            left_col, right_col, match_basis = match
+            name_only = match_basis == "name_only"
             relationships.append(
                 {
                     "relationship_id": _relationship_id(left["name"], left_col, right["name"], right_col),
@@ -859,15 +868,25 @@ def _candidate_relationships(tables: list[dict[str, Any]]) -> list[dict[str, Any
                     "to_column": right_col,
                     "cardinality": "many_to_one_or_many_to_many_pending_validation",
                     "join_type": "left",
-                    "state": "candidate_profile",
-                    "confidence": 0.62,
+                    # A join inferred ONLY from a shared column name is a candidate to confirm,
+                    # never proof. It must ask the user (confirm/reject/relabel) and stay below
+                    # the candidate confidence ceiling until evidence or approval backs it.
+                    "state": "candidate_name_only" if name_only else "candidate_profile",
+                    "match_basis": match_basis,
+                    "needs_confirmation": name_only,
+                    "confidence": 0.45 if name_only else 0.62,
                     "approval": {"state": "needs_review"},
                     "evidence_sources": [
                         {
-                            "type": "profile_shared_key",
+                            "type": "name_only_shared_column" if name_only else "profile_shared_key",
                             "left_dataset": left["source_dataset"],
                             "right_dataset": right["source_dataset"],
                             "normalized_key": _norm(left_col),
+                            "reason": (
+                                "Shared column name only; no identifier role or profile/cardinality proof."
+                                if name_only
+                                else "Shared column carries an identifier role on at least one side."
+                            ),
                         }
                     ],
                 }
@@ -897,6 +916,8 @@ def _promote_from_text_models(
             {
                 **relationship,
                 "state": "proven_data_model",
+                "match_basis": "text_data_model_doc",
+                "needs_confirmation": False,
                 "confidence": 0.9,
                 "approval": {"state": "approved"},
                 "evidence_sources": [*relationship.get("evidence_sources", []), evidence],
@@ -1228,6 +1249,8 @@ def _supported_operations() -> list[dict[str, Any]]:
         {"operation": "set_primary_key", "required": ["name", "columns"]},
         {"operation": "add_relationship", "required": ["from_table", "from_column", "to_table", "to_column"]},
         {"operation": "remove_relationship", "required": ["relationship_id"]},
+        {"operation": "approve_relationship", "required": ["relationship_id"]},
+        {"operation": "relabel_relationship", "required": ["relationship_id"], "optional": ["from_column", "to_column"]},
         {"operation": "set_grain", "required": ["name", "description"]},
         {"operation": "set_table_pattern", "required": ["name", "table_pattern"]},
         {"operation": "set_scd_type", "required": ["name", "scd_type"]},
@@ -1272,6 +1295,7 @@ def _apply_model_operations(draft: dict[str, Any], operations: list[dict[str, An
         applied_ids.add(operation_key)
         _apply_one_operation(updated, operation)
     updated["decision_operations"] = operations
+    updated["understanding"] = _understanding_score(updated)
     updated["summary"] = {
         **updated.get("summary", {}),
         "table_count": len(updated.get("tables", [])),
@@ -1417,6 +1441,7 @@ def _apply_one_operation(draft: dict[str, Any], operation: dict[str, Any]) -> No
             if rel.get("relationship_id") != relationship_id:
                 continue
             rel["state"] = "user_confirmed" if rel.get("state") != "proven_data_model" else rel["state"]
+            rel["needs_confirmation"] = False
             rel["approval"] = {
                 "state": "approved",
                 "approval_source": "data_model_blocker_panel",
@@ -1426,6 +1451,34 @@ def _apply_one_operation(draft: dict[str, Any], operation: dict[str, Any]) -> No
                 {
                     "type": "user_confirmed_relationship",
                     "reason": str(operation.get("reason") or "Approved through data model blocker panel."),
+                }
+            )
+            return
+        raise ValueError(f"relationship not found: {relationship_id}")
+    if op == "relabel_relationship":
+        relationship_id = str(operation.get("relationship_id") or "")
+        for rel in draft.get("relationships", []):
+            if rel.get("relationship_id") != relationship_id:
+                continue
+            new_from = str(operation.get("from_column") or rel.get("from_column") or "")
+            new_to = str(operation.get("to_column") or rel.get("to_column") or "")
+            rel["from_column"] = new_from
+            rel["to_column"] = new_to
+            rel["relationship_id"] = _relationship_id(
+                str(rel.get("from_table") or ""), new_from, str(rel.get("to_table") or ""), new_to
+            )
+            rel["state"] = "user_confirmed"
+            rel["match_basis"] = "user_relabeled"
+            rel["needs_confirmation"] = False
+            rel["approval"] = {
+                "state": "approved",
+                "approval_source": "data_model_blocker_panel",
+                "approved_at": _now(),
+            }
+            rel.setdefault("evidence_sources", []).append(
+                {
+                    "type": "user_relabeled_relationship",
+                    "reason": str(operation.get("reason") or "User relabeled the join key via the blocker panel."),
                 }
             )
             return
@@ -1512,6 +1565,154 @@ def _readiness(draft: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _dm_conversation_skills(panel: dict[str, Any]) -> list[dict[str, Any]]:
+    """Skill routing for the orchestrating CLI agent during data-model creation,
+    driven by the understanding score (the [[data-model-creation]] skill owns the
+    overall design; grill until confident; clarify the few high-impact gaps)."""
+    understanding = panel.get("understanding")
+    raw = understanding.get("score") if isinstance(understanding, dict) else understanding
+    score = int(raw or 0)
+    return [
+        {"name": "data-model-creation", "active": True,
+         "why": "Design grain, keys, fact/dim, relationships, SCD; confirm joins instead of name-guessing; output ERD/SVG."},
+        {"name": "grill-requirements", "active": score < 85,
+         "why": "Interview the user to confirm entities, grain, and keys rather than infer from column names."},
+        {"name": "clarify-ambiguity", "active": score >= 60,
+         "why": "Resolve the few high-impact modeling ambiguities (e.g. unconfirmed joins) before finalizing."},
+        {"name": "domain-model", "active": True,
+         "why": "Align table/column terms with the KPI registry and CONTEXT.md."},
+        {"name": "stakeholder-memory", "active": True,
+         "why": "Save accepted grain/key/relationship decisions as durable workspace definitions."},
+    ]
+
+
+def _understanding_score(draft: dict[str, Any]) -> dict[str, Any]:
+    """Compute the data-model understanding score (0-100) per data-model-creation skill.
+
+    Score = mean of five dimension confidences, each 0-100:
+      entities, grain, keys (confirmed not name-guessed), relationships
+      (proven/confirmed vs candidate), temporal anchor + SCD decided.
+
+    A relationship inferred only from a shared column name counts as a CANDIDATE
+    (capped at <=50), not confirmed, until backed by identifier-role / profile /
+    cardinality evidence or explicit user confirmation. The lowest-confidence
+    dimension is named as the next decision. All evidence is workspace-derived.
+    """
+    tables = draft.get("tables", [])
+    relationships = draft.get("relationships", [])
+
+    entities = _ratio_score(len(tables), len(tables))
+    grain = _ratio_score(len(tables), sum(1 for t in tables if _grain_confirmed(t)))
+    keys = _ratio_score(len(tables), sum(1 for t in tables if _key_confirmed(t)))
+    temporal = _ratio_score(len(tables), sum(1 for t in tables if _temporal_scd_decided(t)))
+
+    if relationships:
+        rel_confidences = [_relationship_confidence(rel) for rel in relationships]
+        relationships_score = round(sum(rel_confidences) / len(rel_confidences), 2)
+    else:
+        relationships_score = 100.0
+
+    dimensions = {
+        "entities": _understanding_dimension(
+            entities, "Entities confirmed", len(tables), len(tables)
+        ),
+        "grain": _understanding_dimension(
+            grain, "Grain decided", sum(1 for t in tables if _grain_confirmed(t)), len(tables)
+        ),
+        "keys": _understanding_dimension(
+            keys,
+            "Keys confirmed (not name-guessed)",
+            sum(1 for t in tables if _key_confirmed(t)),
+            len(tables),
+        ),
+        "relationships": _understanding_dimension(
+            relationships_score,
+            "Relationships proven/confirmed",
+            sum(1 for rel in relationships if _relationship_confidence(rel) > 50),
+            len(relationships),
+        ),
+        "temporal_scd": _understanding_dimension(
+            temporal,
+            "Temporal anchor + SCD decided",
+            sum(1 for t in tables if _temporal_scd_decided(t)),
+            len(tables),
+        ),
+    }
+    overall = round(sum(item["score"] for item in dimensions.values()) / len(dimensions), 2)
+    lowest_key = min(dimensions, key=lambda key: dimensions[key]["score"])
+    lowest = dimensions[lowest_key]
+    next_decision = (
+        f"{lowest['label']} is the lowest-confidence item ({lowest['score']}/100) -> resolve it next."
+        if lowest["score"] < 100
+        else "All understanding dimensions are confirmed."
+    )
+    return {
+        "score": overall,
+        "status": "high" if overall >= 80 else "moderate" if overall >= 50 else "low",
+        "dimensions": dimensions,
+        "lowest_dimension": lowest_key,
+        "next_decision": next_decision,
+    }
+
+
+def _understanding_dimension(score: float, label: str, confirmed: int, total: int) -> dict[str, Any]:
+    if score >= 100:
+        icon = "[ok]"
+    elif score >= 50:
+        icon = "[~]"
+    else:
+        icon = "[x]"
+    return {
+        "label": label,
+        "score": score,
+        "icon": icon,
+        "confirmed": confirmed,
+        "total": total,
+    }
+
+
+def _ratio_score(total: int, confirmed: int) -> float:
+    if total <= 0:
+        return 100.0
+    return round(100.0 * confirmed / total, 2)
+
+
+def _grain_confirmed(table: dict[str, Any]) -> bool:
+    grain = table.get("grain") or {}
+    return bool(grain.get("description")) and grain.get("state") in {"user_confirmed", "user_added"}
+
+
+def _key_confirmed(table: dict[str, Any]) -> bool:
+    """A key counts as confirmed only when the user reviewed it, not when it was
+    name-guessed by the profile heuristic (`approval.state == "draft"`)."""
+    if not table.get("primary_key"):
+        return False
+    return table.get("approval", {}).get("state") in {"user_reviewed", "user_added", "approved"}
+
+
+def _temporal_scd_decided(table: dict[str, Any]) -> bool:
+    anchor = table.get("temporal_anchor") or {}
+    role = table.get("role")
+    if role == "fact":
+        temporal_ok = anchor.get("state") == "user_confirmed" and bool(anchor.get("column"))
+    else:
+        temporal_ok = anchor.get("state") in {"user_confirmed", "not_found", "not_applicable"} or not anchor.get("column")
+    scd = str(table.get("scd_type") or "")
+    scd_ok = scd not in {"", "needs_review"}
+    return temporal_ok and scd_ok
+
+
+def _relationship_confidence(relationship: dict[str, Any]) -> float:
+    """Confidence (0-100) for one relationship. A join inferred only from a shared
+    column name is a candidate and is capped at 50 until confirmed or proven."""
+    approval = relationship.get("approval", {}).get("state")
+    if approval in {"approved", "approved_for_execution"}:
+        return 100.0
+    if relationship.get("needs_confirmation") or relationship.get("match_basis") == "name_only":
+        return min(50.0, round(float(relationship.get("confidence") or 0.0) * 100.0, 2))
+    return round(float(relationship.get("confidence") or 0.0) * 100.0, 2)
+
+
 def _score(total: int, blockers: int) -> dict[str, Any]:
     if total <= 0:
         return {"score": 100.0, "status": "not_applicable", "blocker_count": 0}
@@ -1546,9 +1747,21 @@ def _model_blockers(draft: dict[str, Any]) -> list[dict[str, Any]]:
         if table.get("table_pattern") == "dimension_scd2" and table.get("scd_type") == "needs_review":
             blockers.append(_scd_blocker(table))
     for relationship in draft.get("relationships", []):
-        if relationship.get("approval", {}).get("state") not in {"approved", "approved_for_execution"}:
+        if relationship.get("approval", {}).get("state") in {"approved", "approved_for_execution"}:
+            continue
+        if _is_name_only_relationship(relationship):
+            blockers.append(_name_only_relationship_blocker(relationship))
+        else:
             blockers.append(_relationship_blocker(relationship))
     return sorted(blockers, key=lambda item: (-int(item.get("risk_rank", 0)), item.get("blocker_id", "")))
+
+
+def _is_name_only_relationship(relationship: dict[str, Any]) -> bool:
+    """A relationship inferred only from a shared column name (no identifier role,
+    no profile/cardinality proof) that has not yet been confirmed or relabeled."""
+    if not relationship.get("needs_confirmation"):
+        return False
+    return relationship.get("match_basis") == "name_only" or relationship.get("state") == "candidate_name_only"
 
 
 def _primary_key_blocker(table: dict[str, Any]) -> dict[str, Any]:
@@ -1759,6 +1972,82 @@ def _relationship_blocker(relationship: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _name_only_relationship_blocker(relationship: dict[str, Any]) -> dict[str, Any]:
+    """Ask the user to confirm/reject/relabel a join inferred ONLY from a shared
+    column name. It is never auto-accepted: confirmed joins join the model, rejected
+    ones are dropped, relabeled ones are re-pointed to a user-supplied join key."""
+    relationship_id = str(relationship.get("relationship_id") or "")
+    from_table = str(relationship.get("from_table") or "")
+    from_column = str(relationship.get("from_column") or "")
+    to_table = str(relationship.get("to_table") or "")
+    to_column = str(relationship.get("to_column") or "")
+    return {
+        "version": SESSION_VERSION,
+        "stage": "model_blocker",
+        "blocker_id": f"name_only_relationship__{relationship_id}",
+        "status": "needs_user_answer",
+        "blocker_type": "name_only_relationship",
+        "risk_rank": 92,
+        "relationship_id": relationship_id,
+        "match_basis": "name_only",
+        "question": (
+            f"`{from_table}.{from_column}` and `{to_table}.{to_column}` share a column name only "
+            "(no identifier role or profile/cardinality proof). Confirm, reject, or relabel this join?"
+        ),
+        "recommended_option_id": "option_b",
+        "recommended_answer": (
+            "Reject unless you can confirm the columns truly reference each other; a shared name is not proof."
+        ),
+        "why": (
+            "A join inferred only from a matching column name can silently fan out or drop rows. "
+            "It must be confirmed by the user (or by profile/cardinality evidence) before it is modeled."
+        ),
+        "options": [
+            {
+                "option_id": "option_a",
+                "label": "Confirm the join",
+                "business_summary": (
+                    f"Confirm `{from_table}.{from_column}` joins `{to_table}.{to_column}` and add it to the model."
+                ),
+                "json_backed": True,
+                "operations": [
+                    {
+                        "operation": "approve_relationship",
+                        "relationship_id": relationship_id,
+                        "reason": "User confirmed a name-inferred join via the data model blocker panel.",
+                    }
+                ],
+            },
+            {
+                "option_id": "option_b",
+                "label": "Reject the join",
+                "business_summary": "Drop this name-inferred join; the shared column name is not enough evidence.",
+                "json_backed": True,
+                "operations": [
+                    {"operation": "remove_relationship", "relationship_id": relationship_id}
+                ],
+            },
+            {
+                "option_id": "option_c",
+                "label": "Relabel the join key",
+                "business_summary": (
+                    "Re-point this join to the correct columns "
+                    "(supply from_column/to_column via --operation)."
+                ),
+                "json_backed": True,
+                "operations": [
+                    {
+                        "operation": "relabel_relationship",
+                        "relationship_id": relationship_id,
+                        "from_column": from_column,
+                        "to_column": to_column,
+                    }
+                ],
+            },
+        ],
+    }
+
+
 def _empty_model_blocker_panel(session: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
     return {
         "version": SESSION_VERSION,
@@ -1827,15 +2116,32 @@ def _role_columns(table: dict[str, Any], role: str) -> list[str]:
     ]
 
 
-def _shared_key(left: dict[str, Any], right: dict[str, Any]) -> tuple[str, str] | None:
+def _shared_key(left: dict[str, Any], right: dict[str, Any]) -> tuple[str, str, str] | None:
+    """Pick the join key between two tables from workspace evidence, not a hardcoded list.
+
+    Returns ``(left_column, right_column, match_basis)`` where ``match_basis`` is one of:
+      * ``"identifier_role"`` — a shared column the model marks as an ``identifier`` (key)
+        role in either table. This is evidence-backed and the join is trustworthy.
+      * ``"name_only"`` — a shared column whose name merely ends in ``id``/``code`` with no
+        identifier role on either side. This is a candidate inferred ONLY from a column name
+        and must be confirmed by the user (or by profile/cardinality evidence) before use.
+
+    All preference is derived from the model under construction, so it stays
+    workspace-agnostic (no hardcoded domain entity/key names).
+    """
     left_by_norm = {_norm(column.get("name", "")): column.get("name", "") for column in left.get("columns", [])}
     right_by_norm = {_norm(column.get("name", "")): column.get("name", "") for column in right.get("columns", [])}
-    for key in PREFERRED_JOIN_KEYS:
-        if key in left_by_norm and key in right_by_norm:
-            return left_by_norm[key], right_by_norm[key]
-    for key in sorted(set(left_by_norm).intersection(right_by_norm)):
+    shared = sorted(set(left_by_norm).intersection(right_by_norm))
+    identifier_norms = {
+        _norm(name)
+        for name in _role_columns(left, "identifier") + _role_columns(right, "identifier")
+    }
+    for key in shared:
+        if key in identifier_norms:
+            return left_by_norm[key], right_by_norm[key], "identifier_role"
+    for key in shared:
         if key.endswith("id") or key.endswith("code"):
-            return left_by_norm[key], right_by_norm[key]
+            return left_by_norm[key], right_by_norm[key], "name_only"
     return None
 
 

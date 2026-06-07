@@ -50,6 +50,88 @@ class KPIExecutionHarnessTests(unittest.TestCase):
             )
             self.assertTrue(manifest["ok"])
 
+    def test_intent_blocked_sql_is_pending_decision_not_failed(self):
+        # A KPI whose SQL carries the intent-decision block marker is a PENDING
+        # USER DECISION, not an execution failure. Mislabeling it `failed` made
+        # the artifact validator hard-fail, which blocked applying the very answer
+        # that unblocks it (the grain-bucketing deadlock).
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            solutions = root / "workspaces" / "demo" / "interns" / "generated" / "solutions"
+            solutions.mkdir(parents=True)
+            (solutions / "kpi_002.sql").write_text(
+                "-- BLOCKED: grain-bucketing decision required (no exploded GROUP BY emitted).\n"
+                "-- reason: share metric cut by a raw continuous dimension\n"
+                'CREATE OR REPLACE VIEW "kpi_002_results" AS SELECT * FROM "kpi_002_features";',
+                encoding="utf-8",
+            )
+            result = KPIExecutionHarness(root, "workspaces/demo").run()
+            rec = result.records[0]
+            self.assertEqual(rec.status, "blocked_pending_decision")
+            self.assertFalse(rec.errors)
+            summary = result.summary()
+            self.assertEqual(summary["blocked_pending_count"], 1)
+            self.assertEqual(summary["failed_count"], 0)
+
+    def test_validator_tolerates_blocked_pending_but_rejects_genuine_failure(self):
+        from core.onboarding.kpi.execution_harness import BLOCKED_PENDING_STATUS
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = root / "workspaces" / "demo"
+            solutions = ws / "interns" / "generated" / "solutions"
+            solutions.mkdir(parents=True)
+            sql = (
+                "-- BLOCKED: grain-bucketing decision required\n"
+                "-- reason: pending\n"
+                'CREATE OR REPLACE VIEW "kpi_002_results" AS SELECT * FROM "kpi_002_features";'
+            )
+            (solutions / "kpi_002.sql").write_text(sql, encoding="utf-8")
+            import hashlib
+            payload = {
+                "artifact_type": "kpi_execution_harness.json",
+                "version": 1,
+                "generated_by": "run-kpi-execution-harness",
+                "ok": False,
+                "records": [{
+                    "kpi_id": "kpi_002",
+                    "sql_path": "workspaces/demo/interns/generated/solutions/kpi_002.sql",
+                    "status": BLOCKED_PENDING_STATUS,
+                    "result_view": "kpi_002_results",
+                    "sql_sha256": hashlib.sha256(sql.encode("utf-8")).hexdigest(),
+                    "columns": [], "row_count": None, "sample_output_table": "",
+                }],
+            }
+            self._write_harness_artifact(root, payload)
+            errs = WorkspaceArtifactValidator(root, "workspaces/demo").run().errors
+            self.assertFalse([e for e in errs if "did not pass" in e or "has no result columns" in e])
+
+    def test_validator_rejects_tampered_passed_manifest(self):
+        # The exact fabrication seen in the wild: flip a record to passed with a
+        # dummy sample. Re-execution must catch the mismatch.
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            solutions = root / "workspaces" / "demo" / "interns" / "generated" / "solutions"
+            solutions.mkdir(parents=True)
+            sql = 'CREATE OR REPLACE VIEW "kpi_001_results" AS SELECT 1 AS a UNION ALL SELECT 2;'
+            (solutions / "kpi_001.sql").write_text(sql, encoding="utf-8")
+            # Produce a real manifest, then tamper the row_count.
+            KPIExecutionHarness(root, "workspaces/demo").run()
+            path = root / "workspaces" / "demo" / "interns" / "generated" / "evidence" / "kpi_execution_harness.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["records"][0]["row_count"] = 999
+            data["records"][0]["sample_output_table"] = "| a |\n| --- |\n| Dummy |"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            errs = WorkspaceArtifactValidator(root, "workspaces/demo").run().errors
+            self.assertTrue([e for e in errs if "tampered" in e.lower()])
+
     def test_sql_generator_produces_generic_aggregation_from_metric_and_cuts(self):
         """The result-view SQL is now built by a workspace-agnostic generic
         builder that parses `kpi.metric` + `kpi.cuts` into structural SQL.
@@ -179,6 +261,73 @@ class KPIExecutionHarnessTests(unittest.TestCase):
             self.assertTrue(
                 any("sum(PaidAmount)" in error for error in result.records[0].errors)
             )
+
+    def test_harness_accepts_sum_distinct_metric_implemented_as_count_distinct(self):
+        # A sum(distinct X) metric is a distinct count; the builder renders it as
+        # COUNT(DISTINCT X). The semantic gate must accept that faithful
+        # rendering rather than demanding a literal SUM(. (Also tolerates the
+        # `disitnct` misspelling that appears in the source workbook.)
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            solutions = workspace / "interns" / "generated" / "solutions"
+            contracts = workspace / "interns" / "generated" / "contracts"
+            solutions.mkdir(parents=True)
+            contracts.mkdir(parents=True)
+            (contracts / "kpi_registry.json").write_text(
+                json.dumps(
+                    {
+                        "kpis": [
+                            {
+                                "name": "percentage share of lives by department",
+                                "cuts": "Department Name",
+                                "metric": (
+                                    "percentage of sum(distinct PatientID) / "
+                                    "sum(disitnct PatientID) for departement"
+                                ),
+                                "features": [
+                                    {"feature": "PatientID",
+                                     "source_columns": [{"column": "PatientID"}]},
+                                    {"feature": "Department Name",
+                                     "source_columns": [{"column": "name"}]},
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (solutions / "kpi_001.sql").write_text(
+                "\n".join(
+                    [
+                        'CREATE OR REPLACE VIEW "kpi_001_results" AS',
+                        "SELECT DISTINCT name,",
+                        '  COUNT(DISTINCT "PatientID") OVER (PARTITION BY name) AS per_dept,',
+                        '  COUNT(DISTINCT "PatientID") OVER () AS total',
+                        "FROM (VALUES ('A', 1), ('A', 2), ('B', 3))"
+                        ' AS t(name, "PatientID");',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = KPIExecutionHarness(root, "workspaces/demo").run()
+
+            # The metric-implementation gate must NOT reject the COUNT(DISTINCT)
+            # rendering of sum(distinct PatientID).
+            self.assertFalse(
+                any(
+                    "does not implement workbook metric" in error
+                    for error in result.records[0].errors
+                ),
+                result.records[0].errors,
+            )
+            self.assertEqual(result.records[0].status, "passed", result.records[0].errors)
 
     def test_validator_rejects_generated_sql_without_result_view(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -395,6 +544,161 @@ class KPIExecutionHarnessTests(unittest.TestCase):
 
             self.assertEqual(executable_gate["status"], "blocked")
             self.assertEqual(production_gate["status"], "blocked")
+
+
+class DenominatorScopeHarnessTests(unittest.TestCase):
+    """Phase 1: the execution harness must fail a KPI whose pipeline_decisions.json
+    records a within-group denominator scope but whose SQL uses OVER () instead
+    of OVER (PARTITION BY <group>).
+
+    This is the live BUG-025: the review rubber-stamped unchanged SQL because
+    the recorded decision was never enforced.
+    """
+
+    def _setup_workspace(
+        self,
+        tmp: str,
+        *,
+        denominator_scope: str | None,
+        sql: str,
+    ) -> "KPIExecutionHarness":  # type: ignore[name-defined]
+        root = Path(tmp)
+        workspace = root / "workspaces" / "demo"
+        solutions = workspace / "interns" / "generated" / "solutions"
+        contracts = workspace / "interns" / "generated" / "contracts"
+        solutions.mkdir(parents=True)
+        contracts.mkdir(parents=True)
+
+        registry = {
+            "kpis": [
+                {
+                    "kpi_id": "kpi_002",
+                    "name": "Percentage share of lives by department",
+                    "metric": (
+                        "percentage of sum(distinct PatientID) / "
+                        "sum(distinct PatientID) for departement"
+                    ),
+                    "cuts": "departement, Gender",
+                    "features": [
+                        {"feature": "PatientID",
+                         "source_columns": [{"column": "PatientID"}]},
+                        {"feature": "departement",
+                         "source_columns": [{"column": "departement"}]},
+                        {"feature": "Gender",
+                         "source_columns": [{"column": "Gender"}]},
+                    ],
+                }
+            ]
+        }
+        (contracts / "kpi_registry.json").write_text(
+            json.dumps(registry), encoding="utf-8"
+        )
+
+        if denominator_scope is not None:
+            decisions = {
+                "percentage_denominator_scopes": {"kpi_002": denominator_scope}
+            }
+            (contracts / "pipeline_decisions.json").write_text(
+                json.dumps(decisions), encoding="utf-8"
+            )
+
+        (solutions / "kpi_002.sql").write_text(sql, encoding="utf-8")
+        return KPIExecutionHarness(root, "workspaces/demo")
+
+    def test_harness_fails_when_within_scope_recorded_but_over_grand_total_used(self):
+        """Recorded within_department scope + OVER () in SQL → semantic error."""
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        sql = "\n".join([
+            'CREATE OR REPLACE VIEW "kpi_002_results" AS',
+            "SELECT DISTINCT",
+            '  "departement" AS departement,',
+            '  "Gender" AS gender,',
+            '  COUNT(DISTINCT "PatientID") OVER (PARTITION BY "departement", "Gender") AS per_group,',
+            '  COUNT(DISTINCT "PatientID") OVER () AS total,',
+            "  CAST(per_group AS DOUBLE) / NULLIF(total, 0) * 100 AS percentage_share",
+            "FROM (VALUES ('A', 1, 'M'), ('A', 2, 'F'), ('B', 3, 'M'))"
+            ' AS t("departement", "PatientID", "Gender");',
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = self._setup_workspace(
+                tmp,
+                denominator_scope="within_department",
+                sql=sql,
+            )
+            result = harness.run()
+
+        self.assertFalse(result.ok)
+        all_errors = " ".join(result.records[0].errors)
+        self.assertIn("denominator_scope_not_realized", all_errors)
+
+    def test_harness_passes_when_within_scope_and_partition_by_match(self):
+        """Recorded within_department scope + OVER (PARTITION BY ...) → passes."""
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        sql = "\n".join([
+            'CREATE OR REPLACE VIEW "kpi_002_results" AS',
+            "SELECT DISTINCT",
+            '  "departement" AS departement,',
+            '  "Gender" AS gender,',
+            '  COUNT(DISTINCT "PatientID") OVER (PARTITION BY "departement", "Gender") AS per_group,',
+            '  COUNT(DISTINCT "PatientID") OVER (PARTITION BY "departement") AS total,',
+            "  CAST(per_group AS DOUBLE) / NULLIF(total, 0) * 100 AS percentage_share",
+            "FROM (VALUES ('A', 1, 'M'), ('A', 2, 'F'), ('B', 3, 'M'))"
+            ' AS t("departement", "PatientID", "Gender");',
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = self._setup_workspace(
+                tmp,
+                denominator_scope="within_department",
+                sql=sql,
+            )
+            result = harness.run()
+
+        # Scope is realized — the denomination check should pass.
+        denom_errors = [
+            e for e in result.records[0].errors
+            if "denominator_scope_not_realized" in e
+        ]
+        self.assertEqual(
+            denom_errors, [],
+            f"unexpected denominator_scope errors: {result.records[0].errors}",
+        )
+
+    def test_harness_passes_when_no_pipeline_decisions_file(self):
+        """Absent pipeline_decisions.json → no denominator check → no extra errors."""
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb is not installed")
+
+        sql = "\n".join([
+            'CREATE OR REPLACE VIEW "kpi_002_results" AS',
+            "SELECT DISTINCT",
+            '  "departement" AS departement,',
+            '  COUNT(DISTINCT "PatientID") OVER () AS total',
+            "FROM (VALUES ('A', 1), ('B', 2))"
+            ' AS t("departement", "PatientID");',
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = self._setup_workspace(
+                tmp,
+                denominator_scope=None,  # no decisions file written
+                sql=sql,
+            )
+            result = harness.run()
+
+        denom_errors = [
+            e for e in result.records[0].errors
+            if "denominator_scope_not_realized" in e
+        ]
+        self.assertEqual(denom_errors, [])
 
 
 if __name__ == "__main__":

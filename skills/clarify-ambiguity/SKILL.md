@@ -27,6 +27,31 @@ Before asking, inspect available context:
 
 Ask only for intent, preference, permissions, or unavailable facts.
 
+### Consult internal docs first
+
+For technical/platform ambiguity — how the platform works (data-engineering method, schema type,
+medallion/quality tier, Databricks scopes, dbt, lakehouse ops, pipeline design) — do not ask the
+user first. First retrieve the relevant internal docs:
+
+```text
+uv run retrieve-docs --query "<the ambiguous topic>" --quiet
+```
+
+`--quiet` keeps it cheap (one line per hit: `path (score) - title`). If a relevant doc is returned
+(non-empty, reasonable score), re-run without `--quiet` (or with `--top-k 1`) to read its bounded
+excerpt, resolve the ambiguity from it, and cite the doc path you used so the reasoning is
+traceable. Only ask the user when the docs do not cover the topic.
+
+Decision rule: docs resolve "how", the user resolves "what/which/whether".
+
+- Technical/how-the-platform-works ambiguity -> `retrieve-docs`.
+  Example: "is this a star or snowflake schema?" -> retrieve the schema-design guide and decide
+  from it.
+- Intent/preference/permission ambiguity -> ask the user; docs cannot answer it.
+  Example: "which KPI did you mean?" -> ask the user.
+
+`docs/README.md` is the map of the doc tree; do not hardcode an inline doc list here.
+
 ## Setup-Level Ambiguity
 
 If the unclear part is the active workflow, workspace, or file set, do not guess. Use the Step 0

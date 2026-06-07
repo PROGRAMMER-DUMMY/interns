@@ -1,0 +1,25 @@
+# ═════════════════════════════════════════════════════════════════════════════
+#  autoresearch — runtime lock (TEMPLATE)
+# ═════════════════════════════════════════════════════════════════════════════
+#  Copy to config/lock.toml (gitignored) and set your values:
+#      cp config/lock.toml.example config/lock.toml
+#
+#  Read by core/config.py. Secrets are NOT stored here — this file holds the
+#  NAMES of the env vars that carry secret values (host_env/token_env/...).
+#  Put the actual values in .env (gitignored). See config/README.md.
+# ═════════════════════════════════════════════════════════════════════════════
+
+[databricks]
+enabled    = false            # true -> route execution/deployment to Databricks
+execution  = "warehouse"      # warehouse (SQL) | jobs | duckdb | connect
+fallback   = "duckdb"         # duckdb | fail  — used when remote is unavailable
+catalog    = "autoresearch"   # target Unity Catalog (must already exist)
+schema     = "experiments"    # target schema inside the catalog
+
+# Env var NAMES that hold the secret/connection values (values live in .env):
+host_env       = "DATABRICKS_HOST"
+token_env      = "DATABRICKS_TOKEN"
+http_path_env  = "DATABRICKS_HTTP_PATH"   # required for execution = "warehouse"
+
+trace_redact   = true         # redact secrets from traces
+http_timeout_sec = 60

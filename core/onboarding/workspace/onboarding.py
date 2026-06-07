@@ -26,6 +26,12 @@ from core.onboarding.kpi.text_parser import (
     infer_metric_and_cuts,
     is_template_kpi_row,
 )
+from core.onboarding.kpi.kpi_confirmation_panel import (
+    build_kpi_confirmation_panel,
+    render_kpi_confirmation_markdown,
+)
+from core.onboarding.kpi.kpi_format_detector import KpiFormatDetection, detect_kpi_format
+from core.onboarding.kpi.workbook_structure import read_workbook_grid
 from core.onboarding.lexicon import (
     WorkspaceLexicon,
     build_workspace_lexicon,
@@ -177,6 +183,353 @@ class WorkspaceOnboarder:
             )
         return extracted, warnings
 
+    def _parse_data_model_images(self) -> tuple[dict[str, str], list[str]]:
+        """Invoke DataModelImageParser for any data-model image under the workspace
+        docs tree.  Writes review-gated sidecars under
+        ``interns/generated/data_model_images/``.
+
+        LOCAL-SAFE ONLY: remote vision and sensitive-upload flags are always off.
+        If Tesseract / local OCR is unavailable, degrades gracefully with a [~]
+        warning so onboarding continues without hard-failing.
+
+        Returns ``(artifacts_dict, warnings_list)`` where the artifacts dict
+        contains ``"diagram_sidecar_dir"`` and ``"diagram_current_json"`` when at
+        least one image was processed; it is empty when no images are found or when
+        the parser cannot be imported.
+        """
+        try:
+            from core.onboarding.data_model.image_parser import DataModelImageParser
+        except Exception as exc:  # pragma: no cover - import guard
+            return {}, [f"data_model_image_parser_import_failed:{type(exc).__name__}:{exc}"]
+
+        try:
+            parse_result = DataModelImageParser(self.repo_root, self.workspace).parse(
+                allow_remote_vision=False,
+                confirm_sensitive_upload=False,
+                local_ocr="auto",
+                auto_install_ocr=False,
+            )
+        except Exception as exc:
+            return {}, [f"data_model_image_parse_failed:{type(exc).__name__}:{exc}"]
+
+        warnings: list[str] = []
+        artifacts: dict[str, str] = {}
+
+        if parse_result.image_count == 0:
+            return artifacts, warnings
+
+        # Surface OCR availability through warnings rather than errors.
+        for sidecar_path in parse_result.generated_sidecars:
+            try:
+                import json as _json
+                sidecar = _json.loads((self.repo_root / sidecar_path).read_text(encoding="utf-8"))
+                ocr_state = (sidecar.get("parsers") or {}).get("ocr_layout") or {}
+                if ocr_state.get("state") in {"provider_not_configured", "failed"}:
+                    warnings.append(
+                        f"[~] data_model_image_ocr_unavailable:{sidecar_path}:"
+                        "Tesseract not found locally; diagram parsed without OCR text. "
+                        "Install Tesseract or pass --auto-install-ocr for full extraction."
+                    )
+            except Exception:
+                pass
+
+        artifacts["diagram_sidecar_dir"] = str(
+            self.layout.generated_dir / "data_model_images"
+        )
+        artifacts["diagram_current_json"] = parse_result.current_json_path
+        artifacts["diagram_current_md"] = parse_result.current_markdown_path
+        return artifacts, warnings
+
+    def _scan_documents(self) -> tuple[dict[str, str], list[str]]:
+        """Run the local-safe opendataloader PDF extractor (free mode) over any
+        PDF under the workspace, writing review-gated sidecars under
+        ``interns/generated/documents/`` and propose-only candidate records.
+
+        LOCAL-SAFE ONLY: free mode (deterministic, no AI backend, no upload).
+        Degrades gracefully with a [~] warning when opendataloader-pdf or Java is
+        unavailable, so onboarding continues without hard-failing. Candidates are
+        review-gated and are NEVER auto-promoted into any contract.
+        """
+        warnings: list[str] = []
+        artifacts: dict[str, str] = {}
+        try:
+            from core.onboarding.documents.classifier import classify_document
+            from core.onboarding.documents.document_loader import scan_document
+        except Exception as exc:  # pragma: no cover - import guard
+            return {}, [f"document_scan_import_failed:{type(exc).__name__}:{exc}"]
+
+        interns_dir = self.layout.interns_dir.resolve()
+        pdfs = sorted(
+            p
+            for p in self.workspace.rglob("*.pdf")
+            if interns_dir not in p.resolve().parents
+        )
+        if not pdfs:
+            return artifacts, warnings
+
+        workspace_rel = _rel(self.workspace, self.repo_root)
+        all_candidates: list[dict[str, Any]] = []
+        document_types: dict[str, dict[str, Any]] = {}
+        scanned = 0
+        for pdf in pdfs:
+            try:
+                result = scan_document(self.repo_root, workspace_rel, str(pdf), mode="free")
+            except Exception as exc:
+                warnings.append(
+                    f"[~] document_scan_failed:{_rel(pdf, self.repo_root)}:"
+                    f"{type(exc).__name__}:{exc}"
+                )
+                continue
+            if result.status == "blocker":
+                warnings.append(
+                    f"[~] document_scan_unavailable:{_rel(pdf, self.repo_root)}:"
+                    f"{getattr(result, 'blocker_reason', '') or 'extractor unavailable'} "
+                    "(install opendataloader-pdf + Java 11+ for PDF ingestion)."
+                )
+                continue
+            if result.status != "ok":
+                continue
+            scanned += 1
+            pdf_rel = _rel(pdf, self.repo_root)
+            try:
+                from core.onboarding.documents.classifier import (
+                    CANDIDATE_RAW_EVIDENCE,
+                    detect_document_type,
+                )
+
+                sidecar = json.loads(
+                    (self.repo_root / result.sidecar_path).read_text(encoding="utf-8")
+                )
+                extracted = sidecar.get("extracted_content") or {}
+                doc_type_info = detect_document_type(extracted)
+                document_types[pdf_rel] = doc_type_info
+                cands = classify_document(extracted)
+                for cand in cands:
+                    cand["source_document"] = pdf_rel
+                    all_candidates.append(cand)
+                # "No actionable candidates" signal (the skill's `None` tier): a
+                # document that yielded nothing routable is reference-only, not a
+                # silent no-op. Raw-evidence-only counts as no actionable candidate.
+                routable = [
+                    c for c in cands
+                    if c.get("candidate_type") != CANDIDATE_RAW_EVIDENCE
+                ]
+                if not routable:
+                    warnings.append(
+                        f"[~] document_scanned_no_candidates:{pdf_rel}: "
+                        f"document_type={doc_type_info.get('document_type')} "
+                        "(reference-only; no KPI/lexicon/relationship/rule signals found)."
+                    )
+            except Exception as exc:
+                warnings.append(
+                    f"[~] document_classify_failed:{pdf_rel}:"
+                    f"{type(exc).__name__}:{exc}"
+                )
+
+        if scanned == 0:
+            return artifacts, warnings
+
+        documents_dir = self.layout.generated_dir / "documents"
+        candidates_path = self._write_json(
+            documents_dir / "candidates.json",
+            {
+                "artifact_type": "document_candidates.json",
+                "version": 1,
+                "generated_by": "onboard-workspace",
+                "workspace": workspace_rel,
+                "authoritative_usage_allowed": False,
+                "note": (
+                    "Propose-only candidates extracted from PDFs; review-gated, "
+                    "never auto-promoted into any contract."
+                ),
+                "scanned_pdf_count": scanned,
+                "candidate_count": len(all_candidates),
+                "document_types": document_types,
+                "candidates": all_candidates,
+            },
+        )
+        artifacts["document_sidecar_dir"] = str(documents_dir)
+        artifacts["document_candidates"] = str(candidates_path)
+        return artifacts, warnings
+
+    def _accepted_document_kpis(
+        self, existing: list[KpiDefinition]
+    ) -> tuple[list[KpiDefinition], list[str]]:
+        """Merge human-confirmed PDF KPI candidates (the durable accepted-candidates
+        store) into the KPI set as additional proposals.
+
+        GOVERNED: only candidates a human confirmed via `apply-document-candidate`
+        are consumed (never raw-extracted text). Each becomes a KpiDefinition with
+        `status=needs_mapping` and `source=document_pdf:<file>`, so it flows through
+        the normal feature-resolution / proof gates like any other KPI. New names
+        only — never overrides an authored workbook KPI.
+        """
+        warnings: list[str] = []
+        try:
+            from core.onboarding.documents.candidate_apply import merge_accepted_candidates
+        except Exception:  # pragma: no cover - import guard
+            return [], warnings
+        try:
+            merged = merge_accepted_candidates(self.layout)
+        except Exception as exc:
+            return [], [f"[~] accepted_document_kpi_merge_failed:{type(exc).__name__}:{exc}"]
+
+        accepted = merged.get("kpi_registry_candidates") or []
+        if not accepted:
+            return [], warnings
+
+        existing_names = {(k.name or "").strip().lower() for k in existing}
+        out: list[KpiDefinition] = []
+        for entry in accepted:
+            content = entry.get("content") or {}
+            headers = [str(h) for h in (content.get("headers") or [])]
+            roles = {h: _document_kpi_header_role(h) for h in headers}
+            for row in content.get("sample_rows") or []:
+                if not isinstance(row, dict):
+                    continue
+                name = metric = cuts = ""
+                for header, value in row.items():
+                    role = roles.get(str(header)) or _document_kpi_header_role(str(header))
+                    text = str(value).strip()
+                    if role == "name" and not name:
+                        name = text
+                    elif role == "metric" and not metric:
+                        metric = text
+                    elif role == "cuts" and not cuts:
+                        cuts = text
+                if not name or name.lower() in existing_names:
+                    continue
+                existing_names.add(name.lower())
+                out.append(
+                    KpiDefinition(
+                        name=name,
+                        metric=metric,
+                        cuts=cuts,
+                        source=f"document_pdf:{entry.get('source_document', '')}",
+                        status="needs_mapping",
+                    )
+                )
+        if out:
+            warnings.append(
+                f"[~] document_kpis_merged:{len(out)} KPI(s) from human-confirmed PDF "
+                "candidate(s) added to the registry as proposals (status=needs_mapping)."
+            )
+        return out, warnings
+
+    def _accepted_document_open_questions(self) -> tuple[list[str], list[str]]:
+        """Merge human-confirmed PDF open-question candidates into open_questions.md.
+
+        GOVERNED: only candidates a human accepted via `apply-document-candidate`
+        are consumed (never raw-extracted text). Each accepted
+        `open_question_candidate` (prose rule / SLA / policy text) becomes an
+        appended open question carrying its source-document + page provenance, so
+        the rule is surfaced for stakeholder clarification rather than silently
+        dropped. Cheap append only -- never mutates a contract.
+        """
+        warnings: list[str] = []
+        try:
+            from core.onboarding.documents.candidate_apply import merge_accepted_candidates
+        except Exception:  # pragma: no cover - import guard
+            return [], warnings
+        try:
+            merged = merge_accepted_candidates(self.layout)
+        except Exception as exc:
+            return [], [
+                f"[~] accepted_document_open_question_merge_failed:"
+                f"{type(exc).__name__}:{exc}"
+            ]
+
+        accepted = merged.get("open_question_candidates") or []
+        if not accepted:
+            return [], warnings
+
+        questions: list[str] = []
+        seen: set[str] = set()
+        for entry in accepted:
+            content = entry.get("content") or {}
+            snippet = str(content.get("text_snippet") or "").strip()
+            if not snippet:
+                continue
+            key = snippet.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            src = str(entry.get("source_document") or "").strip()
+            page = entry.get("page")
+            if src:
+                loc = f" (source: {src}" + (f", p.{page}" if page is not None else "") + ")"
+            else:
+                loc = ""
+            questions.append(f"{snippet}{loc}")
+        if questions:
+            warnings.append(
+                f"[~] document_open_questions_merged:{len(questions)} business-rule/SLA "
+                "prose item(s) from human-confirmed PDF candidate(s) appended to open_questions.md."
+            )
+        return questions, warnings
+
+    def _accepted_document_relationship_notes(self) -> tuple[list[str], list[str]]:
+        """Surface human-confirmed PDF data-model candidates as NON-EXECUTABLE notes.
+
+        GOVERNED + NON-EXECUTABLE: a `data_model_candidate` (proposed ERD / FK /
+        relationship extracted from a document) is NEVER auto-promoted into
+        `relationship_contracts.json` and is NEVER executable from document
+        evidence alone (BUG-004/023 discipline -- profile RI proof is still
+        required via `build-relationship-contracts`). This consumption only
+        SURFACES the proposal as an open-question note so a reviewer can prove it
+        against profiles before any join is executed.
+        """
+        warnings: list[str] = []
+        try:
+            from core.onboarding.documents.candidate_apply import merge_accepted_candidates
+        except Exception:  # pragma: no cover - import guard
+            return [], warnings
+        try:
+            merged = merge_accepted_candidates(self.layout)
+        except Exception as exc:
+            return [], [
+                f"[~] accepted_document_relationship_merge_failed:"
+                f"{type(exc).__name__}:{exc}"
+            ]
+
+        accepted = merged.get("data_model_candidates") or []
+        if not accepted:
+            return [], warnings
+
+        notes: list[str] = []
+        seen: set[str] = set()
+        for entry in accepted:
+            content = entry.get("content") or {}
+            snippet = str(content.get("text_snippet") or "").strip()
+            if not snippet:
+                headers = content.get("headers") or []
+                signals = content.get("detected_signals") or []
+                if headers or signals:
+                    snippet = f"relationship table headers={headers} signals={signals}"
+            if not snippet:
+                continue
+            key = snippet.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            src = str(entry.get("source_document") or "").strip()
+            page = entry.get("page")
+            if src:
+                loc = f" (source: {src}" + (f", p.{page}" if page is not None else "") + ")"
+            else:
+                loc = ""
+            notes.append(
+                f"[NON-EXECUTABLE] proposed relationship from document: {snippet}{loc} "
+                "-- requires profile RI proof via build-relationship-contracts before any join."
+            )
+        if notes:
+            warnings.append(
+                f"[~] document_relationships_surfaced:{len(notes)} NON-EXECUTABLE relationship "
+                "proposal(s) from human-confirmed PDF candidate(s) surfaced in open_questions.md "
+                "(profile RI proof still required)."
+            )
+        return notes, warnings
+
     def _run_locked(self) -> OnboardingResult:
         self._clear_onboarding_artifacts()
         inputs = self.discover_inputs()
@@ -192,6 +545,17 @@ class WorkspaceOnboarder:
             estimated_bytes=estimated_profile_bytes,
         )
         kpis, kpi_warnings = self.load_kpis(inputs.kpi_registries)
+        # Consume human-confirmed PDF KPI candidates (closes the PDF->registry loop).
+        document_kpis, document_kpi_warnings = self._accepted_document_kpis(kpis)
+        if document_kpis:
+            kpis = list(kpis) + document_kpis
+        kpi_warnings = kpi_warnings + document_kpi_warnings
+        # Consume human-confirmed PDF prose-rule/SLA candidates into open_questions.md.
+        document_open_questions, document_oq_warnings = self._accepted_document_open_questions()
+        kpi_warnings = kpi_warnings + document_oq_warnings
+        # Surface human-confirmed PDF data-model candidates as NON-EXECUTABLE notes.
+        document_dm_notes, document_dm_warnings = self._accepted_document_relationship_notes()
+        kpi_warnings = kpi_warnings + document_dm_warnings
         profiles, profile_warnings = self.profile_inputs(
             inputs.data_files,
             sample_rows=profiling_settings.sample_rows,
@@ -242,6 +606,17 @@ class WorkspaceOnboarder:
                 "resource_profile_settings": profiling_settings.to_dict(),
             },
         )
+        # Parse data-model images (e.g. DataModel.png) into review-gated sidecars.
+        # Must run AFTER profile_index.json is persisted to disk: the parser's
+        # profile matcher reads profile_index.json to resolve diagram FK endpoints
+        # (Fact/Dim_*) to real dataset/column names. Running before the write left
+        # the matcher in `profile_index_missing` state, so no edges resolved.
+        # LOCAL-SAFE ONLY (no remote vision / upload); degrades with a [~] warning
+        # if Tesseract is absent.
+        diagram_artifacts, diagram_warnings = self._parse_data_model_images()
+        # Local-safe PDF document ingestion (opendataloader free mode). No-op when
+        # no PDFs are present; degrades gracefully if the extractor/Java is absent.
+        document_artifacts, document_warnings = self._scan_documents()
         kpi_registry_payload = {
             "artifact_type": "kpi_registry.json",
             "version": 1,
@@ -255,8 +630,18 @@ class WorkspaceOnboarder:
             kpi_registry_payload,
         )
 
+        # Human-confirmed KPI definitions are authoritative and applied FIRST, so
+        # they override derived/lexicon guesses and survive every re-onboard.
+        kpis = self._apply_accepted_kpi_definitions(kpis)
         lexicon = build_workspace_lexicon(self.layout, self.repo_root)
         kpis = self._fill_kpi_gaps_with_lexicon(kpis, lexicon)
+        # Evidence-based derivation for cells the lexicon could not fill. This
+        # recovers natural-language-question workspaces (empty metric/cuts) by
+        # deriving a measurable metric/grain from the workspace's own profiled
+        # columns, exactly as the KPI-generation interview does. Idempotent and
+        # workspace-agnostic; low-confidence/ambiguous cases stay empty so the
+        # definition-blocker gate still asks rather than fabricating.
+        kpis = self._fill_kpi_gaps_with_derivation(kpis, profiles)
         kpi_registry_payload["kpis"] = [asdict(kpi) for kpi in kpis]
 
         artifacts = {
@@ -276,7 +661,12 @@ class WorkspaceOnboarder:
                 self.layout.contracts_dir / "semantic_contract.json",
                 self._build_semantic_contract(kpis, inputs),
             ),
-            "open_questions": self._write_open_questions(kpis, kpi_warnings + profile_warnings),
+            "open_questions": self._write_open_questions(
+                kpis,
+                kpi_warnings + profile_warnings,
+                document_open_questions,
+                document_dm_notes,
+            ),
             "stakeholder_interview": self._write_stakeholder_interview(inputs, kpis),
             "baseline_sql": self._write_baseline_sql(kpis),
             "experiment": self._write_experiment_script(),
@@ -284,6 +674,8 @@ class WorkspaceOnboarder:
             "onboarding_report": self._write_report(inputs, kpis, profiles),
             "profile_index": profile_index,
             **resource_artifacts,
+            **diagram_artifacts,
+            **document_artifacts,
         }
         artifacts["generated_file_readability"] = self._write_generated_file_readability()
 
@@ -296,7 +688,11 @@ class WorkspaceOnboarder:
             artifacts=artifacts,
             next_step=_onboarding_next_step(inputs, kpis, profiles),
             next_command=_onboarding_next_command(inputs, kpis, profiles),
-            warnings=kpi_warnings + profile_warnings + dictionary_warnings,
+            warnings=kpi_warnings
+            + profile_warnings
+            + dictionary_warnings
+            + diagram_warnings
+            + document_warnings,
         )
 
     def discover_inputs(self) -> WorkspaceInputs:
@@ -350,13 +746,22 @@ class WorkspaceOnboarder:
     def load_kpis(self, registry_paths: list[str]) -> tuple[list[KpiDefinition], list[str]]:
         kpis: list[KpiDefinition] = []
         warnings: list[str] = []
+        detections: list[tuple[KpiFormatDetection, list[dict[str, Any]]]] = []
         for registry in registry_paths:
             path = self.repo_root / registry
+            rel = _rel(path, self.repo_root)
             try:
                 if path.suffix.lower() in {".xlsx", ".xlsm"}:
-                    kpis.extend(_read_excel_kpis(path))
+                    detection, file_kpis = _read_excel_kpis_with_detection(path)
+                    kpis.extend(file_kpis)
+                    if detection is not None:
+                        detections.append((detection, _sample_rows_for(path)))
                 elif path.suffix.lower() == ".csv" and pl:
-                    kpis.extend(_read_tabular_kpis(pl.read_csv(path), source=_rel(path, self.repo_root)))
+                    frame = pl.read_csv(path)
+                    detection, file_kpis = _read_frame_with_detection(frame, rel)
+                    kpis.extend(file_kpis)
+                    if detection is not None:
+                        detections.append((detection, list(frame.head(2).iter_rows(named=True))))
                 elif path.suffix.lower() == ".json":
                     kpis.extend(_read_json_kpis(path, self.repo_root))
                 elif path.suffix.lower() == ".md":
@@ -364,13 +769,44 @@ class WorkspaceOnboarder:
                 elif path.suffix.lower() == ".sql":
                     kpis.extend(_read_sql_comment_kpis(path, self.repo_root))
                 else:
-                    warnings.append(f"unsupported_registry_format:{_rel(path, self.repo_root)}")
+                    warnings.append(f"unsupported_registry_format:{rel}")
             except Exception as exc:
                 warnings.append(
-                    f"kpi_registry_read_failed:{_rel(path, self.repo_root)}:"
-                    f"{type(exc).__name__}:{exc}"
+                    f"kpi_registry_read_failed:{rel}:{type(exc).__name__}:{exc}"
                 )
-        return kpis, warnings
+        self._write_kpi_format_confirmation(detections)
+        kpis, dedupe_warnings = _dedupe_kpis_by_name(kpis)
+        return kpis, warnings + dedupe_warnings
+
+    def _write_kpi_format_confirmation(
+        self,
+        detections: list[tuple[KpiFormatDetection, list[dict[str, Any]]]],
+    ) -> str:
+        """Write the KPI-file format confirmation card (the detected column->role
+        mapping, a real-row read-back, and any nesting/low-confidence flags) so the
+        user can verify the interpretation before it is trusted. One panel per
+        detected tabular KPI file; nothing here commits a mapping."""
+        if not detections:
+            return ""
+        panels = [
+            build_kpi_confirmation_panel(detection, samples)
+            for detection, samples in detections
+        ]
+        out_dir = self.layout.reports_dir / "kpi_format"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "artifact_type": "kpi_format_confirmation",
+            "needs_user_confirmation": any(
+                p["summary"]["needs_user_confirmation"] for p in panels
+            ),
+            "panels": panels,
+        }
+        (out_dir / "current.json").write_text(
+            json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8"
+        )
+        markdown = "\n\n---\n\n".join(render_kpi_confirmation_markdown(p) for p in panels)
+        (out_dir / "current.md").write_text(markdown + "\n", encoding="utf-8")
+        return _rel(out_dir / "current.json", self.repo_root)
 
     def _fill_kpi_gaps_with_lexicon(
         self,
@@ -404,6 +840,148 @@ class WorkspaceOnboarder:
                     cuts=cuts or inferred_cuts,
                 )
             )
+        return filled
+
+    def _apply_accepted_kpi_definitions(
+        self, kpis: list[KpiDefinition]
+    ) -> list[KpiDefinition]:
+        """Apply human-confirmed KPI definitions (metric/grain) from the decision
+        store. Authoritative: overrides empty/derived cells and survives
+        re-onboarding. No-op when no definitions have been accepted."""
+        try:
+            from core.onboarding.kpi.kpi_definition import (
+                apply_accepted_definitions_to_kpis,
+                load_kpi_definition_store,
+            )
+        except Exception:  # pragma: no cover - defensive import guard
+            return list(kpis)
+        store = load_kpi_definition_store(self.layout)
+        if not store:
+            return list(kpis)
+        return apply_accepted_definitions_to_kpis(kpis, store)
+
+    def _load_column_glosses(self) -> list[dict[str, str]]:
+        """Discover column descriptions from the workspace's data-model evidence.
+
+        Returns ``[{"column": <field>, "description": <gloss>}]`` aggregated from
+        any data-dictionary-style file the workspace carries (a ``*dictionary*``
+        CSV with field/description columns, or the onboarding-parsed
+        ``data_dictionary/index.json``). Generic and convention-based: it keys on
+        the presence of field/description structure, never a specific filename or
+        domain term. Returns ``[]`` when no such evidence exists, leaving
+        derivation profile-only. Failures are swallowed (advisory evidence).
+        """
+        import csv as _csv
+
+        entries: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def _add(field: str, description: str) -> None:
+            field = str(field or "").strip()
+            description = str(description or "").strip()
+            if not field or not description:
+                return
+            key = (field.lower(), description.lower())
+            if key in seen:
+                return
+            seen.add(key)
+            entries.append({"column": field, "description": description})
+
+        try:
+            for path in sorted(self.workspace.rglob("*dictionary*.csv")):
+                if not path.is_file() or "/interns/" in path.as_posix():
+                    continue
+                try:
+                    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                        reader = _csv.DictReader(handle)
+                        names = {str(n).strip().lower(): n for n in (reader.fieldnames or [])}
+                        field_key = next((names[k] for k in ("field", "column", "name") if k in names), None)
+                        desc_key = next((names[k] for k in ("description", "definition", "meaning") if k in names), None)
+                        if not field_key or not desc_key:
+                            continue
+                        for row in reader:
+                            _add(row.get(field_key, ""), row.get(desc_key, ""))
+                except OSError:
+                    continue
+        except OSError:
+            pass
+
+        index_path = self.layout.generated_dir / "data_dictionary" / "index.json"
+        if index_path.exists():
+            try:
+                payload = json.loads(index_path.read_text(encoding="utf-8"))
+                for doc in payload.get("documents") or []:
+                    for entry in (doc.get("entries") if isinstance(doc, dict) else None) or []:
+                        if isinstance(entry, dict):
+                            _add(
+                                entry.get("field") or entry.get("column") or "",
+                                entry.get("description") or entry.get("definition") or "",
+                            )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return entries
+
+    def _fill_kpi_gaps_with_derivation(
+        self,
+        kpis: list[KpiDefinition],
+        profiles: list[dict[str, Any]],
+    ) -> list[KpiDefinition]:
+        """Derive a measurable metric/grain for KPIs still missing one.
+
+        Mirrors the KPI-generation interview's derivation (same module, same
+        confidence threshold) so a workspace onboarded directly off a
+        natural-language-question registry reaches the same populated state as
+        one taken through the interview. Only empty cells are touched; a cell is
+        filled only when the derived facet clears the confidence threshold, so
+        ambiguous metrics (share %, top-N) stay empty for the blocker gate to
+        ask. Generic: column choices come from this workspace's profiles.
+        """
+        try:
+            from core.onboarding.kpi.metric_derivation import (
+                HIGH_CONFIDENCE_THRESHOLD,
+                columns_from_profile_index,
+                derive_metric_and_cuts,
+            )
+        except Exception:  # pragma: no cover - defensive import guard
+            return list(kpis)
+        columns = columns_from_profile_index({"profiles": profiles})
+        if not columns:
+            return list(kpis)
+        # Ground the measure choice in the data model's own column descriptions,
+        # not column-name similarity alone (AGENTS.md "Data Model Driven
+        # Generation Rule"). Glosses are discovered from the workspace's
+        # data-dictionary evidence; absent dictionaries leave derivation
+        # profile-only. Generic: no specific file or column is assumed.
+        dictionary_entries = self._load_column_glosses()
+        filled: list[KpiDefinition] = []
+        for kpi in kpis:
+            metric = kpi.metric
+            cuts = kpi.cuts
+            question = str(kpi.name or "").strip()
+            if (metric and cuts) or not question:
+                filled.append(kpi)
+                continue
+            try:
+                derivation = derive_metric_and_cuts(
+                    question, columns, dictionary_entries=dictionary_entries
+                )
+            except Exception:  # pragma: no cover - derivation must never break onboarding
+                filled.append(kpi)
+                continue
+            new_metric = metric
+            new_cuts = cuts
+            if not str(new_metric).strip() and (
+                derivation["metric"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD
+            ):
+                new_metric = derivation["metric"]["value"]
+            if not str(new_cuts).strip() and (
+                derivation["cuts"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD
+            ):
+                new_cuts = derivation["cuts"]["value"]
+            if new_metric != metric or new_cuts != cuts:
+                filled.append(replace(kpi, metric=new_metric, cuts=new_cuts))
+            else:
+                filled.append(kpi)
         return filled
 
     def profile_inputs(
@@ -506,7 +1084,13 @@ class WorkspaceOnboarder:
             ],
         }
 
-    def _write_open_questions(self, kpis: list[KpiDefinition], warnings: list[str]) -> str:
+    def _write_open_questions(
+        self,
+        kpis: list[KpiDefinition],
+        warnings: list[str],
+        document_questions: list[str] | None = None,
+        data_model_notes: list[str] | None = None,
+    ) -> str:
         lines = [
             "# Open Questions",
             "",
@@ -520,6 +1104,27 @@ class WorkspaceOnboarder:
         for idx, kpi in enumerate(kpis, start=1):
             if kpi.refinement_required:
                 lines.append(f"{idx}. **{kpi.name}**: {kpi.refinement_required}")
+        if document_questions:
+            lines.extend([
+                "",
+                "## From confirmed source documents (PDF)",
+                "",
+                "Human-confirmed business rules / SLAs / policy prose extracted from",
+                "uploaded documents. Resolve or fold into KPI definitions as appropriate.",
+                "",
+            ])
+            lines.extend(f"- {q}" for q in document_questions)
+        if data_model_notes:
+            lines.extend([
+                "",
+                "## Proposed relationships from documents (NON-EXECUTABLE)",
+                "",
+                "Human-confirmed ERD/FK proposals from uploaded documents. These are",
+                "NOT executable: profile referential-integrity proof is still required",
+                "(run build-relationship-contracts) before any join is generated.",
+                "",
+            ])
+            lines.extend(f"- {n}" for n in data_model_notes)
         if warnings:
             lines.extend(["", "## Warnings", ""])
             lines.extend(f"- {warning}" for warning in warnings)
@@ -898,6 +1503,13 @@ if __name__ == "__main__":
         dictionary_root = self.layout.generated_dir / "data_dictionary"
         if dictionary_root.exists():
             shutil.rmtree(dictionary_root)
+        # Clear parsed data-model image sidecars so a re-run re-parses fresh.
+        sidecar_root = self.layout.generated_dir / "data_model_images"
+        if sidecar_root.exists():
+            shutil.rmtree(sidecar_root)
+        sidecar_report_root = self.layout.reports_dir / "data_model_images"
+        if sidecar_report_root.exists():
+            shutil.rmtree(sidecar_report_root)
 
     def _store_metadata(
         self,
@@ -937,30 +1549,78 @@ def find_root_artifact_violations(workspace: str | Path) -> list[str]:
     return violations
 
 
+def _sample_rows_for(path: Path, limit: int = 2) -> list[dict[str, Any]]:
+    """First few data rows of an .xlsx, for the confirmation read-back."""
+    try:
+        return read_workbook_grid(path).rows[:limit]
+    except Exception:
+        return []
+
+
 def _read_excel_kpis(path: Path) -> list[KpiDefinition]:
+    return _read_excel_kpis_with_detection(path)[1]
+
+
+def _read_excel_kpis_with_detection(
+    path: Path,
+) -> tuple[KpiFormatDetection | None, list[KpiDefinition]]:
+    """Read an .xlsx KPI file, returning the format detection (with merged-cell
+    nesting signals) alongside the extracted KPIs. Falls back to the XML reader
+    when the structural reader is unavailable."""
+    try:
+        grid = read_workbook_grid(path)
+        detection = detect_kpi_format(
+            grid.columns, grid.rows, source=str(path), merged_spans=grid.merged_spans,
+        )
+        return detection, _extract_tabular_kpis(grid.columns, grid.rows, detection, source=str(path))
+    except Exception:
+        pass
     if pl:
         try:
             frame = pl.read_excel(path)
-            return _read_tabular_kpis(frame, source=str(path))
+            return _read_frame_with_detection(frame, str(path))
         except Exception:
             pass
-    return _read_xlsx_xml_kpis(path)
+    return None, _read_xlsx_xml_kpis(path)
+
+
+def _read_frame_with_detection(
+    frame: Any, source: str,
+) -> tuple[KpiFormatDetection | None, list[KpiDefinition]]:
+    columns = list(frame.columns)
+    rows = list(frame.iter_rows(named=True))
+    detection = detect_kpi_format(columns, rows, source=source)
+    return detection, _extract_tabular_kpis(columns, rows, detection, source=source)
 
 
 def _read_tabular_kpis(frame: Any, source: str) -> list[KpiDefinition]:
-    columns = list(frame.columns)
+    return _read_frame_with_detection(frame, source)[1]
+
+
+def _extract_tabular_kpis(
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    detection: KpiFormatDetection,
+    *,
+    source: str,
+) -> list[KpiDefinition]:
+    """Extract KPI rows using the detector's column->role mapping, with the legacy
+    header-synonym matcher as a zero-regression fallback for any role the detector
+    did not place. The nested-row inheritance (blank key rows merging into the
+    parent) is preserved exactly."""
     lowered = {col.lower().strip(): col for col in columns}
-    name_col = _first_existing(lowered, ["key business question", "kpi", "kpi name", "metric", "name"])
-    desc_col = _first_existing(lowered, ["description", "definition"])
-    cuts_col = _first_existing(lowered, KPI_CUTS_HEADERS)
-    metric_col = _first_existing(lowered, ["metric", "formula", "expression"])
-    refine_col = _first_existing(
+    name_col = detection.role_header("business_question") or _first_existing(
+        lowered, ["key business question", "kpi", "kpi name", "metric", "name"]
+    )
+    desc_col = detection.role_header("description") or _first_existing(lowered, ["description", "definition"])
+    cuts_col = detection.role_header("cuts") or _first_existing(lowered, KPI_CUTS_HEADERS)
+    metric_col = detection.role_header("metric") or _first_existing(lowered, ["metric", "formula", "expression"])
+    refine_col = detection.role_header("refinement") or _first_existing(
         lowered,
         ["data model refinement required", "refinement required", "open questions"],
     )
     if not name_col:
         return []
-    rows = list(frame.iter_rows(named=True))
     if not cuts_col or not metric_col:
         detected_cuts_col, detected_metric_col = _detect_kpi_registry_detail_columns(rows, columns, name_col)
         cuts_col = cuts_col or detected_cuts_col
@@ -1052,6 +1712,68 @@ def _read_xlsx_xml_kpis(path: Path) -> list[KpiDefinition]:
             )
         )
     return kpis
+
+
+def _kpi_name_key(name: str) -> str:
+    """Normalized identity for a KPI business question.
+
+    Lowercased, punctuation-stripped, whitespace-collapsed so the SAME question
+    text coming from two registries (e.g. a finalized
+    ``kpi_registry.generated.json`` plus the raw ``*.sql`` it was generated from)
+    collapses to one key. Generic: it keys on the question text only, never on a
+    source path or domain vocabulary.
+    """
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]+", " ", str(name or "").lower())).strip()
+
+
+def _kpi_richness(kpi: KpiDefinition) -> int:
+    """How completely a KPI is specified. Used to pick the survivor when the
+    same business question appears in multiple registries: the entry that
+    already carries a metric/cuts/refinement wins over a bare duplicate."""
+    score = 0
+    if str(kpi.metric or "").strip():
+        score += 2
+    if str(kpi.cuts or "").strip():
+        score += 2
+    if str(kpi.refinement_required or "").strip():
+        score += 1
+    if str(kpi.description or "").strip():
+        score += 1
+    return score
+
+
+def _dedupe_kpis_by_name(kpis: list[KpiDefinition]) -> tuple[list[KpiDefinition], list[str]]:
+    """Collapse KPIs that share a normalized business question across registries.
+
+    Onboarding can discover both a finalized generation registry and the raw
+    source file it was generated from; ingesting both double-counts every KPI.
+    Dedupe by normalized question text, keeping the richest entry (and the first
+    of equal-richness ones, preserving spec order). Workspace-agnostic — it never
+    inspects which file a KPI came from, only the question text and completeness.
+    """
+    survivors: dict[str, int] = {}
+    ordered: list[KpiDefinition] = []
+    collapsed = 0
+    for kpi in kpis:
+        key = _kpi_name_key(kpi.name)
+        if not key:
+            ordered.append(kpi)
+            continue
+        if key not in survivors:
+            survivors[key] = len(ordered)
+            ordered.append(kpi)
+            continue
+        existing_index = survivors[key]
+        if _kpi_richness(kpi) > _kpi_richness(ordered[existing_index]):
+            ordered[existing_index] = kpi
+        collapsed += 1
+    warnings: list[str] = []
+    if collapsed:
+        warnings.append(
+            f"[~] kpi_dedupe:{collapsed} duplicate KPI(s) collapsed by business question "
+            "(same question present in more than one registry)."
+        )
+    return ordered, warnings
 
 
 def _read_json_kpis(path: Path, repo_root: Path) -> list[KpiDefinition]:
@@ -1155,6 +1877,28 @@ def _source_truth_constraints(inferred_cuts: str) -> str:
         if any(token in clean for token in ("=", ">", "<")) or "top 10" in clean.lower():
             constraints.append(clean)
     return ", ".join(constraints)
+
+
+_DOCUMENT_KPI_NAME_HEADERS = frozenset({"kpi", "name", "indicator", "kpiname", "metricname"})
+_DOCUMENT_KPI_METRIC_HEADERS = frozenset({"metric", "measure", "formula", "calculation", "aggregation"})
+_DOCUMENT_KPI_CUTS_HEADERS = frozenset(
+    {"cut", "cuts", "dimension", "dimensions", "grain", "breakout", "breakdown", "by", "groupby"}
+)
+
+
+def _document_kpi_header_role(header: str) -> str | None:
+    """Map a PDF KPI-table column header to a KpiDefinition field role.
+
+    Returns "name" | "metric" | "cuts" | None. Workspace-agnostic: matches on the
+    normalized header word only (no domain vocabulary)."""
+    norm = re.sub(r"[^a-z0-9]+", "", str(header).lower())
+    if norm in _DOCUMENT_KPI_NAME_HEADERS:
+        return "name"
+    if norm in _DOCUMENT_KPI_METRIC_HEADERS:
+        return "metric"
+    if norm in _DOCUMENT_KPI_CUTS_HEADERS:
+        return "cuts"
+    return None
 
 
 def _is_template_kpi_row(name: str) -> bool:

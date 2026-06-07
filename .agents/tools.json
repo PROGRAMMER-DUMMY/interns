@@ -17,6 +17,7 @@
                   {
                       "name":  "list-workspace-files",
                       "command":  "uv run list-workspace-files --workspace \u003cworkspace\u003e",
+                      "quiet":  "Add --quiet for state/progress checks: prints file count and classified hints, omits the full file dump. Use the default when presenting the confirmation boundary.",
                       "use_when":  [
                                        "workspace selection request",
                                        "set current workspace",
@@ -229,6 +230,7 @@
                   {
                       "name":  "workspace-flow",
                       "command":  "uv run workspace-flow \u003cstart|status|answer|results\u003e",
+                      "quiet":  "--quiet is a top-level flag before the subcommand; for status --diff it prints a compact ready/blocked/gap summary plus the manifest path instead of the full diff JSON.",
                       "use_when":  [
                                        "agent-led workspace workflow should run quietly in the backend",
                                        "user asks for KPI generation by interview",
@@ -314,6 +316,7 @@
                   {
                       "name":  "validate-project-harness",
                       "command":  "uv run validate-project-harness --workspace \u003cworkspace\u003e --domain \u003cdomain\u003e",
+                      "quiet":  "Add --quiet to print the score, deduped blockers/warnings, and artifact paths instead of the full ~700-line JSON; the JSON is still written to disk.",
                       "use_when":  [
                                        "workspace needs one top-level score before completion is claimed",
                                        "all local-safe harnesses should run together",
@@ -770,6 +773,25 @@
                       "required_skills":  [
                                               "workspace-governance",
                                               "domain-model",
+                                              "data-engineering-pipeline-design"
+                                          ]
+                  },
+                  {
+                      "name":  "understand-data",
+                      "command":  "uv run understand-data --workspace \u003cworkspace\u003e",
+                      "quiet":  "Add --quiet for a compact one-line summary (tier + schema type + scoped option count + artifact path); the full JSON and Markdown are still written to disk.",
+                      "use_when":  [
+                                       "classify a workspace data-quality tier and schema type before KPI/SQL generation",
+                                       "surface tier-scoped data-processing options from generated profiles",
+                                       "inspect the BUG-010 data-understanding gate standalone"
+                                   ],
+                      "outputs":  [
+                                      "interns/reports/data_understanding/current.json",
+                                      "interns/reports/data_understanding/current.md"
+                                  ],
+                      "safety":  "local_safe_reads_generated_profiles_only_no_raw_dataset_reads",
+                      "required_skills":  [
+                                              "workspace-governance",
                                               "data-engineering-pipeline-design"
                                           ]
                   },

@@ -1,0 +1,32 @@
+# BUG-018 fix: un-ignore the small, agent-readable artifacts inside interns/state/.
+#
+# .gitignore has a bare "state/" rule (line 16) that matches
+# workspaces/**/interns/state/**  — so Gemini CLI (which respects .gitignore) was
+# blocked from reading those paths directly.  The workaround was a copy/read/delete
+# dance that burned context (35% -> 81% in one session) and left orphaned copies.
+#
+# Strategy: keep .gitignore's "state/" rule (it correctly hides large/noisy blobs),
+# but negate-override the small, human-facing files that agents need to read:
+#   current.json / current.md  — live workflow panel state (~12-155 KB)
+#   handoffs/*.md              — specialist hand-off notes (<2 KB each)
+#   metadata_store/**/*.json   — contract/profile copies (<115 KB each)
+#
+# Still ignored (large / noisy / sensitive):
+#   interns/state/**/session.json       (~740 KB full session log)
+#   interns/state/**/trajectory.jsonl   (~375 KB tool-call trace)
+#   interns/state/**/medallion/         (raw Delta data files)
+#   datasets/                           (raw source CSVs — may contain PHI)
+#   .env / *.databrickscfg / *.key      (secrets — already in .gitignore)
+
+# -- un-ignore lightweight workflow state artifacts --------------------------
+!workspaces/**/interns/state/**/current.json
+!workspaces/**/interns/state/**/current.md
+!workspaces/**/interns/state/**/handoffs/*.md
+!workspaces/**/interns/state/**/metadata_store/**/*.json
+
+# -- also explicitly un-ignore reports/ and generated/ so any future .gitignore
+#    tightening cannot accidentally re-block them  --------------------------
+!workspaces/**/interns/reports/**/*.md
+!workspaces/**/interns/reports/**/*.json
+!workspaces/**/interns/generated/**/*.md
+!workspaces/**/interns/generated/**/*.json

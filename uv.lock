@@ -441,6 +441,7 @@ databricks-full = [
 ]
 documents = [
     { name = "fastexcel" },
+    { name = "opendataloader-pdf" },
     { name = "openpyxl" },
     { name = "pdfplumber" },
     { name = "xlsxwriter" },
@@ -487,6 +488,7 @@ requires-dist = [
     { name = "notebook", specifier = ">=7.5.6" },
     { name = "notebook", marker = "extra == 'notebook'", specifier = ">=7.5.6" },
     { name = "numpy", specifier = ">=1.26,<2.0" },
+    { name = "opendataloader-pdf", marker = "extra == 'documents'", specifier = "==2.4.7" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "openpyxl", marker = "extra == 'documents'", specifier = ">=3.1.5" },
     { name = "pandas", marker = "extra == 'databricks-full'", specifier = ">=2.2" },
@@ -495,8 +497,8 @@ requires-dist = [
     { name = "polars", specifier = ">=1.40.1" },
     { name = "pyarrow", specifier = ">=4.0.0" },
     { name = "pymongo", marker = "extra == 'enterprise-metadata'", specifier = ">=4.7" },
-    { name = "pyspark", specifier = ">=3.5.1" },
-    { name = "pyspark", marker = "extra == 'databricks'", specifier = ">=3.5.1" },
+    { name = "pyspark", specifier = ">=3.5.1,<4" },
+    { name = "pyspark", marker = "extra == 'databricks'", specifier = ">=3.5.1,<4" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "scikit-learn", specifier = ">=1.5" },
@@ -3302,6 +3304,15 @@ wheels = [
 ]
 
 [[package]]
+name = "opendataloader-pdf"
+version = "2.4.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1d/5a/98cd2079f2828f7886ee447eae21ee60a858930596aebcc8d275a1fe2b12/opendataloader_pdf-2.4.7.tar.gz", hash = "sha256:a16e995f2f526d706045218d9e359a31f50371a0bc0e3bb1bc15abb467c08fb7", size = 22554865, upload-time = "2026-05-27T10:04:54.285Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/14/f897eabf04eab4e6a40dce9214d921558165f3eaed68335892a5b1a004d0/opendataloader_pdf-2.4.7-py3-none-any.whl", hash = "sha256:1c359183650f4c012875010c156f13b6d3477b00762b8e3fbd8479fa03feb628", size = 22568934, upload-time = "2026-05-27T10:04:49.902Z" },
+]
+
+[[package]]
 name = "openpyxl"
 version = "3.1.5"
 source = { registry = "https://pypi.org/simple" }
@@ -4329,13 +4340,13 @@ wheels = [
 
 [[package]]
 name = "pyspark"
-version = "4.1.1"
+version = "3.5.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "py4j", version = "0.10.9.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "py4j", version = "0.10.9.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/19/bf/58ee13add151469c25825b7125bbf62c3bdcec05eec4d458fcb5c5516066/pyspark-4.1.1.tar.gz", hash = "sha256:77f78984aa84fbe865c717dd37b49913b4e5c97d76ef6824f932f1aefa6621ec", size = 455359625, upload-time = "2026-01-09T09:38:38.28Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/80/5a/3806f44eb47387e8af803508cdd6bbc0df784febf4dc010700be04a1ff89/pyspark-3.5.8.tar.gz", hash = "sha256:54cca0767b21b40e3953ad1d30f8601c53abf9cbda763653289cdcfcac52313c", size = 317817299, upload-time = "2026-01-15T11:46:14.487Z" }
 
 [[package]]
 name = "pytest"

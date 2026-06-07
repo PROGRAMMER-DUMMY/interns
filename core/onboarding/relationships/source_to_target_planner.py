@@ -41,6 +41,7 @@ class SourceToTargetPlanResult:
     kpi_count: int
     ready_kpi_count: int
     blocked_kpi_count: int
+    deferred_kpi_count: int
     target_engine: str
 
     def summary(self) -> dict[str, Any]:
@@ -55,6 +56,7 @@ class SourceToTargetPlanner:
         *,
         target_engine: str = "sql",
         context_budget: str = "standard",
+        deferred_kpi_ids: set[str] | None = None,
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
@@ -63,6 +65,15 @@ class SourceToTargetPlanner:
             raise ValueError(f"Unsupported target engine: {target_engine}")
         self.target_engine = target_engine
         self.context_budget = context_budget
+        # Partial-completion: KPIs with no measurable definition (empty metric AND
+        # grain) are recorded as `deferred`, not `blocked`. A deferred KPI's plan
+        # is still emitted (for visibility) but it does NOT count toward
+        # `blocked_kpi_count`, so the source-to-target gate lets the DEFINED KPIs
+        # pass to generation instead of being held hostage by undefined siblings.
+        # The id set is supplied by the flow (which owns the definition gate); the
+        # planner also self-derives it from each KPI's own metric/cuts so the rule
+        # stays consistent and the planner is correct when called standalone.
+        self.deferred_kpi_ids = set(deferred_kpi_ids or set())
 
     def build(self) -> SourceToTargetPlanResult:
         self._validate_workspace()
@@ -125,13 +136,25 @@ class SourceToTargetPlanner:
                 for kpi in mapping.get("kpis", [])
             ],
         }
+        complexity_recs = self._complexity_engine_recommendations(
+            local_blocked=not transformation_settings.local_execution_allowed
+        )
         for kpi_plan in plan["kpis"]:
             kpi_plan["engine_evolution_recommendation"] = engine_recommendation
+            rec = complexity_recs.get(kpi_plan.get("kpi_id"))
+            if rec:
+                kpi_plan["complexity_engine_recommendation"] = rec
         ready = [kpi for kpi in plan["kpis"] if kpi["status"] == "ready_for_generation"]
+        deferred = [kpi for kpi in plan["kpis"] if kpi["status"] == "deferred"]
+        # Deferred KPIs are excluded from the blocked count: they are intentionally
+        # skipped this pass, not unresolved. This is what lets a MIX of defined +
+        # undefined KPIs clear the source-to-target gate.
         plan["summary"] = {
             "kpi_count": len(plan["kpis"]),
             "ready_kpi_count": len(ready),
-            "blocked_kpi_count": len(plan["kpis"]) - len(ready),
+            "deferred_kpi_count": len(deferred),
+            "deferred_kpi_ids": [str(kpi.get("kpi_id") or "") for kpi in deferred],
+            "blocked_kpi_count": len(plan["kpis"]) - len(ready) - len(deferred),
             "target_engine": self.target_engine,
             "resource_mode": transformation_settings.mode,
             "resource_target_engine_recommendation": transformation_settings.target_engine_recommendation,
@@ -152,8 +175,21 @@ class SourceToTargetPlanner:
             kpi_count=plan["summary"]["kpi_count"],
             ready_kpi_count=plan["summary"]["ready_kpi_count"],
             blocked_kpi_count=plan["summary"]["blocked_kpi_count"],
+            deferred_kpi_count=plan["summary"]["deferred_kpi_count"],
             target_engine=self.target_engine,
         )
+
+    def _complexity_engine_recommendations(self, *, local_blocked: bool) -> dict[str, dict[str, Any]]:
+        """Per-KPI complexity-aware engine advice (SQL default; Polars/hybrid/PySpark for scale)."""
+        try:
+            from core.onboarding.kpi.engine_recommender import KPIEngineRecommender
+
+            recs = KPIEngineRecommender(
+                self.repo_root, _rel(self.workspace, self.repo_root)
+            ).recommend_all(local_blocked=local_blocked)
+        except Exception:
+            return {}
+        return {rec.kpi_id: rec.summary() for rec in recs}
 
     def _plan_kpi(
         self,
@@ -194,6 +230,8 @@ class SourceToTargetPlanner:
                     "sources": selected_sources,
                 }
             )
+        kpi_id = str(kpi.get("kpi_id") or "")
+        is_deferred = kpi_id in self.deferred_kpi_ids or _kpi_is_undefined(kpi)
         grain = _grain_from_kpi(kpi, feature_plans)
         medallion = {
             "bronze_inputs": selected_sources,
@@ -218,13 +256,25 @@ class SourceToTargetPlanner:
             "grain_matches_kpi_cuts",
             "temporal_anchor_confirmed_for_date_or_age_features",
         ]
+        if is_deferred:
+            status = "deferred"
+        elif blockers:
+            status = "blocked"
+        else:
+            status = "ready_for_generation"
         return {
             "kpi_id": kpi.get("kpi_id", ""),
             "business_question": kpi.get("name", ""),
             "metric": kpi.get("metric", ""),
             "dimensions_and_filters": kpi.get("cuts", ""),
             "target_engine": self.target_engine,
-            "status": "blocked" if blockers else "ready_for_generation",
+            "status": status,
+            "deferred": is_deferred,
+            "deferred_reason": (
+                "KPI has no measurable definition (empty metric and grain); "
+                "deferred from this generation pass, not a hard blocker."
+                if is_deferred else ""
+            ),
             "selected_source_datasets": selected_sources,
             "rejected_source_datasets": rejected_sources,
             "feature_mappings": feature_plans,
@@ -546,6 +596,17 @@ def _estimated_profile_bytes(profiles: dict[str, dict[str, Any]]) -> int:
     return sum(int(profile.get("size_bytes") or 0) for profile in profiles.values())
 
 
+def _engine_reco_line(rec: dict[str, Any] | None) -> str:
+    if not rec:
+        return "- Engine: `sql` (default)"
+    recommended = rec.get("recommended_engine", "sql")
+    why = "; ".join(rec.get("reasons", [])) or "small/simple"
+    return (
+        f"- Engine: default `{rec.get('default_engine', 'sql')}`, recommended **`{recommended}`** "
+        f"(size `{rec.get('size_tier', '')}`, complexity {rec.get('complexity_score', '')}) — {why}"
+    )
+
+
 def _render_markdown(plan: dict[str, Any]) -> str:
     lines = [
         "# Source To Target Plan",
@@ -559,6 +620,9 @@ def _render_markdown(plan: dict[str, Any]) -> str:
         f"- Context manifest: `{plan.get('context_manifest', '')}`",
         f"- Context wiki: `{plan.get('context_wiki', '')}`",
         f"- KPI count: {plan.get('summary', {}).get('kpi_count', len(plan.get('kpis', [])))}",
+        f"- Ready: {plan.get('summary', {}).get('ready_kpi_count', 0)} / "
+        f"Blocked: {plan.get('summary', {}).get('blocked_kpi_count', 0)} / "
+        f"Deferred: {plan.get('summary', {}).get('deferred_kpi_count', 0)}",
         "",
     ]
     for kpi in plan.get("kpis", []):
@@ -566,11 +630,13 @@ def _render_markdown(plan: dict[str, Any]) -> str:
             [
                 f"## {kpi.get('kpi_id')}: {kpi.get('business_question')}",
                 "",
-                f"- Status: `{kpi.get('status')}`",
+                f"- Status: `{kpi.get('status')}`"
+                + (" [~] deferred (no measurable definition)" if kpi.get("deferred") else ""),
                 f"- Metric: `{kpi.get('metric')}`",
                 f"- Grain: {kpi.get('grain', {}).get('description', '')}",
                 f"- Selected sources: {', '.join(kpi.get('selected_source_datasets') or []) or 'none'}",
                 f"- Target output: `{kpi.get('medallion_layers', {}).get('gold_output', {}).get('name', '')}`",
+                _engine_reco_line(kpi.get("complexity_engine_recommendation")),
                 "",
                 "### Feature Mappings",
                 "",
@@ -594,6 +660,15 @@ def _render_markdown(plan: dict[str, Any]) -> str:
                 lines.append(f"- `{blocker.get('type')}`: {blocker.get('message', blocker)}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _kpi_is_undefined(kpi: dict[str, Any]) -> bool:
+    """A KPI carries no measurable definition when BOTH metric and grain/cuts are
+    empty. Mirrors flow._undefined_kpis / WorkspaceArtifactValidator so the gate,
+    the validator, and the planner always agree. Generic: no domain vocabulary."""
+    metric = str(kpi.get("metric") or "").strip()
+    cuts = str(kpi.get("cuts") or "").strip()
+    return not metric and not cuts
 
 
 def _is_join_key(column: str) -> bool:
