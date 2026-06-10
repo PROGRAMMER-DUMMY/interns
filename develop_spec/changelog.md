@@ -17,6 +17,24 @@ Entry template:
 
 ---
 
+### 2026-06-10  Dashboard PRD Phase 3: wire clarify-ambiguity + self-grill (bounded) — PRD COMPLETE
+- what: Added the repo-native judgment skills to the dashboard-engineer with a bounded
+  firing policy: `clarify-ambiguity` at INPUT (only when the request is genuinely
+  ambiguous), `self-grill` at OUTPUT (advisory assumptions audit before presenting,
+  NEVER overrides the dashboard-verify gate). Added to the agent skills list + default_prompt
+  + a SKILL.md "Judgment skills (bounded firing)" section; regenerated all 3 CLI adapters.
+- why: PRD decision 6. Uses REPO skills (clarify-ambiguity / self-grill), not the plugin
+  clarify/self-score/grill-me which aren't reliably present for repo agents.
+- files: `skills/dashboard-design/agents/dashboard-team.yaml` (skills + default_prompt),
+  `skills/dashboard-design/SKILL.md` (firing-policy section); regenerated
+  `.claude`/`.gemini`/`.codex` dashboard-engineer adapters + `.agents/*` indexes.
+- tests: none (doc/config + generated adapters); regen verified all 3 adapters carry
+  "JUDGMENT SKILLS (bounded firing)" + clarify-ambiguity + self-grill. green-gate 346/0
+  (routing-coverage unaffected).
+- verify: grep across .claude/.gemini/.codex adapters = present in all.
+  DASHBOARD PRD COMPLETE (Phases 1a-1d, 2a-2e, 3). The dashboard capability is now generic,
+  data-driven, browser-verified, scale-aware, and agent-orchestrated with bounded judgment.
+
 ### 2026-06-10  Dashboard PRD Phase 2d+2e: nested-KPI grouping + lazy/server-side scale
 - what: 2d — an optional generic `group` field on a KPI organizes the overview into
   sections with inline separators (`.gsep`), while the strip stays one fit-to-viewport
