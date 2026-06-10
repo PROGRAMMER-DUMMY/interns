@@ -132,6 +132,22 @@ def _informativeness(rows: list[dict[str, Any]], dim: str, measure: str) -> floa
     return (var ** 0.5) / abs(mean)
 
 
+def _should_log_scale(rows: list[dict[str, Any]], dim: str, measure: str) -> bool:
+    """Derive log-vs-linear from the measure's distribution across a dimension.
+
+    Log helps when the aggregated values span orders of magnitude — on a linear
+    axis the small categories collapse to invisible slivers next to the large
+    ones. Requires strictly positive values (log is undefined at <=0). The
+    order-of-magnitude span is a property of the DATA, not a tunable business
+    threshold: ratio >= 50 (~1.7 decades) is where linear stops being readable.
+    """
+    totals = [v for v in _aggregate(rows, dim, measure).values() if v is not None]
+    positive = [v for v in totals if v > 0]
+    if len(positive) < 2 or len(positive) != len(totals):
+        return False  # any non-positive value -> log is invalid
+    return (max(positive) / min(positive)) >= 50.0
+
+
 def _humanize(name: str) -> str:
     return re.sub(r"[_\s]+", " ", str(name)).strip().title()
 
@@ -206,6 +222,10 @@ def decide_panels(
             panel["chart_type"] = "bar"
         if is_share:
             panel["y_format"] = "percent"
+        # Adaptive scale: a share (bounded 0-100) is never log; otherwise log when
+        # the measure spans orders of magnitude across this dimension.
+        elif _should_log_scale(rows, d, measure):
+            panel["log_scale"] = True
         panels.append(panel)
 
     return panels[:_MAX_PANELS]

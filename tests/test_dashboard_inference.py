@@ -329,6 +329,38 @@ class CorporateThemeTests(unittest.TestCase):
         self.assertEqual(fig.layout.paper_bgcolor, "rgba(0,0,0,0)")
         self.assertEqual(fig.layout.plot_bgcolor, "rgba(0,0,0,0)")
 
+    def test_single_series_uses_editorial_accent(self):
+        fig = _figure_from_spec(
+            _spec({"chart_type": "bar", "x": "region", "y": "sum_amount", "title": "X"}),
+            [{"region": "north", "sum_amount": 10}, {"region": "south", "sum_amount": 20}],
+        )
+        # single series -> all bars the editorial accent (sienna)
+        self.assertEqual(str(fig.data[0].marker.color).lower(), "#b4441c")
+
+    def test_multi_series_uses_colorblind_safe_palette(self):
+        fig = _figure_from_spec(
+            _spec({"chart_type": "bar", "x": "region", "y": "v", "color": "seg", "title": "X"}),
+            [
+                {"region": "n", "seg": "a", "v": 10}, {"region": "n", "seg": "b", "v": 5},
+                {"region": "s", "seg": "a", "v": 8}, {"region": "s", "seg": "b", "v": 9},
+            ],
+        )
+        # multi-series -> first two traces are the CVD-safe blue + vermillion,
+        # which are far apart in delta-E (verify gate enforces separation).
+        from tools.dashboard_verify import _delta_e
+        c0 = str(fig.data[0].marker.color).lower()
+        c1 = str(fig.data[1].marker.color).lower()
+        self.assertEqual(c0, "#0072b2")
+        self.assertEqual(c1, "#d55e00")
+        self.assertGreater(_delta_e(c0, c1), 16.0)
+
+    def test_log_scale_applied_to_measure_axis(self):
+        fig = _figure_from_spec(
+            _spec({"chart_type": "bar", "x": "region", "y": "sum_amount", "log_scale": True, "title": "X"}),
+            [{"region": "mega", "sum_amount": 1_000_000}, {"region": "tiny", "sum_amount": 500}],
+        )
+        self.assertEqual(fig.layout.yaxis.type, "log")
+
     def test_stacked_percent_uses_percent_suffix_0_100_not_double_scaled(self):
         # barnorm yields 0-100; the axis must use a '%' suffix on a 0-100 range,
         # NOT tickformat '.0%' (which would x100 again -> 5000%/10000%).

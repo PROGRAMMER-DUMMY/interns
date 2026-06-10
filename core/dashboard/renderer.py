@@ -139,6 +139,23 @@ _GRID_COLOR = "#e3ddcf"
 _AXIS_COLOR = "#cfc8b8"
 _TEXT_COLOR = "#1b1a17"
 
+# Single-series charts use the editorial accent. MULTI-series charts use a
+# colorblind-safe categorical palette (Okabe-Ito — distinguishable under
+# deuteranopia/protanopia/tritanopia and well-separated in CIELAB delta-E, which
+# the verify gate enforces). This is decision 4: legibility wins — the look stays
+# editorial for single series, but many series get genuinely separable colors.
+_ACCENT = "#b4441c"
+_CATEGORICAL_SAFE = (
+    "#0072b2",  # blue
+    "#d55e00",  # vermillion
+    "#009e73",  # bluish green
+    "#cc79a7",  # reddish purple
+    "#e69f00",  # orange
+    "#56b4e9",  # sky blue
+    "#f0e442",  # yellow
+    "#000000",  # black
+)
+
 
 def _apply_corporate_theme(fig: go.Figure, *, percent_axis: str | None = None) -> go.Figure:
     """Apply the shared clean-corporate-BI look to any figure (single styling seam)."""
@@ -311,9 +328,13 @@ def _figure_from_spec(
     color_col = color if color and color in (rows[0] if rows else {}) else None
 
     y_is_percent = str(config.get("y_format") or "").lower() == "percent"
-    # Force the editorial palette onto px traces (layout.colorway alone does not
-    # color single-series bars -- px falls back to its default blue otherwise).
-    seq = list(_CORPORATE_COLORWAY)
+    # Palette by series count (decision 4): single-series -> editorial accent;
+    # multi-series (a color split, or always-multi stacked-percent) -> the
+    # colorblind-safe categorical ramp so series are genuinely separable. Forced
+    # onto px traces via color_discrete_sequence (layout.colorway alone does not
+    # color single-series bars — px would fall back to its default blue).
+    is_multi = bool(color_col) or chart_type == "stacked_bar_percent"
+    seq = list(_CATEGORICAL_SAFE) if is_multi else [_ACCENT]
 
     try:
         if chart_type == "line":
@@ -378,6 +399,14 @@ def _figure_from_spec(
             fig.update_xaxes(ticksuffix="%")
         if chart_type == "stacked_bar_percent":
             fig.update_yaxes(range=[0, 100])
+    # Adaptive log scale (data-derived in profile.decide_panels): apply to the
+    # MEASURE axis — x for horizontal ranked_bar, y otherwise. Never combined with
+    # a percent axis (a 0-100 share is not log).
+    if config.get("log_scale") and not (y_is_percent or chart_type == "stacked_bar_percent"):
+        if chart_type == "ranked_bar":
+            fig.update_xaxes(type="log")
+        else:
+            fig.update_yaxes(type="log")
     # V5: rotate long categorical x-tick labels so they do not clip the card
     # (vertical charts only; ranked_bar puts categories on the y-axis).
     if chart_type in ("bar", "grouped_bar", "stacked_bar_percent"):

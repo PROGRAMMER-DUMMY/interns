@@ -79,6 +79,38 @@ class DecidePanelsTests(unittest.TestCase):
     def test_empty_rows_returns_empty(self):
         self.assertEqual(decide_panels([], {"metric": "x"}), [])
 
+    def test_log_scale_chosen_when_measure_spans_orders_of_magnitude(self):
+        # one huge category vs several tiny -> linear hides the small ones -> log
+        rows = [
+            {"region": "mega", "sum_amount": 1_000_000},
+            {"region": "small1", "sum_amount": 500},
+            {"region": "small2", "sum_amount": 800},
+            {"region": "small3", "sum_amount": 1200},
+        ]
+        panels = decide_panels(rows, {"metric": "sum(amount)"})
+        region = next(p for p in panels if p.get("x") == "region")
+        self.assertTrue(region.get("log_scale"))
+
+    def test_log_scale_not_chosen_for_even_distribution(self):
+        rows = [
+            {"region": "a", "sum_amount": 100},
+            {"region": "b", "sum_amount": 120},
+            {"region": "c", "sum_amount": 90},
+        ]
+        panels = decide_panels(rows, {"metric": "sum(amount)"})
+        region = next(p for p in panels if p.get("x") == "region")
+        self.assertFalse(region.get("log_scale"))
+
+    def test_log_scale_never_for_share_metric(self):
+        rows = [
+            {"dept": "a", "percentage_share": 90.0},
+            {"dept": "b", "percentage_share": 1.0},
+            {"dept": "c", "percentage_share": 0.5},
+        ]
+        panels = decide_panels(rows, {"metric": "percentage share"})
+        for p in panels:
+            self.assertNotIn("log_scale", p)  # share is bounded 0-100, never log
+
     def test_panel_count_capped(self):
         rows = [
             {"a": i % 3, "b": i % 4, "c": i % 5, "d": i % 6, "e": i % 7, "v": i}

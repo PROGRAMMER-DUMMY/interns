@@ -17,6 +17,47 @@ Entry template:
 
 ---
 
+### 2026-06-10  Dashboard PRD Phase 1b + 1c: adaptive log scale + colorblind-safe palette
+- what: 1b — `profile.decide_panels` now derives log-vs-linear from the measure's
+  DISTRIBUTION: `_should_log_scale` sets `log_scale` on a breakdown panel when the
+  aggregated positive values span >=50x (~1.7 decades), so small categories aren't
+  invisible slivers next to large ones; never for share/percent (bounded 0-100) or
+  non-positive data. `renderer` applies it to the measure axis (x for ranked_bar, else
+  y). 1c — multi-series charts now use a COLORBLIND-SAFE categorical palette
+  (Okabe-Ito) instead of the near-monochrome editorial colorway; single-series keeps the
+  editorial sienna accent. The verify gate's delta-E check enforces the separation.
+- why: PRD decisions 3 (data-driven encoding, not fixed) + 4 (legibility wins within the
+  design language). Directly addresses the user's "colors not separated / monochrome" and
+  "use log when it shows the difference better" asks — both derived, generic, no knobs.
+- files: `core/dashboard/profile.py` (`_should_log_scale` + log_scale on panels),
+  `core/dashboard/renderer.py` (`_ACCENT`/`_CATEGORICAL_SAFE`, palette-by-series-count,
+  log-axis application), `tests/test_dashboard_profile.py` (+3 log tests),
+  `tests/test_dashboard_inference.py` (+3 palette/log-axis tests).
+- tests: dashboard inference/profile/services green; green-gate 346/0.
+- verify: re-exported + browser-gated PASS (9/9, 0 overflow, 0 color clashes); screenshot
+  confirms the trend's Female/Male now render CVD-safe blue+vermillion (was sienna+slate),
+  single-series breakdowns stay sienna. PRD 1d (DESIGN.md) + Phase 2 (live app) remain.
+
+### 2026-06-10  Dashboard PRD + Phase 1a: perceptual color/contrast checks in the gate
+- what: Wrote `develop_spec/dashboard_prd.md` (6 grilled decisions -> phased build).
+  Phase 1a executed: `tools/dashboard_verify.py` now extracts per-plot rendered series
+  colors + chart background from the SVG and runs PERCEPTUAL checks — pairwise CIE76
+  delta-E between multi-series colors (flags pairs below the ~16 JND band that read as
+  the same color, naming the colors) and WCAG contrast vs background (flags near-invisible
+  series). Added a distinct `blocked` status: if the gate cannot run (browser/eval fails)
+  it is BLOCKED, never silently passed (PRD decision 1). delta-E/contrast thresholds are
+  documented as human-vision constants, not tunable/workspace knobs.
+- why: The structural gate passed dashboards whose series were the same near-monochrome
+  tint (the user's "colors not separated" complaint) — DOM checks can't catch that. Now the
+  gate diagnoses color clashes deterministically and by value.
+- files: `tools/dashboard_verify.py` (sRGB->Lab delta-E + WCAG contrast + per-plot color
+  probe + blocked status), `tests/test_dashboard_verify.py` (new, 8 — parse/delta-E/contrast).
+  `develop_spec/dashboard_prd.md` (new).
+- tests: 8 verify tests green; green-gate 346/0. Live gate on the Healthcare board PASSES
+  (9/9 rendered, 1 multi-series w/ legend, 0 overflow, 0 color clashes, 0 low-contrast).
+- verify: delta-E sienna-vs-slate=75.7 (ok), near-sienna pair=2.2 (would flag); pale-on-white
+  contrast 1.3 (flags), slate-on-white 10.15 (ok). Remaining PRD phases 1b-1d + 2 + 3 open.
+
 ### 2026-06-10  Interactive browser verification gate (agent-browser) + overflow fix
 - what: New `tools/dashboard_verify.py` (entry `dashboard-verify`) — an interactive
   browser gate that drives `agent-browser` (vercel-labs CLI) to load a dashboard
