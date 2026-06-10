@@ -274,6 +274,30 @@ def _cap_categories(
     return _aggregate_rows(out, x_col, color_col, y_col)
 
 
+_LEADING_NUM_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)")
+
+
+def _categorical_order(values: list[str]) -> tuple[str, list[str] | None]:
+    """Decide the display order for a categorical axis, generically:
+
+    * ORDINAL / banded (every category starts with a number — "0-9","10-19","60")
+      -> sort by that leading number ('array' order, ascending). Fixes age bands /
+      ranges / numeric buckets rendering in arbitrary first-appearance order.
+    * NOMINAL (labels with no leading number — departments, gender, visit type)
+      -> 'total descending' so the biggest bar is first (readability).
+
+    Returns (categoryorder, categoryarray|None) for Plotly axis config.
+    """
+    uniq = [v for v in dict.fromkeys(str(x) for x in values)]
+    if not uniq:
+        return "trace", None
+    nums = [_LEADING_NUM_RE.match(v) for v in uniq]
+    if all(nums):
+        ordered = sorted(uniq, key=lambda v: float(_LEADING_NUM_RE.match(v).group(1)))
+        return "array", ordered
+    return "total descending", None
+
+
 def _figure_from_spec(
     spec: DashboardSpec, rows: list[dict[str, Any]], *, show_title: bool = True
 ) -> go.Figure:
@@ -395,6 +419,20 @@ def _figure_from_spec(
             fig.update_xaxes(type="log")
         else:
             fig.update_yaxes(type="log")
+    # Category ORDER (correctness): vertical-bar x-axis. Ordinal/banded categories
+    # (age bands, numeric buckets) sort by their natural numeric value; plain nominal
+    # categories sort by measure descending. ranked_bar already sorts by value; line
+    # over time stays chronological.
+    if chart_type in ("bar", "grouped_bar", "stacked_bar_percent"):
+        try:
+            cats = [r.get(x_col) for r in data if x_col in r]
+            order, arr = _categorical_order([c for c in cats if c is not None])
+            if order == "array" and arr:
+                fig.update_xaxes(categoryorder="array", categoryarray=arr)
+            elif order == "total descending" and chart_type != "stacked_bar_percent":
+                fig.update_xaxes(categoryorder="total descending")
+        except Exception:
+            pass
     # V5: rotate long categorical x-tick labels so they do not clip the card
     # (vertical charts only; ranked_bar puts categories on the y-axis).
     if chart_type in ("bar", "grouped_bar", "stacked_bar_percent"):

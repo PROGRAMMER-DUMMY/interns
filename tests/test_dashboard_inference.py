@@ -355,6 +355,25 @@ class CorporateThemeTests(unittest.TestCase):
         self.assertEqual(c1, "#d55e00")
         self.assertGreater(_delta_e(c0, c1), 16.0)
 
+    def test_ordinal_banded_x_axis_sorts_by_natural_number(self):
+        # Age bands must render 0-9,10-19,... not in arbitrary first-appearance order.
+        rows = [
+            {"band": "20-29", "v": 3}, {"band": "0-9", "v": 5},
+            {"band": "100-109", "v": 1}, {"band": "10-19", "v": 4},
+        ]
+        fig = _figure_from_spec(
+            _spec({"chart_type": "bar", "x": "band", "y": "v", "title": "X"}), rows
+        )
+        self.assertEqual(fig.layout.xaxis.categoryorder, "array")
+        self.assertEqual(list(fig.layout.xaxis.categoryarray), ["0-9", "10-19", "20-29", "100-109"])
+
+    def test_nominal_x_axis_sorts_by_value_descending(self):
+        rows = [{"dept": "a", "v": 1}, {"dept": "b", "v": 9}, {"dept": "c", "v": 5}]
+        fig = _figure_from_spec(
+            _spec({"chart_type": "bar", "x": "dept", "y": "v", "title": "X"}), rows
+        )
+        self.assertEqual(fig.layout.xaxis.categoryorder, "total descending")
+
     def test_log_scale_applied_to_measure_axis(self):
         fig = _figure_from_spec(
             _spec({"chart_type": "bar", "x": "region", "y": "sum_amount", "log_scale": True, "title": "X"}),

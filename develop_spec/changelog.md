@@ -17,6 +17,23 @@ Entry template:
 
 ---
 
+### 2026-06-10  Dashboard correctness: categorical axis ordering (ordinal/banded + nominal)
+- what: `_figure_from_spec` now orders vertical-bar x categories generically: ORDINAL/banded
+  categories (age bands "0-9".."100-109", numeric buckets) sort by their natural leading
+  number; NOMINAL categories (departments, gender, visit type) sort by measure descending;
+  temporal/ranked unchanged. New `_categorical_order` helper + Plotly categoryorder/categoryarray.
+- why: User flagged data-ordering correctness. Browser inspection of the rendered charts showed
+  the kpi_002 "% share by Age Band" x-axis in arbitrary first-appearance order
+  (20-29, 80-89, 50-59, 0-9, ...) instead of natural 0-9, 10-19, ... — a real correctness bug;
+  nominal bars were also unsorted.
+- files: `core/dashboard/renderer.py` (`_categorical_order` + ordering in the bar path),
+  `tests/test_dashboard_inference.py` (+2: ordinal natural-number order, nominal value-desc).
+- tests: dashboard inference 34 green; green-gate 346/0.
+- verify: re-exported + browser-read the rendered axes — age bands now
+  0-9,10-19,20-29,...,100-109; visit-type/gender sorted by value. Screenshot confirms the
+  age-band chart reads as a coherent distribution. (Static export `exports/index.html` is the
+  design the user endorsed; this fixes its data ordering.)
+
 ### 2026-06-10  Dashboard PRD Phase 3: wire clarify-ambiguity + self-grill (bounded) — PRD COMPLETE
 - what: Added the repo-native judgment skills to the dashboard-engineer with a bounded
   firing policy: `clarify-ambiguity` at INPUT (only when the request is genuinely
