@@ -17,6 +17,26 @@ Entry template:
 
 ---
 
+### 2026-06-10  Dashboard PRD Phase 1d: swappable DESIGN.md design language
+- what: The dashboard look (palette/fonts) now comes from a swappable DESIGN.md, not
+  hardcoded CSS. New `core/dashboard/design_md.py` (`DesignTokens` + forgiving parser +
+  resolver: `workspaces/<ws>/DESIGN.md` -> shipped `core/dashboard/default_design.md` ->
+  built-in editorial defaults). `renderer` reads active tokens (`set_active_design`,
+  module-level `_ACTIVE`) for colorway/accent/fonts/text; `export` builds the `:root` CSS
+  vars + Google-fonts link from tokens and applies them before rendering. Follows the
+  Stitch/awesome-design-md convention (prose + a machine-readable token block).
+- why: PRD decision 3 (generic, any workspace; no hardcoded styling). A workspace can carry
+  its own DESIGN.md and get a different aesthetic with zero code change.
+- files: `core/dashboard/design_md.py` (new), `core/dashboard/default_design.md` (new),
+  `core/dashboard/renderer.py` (active tokens, removed hardcoded colorway/accent),
+  `core/dashboard/export.py` (token-driven :root + fonts), `tests/test_dashboard_design_md.py`
+  (new, 8), `tests/test_dashboard_inference.py` (theme test reads tokens).
+- tests: 58 dashboard tests green; green-gate 346/0.
+- verify: default export passes the browser gate (9/9, 0 overflow/clashes). SWAP proof —
+  dropped a workspace DESIGN.md with teal accent + dark paper, re-exported: exported CSS
+  showed `--accent: #0d7d74` / `--paper: #0f1417` with NO code change (acceptance met).
+  Phase 1 (deterministic engine + gate) COMPLETE; Phase 2 (live Dash app) + 3 (agent wiring) remain.
+
 ### 2026-06-10  Dashboard PRD Phase 1b + 1c: adaptive log scale + colorblind-safe palette
 - what: 1b — `profile.decide_panels` now derives log-vs-linear from the measure's
   DISTRIBUTION: `_should_log_scale` sets `log_scale` on a breakdown panel when the

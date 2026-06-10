@@ -10,25 +10,38 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from core.dashboard.renderer import render_kpi_html, render_kpi_inline
+from core.dashboard.design_md import DesignTokens, load_design_tokens
+from core.dashboard.renderer import render_kpi_html, render_kpi_inline, set_active_design
 from core.dashboard.spec import load_kpi_spec
 from core.onboarding.kpi.registry_loader import load_kpi_definitions
 from core.onboarding.workspace.flow import compute_workflow_diff
 from core.storage.workspace_layout import WorkspaceLayout
 
 
-# Editorial "data desk" aesthetic: warm paper canvas, characterful Fraunces serif
-# masthead, Spline Sans Mono datelines/figures, one sharp sienna accent, hairline
-# rules, grain texture, staggered load. Distinctive yet credible for a data product.
-# Generic — no domain styling.
-_FONTS_LINK = (
-    '<link rel="preconnect" href="https://fonts.googleapis.com">'
-    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-    '<link href="https://fonts.googleapis.com/css2?'
-    'family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&'
-    'family=Hanken+Grotesk:wght@400;500;600;700&'
-    'family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">'
-)
+# The look (palette, fonts) comes from a swappable DESIGN.md (Phase 1d) — the CSS
+# below uses var(--token) and the :root block + fonts link are generated from the
+# active DesignTokens, so a workspace's DESIGN.md changes the aesthetic with no code
+# change. Layout/structure (masthead, grid, grain, staggered load) stays constant.
+def _fonts_link(t: DesignTokens) -> str:
+    fams = "&".join(f"family={f}" for f in t.font_families)
+    if not fams:
+        return ""
+    return (
+        '<link rel="preconnect" href="https://fonts.googleapis.com">'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        f'<link href="https://fonts.googleapis.com/css2?{fams}&display=swap" rel="stylesheet">'
+    )
+
+
+def _root_css(t: DesignTokens) -> str:
+    return (
+        ":root {"
+        f"--paper: {t.paper}; --card: {t.card}; --ink: {t.ink}; --ink-soft: {t.ink_soft};"
+        f"--rule: {t.rule}; --rule-soft: {t.rule_soft}; --accent: {t.accent}; --accent-deep: {t.accent_deep};"
+        f"--serif: {t.serif}; --sans: {t.sans}; --mono: {t.mono};"
+        "}"
+    )
+
 
 # Faint paper grain as an inline SVG data URI (fixed overlay, very low opacity).
 _GRAIN = (
@@ -38,14 +51,8 @@ _GRAIN = (
     "</filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/></svg>"
 )
 
+# Structural CSS (uses var(--token) set by _root_css). Token-independent.
 _BASE_CSS = """
-:root {
-  --paper: #f3efe6; --card: #fbf9f3; --ink: #1b1a17; --ink-soft: #6f6a60;
-  --rule: #d7d1c4; --rule-soft: #e7e2d6; --accent: #b4441c; --accent-deep: #2f4452;
-  --serif: 'Fraunces', Georgia, serif;
-  --sans: 'Hanken Grotesk', system-ui, sans-serif;
-  --mono: 'Spline Sans Mono', ui-monospace, monospace;
-}
 * { box-sizing: border-box; }
 html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 body { font-family: var(--sans); margin: 0; color: var(--ink); background: var(--paper); }
@@ -162,8 +169,10 @@ def _kpi_blocker_card_html(kpi_id: str, gap: dict[str, Any]) -> str:
 
 
 def _wrap_page(
-    title: str, body: str, *, topbar: str = "", stamp: str = "", eyebrow: str = "Workspace Intelligence"
+    title: str, body: str, *, topbar: str = "", stamp: str = "", eyebrow: str = "Workspace Intelligence",
+    tokens: DesignTokens | None = None,
 ) -> str:
+    t = tokens or DesignTokens()
     stamp_html = (
         f'<div class="stamp">{stamp}</div>' if stamp else ""
     )
@@ -188,8 +197,8 @@ def _wrap_page(
     return (
         f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
         f'<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f'{_FONTS_LINK}'
-        f'<title>{title}</title><style>{_BASE_CSS}</style></head>'
+        f'{_fonts_link(t)}'
+        f'<title>{title}</title><style>{_root_css(t)}{_BASE_CSS}</style></head>'
         f'<body><div class="grain"></div>{topbar_html}'
         f'<main class="container">{body}</main>{resize_js}</body></html>'
     )
@@ -202,6 +211,11 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
     layout = WorkspaceLayout(project_root=workspace)
     exports_dir = workspace / "dashboard" / "exports"
     exports_dir.mkdir(parents=True, exist_ok=True)
+
+    # DESIGN.md layer: load the workspace's design language (or the shipped default)
+    # and apply it to the renderer so charts + shell share one swappable look.
+    tokens = load_design_tokens(workspace)
+    set_active_design(tokens)
 
     definitions = load_kpi_definitions(layout)
     diff = compute_workflow_diff(repo_root, workspace_rel)
@@ -237,6 +251,7 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
                 topbar=card["title"],
                 stamp=f"{kpi_id.upper().replace('_', ' ')}",
                 eyebrow="KPI Detail",
+                tokens=tokens,
             ),
             encoding="utf-8",
         )
@@ -263,6 +278,7 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
             grid,
             topbar=workspace.name.replace("-", " "),
             stamp=stamp,
+            tokens=tokens,
         ),
         encoding="utf-8",
     )

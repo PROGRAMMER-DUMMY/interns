@@ -323,9 +323,10 @@ class CorporateThemeTests(unittest.TestCase):
             _spec({"chart_type": "bar", "x": "region", "y": "sum_amount", "title": "X"}),
             [{"region": "north", "sum_amount": 10}],
         )
-        # Sienna leads the editorial colorway; canvas is transparent so the warm
-        # card shows through.
-        self.assertEqual(fig.layout.colorway[0], "#b4441c")
+        # colorway comes from the active DESIGN.md tokens (categorical ramp);
+        # canvas is transparent so the warm card shows through.
+        from core.dashboard.design_md import DesignTokens
+        self.assertEqual(fig.layout.colorway[0], DesignTokens().categorical[0])
         self.assertEqual(fig.layout.paper_bgcolor, "rgba(0,0,0,0)")
         self.assertEqual(fig.layout.plot_bgcolor, "rgba(0,0,0,0)")
 

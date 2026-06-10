@@ -22,6 +22,7 @@ import plotly.express as px
 import plotly.graph_objs as go
 from dash import ALL, Input, Output, dcc, html, no_update
 
+from core.dashboard.design_md import DesignTokens
 from core.dashboard.spec import DashboardSpec, load_kpi_spec
 from core.onboarding.kpi.registry_loader import load_kpi_definitions
 from core.onboarding.workspace.flow import compute_workflow_diff
@@ -121,49 +122,31 @@ def _filter_rows_by_date(
     return out
 
 
-# Editorial "data desk" theme — warm sienna/slate categorical colorway on a
-# transparent paper canvas with hairline gridlines, so charts sit cohesively in
-# the broadsheet shell. Generic, no domain styling.
-_CORPORATE_COLORWAY = (
-    "#b4441c",  # sienna (accent)
-    "#2f4452",  # deep slate
-    "#c98a3a",  # ochre
-    "#5b7065",  # sage
-    "#8a5a44",  # clay
-    "#7a5160",  # muted plum
-    "#94785c",  # taupe
-    "#b0a899",  # stone
-)
-_CORPORATE_FONT = "'Hanken Grotesk', system-ui, sans-serif"
+# Neutral hairline grid/axis (shared across themes; the rest comes from DESIGN.md).
 _GRID_COLOR = "#e3ddcf"
 _AXIS_COLOR = "#cfc8b8"
-_TEXT_COLOR = "#1b1a17"
 
-# Single-series charts use the editorial accent. MULTI-series charts use a
-# colorblind-safe categorical palette (Okabe-Ito — distinguishable under
-# deuteranopia/protanopia/tritanopia and well-separated in CIELAB delta-E, which
-# the verify gate enforces). This is decision 4: legibility wins — the look stays
-# editorial for single series, but many series get genuinely separable colors.
-_ACCENT = "#b4441c"
-_CATEGORICAL_SAFE = (
-    "#0072b2",  # blue
-    "#d55e00",  # vermillion
-    "#009e73",  # bluish green
-    "#cc79a7",  # reddish purple
-    "#e69f00",  # orange
-    "#56b4e9",  # sky blue
-    "#f0e442",  # yellow
-    "#000000",  # black
-)
+# Design language is data-driven from a swappable DESIGN.md (Phase 1d). The active
+# tokens supply the accent (single-series), the colorblind-safe categorical ramp
+# (multi-series — separation enforced by the verify gate), fonts, and text color.
+# `set_active_design()` is called by the export/refresh path before rendering so a
+# workspace's DESIGN.md changes the look with no code change. Defaults are editorial.
+_ACTIVE: DesignTokens = DesignTokens()
+
+
+def set_active_design(tokens: DesignTokens) -> None:
+    """Set the DESIGN.md tokens used by subsequent figure renders (process-wide)."""
+    global _ACTIVE
+    _ACTIVE = tokens
 
 
 def _apply_corporate_theme(fig: go.Figure, *, percent_axis: str | None = None) -> go.Figure:
     """Apply the shared clean-corporate-BI look to any figure (single styling seam)."""
     fig.update_layout(
         template="plotly_white",
-        colorway=list(_CORPORATE_COLORWAY),
-        font={"family": _CORPORATE_FONT, "size": 12, "color": _TEXT_COLOR},
-        title={"font": {"size": 15, "color": _TEXT_COLOR}, "x": 0.01, "xanchor": "left"},
+        colorway=list(_ACTIVE.categorical),
+        font={"family": _ACTIVE.sans, "size": 12, "color": _ACTIVE.ink},
+        title={"font": {"size": 15, "color": _ACTIVE.ink}, "x": 0.01, "xanchor": "left"},
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         margin={"l": 52, "r": 18, "t": 44, "b": 44},
@@ -175,7 +158,7 @@ def _apply_corporate_theme(fig: go.Figure, *, percent_axis: str | None = None) -
             "x": 1,
             "title": {"text": ""},
         },
-        hoverlabel={"font": {"family": _CORPORATE_FONT, "size": 12}},
+        hoverlabel={"font": {"family": _ACTIVE.sans, "size": 12}},
         autosize=True,
     )
     axis_style = {
@@ -334,7 +317,7 @@ def _figure_from_spec(
     # onto px traces via color_discrete_sequence (layout.colorway alone does not
     # color single-series bars — px would fall back to its default blue).
     is_multi = bool(color_col) or chart_type == "stacked_bar_percent"
-    seq = list(_CATEGORICAL_SAFE) if is_multi else [_ACCENT]
+    seq = list(_ACTIVE.categorical) if is_multi else [_ACTIVE.accent]
 
     try:
         if chart_type == "line":
@@ -860,6 +843,7 @@ def render_kpi_inline(
 
 __all__ = [
     "render_kpi_inline",
+    "set_active_design",
     "build_dash_app",
     "render_kpi_html",
 ]
