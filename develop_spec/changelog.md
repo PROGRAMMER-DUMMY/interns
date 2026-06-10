@@ -17,6 +17,29 @@ Entry template:
 
 ---
 
+### 2026-06-10  Dashboard PRD Phase 2a-2c: live Dash app — overview+drill, controls, theme
+- what: Rebuilt `build_dash_app` from the legacy single-chart layout into an
+  overview+drill app on the data-driven panel engine + DESIGN.md theme. (2a) applies
+  `set_active_design(load_design_tokens(ws))`, renders each KPI's panels as figures
+  (`_kpi_render_data`), editorial CSS shell generated from tokens via
+  `_dash_index_string`. (2b) FIT-TO-VIEWPORT: a fixed masthead + a one-row overview
+  strip of clickable KPI tiles (headline + title) + a controls row + a flex detail
+  region (the only scroll area); `#app{height:100vh;overflow:hidden}`. (2c) controls:
+  KPI dropdown, per-panel show/hide checklist, legend-toggle + hover (Plotly native),
+  metric/cuts info line. Pattern-matching callbacks wire tile-click->select,
+  select->panel-checklist, select+checklist->detail grid, select->tile highlight.
+- why: PRD Phase 2 — the live Dash app is the real target surface (not static export).
+- files: `core/dashboard/renderer.py` (`_kpi_render_data`, `_dash_index_string`, new
+  `build_dash_app`; removed legacy `_kpi_chart_card`/`_index_card_grid`/date-filter
+  callback), `tests/test_dashboard_design_md.py` (+1 index-string structural test).
+- tests: dashboard suites green; green-gate 346/0.
+- verify: BOOTED the live app (port 8071, HTTP 200) and BROWSER-VERIFIED via
+  dashboard-verify -> PASS (4/4 panels rendered, legend, 0 overflow) + agent-browser
+  interaction proof: clicking the KPI-002 tile switched the detail to its 4 share
+  panels; unchecking "by Gender" dropped the panel (4->3). Screenshot confirms editorial
+  masthead + tiles + CVD-safe drill charts. Phase 2d (nested KPIs) + 2e (server-side
+  aggregation/lazy) + Phase 3 (agent wiring) remain.
+
 ### 2026-06-10  Dashboard PRD Phase 1d: swappable DESIGN.md design language
 - what: The dashboard look (palette/fonts) now comes from a swappable DESIGN.md, not
   hardcoded CSS. New `core/dashboard/design_md.py` (`DesignTokens` + forgiving parser +

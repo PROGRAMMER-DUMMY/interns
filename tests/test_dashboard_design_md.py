@@ -81,5 +81,22 @@ class AppliesToRendererTests(unittest.TestCase):
             set_active_design(DesignTokens())  # restore default for other tests
 
 
+class DashIndexStringTests(unittest.TestCase):
+    def test_index_string_is_token_driven_and_has_layout_regions(self):
+        try:
+            from core.dashboard.renderer import _dash_index_string
+        except Exception:
+            self.skipTest("dashboard extra (plotly/dash) not installed")
+        html = _dash_index_string(parse_design_md("accent: #abcdef\n"))
+        # token wired into the CSS shell
+        self.assertIn("--accent:#abcdef", html)
+        # fit-to-viewport overview+drill regions present
+        for cls in (".strip", ".tile", ".detail", ".dgrid", "height:100vh"):
+            self.assertIn(cls, html)
+        # required Dash template placeholders preserved
+        for ph in ("{%app_entry%}", "{%config%}", "{%scripts%}", "{%renderer%}"):
+            self.assertIn(ph, html)
+
+
 if __name__ == "__main__":
     unittest.main()

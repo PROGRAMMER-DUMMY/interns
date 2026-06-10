@@ -20,9 +20,9 @@ import dash
 import dash_bootstrap_components as dbc
 import plotly.express as px
 import plotly.graph_objs as go
-from dash import ALL, Input, Output, dcc, html, no_update
+from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
-from core.dashboard.design_md import DesignTokens
+from core.dashboard.design_md import DesignTokens, load_design_tokens
 from core.dashboard.spec import DashboardSpec, load_kpi_spec
 from core.onboarding.kpi.registry_loader import load_kpi_definitions
 from core.onboarding.workspace.flow import compute_workflow_diff
@@ -482,59 +482,32 @@ def _build_kpi_figure(
     return _figure_from_spec(spec, rows)
 
 
-def _kpi_chart_card(repo_root: Path, layout: WorkspaceLayout, spec: DashboardSpec) -> dbc.Card:
-    dialect = _detect_artifact_dialect(repo_root, layout, spec.kpi_id)
-    if dialect not in {"sql", "unknown"}:
-        source_relative = ""
-        candidate = layout.solutions_dir / f"{spec.kpi_id}.{dialect}.py"
-        if candidate.exists():
-            try:
-                source_relative = candidate.relative_to(repo_root).as_posix()
-            except ValueError:
-                source_relative = candidate.as_posix()
-        return _non_sql_dialect_card(spec.kpi_id, dialect, source_relative, spec)
-    fig = _build_kpi_figure(repo_root, layout, spec)
+def _kpi_render_data(repo_root: Path, layout: WorkspaceLayout, spec: DashboardSpec) -> dict[str, Any]:
+    """Execute the KPI's SQL ONCE and build its data-derived panel figures +
+    headline. Returns figures (not HTML) for the live Dash app. Each panel is
+    (title, figure); falls back to a single chart when the spec has no `panels`.
+    """
+    sql_path_rel = str(spec.config.get("sql_path") or "")
+    sql_path = (repo_root / sql_path_rel).resolve() if sql_path_rel else None
+    rows = _execute_sql_view(repo_root, sql_path, f"{spec.kpi_id}_results") if sql_path else []
     definition = spec.config.get("definition") or {}
-    has_date_axis = bool(_spec_date_column(spec))
-    return dbc.Card(
-        [
-            dbc.CardHeader(
-                [
-                    html.H5(spec.config.get("title") or spec.kpi_id, className="mb-1"),
-                    html.Small(definition.get("metric") or "", className="text-muted"),
-                ]
-            ),
-            dbc.CardBody(
-                [
-                    dcc.Graph(
-                        id={"role": "kpi-chart", "kpi_id": spec.kpi_id},
-                        figure=fig,
-                        config={"displaylogo": False},
-                    ),
-                    html.Div(
-                        [
-                            html.Span("Cuts: ", className="text-muted"),
-                            html.Code(str(definition.get("cuts") or "—")),
-                            html.Span(
-                                " · Listens to global date filter"
-                                if has_date_axis
-                                else " · No date axis (global filter does not apply)",
-                                className="ms-2 text-muted small",
-                            ),
-                        ],
-                        className="mt-2 small",
-                    ),
-                ]
-            ),
-            dbc.CardFooter(
-                html.Small(
-                    f"spec: {spec.spec_path}",
-                    className="text-muted",
-                )
-            ),
-        ],
-        className="mb-3 shadow-sm",
-    )
+    panels: list[tuple[str, go.Figure]] = []
+    panels_cfg = spec.config.get("panels") or []
+    if panels_cfg:
+        for i, p in enumerate(panels_cfg):
+            fig = _figure_from_spec(_panel_spec(spec, p), rows, show_title=False)
+            panels.append((str(p.get("title") or f"View {i + 1}"), fig))
+    else:
+        panels.append((str(spec.config.get("title") or spec.kpi_id),
+                       _figure_from_spec(spec, rows, show_title=False)))
+    return {
+        "kpi_id": spec.kpi_id,
+        "title": str(spec.config.get("title") or spec.kpi_id),
+        "metric": str(definition.get("metric") or ""),
+        "cuts": str(definition.get("cuts") or ""),
+        "headline": _kpi_headline(rows, spec),
+        "panels": panels,
+    }
 
 
 def _kpi_blocker_card(kpi_id: str, gap: dict[str, Any]) -> dbc.Card:
@@ -576,121 +549,180 @@ def _kpi_blocker_card(kpi_id: str, gap: dict[str, Any]) -> dbc.Card:
     )
 
 
-def _index_card_grid(cards: list[Any]) -> dbc.Container:
-    rows = []
-    for i in range(0, len(cards), 2):
-        rows.append(
-            dbc.Row(
-                [dbc.Col(card, md=6) for card in cards[i:i + 2]],
-                className="mb-1",
-            )
-        )
-    return dbc.Container(rows, fluid=True)
+def _dash_index_string(t: DesignTokens) -> str:
+    """Editorial CSS shell for the live app, generated from DESIGN.md tokens.
+    Overview strip + drill detail are sized to fit the viewport (no page scroll;
+    the detail grid is the only scroll region when a KPI has many panels)."""
+    fams = "&".join(f"family={f}" for f in t.font_families)
+    fonts = (f'<link href="https://fonts.googleapis.com/css2?{fams}&display=swap" rel="stylesheet">'
+             if fams else "")
+    css = (
+        ":root{"
+        f"--paper:{t.paper};--card:{t.card};--ink:{t.ink};--ink-soft:{t.ink_soft};"
+        f"--rule:{t.rule};--rule-soft:{t.rule_soft};--accent:{t.accent};--accent-deep:{t.accent_deep};"
+        f"--serif:{t.serif};--sans:{t.sans};--mono:{t.mono};"
+        "}"
+        "*{box-sizing:border-box;}"
+        "html,body{margin:0;height:100%;font-family:var(--sans);color:var(--ink);background:var(--paper);}"
+        "#app{display:flex;flex-direction:column;height:100vh;overflow:hidden;}"
+        ".mast{border-bottom:2px solid var(--ink);padding:.7rem 1.2rem;}"
+        ".mast .ey{font-family:var(--mono);font-size:.62rem;letter-spacing:.26em;text-transform:uppercase;color:var(--accent);margin:0;}"
+        ".mast h1{font-family:var(--serif);font-weight:900;font-size:1.5rem;margin:.1rem 0 0;letter-spacing:-.02em;}"
+        ".strip{display:flex;gap:.6rem;overflow-x:auto;padding:.7rem 1.2rem;border-bottom:1px solid var(--rule);flex:0 0 auto;}"
+        ".tile{flex:0 0 auto;min-width:150px;background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:.5rem .7rem;cursor:pointer;transition:border-color .2s,transform .2s;}"
+        ".tile:hover{border-color:var(--ink);transform:translateY(-2px);}"
+        ".tile.sel{border-color:var(--accent);box-shadow:-3px 4px 0 rgba(180,68,28,.12);}"
+        ".tile .t{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-soft);}"
+        ".tile .h{font-family:var(--serif);font-weight:900;font-size:1.15rem;color:var(--accent);}"
+        ".tile .n{font-size:.7rem;color:var(--ink-soft);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
+        ".ctl{display:flex;gap:1rem;align-items:center;padding:.5rem 1.2rem;border-bottom:1px solid var(--rule-soft);flex:0 0 auto;flex-wrap:wrap;}"
+        ".ctl .lab{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-soft);}"
+        ".detail{flex:1 1 auto;overflow:auto;padding:1rem 1.2rem;}"
+        ".dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:1rem;}"
+        ".pane{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:.5rem .7rem;min-width:0;overflow:hidden;}"
+        ".pane .pt{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.12em;color:var(--accent-deep);margin:.1rem 0 .2rem;}"
+        ".dh{font-family:var(--serif);font-size:1.1rem;margin:0 0 .2rem;}"
+        ".dm{font-family:var(--mono);font-size:.68rem;color:var(--ink-soft);margin-bottom:.6rem;}"
+        ".js-plotly-plot,.plot-container{width:100%!important;}"
+    )
+    return (
+        "<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>"
+        + fonts
+        + f"<style>{css}</style>{{%favicon%}}{{%css%}}</head>"
+        + "<body><div id=\"app\">{%app_entry%}</div><footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>"
+    )
 
 
 def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
-    """Build the per-workspace BI Dash app.
-
-    Caller is responsible for `app.run(...)`. Static export uses the same
-    component tree via `export_static_html`.
+    """Build the per-workspace BI Dash app: overview tiles (fit one viewport) + a
+    drill-down detail showing the selected KPI's data-derived panels. Charts use
+    the DESIGN.md theme. Caller runs `app.run(...)`.
     """
     repo_root = Path(repo_root).resolve()
     workspace = (repo_root / workspace_rel).resolve()
     layout = WorkspaceLayout(project_root=workspace)
 
-    app = dash.Dash(
-        __name__,
-        external_stylesheets=[dbc.themes.BOOTSTRAP],
-        title=f"Dashboard — {workspace.name}",
-    )
+    tokens = load_design_tokens(workspace)
+    set_active_design(tokens)
+
+    app = dash.Dash(__name__, title=f"Dashboard — {workspace.name}")
+    app.index_string = _dash_index_string(tokens)
 
     definitions = load_kpi_definitions(layout)
     diff = compute_workflow_diff(repo_root, workspace_rel)
     gaps_by_id = {str(g.get("kpi_id")): g for g in (diff.get("kpi_gaps") or [])}
 
-    cards = []
-    date_aware_specs: dict[str, DashboardSpec] = {}
-    for kpi_id, definition in sorted(definitions.items()):
+    # Precompute render data once per ready KPI (figures + headline + panels).
+    render_data: dict[str, dict[str, Any]] = {}
+    blocked: dict[str, dict[str, Any]] = {}
+    for kpi_id, _definition in sorted(definitions.items()):
         spec = load_kpi_spec(layout, kpi_id)
         gap = gaps_by_id.get(kpi_id) or {}
-        is_blocked = str(gap.get("status")) == "blocked" or not spec
-        if is_blocked or not (spec and spec.config.get("sql_path")):
-            cards.append(_kpi_blocker_card(kpi_id, gap or {"blockers": ["spec_missing"], "recovery_commands": []}))
+        if str(gap.get("status")) == "blocked" or not (spec and spec.config.get("sql_path")):
+            blocked[kpi_id] = gap or {"blockers": ["spec_missing"], "recovery_commands": []}
         else:
-            cards.append(_kpi_chart_card(repo_root, layout, spec))
-            if _spec_date_column(spec):
-                date_aware_specs[kpi_id] = spec
+            render_data[kpi_id] = _kpi_render_data(repo_root, layout, spec)
 
-    has_date_filter = bool(date_aware_specs)
+    ready_ids = list(render_data.keys())
+    first = ready_ids[0] if ready_ids else ""
 
-    header_children = [
-        html.H2(f"Workspace Dashboard — {workspace.name}", className="mt-3"),
-        html.P(
-            "Live KPI charts. Each card re-executes its KPI SQL against the "
-            "workspace datasets on every render. Spec lives in `dashboard/<kpi_id>.json`; "
-            "edit the `user_overrides` section to customize.",
-            className="text-muted",
-        ),
-    ]
-    if has_date_filter:
-        header_children.append(
-            dbc.Card(
-                dbc.CardBody(
-                    [
-                        html.Strong("Global date range filter"),
-                        html.Div(
-                            "Applies to every KPI whose x-axis is a date column. "
-                            "KPIs without a date axis are unaffected.",
-                            className="small text-muted mb-2",
-                        ),
-                        dcc.DatePickerRange(
-                            id="global-date-range",
-                            display_format="YYYY-MM-DD",
-                            clearable=True,
-                            persistence=True,
-                            persistence_type="session",
-                        ),
-                    ]
-                ),
-                className="mb-3",
-            )
-        )
-    header = dbc.Container(header_children, fluid=True)
+    # Overview strip: one clickable tile per KPI (headline fits one viewport row).
+    tiles = []
+    for kid, d in render_data.items():
+        tiles.append(html.Div(
+            [html.Div(kid.replace("_", " ").upper(), className="t"),
+             html.Div(d["headline"], className="h"),
+             html.Div(d["title"], className="n", title=d["title"])],
+            id={"role": "kpi-tile", "kpi_id": kid},
+            className="tile" + (" sel" if kid == first else ""),
+            n_clicks=0,
+        ))
+    for kid in blocked:
+        tiles.append(html.Div(
+            [html.Div(kid.replace("_", " ").upper(), className="t"),
+             html.Div("blocked", className="h", style={"color": "var(--ink-soft)"}),
+             html.Div("no executable SQL", className="n")],
+            className="tile",
+        ))
 
-    if not cards:
-        cards = [
-            dbc.Alert(
-                "No KPIs registered in this workspace yet. Run "
-                "`uv run workspace-flow start --workspace <ws>` first.",
-                color="info",
-            )
+    controls = html.Div([
+        html.Span("KPI", className="lab"),
+        dcc.Dropdown(id="kpi-pick", options=[{"label": render_data[k]["title"], "value": k} for k in ready_ids],
+                     value=first, clearable=False, style={"minWidth": "320px"}),
+        html.Span("Views", className="lab"),
+        dcc.Checklist(id="panel-pick", inline=True, style={"display": "flex", "gap": ".5rem", "flexWrap": "wrap"}),
+    ], className="ctl") if ready_ids else html.Div()
+
+    app.layout = html.Div([
+        html.Header([html.P("Workspace Intelligence", className="ey"),
+                     html.H1(workspace.name.replace("-", " "))], className="mast"),
+        html.Div(tiles or [html.Div("No KPIs registered yet.", className="n")], className="strip"),
+        controls,
+        html.Div(id="kpi-detail", className="detail"),
+        dcc.Store(id="render-store"),  # reserved for future server-side paging
+    ], id="app")
+
+    def _detail_children(kpi_id: str, visible_idxs: list[int] | None) -> Any:
+        d = render_data.get(kpi_id)
+        if not d:
+            return html.Div("Select a KPI above.", className="dm")
+        panels = d["panels"]
+        idxs = visible_idxs if visible_idxs is not None else list(range(len(panels)))
+        cells = []
+        for i in idxs:
+            if i < 0 or i >= len(panels):
+                continue
+            ptitle, fig = panels[i]
+            cells.append(html.Div([
+                html.Div(ptitle, className="pt"),
+                dcc.Graph(figure=fig, config={"displaylogo": False, "responsive": True},
+                          style={"height": "300px"}),
+            ], className="pane"))
+        return [
+            html.H2(d["title"], className="dh"),
+            html.Div((d["metric"] + ("  ·  cuts: " + d["cuts"] if d["cuts"] else "")) or "", className="dm"),
+            html.Div(cells, className="dgrid"),
         ]
 
-    app.layout = dbc.Container(
-        [header, _index_card_grid(cards)],
-        fluid=True,
-        className="pb-5",
-    )
-
-    if has_date_filter:
+    if ready_ids:
         @app.callback(
-            Output({"role": "kpi-chart", "kpi_id": ALL}, "figure"),
-            Input("global-date-range", "start_date"),
-            Input("global-date-range", "end_date"),
-            Input({"role": "kpi-chart", "kpi_id": ALL}, "id"),
+            Output("kpi-pick", "value"),
+            Input({"role": "kpi-tile", "kpi_id": ALL}, "n_clicks"),
+            prevent_initial_call=True,
         )
-        def _apply_global_date_range(start_date_str, end_date_str, chart_ids):
-            start = _coerce_date(start_date_str) if start_date_str else None
-            end = _coerce_date(end_date_str) if end_date_str else None
-            figures = []
-            for chart_id in chart_ids:
-                kpi_id = chart_id.get("kpi_id") if isinstance(chart_id, dict) else None
-                spec = date_aware_specs.get(kpi_id) if kpi_id else None
-                if not spec:
-                    figures.append(no_update)
-                    continue
-                figures.append(_build_kpi_figure(repo_root, layout, spec, start=start, end=end))
-            return figures
+        def _tile_to_pick(_clicks):
+            trig = ctx.triggered_id
+            if isinstance(trig, dict) and trig.get("role") == "kpi-tile":
+                return trig.get("kpi_id")
+            return no_update
+
+        @app.callback(
+            Output("panel-pick", "options"),
+            Output("panel-pick", "value"),
+            Input("kpi-pick", "value"),
+        )
+        def _panels_for_kpi(kpi_id):
+            d = render_data.get(kpi_id)
+            if not d:
+                return [], []
+            opts = [{"label": ptitle, "value": i} for i, (ptitle, _f) in enumerate(d["panels"])]
+            return opts, [o["value"] for o in opts]  # all visible by default
+
+        @app.callback(
+            Output("kpi-detail", "children"),
+            Input("kpi-pick", "value"),
+            Input("panel-pick", "value"),
+        )
+        def _render_detail(kpi_id, visible):
+            return _detail_children(kpi_id, list(visible) if visible is not None else None)
+
+        @app.callback(
+            Output({"role": "kpi-tile", "kpi_id": ALL}, "className"),
+            Input("kpi-pick", "value"),
+            State({"role": "kpi-tile", "kpi_id": ALL}, "id"),
+        )
+        def _highlight_tile(kpi_id, ids):
+            return ["tile sel" if (i or {}).get("kpi_id") == kpi_id else "tile" for i in ids]
 
     return app
 
