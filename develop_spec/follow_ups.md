@@ -7,21 +7,14 @@ Item template: `- [ ] <area>: <what> — <why / where>`
 
 ## Open
 
-- [ ] **dashboard: build the LIVE Dash app to the full bar (chosen surface).** User wants the
-      live Dash app (not static export) as the real surface, with: real controls (checkboxes to
-      show/hide panels, dropdowns to pick KPIs/dimensions), legend toggle + hover, a distinct
-      ACCESSIBLE categorical palette (current sienna-led set is too monochrome for separating many
-      series), info/units affordance, and scale handling for ~20 NESTED KPIs + 100+ features +
-      multi-TB (nested/grouped navigation, lazy/paginated panels, SERVER-SIDE aggregation+sampling
-      so raw multi-TB never reaches the browser). `core/dashboard/renderer.py::build_dash_app` is
-      still the old single-chart dbc layout — rebuild it to use the data-driven panels + editorial
-      look, and VERIFY each step with `dashboard-verify --url http://127.0.0.1:<port>` incl.
-      agent-browser click/hover to prove select/deselect + legend-toggle work. (Static export is
-      now contained + gated; the live app is the next major build.)
-- [ ] **dashboard palette: improve categorical separation.** The editorial sienna-led colorway
-      reads monochrome when a chart has many series. Add a higher-contrast, colorblind-safe
-      categorical ramp for multi-series charts while keeping the editorial single-accent look for
-      single-series. Verify legibility via the gate's screenshot.
+- [x] **dashboard: LIVE Dash app built to the full bar (DONE 2026-06-10, Phase 2).** Rebuilt
+      `build_dash_app` into a fit-to-viewport overview+drill app on the data-driven panels +
+      DESIGN.md theme: KPI tiles -> drill, show/hide panel checklist, KPI dropdown, native
+      legend-toggle/hover, nested-KPI grouping, lazy/server-side rendering. Browser-verified via
+      dashboard-verify + agent-browser click/hover. See changelog 2026-06-10 (Phase 2a-2e).
+- [x] **dashboard palette: categorical separation (DONE 2026-06-10, Phase 1c).** Multi-series now
+      uses a colorblind-safe Okabe-Ito ramp; single-series keeps the editorial accent; the verify
+      gate's delta-E check enforces separation. (Now token-driven via DESIGN.md.)
 
 - [x] **dashboard chart fixes V1-V6 (DONE 2026-06-10, visually verified).** All six implemented in
       `core/dashboard/renderer.py` and confirmed by screenshotting the rendered board: V1 no duplicate
@@ -35,15 +28,24 @@ Item template: `- [ ] <area>: <what> — <why / where>`
       non-constant column, ignoring filter-pinned constants). kpi_003 now shows the real top-10 payers
       (PAYOR8395..PAYOR4165). Guarded by the ranked_bar renderer tests.
 
-- [ ] **dashboard/wiki: add the 2 new test modules to green-gate discovery.** `tests/test_dashboard_inference.py`
-      and `tests/test_wiki_writer.py` pass when run directly (38 green) but green-gate's count held at
-      346 after integration, so they may not be in its curated discovery list. Add them so they GATE.
-- [ ] **wiki W3/W5 + dashboard D2/D3/D4/D5 (second wave).** Done so far: D1 (chart-type inference),
-      W1 (no inlined SQL), W2 (lineage + cross-links + decision history). Remaining: dashboard D2 visual
-      polish, D3 one-command viewable, D4 richer specs (filters/drill-down), D5 dashboard-engineer
-      clarify/grill front-end for flawless user chart-edits; wiki W3 durable business-context sections,
-      W4 formatting polish, W5 wiki-as-brain (workspace home note + agents reading wiki as context,
-      extending `core/onboarding/memory/wiki_memory.py`).
+- [x] **dashboard/wiki: new test modules now gate (DONE 2026-06-11).** Added the 7 dashboard/token/
+      wiki test modules to `green_gate.CURATED_MODULES`. green-gate went 346 -> 420 tests; they now
+      protect against regressions instead of only passing on demand.
+- [ ] **wiki W3/W5 + dashboard D3/D4 (second wave — partial).** DONE: D1 (inference), D2 (theme),
+      D5 (dashboard-engineer clarify/self-grill, Phase 3), W1 (no inlined SQL), W2 (lineage/links/
+      decisions). REMAINING: dashboard D3 one-command viewable, D4 richer specs (filters/drill-down);
+      wiki W3 durable business-context sections, W4 formatting polish, W5 wiki-as-brain (workspace
+      home note + agents reading wiki as context, extending `core/onboarding/memory/wiki_memory.py`).
+- [x] **cli: UnicodeEncodeError (cp1252) on non-ASCII output (FIXED 2026-06-11).** `workspace-flow`
+      main() now reconfigures stdout/stderr to UTF-8 errors=replace, and the generated Gold-results
+      comment uses ASCII `->` instead of `→`. No longer crashes mid-output on a piped cp1252 console.
+- [~] **kpi_002 age via CURRENT_DATE — investigated 2026-06-11, NOT a bug.** Earlier flagged as a
+      correctness bug; on inspection the as-of-event logic already exists (`_detect_event_date_column`
+      + `as_of_expr`) and works (kpi_001 anchors age on ServiceDate). kpi_002's features are
+      PatientID/Name/VisitType/Gender/DOB — NO date column at all, so there is no event date to anchor
+      on; CURRENT_DATE is the only/defensible option for an age-snapshot and is recorded via the
+      `_age_fallback` note for the kpi-analyst gate. Possible future improvement: broaden event-date
+      detection to a lone date-typed FEATURE column (not just time-bucket cuts) for KPIs that have one.
 
 - [x] **results presentation: agent paraphrased instead of forwarding; user had to ask
       (FIXED 2026-06-09).** Re-test after the subagent fix: pipeline completed but the
@@ -125,14 +127,9 @@ Item template: `- [ ] <area>: <what> — <why / where>`
       `tests.test_workspace_flow.ActiveRunPathsTests` (3 tests). The structural-guard
       idea (wrapper emits packet itself) is deferred — the tail pointer is sufficient.
 
-- [ ] **cli: UnicodeEncodeError (cp1252) when panel markdown contains non-ASCII (found 2026-06-08).**
-      `workspace-flow results`/completion crashes mid-print on a Windows cp1252 console
-      because the generated SQL comment carries a `→` ("Gold results → Parquet",
-      `core/onboarding/kpi/sql_generator.py`). Only bites when stdout is not UTF-8
-      (e.g. piped on Windows); a mid-output crash can itself derail a driving CLI. Fix
-      options: make `_print_cli_panel` write via a UTF-8-safe stream (reconfigure stdout
-      or `errors="replace"`), and/or replace the `→` in generated comments with ASCII
-      ("Gold results -> Parquet") per the no-emoji/ASCII rule. Not fixed (scope).
+- [x] **cli: UnicodeEncodeError (cp1252) on non-ASCII output (FIXED 2026-06-11).** `workspace-flow`
+      main() reconfigures stdout/stderr to UTF-8 (errors=replace) and the generated Gold-results
+      comment uses ASCII `->`. No longer crashes mid-print on a piped cp1252 Windows console.
 
 - [x] **gemini visibility: interns/ artifacts unreadable by native tools -- BUG-018
       actually fixed (2026-06-07).** Root cause: a gitignore DIRECTORY exclusion

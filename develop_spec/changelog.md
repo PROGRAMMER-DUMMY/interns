@@ -17,6 +17,26 @@ Entry template:
 
 ---
 
+### 2026-06-11  Quick wins: gate the new tests, fix cp1252 crash, reconcile backlog
+- what: (1) Added the 7 dashboard/token/wiki test modules to `green_gate.CURATED_MODULES`
+  (test_dashboard_inference/profile/design_md/nested/verify, test_token_report, test_wiki_writer)
+  — they passed on demand but weren't gating. (2) cp1252 fix: `workspace-flow` main() reconfigures
+  stdout/stderr to UTF-8 errors=replace, and the generated Gold-results comment uses ASCII `->`
+  instead of `→`. (3) Reconciled follow_ups.md (3 stale items checked off; cp1252 closed).
+- why: The green checkmark meant less than it should (74 tests on the bench); a non-ASCII char
+  crashed `workspace-flow results` on a piped Windows console; the backlog overstated open work.
+- also (honesty): INVESTIGATED the "kpi_002 age via CURRENT_DATE" item I'd flagged as a bug — it
+  is NOT one. The as-of-event anchor logic already exists and works (kpi_001 anchors on ServiceDate);
+  kpi_002 has NO date column in its features (PatientID/Name/VisitType/Gender/DOB), so there's no
+  event date to anchor on — CURRENT_DATE is the only/defensible option for an age-snapshot and is
+  audited via `_age_fallback`. Retracted the claim; left the code unchanged rather than force a
+  wrong anchor. Logged a possible future improvement (broaden detection to a lone date feature col).
+- files: `core/dev/green_gate.py` (+7 modules), `core/onboarding/workspace/flow.py` (stdout
+  reconfigure), `core/onboarding/kpi/sql_generator.py` (-> ASCII), `develop_spec/follow_ups.md`.
+- tests: none new (wiring + 2-line fixes); green-gate now 420 tests, 0 failing (was 346 — the
+  +74 are the newly-gated modules). Confirms the cp1252 changes broke nothing.
+- verify: `green-gate` 420/0.
+
 ### 2026-06-10  DESIGN.md: consume the REAL awesome-design-md schema (was cosmetic-only)
 - what: `design_md.py` now parses the actual awesome-design-md / Stitch schema — YAML
   frontmatter with a `colors:` map in the brand's own vocabulary + a nested `typography:`

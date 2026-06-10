@@ -280,7 +280,7 @@ class DuckDBKPISQLGenerator:
         """Emit COPY statement to write Gold results to Parquet (delta written via Python)."""
         gold_path = self.layout.gold_dir / f"{kpi_id}_results"
         return "\n".join([
-            "-- Gold results → Parquet (use deltalake Python lib to wrap as Delta)",
+            "-- Gold results -> Parquet (use deltalake Python lib to wrap as Delta)",
             f"-- COPY (SELECT * FROM {self.quote_ident(kpi_id + '_results')})",
             f"--   TO '{gold_path.as_posix()}/data.parquet' (FORMAT PARQUET);",
         ])

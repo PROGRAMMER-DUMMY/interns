@@ -51,6 +51,16 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_intent_contract_routing",
     "tests.test_phi_gate",
     "tests.test_workflow_guard_specialist_firing",
+    # Dashboard + tooling suites added 2026-06 (data-driven panels, verify gate,
+    # DESIGN.md, token report, wiki lineage). Previously passed on demand but were
+    # not gated — wiring them in so they protect against regressions.
+    "tests.test_dashboard_inference",
+    "tests.test_dashboard_profile",
+    "tests.test_dashboard_design_md",
+    "tests.test_dashboard_nested",
+    "tests.test_dashboard_verify",
+    "tests.test_token_report",
+    "tests.test_wiki_writer",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
