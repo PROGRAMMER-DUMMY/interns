@@ -17,6 +17,22 @@ Entry template:
 
 ---
 
+### 2026-06-11  Fix the 3 pre-existing test_failure_contracts failures (pipeline-SQL validator)
+- what: `WorkspaceArtifactValidator._validate_pipeline_harnesses` now enforces the
+  pipeline-SQL content contract the 3 long-red tests assert: (1) empty `pipeline_layers.sql`
+  -> "generated pipeline SQL must be non-empty"; (2) raw dataset-path reads (read_csv_auto/
+  read_parquet/delta_scan/'datasets/' literal) with NO bootstrap markers -> "missing
+  BEGIN/END CATALOG BOOTSTRAP"; (3) raw paths OUTSIDE the BEGIN/END CATALOG BOOTSTRAP region
+  -> "raw dataset path references are only allowed inside CATALOG BOOTSTRAP". Added
+  `test_failure_contracts` to green-gate (now green).
+- why: These 3 were pre-existing failures parked in the backlog. The validator had the
+  pipeline harness-JSON checks but never validated the SQL content itself.
+- files: `core/onboarding/workspace/validation.py` (+content checks, `import re`),
+  `core/dev/green_gate.py` (gate test_failure_contracts).
+- tests: test_failure_contracts 14/14 green; green-gate 420 -> 434, 0 failing.
+- verify: confirmed a LEGITIMATE pipeline (raw paths INSIDE bootstrap, downstream reads the
+  view) produces NO content error — no false positive. The 3 target errors fire on the bad cases.
+
 ### 2026-06-11  Quick wins: gate the new tests, fix cp1252 crash, reconcile backlog
 - what: (1) Added the 7 dashboard/token/wiki test modules to `green_gate.CURATED_MODULES`
   (test_dashboard_inference/profile/design_md/nested/verify, test_token_report, test_wiki_writer)

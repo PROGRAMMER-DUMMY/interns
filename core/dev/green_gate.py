@@ -61,6 +61,9 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_dashboard_verify",
     "tests.test_token_report",
     "tests.test_wiki_writer",
+    # Pipeline-SQL failure contracts: green again after the validator now rejects
+    # empty pipeline SQL + raw dataset paths outside CATALOG BOOTSTRAP (2026-06-11).
+    "tests.test_failure_contracts",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

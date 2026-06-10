@@ -159,10 +159,11 @@ Item template: `- [ ] <area>: <what> — <why / where>`
       promotes the hard-blocking `grain_bucketing` facet to `current` so
       apply-kpi-panel-answer resolves it. Verified live + green-gate (see changelog
       2026-06-08). The GEMINI.md deterministic-route guardrail still stands as a backstop.
-- [ ] **pre-existing: `tests.test_failure_contracts` has 3 failing tests**
-      (BEGIN/END CATALOG BOOTSTRAP + raw-pipeline-SQL-path assertions). Confirmed
-      pre-existing (fail on baseline with 2026-06-07 changes stashed); NOT caused by
-      the grain/harness work. Triage separately. (Added to testing.md.)
+- [x] **pre-existing: `tests.test_failure_contracts` 3 failures FIXED (2026-06-11).**
+      Added the pipeline-SQL content contract to `WorkspaceArtifactValidator`
+      (`_validate_pipeline_harnesses`): non-empty, and raw dataset-path reads only inside
+      the BEGIN/END CATALOG BOOTSTRAP block. 14/14 green; module added to green-gate
+      (434 tests). No false positive on legitimate pipeline SQL. See changelog 2026-06-11.
 
 - [x] **generation: band_continuous_cuts emitted a NO-OP (FIXED 2026-06-07).** The
       grain block (2026-06-06) and the facet seam (line 22) only proved the decision

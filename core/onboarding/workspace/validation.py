@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -728,6 +729,38 @@ class WorkspaceArtifactValidator:
         if not pipeline_sql.exists():
             return
         self._checked(pipeline_sql)
+
+        # Content contract: the generated pipeline SQL must be non-empty, and any raw
+        # dataset-path reads (read_csv_auto / read_parquet / delta_scan / a 'datasets/'
+        # path literal) must live ONLY inside the BEGIN/END CATALOG BOOTSTRAP block —
+        # downstream layers read the bootstrapped catalog views, never raw paths.
+        sql_text = pipeline_sql.read_text(encoding="utf-8")
+        if not sql_text.strip():
+            self._error(pipeline_sql, "generated pipeline SQL must be non-empty")
+        else:
+            raw_re = re.compile(
+                r"(?:read_csv_auto|read_parquet|read_json_auto|read_ndjson_auto|delta_scan)\s*\("
+                r"|'[^']*datasets/[^']*'",
+                re.IGNORECASE,
+            )
+            raw_spans = [m.span() for m in raw_re.finditer(sql_text)]
+            if raw_spans:
+                begin = re.search(r"--\s*BEGIN CATALOG BOOTSTRAP", sql_text, re.IGNORECASE)
+                end = re.search(r"--\s*END CATALOG BOOTSTRAP", sql_text, re.IGNORECASE)
+                if not (begin and end and begin.start() < end.start()):
+                    self._error(
+                        pipeline_sql,
+                        "generated pipeline SQL references raw dataset paths but is missing "
+                        "BEGIN/END CATALOG BOOTSTRAP",
+                    )
+                else:
+                    region = (begin.start(), end.end())
+                    if any(not (region[0] <= s[0] < region[1]) for s in raw_spans):
+                        self._error(
+                            pipeline_sql,
+                            "raw dataset path references are only allowed inside CATALOG BOOTSTRAP",
+                        )
+
         pipeline_harness = self.layout.evidence_dir / "pipeline_execution_harness" / "current.json"
         data_quality_harness = self.layout.evidence_dir / "data_quality_harness" / "current.json"
         if not pipeline_harness.exists():
