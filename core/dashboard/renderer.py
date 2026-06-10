@@ -124,6 +124,11 @@ def _filter_rows_by_date(
 
 # Neutral hairline grid/axis (shared across themes; the rest comes from DESIGN.md).
 _GRID_COLOR = "#e3ddcf"
+
+# Safety cap on rows fetched from a KPI result view into the browser. KPI views are
+# pre-aggregated (GROUP BY) so they're small; this guards against a pathological
+# high-cardinality view and keeps raw/large data server-side (2e scale guardrail).
+_SAMPLE_CAP = 5000
 _AXIS_COLOR = "#cfc8b8"
 
 # Design language is data-driven from a swappable DESIGN.md (Phase 1d). The active
@@ -575,6 +580,7 @@ def _dash_index_string(t: DesignTokens) -> str:
         ".tile .t{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-soft);}"
         ".tile .h{font-family:var(--serif);font-weight:900;font-size:1.15rem;color:var(--accent);}"
         ".tile .n{font-size:.7rem;color:var(--ink-soft);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
+        ".gsep{flex:0 0 auto;align-self:center;writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--mono);font-size:.58rem;letter-spacing:.18em;color:var(--accent-deep);padding:.2rem 0;border-left:2px solid var(--accent-deep);margin-left:.3rem;}"
         ".ctl{display:flex;gap:1rem;align-items:center;padding:.5rem 1.2rem;border-bottom:1px solid var(--rule-soft);flex:0 0 auto;flex-wrap:wrap;}"
         ".ctl .lab{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-soft);}"
         ".detail{flex:1 1 auto;overflow:auto;padding:1rem 1.2rem;}"
@@ -612,33 +618,71 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
     diff = compute_workflow_diff(repo_root, workspace_rel)
     gaps_by_id = {str(g.get("kpi_id")): g for g in (diff.get("kpi_gaps") or [])}
 
-    # Precompute render data once per ready KPI (figures + headline + panels).
-    render_data: dict[str, dict[str, Any]] = {}
+    # LAZY (2e): query each KPI's result view ONCE for its headline + panel titles,
+    # but DON'T build the heavy Plotly figures up front — those are built on drill and
+    # cached. KPI result views are pre-aggregated (GROUP BY) and the fetch is capped at
+    # _SAMPLE_CAP, so raw (multi-TB) data never reaches the browser: DuckDB/Delta
+    # aggregates server-side, we sample the small result, and figures build per drilled
+    # KPI rather than all-at-once.
+    meta: dict[str, dict[str, Any]] = {}
     blocked: dict[str, dict[str, Any]] = {}
-    for kpi_id, _definition in sorted(definitions.items()):
+    for kpi_id, definition in sorted(definitions.items()):
         spec = load_kpi_spec(layout, kpi_id)
         gap = gaps_by_id.get(kpi_id) or {}
         if str(gap.get("status")) == "blocked" or not (spec and spec.config.get("sql_path")):
             blocked[kpi_id] = gap or {"blockers": ["spec_missing"], "recovery_commands": []}
-        else:
-            render_data[kpi_id] = _kpi_render_data(repo_root, layout, spec)
+            continue
+        sql_path = (repo_root / str(spec.config.get("sql_path"))).resolve()
+        rows = _execute_sql_view(repo_root, sql_path, f"{kpi_id}_results", limit=_SAMPLE_CAP)
+        panels_cfg = spec.config.get("panels") or [dict(spec.config)]
+        defn = spec.config.get("definition") or {}
+        meta[kpi_id] = {
+            "spec": spec,
+            "rows": rows,
+            "headline": _kpi_headline(rows, spec),
+            "title": str(spec.config.get("title") or kpi_id),
+            "metric": str(defn.get("metric") or ""),
+            "cuts": str(defn.get("cuts") or ""),
+            # 2d — nested KPIs: an optional generic `group` field on the KPI
+            # definition organizes the overview into sections. Absent -> flat.
+            "group": str(defn.get("group") or definition.get("group") or ""),
+            "panels_cfg": panels_cfg,
+            "panel_titles": [str(p.get("title") or f"View {i + 1}") for i, p in enumerate(panels_cfg)],
+        }
 
-    ready_ids = list(render_data.keys())
+    ready_ids = sorted(meta, key=lambda k: (meta[k]["group"], k))  # group together
     first = ready_ids[0] if ready_ids else ""
 
-    # Overview strip: one clickable tile per KPI (headline fits one viewport row).
-    tiles = []
-    for kid, d in render_data.items():
-        tiles.append(html.Div(
+    _fig_cache: dict[tuple[str, int], go.Figure] = {}
+
+    def _panel_figure(kpi_id: str, idx: int) -> go.Figure:
+        key = (kpi_id, idx)
+        if key not in _fig_cache:
+            m = meta[kpi_id]
+            _fig_cache[key] = _figure_from_spec(
+                _panel_spec(m["spec"], m["panels_cfg"][idx]), m["rows"], show_title=False
+            )
+        return _fig_cache[key]
+
+    # Overview strip: clickable tiles, grouped by `group` with inline separators so
+    # nested KPIs stay organized while the strip remains one fit-to-viewport row.
+    strip_children: list[Any] = []
+    last_group = None
+    for kid in ready_ids:
+        g = meta[kid]["group"]
+        if g and g != last_group:
+            strip_children.append(html.Div(g.upper(), className="gsep"))
+        last_group = g
+        strip_children.append(html.Div(
             [html.Div(kid.replace("_", " ").upper(), className="t"),
-             html.Div(d["headline"], className="h"),
-             html.Div(d["title"], className="n", title=d["title"])],
+             html.Div(meta[kid]["headline"], className="h"),
+             html.Div(meta[kid]["title"], className="n", title=meta[kid]["title"])],
             id={"role": "kpi-tile", "kpi_id": kid},
             className="tile" + (" sel" if kid == first else ""),
             n_clicks=0,
         ))
     for kid in blocked:
-        tiles.append(html.Div(
+        strip_children.append(html.Div(
             [html.Div(kid.replace("_", " ").upper(), className="t"),
              html.Div("blocked", className="h", style={"color": "var(--ink-soft)"}),
              html.Div("no executable SQL", className="n")],
@@ -647,7 +691,7 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
 
     controls = html.Div([
         html.Span("KPI", className="lab"),
-        dcc.Dropdown(id="kpi-pick", options=[{"label": render_data[k]["title"], "value": k} for k in ready_ids],
+        dcc.Dropdown(id="kpi-pick", options=[{"label": meta[k]["title"], "value": k} for k in ready_ids],
                      value=first, clearable=False, style={"minWidth": "320px"}),
         html.Span("Views", className="lab"),
         dcc.Checklist(id="panel-pick", inline=True, style={"display": "flex", "gap": ".5rem", "flexWrap": "wrap"}),
@@ -656,31 +700,30 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
     app.layout = html.Div([
         html.Header([html.P("Workspace Intelligence", className="ey"),
                      html.H1(workspace.name.replace("-", " "))], className="mast"),
-        html.Div(tiles or [html.Div("No KPIs registered yet.", className="n")], className="strip"),
+        html.Div(strip_children or [html.Div("No KPIs registered yet.", className="n")], className="strip"),
         controls,
         html.Div(id="kpi-detail", className="detail"),
-        dcc.Store(id="render-store"),  # reserved for future server-side paging
     ], id="app")
 
     def _detail_children(kpi_id: str, visible_idxs: list[int] | None) -> Any:
-        d = render_data.get(kpi_id)
-        if not d:
+        m = meta.get(kpi_id)
+        if not m:
             return html.Div("Select a KPI above.", className="dm")
-        panels = d["panels"]
-        idxs = visible_idxs if visible_idxs is not None else list(range(len(panels)))
+        n = len(m["panel_titles"])
+        idxs = visible_idxs if visible_idxs is not None else list(range(n))
         cells = []
         for i in idxs:
-            if i < 0 or i >= len(panels):
+            if i < 0 or i >= n:
                 continue
-            ptitle, fig = panels[i]
             cells.append(html.Div([
-                html.Div(ptitle, className="pt"),
-                dcc.Graph(figure=fig, config={"displaylogo": False, "responsive": True},
+                html.Div(m["panel_titles"][i], className="pt"),
+                dcc.Graph(figure=_panel_figure(kpi_id, i),  # built lazily + cached
+                          config={"displaylogo": False, "responsive": True},
                           style={"height": "300px"}),
             ], className="pane"))
         return [
-            html.H2(d["title"], className="dh"),
-            html.Div((d["metric"] + ("  ·  cuts: " + d["cuts"] if d["cuts"] else "")) or "", className="dm"),
+            html.H2(m["title"], className="dh"),
+            html.Div((m["metric"] + ("  ·  cuts: " + m["cuts"] if m["cuts"] else "")) or "", className="dm"),
             html.Div(cells, className="dgrid"),
         ]
 
@@ -702,10 +745,10 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             Input("kpi-pick", "value"),
         )
         def _panels_for_kpi(kpi_id):
-            d = render_data.get(kpi_id)
-            if not d:
+            m = meta.get(kpi_id)
+            if not m:
                 return [], []
-            opts = [{"label": ptitle, "value": i} for i, (ptitle, _f) in enumerate(d["panels"])]
+            opts = [{"label": t, "value": i} for i, t in enumerate(m["panel_titles"])]
             return opts, [o["value"] for o in opts]  # all visible by default
 
         @app.callback(

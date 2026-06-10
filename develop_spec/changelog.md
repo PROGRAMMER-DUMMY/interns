@@ -17,6 +17,25 @@ Entry template:
 
 ---
 
+### 2026-06-10  Dashboard PRD Phase 2d+2e: nested-KPI grouping + lazy/server-side scale
+- what: 2d — an optional generic `group` field on a KPI organizes the overview into
+  sections with inline separators (`.gsep`), while the strip stays one fit-to-viewport
+  row; KPIs ordered by (group, id). Absent group -> flat (no behavior change for the
+  sample). 2e — LAZY rendering: `build_dash_app` queries each KPI's result view ONCE for
+  its headline + panel titles but builds the heavy Plotly figures only on drill (cached in
+  `_fig_cache`); fetch capped at `_SAMPLE_CAP=5000`. Raw/large data never reaches the
+  browser — KPI views are pre-aggregated server-side (DuckDB/Delta GROUP BY), the small
+  result is sampled, and figures build per drilled KPI rather than all up front.
+- why: PRD Phase 2 scale — handle ~20 nested KPIs / 100+ features / multi-TB without
+  flooding the browser or building dozens of figures at startup.
+- files: `core/dashboard/renderer.py` (meta/lazy refactor of build_dash_app, `_panel_figure`
+  cache, `_SAMPLE_CAP`, group ordering + `.gsep`), `tests/test_dashboard_nested.py` (new).
+- tests: new nested test proves 2 group separators + 4 tiles AND zero figures built at
+  construction (lazy); full dashboard suites + green-gate 346/0.
+- verify: re-booted live app (port 8072, HTTP 200) -> dashboard-verify PASS (4/4 rendered,
+  legend, 0 overflow), confirming lazy figure-building renders correctly on drill. Phase 2
+  COMPLETE; Phase 3 (wire clarify-ambiguity + self-grill into the agent) remains.
+
 ### 2026-06-10  Dashboard PRD Phase 2a-2c: live Dash app — overview+drill, controls, theme
 - what: Rebuilt `build_dash_app` from the legacy single-chart layout into an
   overview+drill app on the data-driven panel engine + DESIGN.md theme. (2a) applies
