@@ -7,7 +7,142 @@ Item template: `- [ ] <area>: <what> — <why / where>`
 
 ## Open
 
-- [ ] **intent-contract apply path mis-keys decisions to an empty kpi_id.**
+- [ ] **dashboard: build the LIVE Dash app to the full bar (chosen surface).** User wants the
+      live Dash app (not static export) as the real surface, with: real controls (checkboxes to
+      show/hide panels, dropdowns to pick KPIs/dimensions), legend toggle + hover, a distinct
+      ACCESSIBLE categorical palette (current sienna-led set is too monochrome for separating many
+      series), info/units affordance, and scale handling for ~20 NESTED KPIs + 100+ features +
+      multi-TB (nested/grouped navigation, lazy/paginated panels, SERVER-SIDE aggregation+sampling
+      so raw multi-TB never reaches the browser). `core/dashboard/renderer.py::build_dash_app` is
+      still the old single-chart dbc layout — rebuild it to use the data-driven panels + editorial
+      look, and VERIFY each step with `dashboard-verify --url http://127.0.0.1:<port>` incl.
+      agent-browser click/hover to prove select/deselect + legend-toggle work. (Static export is
+      now contained + gated; the live app is the next major build.)
+- [ ] **dashboard palette: improve categorical separation.** The editorial sienna-led colorway
+      reads monochrome when a chart has many series. Add a higher-contrast, colorblind-safe
+      categorical ramp for multi-series charts while keeping the editorial single-accent look for
+      single-series. Verify legibility via the gate's screenshot.
+
+- [x] **dashboard chart fixes V1-V6 (DONE 2026-06-10, visually verified).** All six implemented in
+      `core/dashboard/renderer.py` and confirmed by screenshotting the rendered board: V1 no duplicate
+      titles, V2 line aggregates by date, V3 share is true 0-100% + top-N/Other cap (fixed the
+      5000%/10000% double-scale), V4 ranked_bar ranks by non-constant categorical, V5 responsive +
+      automargin (no clip), V6 clean top legend. See changelog 2026-06-10. Done at RENDER time
+      (data-driven) rather than in inference, since inference only sees SQL column names not row
+      values — more robust.
+- [x] **dashboard D1 defect: ranked_bar ranks by the wrong dimension (FIXED 2026-06-10 via V4).**
+      Resolved at render time by `_first_non_constant_categorical` (rank by the highest-cardinality
+      non-constant column, ignoring filter-pinned constants). kpi_003 now shows the real top-10 payers
+      (PAYOR8395..PAYOR4165). Guarded by the ranked_bar renderer tests.
+
+- [ ] **dashboard/wiki: add the 2 new test modules to green-gate discovery.** `tests/test_dashboard_inference.py`
+      and `tests/test_wiki_writer.py` pass when run directly (38 green) but green-gate's count held at
+      346 after integration, so they may not be in its curated discovery list. Add them so they GATE.
+- [ ] **wiki W3/W5 + dashboard D2/D3/D4/D5 (second wave).** Done so far: D1 (chart-type inference),
+      W1 (no inlined SQL), W2 (lineage + cross-links + decision history). Remaining: dashboard D2 visual
+      polish, D3 one-command viewable, D4 richer specs (filters/drill-down), D5 dashboard-engineer
+      clarify/grill front-end for flawless user chart-edits; wiki W3 durable business-context sections,
+      W4 formatting polish, W5 wiki-as-brain (workspace home note + agents reading wiki as context,
+      extending `core/onboarding/memory/wiki_memory.py`).
+
+- [x] **results presentation: agent paraphrased instead of forwarding; user had to ask
+      (FIXED 2026-06-09).** Re-test after the subagent fix: pipeline completed but the
+      auto-emitted packet inlined full bootstrap SQL for every KPI (~500 lines), the CLI
+      truncated it, and the agent PARAPHRASED the tables ("consolidated key findings" —
+      BUG-015-style) + made the user type "show me results". Root = oversized output ->
+      truncation. Fixed by a COMPACT auto-surface (SQL linked, not inlined; 0 inline-SQL
+      fences; compact packet -61% tokens/lines) at complete + review-gate, while explicit
+      `workspace-flow results` stays full. Also added `results --kpi <id>` for single-KPI.
+      Guarded by `EmitResultPacketTests` + `test_complete_compact_explicit_full_and_kpi_filter`.
+      See changelog 2026-06-09. FOLLOW-ON (smaller): explicit `results` (full) and a future
+      multi-KPI review brief still truncate — fine since `--kpi` + compact cover the common
+      paths; revisit only if a full-packet truncation causes a real failure.
+
+- [x] **token bloat: Gemini pins ~56k tokens of context on EVERY turn (FIXED 2026-06-08, measured 2026-06-09).**
+      MEASURED via the new `token-report` tool: gemini fixed context 55,057 -> 16,336 tok
+      (-38,721, -70%), grand total 62,378 -> 23,657 (-62.1%, bytes/4 heuristic, excludes the
+      also-removed includeDirectoryTree runtime cost). Reproduce:
+      `uv run token-report --workspace workspaces/<project> --label after --baseline <before.json>`.
+      `.gemini/settings.json` `context.fileName` force-loads six files into context on every
+      message: GEMINI.md (~3.4k) + AGENTS.md (~9.5k) + TOOLS.md (~16k) + `.agents/tools.json`
+      (~23k, a 93KB machine registry) + workspace-workflow-prompt.md (~1.9k) +
+      gemini-cli-reference.md (~1.85k) ~= **56k tokens fixed base**, plus `includeDirectoryTree:true`
+      and 46 skill blurbs. Claude only auto-loads CLAUDE.md (~2.5k) by comparison. In the
+      2026-06-08 Hospital-A run this fixed base was carried across ~40 tool calls and was the
+      bigger silent tax (on top of the visible re-read loop — see the KPI-result-forward item).
+      PLAN: drop `TOOLS.md` and `.agents/tools.json` from the pinned array (they are read-on-demand
+      references per GEMINI.md:4 / AGENTS.md:468; `jitContext:true` already set but the explicit
+      array overrides it), and set `includeDirectoryTree:false` (use `list-workspace-files`).
+      Saves ~39k/turn (~70% of the base) with no capability loss — the registry stays readable.
+      ROLLBACK BASELINE (restore this exact block to revert):
+      ```json
+      "context": {
+        "fileName": [
+          "GEMINI.md",
+          "AGENTS.md",
+          "TOOLS.md",
+          ".agents/tools.json",
+          ".gemini/workspace-workflow-prompt.md",
+          "docs/agents/gemini-cli-reference.md"
+        ],
+        "includeDirectoryTree": true
+      },
+      ```
+      VERIFY AFTER: a fresh Gemini session footer should report fewer context files / lower
+      context%; the tool registry must still be reachable via ReadFile when an agent needs it.
+
+- [x] **KPI result forward: CLI agent looped on UI truncation instead of presenting (FIXED 2026-06-08).**
+      In the 2026-06-08 Hospital-A run the pipeline completed (`ready 3, blocked 0`) and wrote
+      `interns/runs/2026-06-08/results.md` (+ per-KPI `kpi_00N.md`) and the `reports/kpi_results/current.md`
+      alias, but Gemini read `current.md`, misread the `"... first N lines hidden ..."` UI banner as a
+      read failure, and fell into the forbidden re-read loop (`-TotalCount 25/50/75/200/1000`, `-Raw`,
+      `-Tail`, `Select-String ".*"`, `SearchText '^.*$'`) + read the 109KB `current.json` and 384KB
+      `session.json` + a recursive dir dump — never forwarding the packet; the user cancelled. The
+      grep tools also returned empty (ignore-filtered path) while raw Get-Content succeeded, manufacturing
+      a contradiction that escalated the search. Doc rule already exists (GEMINI.md:180-192) and still
+      failed. PLAN: make completion advertise the active run as a stable surface
+      (`Active run -> interns/runs/<date>/results.md`) so any CLI anchors on the dated path and forwards
+      ONCE; consider a structural guard so the wrapper emits the packet itself on completion rather than
+      relying on the agent to fetch-and-verify a truncated read.
+      RECURRED 2026-06-09 at the BLOCKER PANEL (not results): on a fresh re-test the long
+      blocker panel's truncation banner was misread as an incomplete read and Gemini escalated
+      by spawning a `generalist` subagent to re-read it; the subagent can't read git-ignored
+      interns/ via ReadFile (subagents hard-respect .gitignore) and looped on policy-denied
+      fallbacks until cancelled. Fixed: (1) `prepare-kpi-blocker-panel` next_step now carries
+      the "render ONCE; truncation=success; do not re-read or delegate" guard (next_step is
+      short / always visible); (2) `.gemini/settings.json` enableAgents=false removes the
+      subagent escalation path (matches the Agent Delegation Rule). Guarded by
+      `test_prepare_kpi_blocker_panel_next_step_carries_truncation_guard`. See changelog
+      2026-06-09. NOTE: the generic root (truncation indistinguishable from failure) is now
+      guarded on results AND the blocker panel; extend the same next_step guard to any other
+      long governed panel (data-model / duplicate-review / pipeline-format) if they recur.
+      RESOLVED 2026-06-08: `_print_cli_panel` now prints an `## Active Run` block at the
+      visible tail of completion/`results` output naming the stable dated surface
+      (`interns/runs/<date>/results.md` + per-KPI `kpi_*.md`) with explicit "read ONCE /
+      `... first N lines hidden ...` means SUCCESS, do not re-read" guidance. New
+      `_active_run_paths` helper resolves today's run (fallback: latest dated dir).
+      Verified live on session wf_20260608T145532Z; guarded by
+      `tests.test_workspace_flow.ActiveRunPathsTests` (3 tests). The structural-guard
+      idea (wrapper emits packet itself) is deferred — the tail pointer is sufficient.
+
+- [ ] **cli: UnicodeEncodeError (cp1252) when panel markdown contains non-ASCII (found 2026-06-08).**
+      `workspace-flow results`/completion crashes mid-print on a Windows cp1252 console
+      because the generated SQL comment carries a `→` ("Gold results → Parquet",
+      `core/onboarding/kpi/sql_generator.py`). Only bites when stdout is not UTF-8
+      (e.g. piped on Windows); a mid-output crash can itself derail a driving CLI. Fix
+      options: make `_print_cli_panel` write via a UTF-8-safe stream (reconfigure stdout
+      or `errors="replace"`), and/or replace the `→` in generated comments with ASCII
+      ("Gold results -> Parquet") per the no-emoji/ASCII rule. Not fixed (scope).
+
+- [x] **gemini visibility: interns/ artifacts unreadable by native tools -- BUG-018
+      actually fixed (2026-06-07).** Root cause: a gitignore DIRECTORY exclusion
+      (`workspaces/**/interns/`) that child `!negations` can't undo, so the old
+      `.geminiignore` re-includes were inert. Switched Gemini to respectGitIgnore=false
+      + a self-contained `.geminiignore` denylist; git commit behavior unchanged. See
+      changelog 2026-06-07. RESIDUAL: respectGitIgnore is now OFF globally for Gemini,
+      so any NEW secret/PHI/heavy path must be added to `.geminiignore` explicitly --
+      git's denylist no longer protects agent file visibility.
+- [x] **intent-contract apply path mis-keys decisions to an empty kpi_id (FIXED 2026-06-08).**
       `record_intent_answer` for `grain_bucketing` (and `denominator_scope`) was
       observed writing `pipeline_decisions.json` under key `""` instead of the real
       kpi_id (e.g. `{"grain_bucketing_decisions": {"": "band_continuous_cuts"}}`),
@@ -17,6 +152,16 @@ Item template: `- [ ] <area>: <what> — <why / where>`
       needs its kpi_id plumbed through `record_intent_answer`'s caller. Until fixed,
       the blocker-panel route to a grain answer remains unreliable even though the
       deadlock is gone.
+      UPDATE 2026-06-08: also observed that when the harness blocks on grain, the blocker
+      question panel surfaces NO options at all (the grain facet is a pipeline decision, not a
+      feature blocker), so `apply-kpi-panel-answer`/`workspace-flow answer` error out and an
+      agent loops (a Gemini run burned ~7% quota). Mitigated operator-side via a new GEMINI.md
+      "Grain-Bucketing Blocker Rule" (route to `apply-pipeline-decision`).
+      RESOLVED 2026-06-08: (1) `_load_registry_with_features` backfills positional
+      `kpi_{idx:03d}` so questions/answers key correctly; (2) `BlockerQuestionPanelBuilder`
+      promotes the hard-blocking `grain_bucketing` facet to `current` so
+      apply-kpi-panel-answer resolves it. Verified live + green-gate (see changelog
+      2026-06-08). The GEMINI.md deterministic-route guardrail still stands as a backstop.
 - [ ] **pre-existing: `tests.test_failure_contracts` has 3 failing tests**
       (BEGIN/END CATALOG BOOTSTRAP + raw-pipeline-SQL-path assertions). Confirmed
       pre-existing (fail on baseline with 2026-06-07 changes stashed); NOT caused by

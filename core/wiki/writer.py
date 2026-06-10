@@ -9,6 +9,15 @@ from typing import Any
 import yaml
 
 from core.wiki.layout import WikiLayout
+from core.wiki.lineage import (
+    collect_decisions,
+    collect_lineage,
+    collect_related_links,
+    extract_result_shaping,
+    find_contracts_dir,
+    render_decision_section,
+    render_lineage_section,
+)
 from core.wiki.reader import read_note
 from core.wiki.template import ALL_SECTIONS, HUMAN_SECTIONS, empty_section
 
@@ -114,8 +123,9 @@ def upsert_feature_note(layout: WikiLayout, feature: str, scaffold: dict[str, An
 
 KPI_MACHINE_SECTIONS = (
     "Definition",
-    "Generated SQL",
-    "Result preview",
+    "Current state",
+    "Lineage",
+    "Decision history",
     "Last execution",
 )
 
@@ -132,13 +142,22 @@ def build_kpi_completion_scaffold(
     entry: dict[str, Any],
     contract_ref: str = "",
     timestamp: str | None = None,
+    project_root: Path | str | None = None,
 ) -> dict[str, Any]:
     """Build the machine-owned scaffold for a KPI completion note.
 
     ``entry`` is the same per-KPI dict produced by ``_write_result_preview``:
     keys ``definition`` (kpi_registry record), ``sql_path``, ``sql_text``,
     ``status``, ``preview_markdown``, ``error``, ``result_view``.
-    Workspace-agnostic.
+
+    W1/W2 behaviour (workspace-agnostic):
+    - The full generated SQL is NOT inlined. The Definition section links to the
+      ``.sql`` artifact; the Current state section shows only the
+      ``<kpi>_results`` result-shaping body plus the small preview table.
+    - Lineage / Decision history / cross-links are derived from the workspace
+      contracts (``source_to_target_plan.json``, ``relationship_contracts.json``,
+      ``pipeline_decisions.json``) located relative to ``project_root`` or, when
+      not given, inferred from ``entry['sql_path']``.
     """
     now = timestamp or datetime.now(timezone.utc).isoformat()
     definition = entry.get("definition") or {}
@@ -149,7 +168,25 @@ def build_kpi_completion_scaffold(
     cuts = str(definition.get("cuts") or "").strip()
     description = str(definition.get("description") or "").strip()
     status = str(entry.get("status") or "")
+    sql_path = str(entry.get("sql_path") or "").strip()
 
+    # --- Locate workspace contracts (best-effort; degrade if absent). ---------
+    contracts_dir = None
+    if project_root is not None:
+        contracts_dir = find_contracts_dir(Path(project_root))
+    if contracts_dir is None and sql_path:
+        contracts_dir = find_contracts_dir(Path(sql_path))
+
+    lineage = collect_lineage(contracts_dir, kpi_id)
+    feature_names = [
+        str(fm.get("feature") or "")
+        for fm in (definition.get("feature_mappings") or [])
+        if fm.get("feature")
+    ]
+    decision_bullets = collect_decisions(contracts_dir, kpi_id, lineage)
+    related_links = collect_related_links(lineage, feature_names)
+
+    # --- Definition (W1: SQL link, not inlined SQL). --------------------------
     definition_lines = [f"- **KPI**: `{kpi_id}`"]
     if business_question:
         definition_lines.append(f"- **Business question**: {business_question}")
@@ -159,44 +196,64 @@ def build_kpi_completion_scaffold(
         definition_lines.append(f"- **Metric**: `{metric}`")
     if cuts:
         definition_lines.append(f"- **Cuts/grain**: {cuts}")
-    if entry.get("sql_path"):
-        definition_lines.append(f"- **SQL artifact**: `{entry.get('sql_path')}`")
+    if sql_path:
+        definition_lines.append(f"- **SQL**: [`{sql_path}`]({sql_path})")
     definition_block = "\n".join(definition_lines)
 
-    sql_text = str(entry.get("sql_text") or "").strip()
-    sql_block = (
-        "```sql\n" + sql_text + "\n```" if sql_text else "_(no SQL generated yet)_"
-    )
+    # --- Current state (W1: result-shaping only + preview table). -------------
+    sql_text = str(entry.get("sql_text") or "")
+    shaping = extract_result_shaping(sql_text, kpi_id).strip()
+    current_parts: list[str] = ["**Result-shaping logic**", ""]
+    if shaping:
+        current_parts.append("```sql\n" + shaping + "\n```")
+    else:
+        current_parts.append("_(no result-shaping view found)_")
+    current_parts.append("")
+    current_parts.append("**Result preview**")
+    current_parts.append("")
 
     preview = str(entry.get("preview_markdown") or "").strip()
     error = str(entry.get("error") or "").strip()
     if error:
-        preview_block = "```text\n" + error + "\n```"
+        current_parts.append("```text\n" + error + "\n```")
     elif preview:
-        preview_block = preview
+        current_parts.append(preview)
     else:
-        preview_block = "_(no result preview available)_"
+        current_parts.append("_(no result preview available)_")
+    if sql_path:
+        current_parts.append("")
+        current_parts.append(f"Full generated SQL: [`{sql_path}`]({sql_path})")
+    current_block = "\n".join(current_parts)
+
+    lineage_block = render_lineage_section(lineage)
+    decision_block = render_decision_section(decision_bullets)
 
     exec_lines = [f"- **Status**: `{status}`", f"- **Last updated**: {now}"]
     if entry.get("result_view"):
         exec_lines.append(f"- **Result view**: `{entry.get('result_view')}`")
     exec_block = "\n".join(exec_lines)
 
+    frontmatter: dict[str, Any] = {
+        "contract_ref": contract_ref or "interns/generated/contracts/kpi_registry.json",
+        "entity_type": "kpi",
+        "entity_id": kpi_id,
+        "summary": business_question or f"KPI {kpi_id}",
+        "tags": ["kpi"],
+        "updated": now,
+        "last_validated_against_json": now,
+        "validator_status": "ok" if status == "ok" else "blocked",
+    }
+    if related_links:
+        frontmatter["related"] = related_links
+
     return {
-        "frontmatter": {
-            "contract_ref": contract_ref or "interns/generated/contracts/kpi_registry.json",
-            "entity_type": "kpi",
-            "entity_id": kpi_id,
-            "summary": business_question or f"KPI {kpi_id}",
-            "tags": ["kpi"],
-            "updated": now,
-            "last_validated_against_json": now,
-            "validator_status": "ok" if status == "ok" else "blocked",
-        },
+        "frontmatter": frontmatter,
         "definition": definition_block,
-        "generated_sql": sql_block,
-        "result_preview": preview_block,
+        "current_state": current_block,
+        "lineage": lineage_block,
+        "decision_history": decision_block,
         "last_execution": exec_block,
+        "related_links": related_links,
     }
 
 
@@ -209,10 +266,13 @@ def upsert_kpi_note(layout: WikiLayout, kpi_id: str, scaffold: dict[str, Any]) -
 
     machine_sections = {
         "Definition": scaffold["definition"],
-        "Generated SQL": scaffold["generated_sql"],
-        "Result preview": scaffold["result_preview"],
+        "Current state": scaffold["current_state"],
+        "Lineage": scaffold["lineage"],
+        "Decision history": scaffold["decision_history"],
         "Last execution": scaffold["last_execution"],
     }
+
+    related_links = scaffold.get("related_links") or []
 
     if existing is None:
         frontmatter = dict(scaffold["frontmatter"])
@@ -220,6 +280,10 @@ def upsert_kpi_note(layout: WikiLayout, kpi_id: str, scaffold: dict[str, Any]) -
         sections = dict(machine_sections)
         for human in KPI_HUMAN_SECTIONS:
             sections[human] = empty_section(human)
+        # Seed the human-owned Related notes with auto cross-links on first
+        # creation only; subsequent writes never touch human sections.
+        if related_links:
+            sections["Related notes"] = "\n".join(f"- {link}" for link in related_links)
     else:
         frontmatter = dict(existing.frontmatter)
         frontmatter.update(scaffold["frontmatter"])

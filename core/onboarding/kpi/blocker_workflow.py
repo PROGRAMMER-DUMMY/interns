@@ -106,8 +106,10 @@ def prepare_kpi_blocker_panel(
         question_count=panel_result.question_count,
         validation=validation.summary(),
         next_step=(
-            f"Render {panel_result.current_markdown} as-is. Do not summarize it or write a "
-            f"second blocker prompt. Apply answers only from {panel_result.current_json}."
+            f"Render {panel_result.current_markdown} as-is, reading it ONCE. Do not summarize it, "
+            f"write a second blocker prompt, re-read it in another form, or delegate to a subagent "
+            f"to read it: a `... first N lines hidden ...` notice means the read SUCCEEDED "
+            f"(UI truncation, not a failure). Apply answers only from {panel_result.current_json}."
             if panel_result.current_feature
             else "No blocker question remains."
         ),

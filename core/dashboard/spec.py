@@ -18,11 +18,12 @@ from core.dashboard.inference import (
     parse_result_view_columns,
     validate_spec_columns,
 )
+from core.dashboard.profile import decide_panels, execute_result_view
 from core.onboarding.kpi.registry_loader import load_kpi_definitions
 from core.storage.workspace_layout import WorkspaceLayout
 
 
-SPEC_VERSION = 1
+SPEC_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -84,33 +85,49 @@ def build_kpi_spec(
     definition: dict[str, Any],
     sql_path: str = "",
     result_columns: list[str] | None = None,
+    repo_root: Path | str | None = None,
 ) -> dict[str, Any]:
     """Build the per-KPI dashboard spec payload (full file content).
 
-    If *result_columns* is empty but *sql_path* points to an existing file,
-    the result-view column aliases are parsed directly from the SQL so that
-    ``x``, ``y``, and ``color`` can be resolved to real emitted aliases rather
-    than raw cut labels.
+    If *result_columns* is empty but *sql_path* points to an existing file, the
+    result-view column aliases are parsed directly from the SQL so that ``x``,
+    ``y``, and ``color`` can be resolved to real emitted aliases rather than raw
+    cut labels.
 
-    A ``_column_validation`` key is written into ``machine_defaults`` with a
-    list of error strings (empty list = clean).  This surfaces axis / column
-    mismatches at spec-build time rather than silently emitting broken charts.
+    A ``_column_validation`` key is written into ``machine_defaults`` with a list
+    of error strings (empty list = clean). This surfaces axis / column mismatches
+    at spec-build time rather than silently emitting a broken chart -- the
+    renderer falls back to a recovery card when a referenced column is absent.
     """
-    # --- resolve result_columns from SQL when not supplied externally ---
     resolved_columns: list[str] = list(result_columns or [])
     if not resolved_columns and sql_path:
-        sql_file = Path(sql_path)
-        if not sql_file.is_absolute():
-            # Try relative to repo root (two levels above a typical workspace path).
-            # Accept whatever path is given; if it doesn't exist we get [].
-            pass
         try:
-            sql_text = sql_file.read_text(encoding="utf-8")
+            sql_text = Path(sql_path).read_text(encoding="utf-8")
             resolved_columns = parse_result_view_columns(sql_text, kpi_id)
         except OSError:
             resolved_columns = []
 
+    # Single-chart default from KPI text/columns (always present, backward compat).
     machine_defaults = infer_chart(definition=definition, result_columns=resolved_columns)
+
+    # Data-driven panels: execute the result view and DERIVE one panel per
+    # informative dimension from the actual data shape. Falls back to the single
+    # inferred chart when rows can't be obtained (no repo_root / SQL not runnable).
+    panels: list[dict[str, Any]] = []
+    if repo_root is not None and sql_path:
+        rows = execute_result_view(Path(repo_root), Path(repo_root) / sql_path, kpi_id)
+        panels = decide_panels(rows, definition)
+        if rows and not resolved_columns:
+            resolved_columns = list(rows[0].keys())
+    if panels:
+        machine_defaults["panels"] = panels
+        # Mirror the first (most-informative) panel to the top level so the legacy
+        # single-chart renderer path and existing field readers keep working.
+        first = panels[0]
+        for k in ("chart_type", "x", "y", "color", "agg", "limit", "orientation", "y_format"):
+            if k in first:
+                machine_defaults[k] = first[k]
+
     machine_defaults["sql_path"] = sql_path
     machine_defaults["definition"] = {
         "business_question": definition.get("business_question") or definition.get("name") or "",
@@ -118,12 +135,10 @@ def build_kpi_spec(
         "metric": definition.get("metric") or "",
         "cuts": definition.get("cuts") or "",
     }
-    # --- validate axis fields against known columns ---
     validation_errors = validate_spec_columns(machine_defaults, resolved_columns)
     machine_defaults["_column_validation"] = validation_errors
     if resolved_columns:
         machine_defaults["_result_columns"] = resolved_columns
-
     return {
         "artifact_type": "dashboard_spec",
         "version": SPEC_VERSION,
@@ -265,6 +280,7 @@ def refresh_workspace_dashboard(
             definition=definition,
             sql_path=sql_path,
             result_columns=result_columns,
+            repo_root=layout.project_root.parents[1],
         )
         written = save_kpi_spec(layout, kpi_id, payload)
         written_specs.append(payload)

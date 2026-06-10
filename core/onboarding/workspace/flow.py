@@ -1206,10 +1206,18 @@ class WorkspaceFlow:
         json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
         results_markdown = _render_results_markdown(payload)
         md_path.write_text(results_markdown, encoding="utf-8")
+        # Compact sibling: same packet with SQL linked (not inlined), for the
+        # auto-surface at completion/review so the emitted output stays small
+        # enough not to trip CLI truncation (which agents misread as a failed read).
+        compact_md_path = result_dir / "current_compact.md"
+        compact_md_path.write_text(
+            _render_results_markdown(payload, compact=True), encoding="utf-8"
+        )
         self._write_runs_snapshot(payload, results_markdown)
         return {
             "json_path": _rel(json_path, self.repo_root),
             "markdown_path": _rel(md_path, self.repo_root),
+            "compact_markdown_path": _rel(compact_md_path, self.repo_root),
             "kpi_count": len(entries),
             "error_count": sum(1 for item in entries if item.get("status") != "ok"),
             "kpis": entries,
@@ -1517,9 +1525,14 @@ def _render_panel_markdown(panel: dict[str, Any]) -> str:
     summary = panel.get("summary") or {}
     completed_kpis = summary.get("completed_kpis") or []
     if completed_kpis:
+        # Compact at completion: SQL is linked per KPI, not inlined. The full SQL +
+        # tables are emitted right after by the `## KPI Result Packet` (compact) and
+        # remain in the .sql files / runs snapshot. Inlining SQL here too produced a
+        # double full-SQL dump that made the completion output UI-truncate (which
+        # agents misread as a failed read and then re-read/paraphrase).
         lines.extend(["## Completed KPIs", ""])
         for entry in completed_kpis:
-            lines.extend(render_kpi_block(entry, heading_level=3))
+            lines.extend(render_kpi_block(entry, heading_level=3, include_sql=False))
     else:
         # The `results` stage carries per-KPI previews under `summary.kpis`
         # (definition + SQL + result table), not `completed_kpis`. Render them
@@ -1528,9 +1541,14 @@ def _render_panel_markdown(panel: dict[str, Any]) -> str:
         # presenter forwards the rendered tables automatically.
         result_kpis = summary.get("kpis") or []
         if result_kpis:
+            # Compact: definition + table + SQL pointer, no inlined SQL. Full SQL is
+            # delivered by `workspace-flow results --full` (the full packet) and lives
+            # in the per-KPI .sql files. Keeping it compact here means the session panel
+            # markdown never UI-truncates (the truncation that agents misread as a
+            # failed read -> re-read loop / paraphrase).
             lines.extend(["## KPI Results", ""])
             for entry in result_kpis:
-                lines.extend(render_kpi_block(entry, heading_level=3))
+                lines.extend(render_kpi_block(entry, heading_level=3, include_sql=False))
     recovery_commands = (panel.get("summary") or {}).get("recovery_commands") or panel.get("recovery_commands") or []
     if recovery_commands:
         lines.extend(["## Recovery Commands", ""])
@@ -1945,7 +1963,7 @@ def _render_data_understanding_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _render_results_markdown(payload: dict[str, Any]) -> str:
+def _render_results_markdown(payload: dict[str, Any], *, compact: bool = False) -> str:
     lines = [
         "# KPI Query Results",
         "",
@@ -1953,8 +1971,14 @@ def _render_results_markdown(payload: dict[str, Any]) -> str:
         f"- KPI count: {len(payload.get('kpis', []))}",
         "",
     ]
+    if compact:
+        lines.append(
+            "- Compact view: SQL is linked per KPI (`SQL:` line), not inlined. "
+            "Full SQL is in the linked `.sql` file and the combined packet."
+        )
+        lines.append("")
     for entry in payload.get("kpis", []):
-        lines.extend(render_kpi_block(entry, heading_level=2))
+        lines.extend(render_kpi_block(entry, heading_level=2, include_sql=not compact))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -2511,7 +2535,129 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
+def _active_run_paths(
+    repo_root: Path, workspace_rel: str
+) -> tuple[str, list[str]] | None:
+    """Resolve the dated ``runs/<date>/`` snapshot to advertise as the active run.
+
+    Prefers today's directory (how ``_write_runs_snapshot`` names it) and falls
+    back to the most recent dated directory that has a ``results.md``. Returns
+    ``(results.md rel path, [kpi_*.md rel paths])`` or ``None`` if no run snapshot
+    exists. Used to print one stable, single-file surface a driving CLI can read
+    and forward verbatim — instead of re-reading a UI-truncated inline packet.
+    """
+    runs_base = repo_root / workspace_rel / "interns" / "runs"
+    if not runs_base.is_dir():
+        return None
+    candidate = runs_base / date.today().isoformat()
+    if not (candidate / "results.md").exists():
+        dated = sorted(
+            (
+                p
+                for p in runs_base.iterdir()
+                if p.is_dir() and (p / "results.md").exists()
+            ),
+            key=lambda p: p.name,
+        )
+        if not dated:
+            return None
+        candidate = dated[-1]
+    results_rel = _rel(candidate / "results.md", repo_root)
+    kpi_rels = [_rel(p, repo_root) for p in sorted(candidate.glob("kpi_*.md"))]
+    return results_rel, kpi_rels
+
+
+def _emit_result_packet(
+    repo_root: Path,
+    workspace_rel: str,
+    *,
+    compact: bool = False,
+    kpi_id: str = "",
+) -> bool:
+    """Print the KPI Result Packet + Active Run pointer for a workspace.
+
+    Source selection (first match wins):
+      * ``kpi_id`` set -> the per-KPI file ``runs/<date>/<kpi_id>.md`` (full, with
+        SQL): "give me just this KPI's solution". Falls back to the combined packet
+        with a note if that KPI file is absent.
+      * ``compact`` -> ``reports/kpi_results/current_compact.md`` (SQL linked, not
+        inlined; falls back to the full ``current.md`` for runs predating it). Used
+        by the auto-surface at completion/review so the emitted output stays small
+        enough not to trip CLI truncation (which agents misread as a failed read).
+      * otherwise -> the full ``reports/kpi_results/current.md``.
+
+    Then prints the ``## Active Run`` tail pointer naming the dated ``runs/<date>/``
+    files. Returns ``True`` if a packet was emitted.
+
+    Shared by the ``workspace-flow`` panel printer and the ``run-kpi-pipeline``
+    review-gate stop so the SQL + result rows surface automatically the moment the
+    flow stops — no separate "show results" call (the rule: having to ask is a bug).
+    """
+    reports = repo_root / workspace_rel / "interns" / "reports" / "kpi_results"
+    note = ""
+    md_path: Path | None = None
+    if kpi_id:
+        active = _active_run_paths(repo_root, workspace_rel)
+        if active:
+            _results_rel, kpi_rels = active
+            match = next((r for r in kpi_rels if Path(r).stem == kpi_id), "")
+            if match:
+                md_path = repo_root / match
+        if md_path is None:
+            note = f"[~] {kpi_id} not found in the latest run — showing the combined packet."
+    if md_path is None and compact:
+        compact_path = reports / "current_compact.md"
+        md_path = compact_path if compact_path.exists() else reports / "current.md"
+    if md_path is None:
+        md_path = reports / "current.md"
+    if not md_path.exists():
+        return False
+    # Packet integrity (BUG-015/BUG-024 follow-on): warn loudly if the on-disk SQL
+    # changed after this packet was generated, so the rows are not mistaken for
+    # results that still match the SQL.
+    stale_kpis = _result_packet_stale_kpis(repo_root, workspace_rel)
+    print("")
+    print("## KPI Result Packet" + (f": {kpi_id}" if kpi_id else ""))
+    print("")
+    if note:
+        print(note)
+        print("")
+    if stale_kpis:
+        print(f"[x] STALE — on-disk SQL changed after this packet was built for: {', '.join(stale_kpis)}.")
+        print("    Re-run `workspace-flow results` to regenerate; the rows below may not match the current SQL.")
+        print("")
+    print(md_path.read_text(encoding="utf-8").rstrip())
+    print("")
+    # Active-run surface (token/loop guardrail): name the stable, dated results file
+    # as the ONE thing to read and forward. The packet printed above can be UI-
+    # truncated by a CLI frontend ("... first N lines hidden ..."); agents have
+    # misread that truncation as a read FAILURE and looped re-reading the results in
+    # many forms (-TotalCount/-Head/-Tail/Select-String) plus opening the heavy
+    # evidence JSON — burning quota and never presenting. Printing the dated file at
+    # the visible tail gives any driving CLI a single cheap surface to forward.
+    active_run = _active_run_paths(repo_root, workspace_rel)
+    if active_run:
+        run_rel, kpi_rels = active_run
+        print("")
+        print("## Active Run")
+        print("")
+        print(f"- Results (combined): `{run_rel}`")
+        for kpi_rel in kpi_rels:
+            print(f"- Per-KPI: `{kpi_rel}`")
+        print("")
+        print(
+            "- To present: read the combined results file ONCE and forward it "
+            "verbatim. A `... first N lines hidden ...` notice means the read "
+            "SUCCEEDED (UI truncation, not a failure) — do not re-read it with "
+            "-TotalCount/-Head/-Tail/Select-String and do not open the evidence JSON."
+        )
+        print("- For a single KPI, forward its `Per-KPI` file above (each is self-contained).")
+    return True
+
+
+def _print_cli_panel(
+    repo_root: Path, result: WorkspaceFlowResult, *, kpi_filter: str = "", full: bool = False
+) -> None:
     panel_path = repo_root / result.current_panel_path if result.current_panel_path else None
     panel_payload: dict[str, Any] = {}
     delegations: list[dict[str, Any]] = []
@@ -2572,36 +2718,22 @@ def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
     # kpi_results packet so any driving agent sees KPI + SQL + result rows without
     # needing a separate call.  For `results` stage the packet IS the point of the
     # command; for `complete` it surfaces automatically so agents driving via the
-    # CLI see rows immediately after the workflow finishes.
-    if result.stage in ("complete", "results") and result.workspace:
-        kpi_results_paths = (panel_payload.get("artifact_paths") or [])
-        kpi_results_md: str | None = None
-        # Look for the kpi_results current.md among the artifact paths first.
-        for ap in kpi_results_paths:
-            if ap.endswith("kpi_results/current.md"):
-                candidate = repo_root / ap
-                if candidate.exists():
-                    kpi_results_md = candidate.read_text(encoding="utf-8")
-                    break
-        if kpi_results_md is None:
-            # Fallback: derive path from workspace.
-            fallback = repo_root / result.workspace / "interns" / "reports" / "kpi_results" / "current.md"
-            if fallback.exists():
-                kpi_results_md = fallback.read_text(encoding="utf-8")
-        if kpi_results_md:
-            # Packet integrity (BUG-015/BUG-024 follow-on): warn loudly if the
-            # on-disk SQL changed after this packet was generated, so the rows
-            # below are not mistaken for results that still match the SQL.
-            stale_kpis = _result_packet_stale_kpis(repo_root, result.workspace)
-            print("")
-            print("## KPI Result Packet")
-            print("")
-            if stale_kpis:
-                print(f"[x] STALE — on-disk SQL changed after this packet was built for: {', '.join(stale_kpis)}.")
-                print("    Re-run `workspace-flow results` to regenerate; the rows below may not match the current SQL.")
-                print("")
-            print(kpi_results_md.rstrip())
-            print("")
+    # CLI see rows immediately after the workflow finishes. The `kpi_analyst_review`
+    # gate is included because results are already executed by then (preview is
+    # written before the gate) and the reviewer needs the SQL + rows to judge intent
+    # — so the packet auto-surfaces when the flow STOPS for review, with no separate
+    # "show results" call (KPI Result Packet Forwarding Rule: having to ask is a bug).
+    if result.stage in ("complete", "results", "kpi_analyst_review") and result.workspace:
+        # Compact everywhere by default so the emitted output never UI-truncates (a
+        # truncation banner is what agents misread as a failed read -> re-read loop /
+        # paraphrase). The auto-surfaces (complete / review gate) are always compact;
+        # the explicit `results` command is compact unless `--full` is passed (full SQL
+        # also always lives in the per-KPI .sql files). `--kpi` forwards one KPI's file.
+        if result.stage == "results":
+            compact = not full
+        else:
+            compact = True
+        _emit_result_packet(repo_root, result.workspace, compact=compact, kpi_id=kpi_filter)
     print("")
     print("## Next Step")
     print("")
@@ -2783,6 +2915,15 @@ def main(argv: list[str] | None = None) -> int:
     _add_quiet(results)
     results.add_argument("--session", required=True)
     results.add_argument("--preview-rows", type=int, default=PREVIEW_ROW_CAP)
+    results.add_argument(
+        "--kpi", default="",
+        help="Emit only this KPI's packet (e.g. kpi_002), forwarding its per-KPI run file.",
+    )
+    results.add_argument(
+        "--full", action="store_true",
+        help="Inline the full SQL per KPI (default is compact: SQL linked, tables shown). "
+             "Full SQL also always lives in the per-KPI .sql files.",
+    )
 
     review_p = sub.add_parser("review")
     _add_quiet(review_p)
@@ -3104,7 +3245,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(result.summary(), indent=2))
     else:
-        _print_cli_panel(Path(args.repo_root).resolve(), result)
+        _print_cli_panel(
+            Path(args.repo_root).resolve(),
+            result,
+            kpi_filter=getattr(args, "kpi", ""),
+            full=getattr(args, "full", False),
+        )
     return 0
 
 
@@ -3408,6 +3554,11 @@ def pipeline_main(argv: list[str] | None = None) -> int:
     if result.status == "needs_specialist_review" and result.stage == "kpi_analyst_review":
         panel_data = _read_json(repo_root / result.current_panel_path) if result.current_panel_path else {}
         session_id = result.session_id
+        # Surface the result rows AT the gate (results are already executed by now):
+        # the reviewer needs them to judge intent, and the operator never has to type
+        # "show results". Compact (SQL linked, not inlined) so the gate output does not
+        # UI-truncate; full SQL stays in the .sql files / runs snapshot.
+        _emit_result_packet(repo_root, workspace_rel, compact=True)
         return _gate_stop(
             headline="KPI-analyst semantic review required before the workflow can complete.",
             details=[

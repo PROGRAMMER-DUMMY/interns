@@ -55,13 +55,19 @@ def load_kpi_definitions(layout: WorkspaceLayout) -> dict[str, dict[str, Any]]:
     return by_id
 
 
-def render_kpi_block(entry: dict[str, Any], *, heading_level: int = 3) -> list[str]:
+def render_kpi_block(
+    entry: dict[str, Any], *, heading_level: int = 3, include_sql: bool = True
+) -> list[str]:
     """Return markdown lines for a single KPI's definition + SQL + result table.
 
     Generic across workspaces. `entry` must carry at least `kpi_id`; optional
     keys are `definition`, `sql_text`, `sql_path`, `status`, `error`,
     `preview_markdown`. Used by both the panel renderer and the standalone
     results renderer to avoid drift.
+
+    `include_sql=False` omits the inlined ```sql``` block (the `- SQL: <path>`
+    pointer is kept), for compact surfaces that must not trigger CLI output
+    truncation — the full SQL stays reachable via the pointer / the .sql file.
     """
     definition = entry.get("definition") or {}
     kpi_id = entry.get("kpi_id", "")
@@ -92,7 +98,7 @@ def render_kpi_block(entry: dict[str, Any], *, heading_level: int = 3) -> list[s
     lines.append("")
 
     sql_text = str(entry.get("sql_text") or "").strip()
-    if sql_text:
+    if include_sql and sql_text:
         lines.append(f"{sub_prefix} Generated SQL")
         lines.append("")
         lines.append("```sql")

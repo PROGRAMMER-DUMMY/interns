@@ -1,14 +1,18 @@
 {
   "context": {
+    "_note": "TOOLS.md (~16k) and .agents/tools.json (~23k) were removed from this pinned array on 2026-06-08 — they are read-on-demand references (GEMINI.md:4 / AGENTS.md:468) and jitContext loads them when needed. This dropped ~39k tokens of fixed per-turn context (~70% of the base). includeDirectoryTree set false; use `uv run list-workspace-files` for bounded scans. Rollback baseline recorded in develop_spec/follow_ups.md.",
     "fileName": [
       "GEMINI.md",
       "AGENTS.md",
-      "TOOLS.md",
-      ".agents/tools.json",
       ".gemini/workspace-workflow-prompt.md",
       "docs/agents/gemini-cli-reference.md"
     ],
-    "includeDirectoryTree": true
+    "includeDirectoryTree": false
+  },
+  "fileFiltering": {
+    "_note": "respectGitIgnore=false lets native file tools (ReadFile/Glob/SearchText/ReadFolder) read git-ignored generated artifacts under workspaces/**/interns/ (git still does NOT commit them - this flag only affects agent file visibility, not git). With git filtering off, .geminiignore is the SOLE visibility denylist and must hide secrets/PHI/heavy files on its own.",
+    "respectGitIgnore": false,
+    "respectGeminiIgnore": true
   },
   "model": {
     "summarizeToolOutput": {
@@ -66,6 +70,7 @@
   },
   "experimental": {
     "jitContext": true,
-    "enableAgents": true
+    "_enableAgentsNote": "Set false on 2026-06-09. Gemini auto-spawned a `generalist` subagent for blocker-panel prep (against AGENTS.md/GEMINI.md Agent Delegation Rule); the subagent could not read git-ignored interns/ via ReadFile (subagents hard-respect .gitignore, unlike the main agent under respectGitIgnore=false) and looped on policy-denied fallbacks until cancelled. The main agent handles onboarding/blocker/results without subagents. Flip back to true only for explicit, user-requested subagent/parallel work. Rollback: set enableAgents=true.",
+    "enableAgents": false
   }
 }

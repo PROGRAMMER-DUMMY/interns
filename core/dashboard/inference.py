@@ -3,25 +3,28 @@
 Workspace-agnostic. Inputs: the KPI's definition (business_question, metric,
 cuts, filters) + the columns the generated SQL produces. Outputs: a chart
 spec dict that the renderer can use directly. The picker is intentionally
-small and rule-based — the user can override any field via `user_overrides`.
+small and rule-based -- the user can override any field via `user_overrides`.
 
 SQL column parsing
 ------------------
 `parse_result_view_columns(sql_text, kpi_id)` extracts the SELECT-alias list
-from the ``kpi_XXX_results`` CREATE VIEW statement.  The generator always
-emits ``AS <alias>`` for every output column so a regex pass is sufficient.
+from the ``kpi_XXX_results`` CREATE VIEW statement. The generator always emits
+``AS <alias>`` for every output column so a regex pass is sufficient.
 
 Validation
 ----------
 `validate_spec_columns(spec, result_columns)` returns a list of field-level
-errors (empty = clean).  The caller (``build_kpi_spec`` / ``refresh_*``)
-decides how to surface them — the function never raises so the dashboard still
-renders a recovery card rather than crashing.
+errors (empty = clean). The caller decides how to surface them -- the function
+never raises so the dashboard still renders a recovery card rather than
+crashing.
+
+All examples in comments are generic (orders/customers/segments); no workspace
+domain vocabulary is baked into logic -- behavior is derived from the metric
+text, the cut labels, and the emitted result-view column names.
 """
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
 
@@ -31,13 +34,21 @@ _DATE_NAME_PATTERN = re.compile(
 )
 _TOP_N_PATTERN = re.compile(r"\btop\s*(\d+)\b", re.IGNORECASE)
 
-# Matches  "...  AS alias"  where alias is an unquoted identifier.
-# Also handles double-quoted aliases: AS "alias".
+# A share / percentage / ratio metric. Matched against the metric text and
+# against measure-column names (e.g. an emitted ``percentage_share`` alias).
+# Generic -- keyed on the math vocabulary (percent/share/ratio/proportion),
+# never on any workspace's domain words.
+_SHARE_NAME_PATTERN = re.compile(
+    r"(percentage|percent|share|ratio|proportion|\bpct\b|%)",
+    re.IGNORECASE,
+)
+
+# Matches  "...  AS alias"  where alias is an unquoted identifier, or a
+# double-quoted alias: AS "alias". A real select-item alias is followed by a
+# comma (next item) or the end of the SELECT clause. The trailing lookahead
+# excludes CAST type annotations such as ``CAST("x" AS DATE)`` where ``AS
+# <TYPE>`` is followed by ``)`` and must NOT be mistaken for an output column.
 _SELECT_ALIAS_RE = re.compile(
-    # A real select-item alias is followed by a comma (next item) or the end of
-    # the SELECT clause. The trailing lookahead excludes CAST type annotations
-    # such as `CAST("DOB" AS DATE)` / `CAST(x AS DOUBLE)`, where `AS <TYPE>` is
-    # followed by `)` and must NOT be mistaken for an output column.
     r"""\bAS\s+(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))(?=\s*(?:,|$))""",
     re.IGNORECASE,
 )
@@ -57,16 +68,12 @@ _MEASURE_NAME_RE = re.compile(
 def parse_result_view_columns(sql_text: str, kpi_id: str) -> list[str]:
     """Return the ordered list of column aliases from the ``kpi_XXX_results`` view.
 
-    Parses the ``CREATE … VIEW "kpi_XXX_results" AS SELECT …`` block.  Works on
-    the standard single-statement-per-view layout emitted by the KPI generator.
-
+    Parses the ``CREATE OR REPLACE VIEW "kpi_XXX_results" AS SELECT ...`` block.
     Returns an empty list when the view block cannot be located (e.g. the SQL
-    has not yet been generated).  Never raises.
+    has not yet been generated). Never raises.
     """
     if not sql_text or not kpi_id:
         return []
-    # Locate the results-view block: from "kpi_XXX_results" AS SELECT to the
-    # next CREATE statement or end of string.
     view_pattern = re.compile(
         rf"""CREATE\s+OR\s+REPLACE\s+VIEW\s+["']?{re.escape(kpi_id)}_results["']?\s+AS\s+(.*?)(?=CREATE\s+OR\s+REPLACE\s+VIEW|$)""",
         re.IGNORECASE | re.DOTALL,
@@ -75,18 +82,15 @@ def parse_result_view_columns(sql_text: str, kpi_id: str) -> list[str]:
     if not m:
         return []
     view_body = m.group(1)
-    # Extract the SELECT clause: everything between SELECT and FROM (first FROM).
     select_m = re.search(r"\bSELECT\b(.*?)\bFROM\b", view_body, re.IGNORECASE | re.DOTALL)
     if not select_m:
-        # Might be a SELECT DISTINCT …
         select_m = re.search(
             r"\bSELECT\s+DISTINCT\b(.*?)\bFROM\b", view_body, re.IGNORECASE | re.DOTALL
         )
     if not select_m:
         # Fallback: grab all AS aliases anywhere in the view body.
         return _extract_all_aliases(view_body)
-    select_clause = select_m.group(1)
-    return _extract_all_aliases(select_clause)
+    return _extract_all_aliases(select_m.group(1))
 
 
 def _extract_all_aliases(text: str) -> list[str]:
@@ -110,18 +114,26 @@ def infer_measure_column(result_columns: list[str]) -> str:
 
     Preference order:
     1. Last column whose name matches an aggregate/numeric pattern.
-    2. Last column overall (generator puts the measure last by convention).
+    2. Last column overall (the generator puts the measure last by convention).
 
     Returns an empty string when *result_columns* is empty.
     """
     if not result_columns:
         return ""
-    # Score each column: higher = more measure-like.
     best = ""
     for col in result_columns:
         if _MEASURE_NAME_RE.search(col):
             best = col
     return best or result_columns[-1]
+
+
+def _find_share_measure(result_columns: list[str]) -> str:
+    """Return the first result column whose name reads as a percentage/share
+    measure (e.g. ``percentage_share``), or '' when none qualifies."""
+    for col in result_columns:
+        if _SHARE_NAME_PATTERN.search(col):
+            return col
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -144,22 +156,10 @@ def validate_spec_columns(
 ) -> list[str]:
     """Validate that axis fields in *spec* exist in *result_columns*.
 
-    Parameters
-    ----------
-    spec:
-        The ``machine_defaults`` dict (or merged config).
-    result_columns:
-        Column aliases from the result view (as returned by
-        ``parse_result_view_columns``).
-    strict:
-        When True, raise ``SpecColumnError`` instead of returning a list.
-
-    Returns
-    -------
-    list[str]
-        Human-readable error strings.  Empty list means the spec is valid.
-        When *result_columns* is empty the check is skipped (columns not yet
-        known — SQL not yet generated).
+    Returns a list of human-readable error strings. Empty list means the spec
+    is valid. When *result_columns* is empty the check is skipped (columns not
+    yet known -- SQL not yet generated). With ``strict=True`` raises
+    ``SpecColumnError`` instead of returning a list.
     """
     if not result_columns:
         return []
@@ -200,6 +200,18 @@ def _is_date_like(name: str) -> bool:
     return bool(_DATE_NAME_PATTERN.search(name or ""))
 
 
+def _is_share_metric(metric: str, share_measure: str) -> bool:
+    """True when the KPI is a share/percentage/ratio metric.
+
+    Two independent signals (either is sufficient):
+    1. The metric text mentions percent/share/ratio/proportion.
+    2. The result view emitted a percentage/share-named measure column.
+    """
+    if share_measure:
+        return True
+    return bool(_SHARE_NAME_PATTERN.search(metric or ""))
+
+
 def _detect_top_n(definition: dict[str, Any]) -> int | None:
     haystack = " ".join(
         [
@@ -228,27 +240,38 @@ def infer_chart(
 ) -> dict[str, Any]:
     """Return a default chart spec for a KPI.
 
-    Rules (in order):
+    Rules (in precedence order):
 
-    1. Any cut name matches date/time pattern → ``line`` over time, color by next cut.
-    2. Business question contains "top N" → ``ranked_bar`` with ``limit=N``.
-    3. Single dimensional cut → ``bar``.
-    4. Two dimensional cuts → ``grouped_bar``.
-    5. No cuts → ``big_number`` (single-metric tile).
+    1. A date/time cut is present (trend) -> ``line`` over time; x = the date
+       column, y = the measure, color by the next cut.
+    2. The business question says "top N" -> ``ranked_bar`` (rendered as a
+       horizontal bar sorted by the measure descending, limited to N).
+    3. A share / percentage / ratio metric cut by a categorical dimension ->
+       ``stacked_bar_percent`` (100%-stacked bar). Stacked-percent is chosen
+       over grouped so each x-category sums to 100% and parts-of-a-whole read
+       directly off the axis -- the literal intent of a share metric. The
+       measure is the emitted percentage/share column when one exists, and the
+       y-axis is formatted as a percentage (``y_format = "percent"``).
+    4. A single categorical cut -> vertical ``bar``.
+    5. Two or more categorical cuts -> ``grouped_bar``.
+    6. No usable dimension -> ``big_number`` (single-value card).
 
-    ``x`` and ``color`` are resolved to the closest real result-view column alias
-    when *result_columns* is provided.  ``y`` is resolved to the real measure alias
-    (the last aggregate/numeric column) rather than the literal ``"value"``
-    placeholder.  When *result_columns* is empty the inferred raw cut label is used
-    as-is and validation is deferred until columns are available.
+    ``x`` and ``color`` are resolved to the closest real result-view column
+    alias when *result_columns* is provided. ``y`` is resolved to the real
+    measure alias (the share column for share metrics, else the last
+    aggregate/numeric column) rather than the literal ``"value"`` placeholder.
+    When *result_columns* is empty the inferred raw cut label is used as-is and
+    validation is deferred until columns are available.
 
-    Returns a plain dict — never raises. Callers store this under
+    Returns a plain dict -- never raises. Callers store this under
     ``machine_defaults`` and let users override per field via ``user_overrides``.
     """
     metric = str(definition.get("metric") or "").strip()
     cuts_text = str(definition.get("cuts") or "").strip()
     cuts = _split_cuts(cuts_text)
-    business_question = str(definition.get("business_question") or definition.get("name") or "").strip()
+    business_question = str(
+        definition.get("business_question") or definition.get("name") or ""
+    ).strip()
 
     available = list(result_columns or [])
     available_lower = {c.lower(): c for c in available}
@@ -256,13 +279,8 @@ def infer_chart(
     def _resolve_dim_column(name: str) -> str:
         """Resolve a cut label to the best matching result-view alias.
 
-        Matching priority:
-        1. Exact match.
-        2. Case-insensitive exact match.
-        3. Alphanumeric-stripped case-insensitive match (e.g. "Department Name" -> "departmentname").
-        4. Prefix match: result column starts with the cleaned cut label.
-        5. Substring match: result column contains the cleaned cut label (len >= 3).
-        6. Return raw name unchanged (columns not yet known or no match).
+        Priority: exact -> case-insensitive exact -> alnum-stripped match ->
+        prefix/substring match -> raw name (unresolved, surfaces in validation).
         """
         if not name:
             return ""
@@ -275,23 +293,20 @@ def infer_chart(
         for candidate in available:
             if re.sub(r"[^A-Za-z0-9]+", "", candidate).lower() == cleaned:
                 return candidate
-        # Prefix / substring fallback
         if len(cleaned) >= 3:
             for candidate in available:
                 c_clean = re.sub(r"[^A-Za-z0-9]+", "", candidate).lower()
                 if c_clean.startswith(cleaned) or cleaned in c_clean:
                     return candidate
-        return name  # unresolved — will surface as a validation error
+        return name
 
-    def _resolve_measure() -> str:
-        """Return the real measure alias from result_columns, or '' when unknown."""
-        return infer_measure_column(available) if available else ""
+    share_measure = _find_share_measure(available)
+    measure = (share_measure or infer_measure_column(available)) if available else ""
 
     date_cut = next((cut for cut in cuts if _is_date_like(cut)), "")
     non_date_cuts = [cut for cut in cuts if cut != date_cut]
     top_n = _detect_top_n(definition)
-
-    measure = _resolve_measure()
+    is_share = _is_share_metric(metric, share_measure)
 
     spec: dict[str, Any] = {
         "title": business_question or metric or "KPI",
@@ -299,63 +314,86 @@ def infer_chart(
         "y_label": metric,
     }
 
+    # 1. Trend over time -> line.
     if date_cut:
-        y_val = measure or "value"
         spec.update(
             {
                 "chart_type": "line",
                 "x": _resolve_dim_column(date_cut),
                 "x_label": date_cut,
-                "y": y_val,
+                "y": measure or "value",
                 "agg": "sum",
                 "color": _resolve_dim_column(non_date_cuts[0]) if non_date_cuts else "",
             }
         )
+        if is_share:
+            spec["y_format"] = "percent"
+            spec["y_label"] = metric or "share"
         return spec
 
+    # 2. Top-N ranking -> horizontal ranked bar.
     if top_n and cuts:
         primary = cuts[0]
-        y_val = measure or "value"
         spec.update(
             {
                 "chart_type": "ranked_bar",
                 "x": _resolve_dim_column(primary),
                 "x_label": primary,
-                "y": y_val,
+                "y": measure or "value",
                 "agg": "sum",
                 "limit": top_n,
                 "sort": "desc",
+                "orientation": "h",
             }
         )
         return spec
 
+    # 3. Share / percentage metric over a categorical cut -> 100%-stacked bar.
+    if is_share and cuts:
+        primary = cuts[0]
+        secondary = cuts[1] if len(cuts) >= 2 else ""
+        spec.update(
+            {
+                "chart_type": "stacked_bar_percent",
+                "x": _resolve_dim_column(primary),
+                "x_label": primary,
+                "y": measure or "value",
+                "agg": "sum",
+                "color": _resolve_dim_column(secondary) if secondary else "",
+                "y_format": "percent",
+                "y_label": metric or "share",
+            }
+        )
+        return spec
+
+    # 4. Single categorical cut -> vertical bar.
     if len(cuts) == 1:
-        y_val = measure or "value"
         spec.update(
             {
                 "chart_type": "bar",
                 "x": _resolve_dim_column(cuts[0]),
                 "x_label": cuts[0],
-                "y": y_val,
+                "y": measure or "value",
                 "agg": "sum",
             }
         )
         return spec
 
+    # 5. Two or more categorical cuts -> grouped bar.
     if len(cuts) >= 2:
-        y_val = measure or "value"
         spec.update(
             {
                 "chart_type": "grouped_bar",
                 "x": _resolve_dim_column(cuts[0]),
                 "x_label": cuts[0],
-                "y": y_val,
+                "y": measure or "value",
                 "agg": "sum",
                 "color": _resolve_dim_column(cuts[1]),
             }
         )
         return spec
 
+    # 6. No usable dimension -> single-value card.
     spec.update(
         {
             "chart_type": "big_number",
@@ -363,6 +401,8 @@ def infer_chart(
             "agg": "sum",
         }
     )
+    if is_share:
+        spec["y_format"] = "percent"
     return spec
 
 
