@@ -17,6 +17,26 @@ Entry template:
 
 ---
 
+### 2026-06-11  Route result reads through ReadFile (bypass shell cap) + per-KPI forwarding
+- what: The re-read loop's mechanism is Gemini's `model.summarizeToolOutput.run_shell_command`
+  (tokenBudget 12000) + a UI "lines hidden" collapse on shell output — so a `Get-Content` of a
+  long file is capped/collapsed and the agent loops trying to get the rest. Fix targets the read
+  PATH: (1) the Active Run pointer (flow.py) now tells the agent to read each file ONCE with its
+  NATIVE file reader (ReadFile), NOT a shell command (shell is summarized/capped; ReadFile is
+  not), notes current.md is compact, and says forward the per-KPI files for many KPIs (one read
+  each, never exceeds the cap). (2) GEMINI.md "Results read discipline" updated to the same:
+  ReadFile not Get-Content; current.md is compact / current_full.md is full; per-KPI files for
+  scale.
+- why: There is no per-FILE truncation exception in Gemini config (cap is by tool+size, not path),
+  but the shell-summarization budget only applies to `run_shell_command` — so reading via ReadFile
+  sidesteps it. Combined with the compact files (prev entry), each read unit stays under the cap.
+- files: `core/onboarding/workspace/flow.py` (Active Run guidance), `GEMINI.md` (rule).
+- tests: test_workspace_flow 40 green; green-gate 434/0.
+- HONEST: this is operator guidance + a read-path change; it can't force Gemini's tool choice, but
+  it points at the path that isn't capped and keeps every unit small. NOTE: GEMINI.md carries
+  pre-existing uncommitted changes from before this session — the GEMINI.md edit is left UNSTAGED
+  to avoid committing someone else's in-progress work; it is live at runtime regardless of git.
+
 ### 2026-06-11  Make the canonical results files COMPACT on disk (stop the agent re-read loop)
 - what: `reports/kpi_results/current.md` and `runs/<date>/results.md` (the files an agent
   naively cats / the Active Run pointer targets) are now the COMPACT packet (definition +

@@ -2660,12 +2660,22 @@ def _emit_result_packet(
             print(f"- Per-KPI: `{kpi_rel}`")
         print("")
         print(
-            "- To present: read the combined results file ONCE and forward it "
-            "verbatim. A `... first N lines hidden ...` notice means the read "
-            "SUCCEEDED (UI truncation, not a failure) — do not re-read it with "
-            "-TotalCount/-Head/-Tail/Select-String and do not open the evidence JSON."
+            "- To present: read each file ONCE with your NATIVE file reader (ReadFile / "
+            "read_file), NOT a shell command (Get-Content/cat) — shell output is summarized/"
+            "capped per the CLI's tokenBudget, which truncates a long read and makes agents "
+            "loop re-reading it. These files are compact (SQL is linked, not inlined) so one "
+            "read returns the whole file."
         )
-        print("- For a single KPI, forward its `Per-KPI` file above (each is self-contained).")
+        print(
+            "- A `... first N lines hidden ...` notice means the read SUCCEEDED (UI display "
+            "truncation, not a failure). Do NOT re-read with -TotalCount/-Head/-Tail/-Raw/"
+            "-Encoding/Select-String, and do not open the evidence JSON."
+        )
+        print(
+            "- Forwarding many KPIs: forward the `Per-KPI` files (one read each, each self-"
+            "contained) rather than the combined file — this never exceeds the read cap "
+            "regardless of KPI count."
+        )
     return True
 
 
