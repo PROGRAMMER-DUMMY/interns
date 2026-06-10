@@ -29,6 +29,33 @@ _COLOR_KEYS = (
 _FONT_KEYS = ("serif", "sans", "mono")
 _HEX_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b")
 
+# Maps OUR token -> the synonym color names real DESIGN.md files use (Stitch /
+# awesome-design-md vocabulary varies per brand). First synonym present wins.
+# Names are matched after normalizing to lowercase with '-' separators.
+_COLOR_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "accent": ("accent", "primary", "brand", "cta", "action", "accent-1"),
+    "accent_deep": ("accent-deep", "primary-deep", "primary-dark", "primary-press",
+                    "brand-dark", "brand-dark-900", "secondary", "accent-2"),
+    "paper": ("paper", "canvas", "background", "bg", "page", "base", "surface-0"),
+    "card": ("card", "canvas-soft", "surface", "surface-1", "elevated", "panel",
+             "background-secondary", "canvas-cream"),
+    "ink": ("ink", "foreground", "fg", "text", "on-canvas", "on-background", "content"),
+    "ink_soft": ("ink-soft", "ink-secondary", "ink-mute", "muted", "text-secondary",
+                 "text-muted", "foreground-muted", "secondary-text"),
+    "rule": ("rule", "hairline", "border", "divider", "line", "outline"),
+    "rule_soft": ("rule-soft", "hairline-soft", "hairline-input", "border-subtle",
+                  "divider-soft", "border-muted"),
+}
+
+
+def _norm_key(k: str) -> str:
+    return re.sub(r"[\s_]+", "-", str(k).strip().lower())
+
+
+def _first_hex(val: object) -> str:
+    m = _HEX_RE.search(str(val))
+    return m.group(0).lower() if m else ""
+
 
 @dataclass(frozen=True)
 class DesignTokens:
@@ -70,8 +97,83 @@ def _parse_value(line: str) -> tuple[str, str] | None:
     return key, val
 
 
+def _font_family_stack(typography: dict) -> dict[str, str]:
+    """From a real DESIGN.md `typography:` block (token -> {fontFamily,...}), pick a
+    display font (serif slot), a body font (sans slot), and a mono/tabular font.
+    Most brands use one family across tokens — that's fine; the masthead then uses
+    the brand font too. Returns only the slots we could resolve."""
+    if not isinstance(typography, dict):
+        return {}
+    def fam(tok: dict) -> str:
+        return str(tok.get("fontFamily") or tok.get("font_family") or "").strip() if isinstance(tok, dict) else ""
+    items = {str(k).lower(): v for k, v in typography.items() if isinstance(v, dict)}
+    out: dict[str, str] = {}
+    # body/sans: prefer a body-* token, else the most common family.
+    body = next((fam(v) for k, v in items.items() if "body" in k and fam(v)), "")
+    if not body:
+        fams = [fam(v) for v in items.values() if fam(v)]
+        body = max(set(fams), key=fams.count) if fams else ""
+    if body:
+        out["sans"] = body
+    # display/serif slot: a display/heading token's family (often same as body).
+    disp = next((fam(v) for k, v in items.items() if ("display" in k or "heading" in k) and fam(v)), "")
+    if disp:
+        out["serif"] = disp
+    # mono: a tabular/mono/code token if present.
+    mono = next((fam(v) for k, v in items.items()
+                 if any(t in k for t in ("mono", "code", "tabular")) and fam(v)), "")
+    if mono:
+        out["mono"] = mono
+    return out
+
+
+def _parse_frontmatter(text: str) -> DesignTokens | None:
+    """Parse a real awesome-design-md / Stitch DESIGN.md: YAML frontmatter between
+    leading `---` fences with `colors:` (+ optional `typography:`). Maps the brand's
+    semantic vocabulary onto our tokens. Returns None if there's no usable frontmatter
+    so the caller can fall back to the loose key:value parser (our own format)."""
+    m = re.match(r"\s*---\s*\n(.*?)\n---\s*\n", text or "", re.DOTALL)
+    if not m:
+        return None
+    try:
+        import yaml
+        data = yaml.safe_load(m.group(1))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    colors_raw = data.get("colors")
+    if not isinstance(colors_raw, dict):
+        return None
+    colors = {_norm_key(k): _first_hex(v) for k, v in colors_raw.items()}
+    colors = {k: v for k, v in colors.items() if v}
+    if not colors:
+        return None
+    updates: dict[str, object] = {}
+    for token, synonyms in _COLOR_SYNONYMS.items():
+        for syn in synonyms:
+            if syn in colors:
+                updates[token] = colors[syn]
+                break
+    # if no distinct `card` surface was found, derive it from the page background.
+    if "card" not in updates and "paper" in updates:
+        updates["card"] = updates["paper"]
+    updates.update(_font_family_stack(data.get("typography") or {}))
+    # Real brand fonts are often proprietary (Sohne etc.) with system fallbacks in
+    # the family stack; don't try to Google-Fonts-load them — let the stack fall back.
+    if any(k in updates for k in ("serif", "sans", "mono")):
+        updates["font_families"] = ()
+    return replace(_DEFAULTS, **updates) if updates else None
+
+
 def parse_design_md(text: str) -> DesignTokens:
-    """Parse DESIGN.md text into DesignTokens, falling back per-field on defaults."""
+    """Parse DESIGN.md text into DesignTokens, falling back per-field on defaults.
+
+    Tries the real awesome-design-md YAML-frontmatter schema first; if absent, uses
+    the loose `key: value` parser (our own default_design.md token-block format)."""
+    fm = _parse_frontmatter(text)
+    if fm is not None:
+        return fm
     colors: dict[str, str] = {}
     fonts: dict[str, str] = {}
     categorical: list[str] = []

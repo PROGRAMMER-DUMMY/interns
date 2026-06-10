@@ -41,6 +41,49 @@ class ParseDesignMdTests(unittest.TestCase):
         self.assertEqual(t.paper, "#fefefe")
 
 
+class RealSchemaFrontmatterTests(unittest.TestCase):
+    """Consume the actual awesome-design-md / Stitch schema: YAML frontmatter with a
+    `colors:` map in the brand's own vocabulary, mapped onto our tokens."""
+
+    def test_maps_brand_vocabulary_to_our_tokens(self):
+        md = (
+            "---\n"
+            "colors:\n"
+            '  primary: "#533afd"\n'
+            '  primary-deep: "#4434d4"\n'
+            '  ink: "#0d253d"\n'
+            '  ink-secondary: "#273951"\n'
+            '  canvas: "#ffffff"\n'
+            '  canvas-soft: "#f6f9fc"\n'
+            '  hairline: "#e3e8ee"\n'
+            "typography:\n"
+            "  body-md:\n"
+            '    fontFamily: "sohne-var, system-ui, sans-serif"\n'
+            "---\n\n## Overview\nprose...\n"
+        )
+        t = parse_design_md(md)
+        self.assertEqual(t.accent, "#533afd")       # primary -> accent
+        self.assertEqual(t.accent_deep, "#4434d4")  # primary-deep -> accent_deep
+        self.assertEqual(t.paper, "#ffffff")        # canvas -> paper
+        self.assertEqual(t.card, "#f6f9fc")         # canvas-soft -> card
+        self.assertEqual(t.ink, "#0d253d")
+        self.assertEqual(t.ink_soft, "#273951")     # ink-secondary -> ink_soft
+        self.assertEqual(t.rule, "#e3e8ee")         # hairline -> rule
+        self.assertIn("sohne-var", t.sans)          # typography fontFamily -> sans
+        self.assertEqual(t.font_families, ())       # proprietary -> don't Google-load
+
+    def test_card_falls_back_to_paper_when_no_surface(self):
+        md = '---\ncolors:\n  primary: "#111111"\n  background: "#fafafa"\n---\n'
+        t = parse_design_md(md)
+        self.assertEqual(t.paper, "#fafafa")
+        self.assertEqual(t.card, "#fafafa")  # no distinct surface -> use page bg
+
+    def test_non_frontmatter_falls_back_to_loose_parser(self):
+        # our own token-block format still works (not YAML frontmatter)
+        t = parse_design_md("```design-tokens\naccent: #abcdef\n```\n")
+        self.assertEqual(t.accent, "#abcdef")
+
+
 class LoadDesignTokensTests(unittest.TestCase):
     def test_workspace_design_md_overrides_default(self):
         with tempfile.TemporaryDirectory() as tmp:

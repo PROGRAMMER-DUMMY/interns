@@ -17,6 +17,28 @@ Entry template:
 
 ---
 
+### 2026-06-10  DESIGN.md: consume the REAL awesome-design-md schema (was cosmetic-only)
+- what: `design_md.py` now parses the actual awesome-design-md / Stitch schema — YAML
+  frontmatter with a `colors:` map in the brand's own vocabulary + a nested `typography:`
+  block — and maps it onto our tokens via a synonym table (`primary->accent`,
+  `canvas->paper`, `canvas-soft/surface->card`, `ink->ink`, `ink-secondary->ink_soft`,
+  `hairline->rule`, `primary-deep->accent_deep`, ...). Picks body/display/mono font stacks
+  from `typography.*.fontFamily`; proprietary fonts keep their fallback stack and are NOT
+  Google-loaded. Falls back to the loose token-block parser (our own default) when there's
+  no YAML frontmatter.
+- why: The earlier Phase-1d integration adopted the DESIGN.md *concept* but invented its own
+  flat vocabulary, so dropping a real repo file (e.g. stripe/DESIGN.md) changed almost nothing
+  (only a coincidental `ink` match) — cosmetic, not functional. The user gave that repo to use.
+- files: `core/dashboard/design_md.py` (synonym map, `_parse_frontmatter`, font-stack picker;
+  parse_design_md tries YAML first), `tests/test_dashboard_design_md.py` (+3: vocabulary map,
+  card fallback, non-frontmatter fallback).
+- tests: 11 design-md tests green; green-gate 346/0.
+- verify: downloaded the live stripe/DESIGN.md -> parsed to accent #533afd (indigo) / paper
+  #ffffff / ink #0d253d (navy) / card #f6f9fc / rule #e3e8ee / accent_deep #4434d4 / sohne
+  font stack. Dropped it into the workspace, re-exported, screenshotted: dashboard genuinely
+  restyled to Stripe's white/navy/indigo (headlines indigo, was sienna). Removed it -> back to
+  editorial default. Now honors "use this repo" at the file level, not just the concept.
+
 ### 2026-06-10  Dashboard correctness: categorical axis ordering (ordinal/banded + nominal)
 - what: `_figure_from_spec` now orders vertical-bar x categories generically: ORDINAL/banded
   categories (age bands "0-9".."100-109", numeric buckets) sort by their natural leading
