@@ -76,12 +76,14 @@ class EmitResultPacketTests(unittest.TestCase):
 
         reports = root / ws / "interns" / "reports" / "kpi_results"
         reports.mkdir(parents=True)
+        # New convention: current.md = compact (the canonical forward target);
+        # current_full.md = full (inlined SQL, for --full drill-down).
         (reports / "current.md").write_text(
-            "# KPI Query Results\n\n## kpi_001\nFULL_SQL_BLOCK_001\n## kpi_002\nFULL_SQL_BLOCK_002\n",
+            "# KPI Query Results\n\n- Compact view: SQL is linked per KPI\n\n## kpi_001\nTABLE_001\n## kpi_002\nTABLE_002\n",
             encoding="utf-8",
         )
-        (reports / "current_compact.md").write_text(
-            "# KPI Query Results\n\n- Compact view: SQL is linked per KPI\n\n## kpi_001\nTABLE_001\n## kpi_002\nTABLE_002\n",
+        (reports / "current_full.md").write_text(
+            "# KPI Query Results\n\n## kpi_001\nFULL_SQL_BLOCK_001\n## kpi_002\nFULL_SQL_BLOCK_002\n",
             encoding="utf-8",
         )
         run = root / ws / "interns" / "runs" / date.today().isoformat()

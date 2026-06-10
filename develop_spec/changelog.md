@@ -17,6 +17,27 @@ Entry template:
 
 ---
 
+### 2026-06-11  Make the canonical results files COMPACT on disk (stop the agent re-read loop)
+- what: `reports/kpi_results/current.md` and `runs/<date>/results.md` (the files an agent
+  naively cats / the Active Run pointer targets) are now the COMPACT packet (definition +
+  table + `SQL:` link, no inlined SQL). The full inlined-SQL packet moved to `current_full.md`
+  / `runs/<date>/results_full.md`; per-KPI run files are compact too. `current_compact.md` kept
+  as a back-compat alias. `_emit_result_packet`: compact reads current.md, full reads
+  current_full.md.
+- why: Live Gemini re-test showed the operator re-reading the FULL `current.md` 6-7 times
+  (-Raw / -Encoding / -First 200 / -Head 100 …) because the long file UI-truncates and Gemini
+  misreads truncation as an incomplete read — the same loop, on the DIRECT file-read path that
+  bypasses the compact CLI output. Making the on-disk canonical file small removes the
+  truncation trigger. (The full SQL is still on disk: current_full.md + the per-KPI .sql files.)
+- HONEST limit: this reduces the trigger; it can't fully force Gemini's behavior — Gemini was
+  violating its own GEMINI.md "read results ONCE, truncation=success, don't re-read" rule.
+- files: `core/onboarding/workspace/flow.py` (`_write_result_preview` compact current.md +
+  current_full.md; `_write_runs_snapshot` compact results.md + results_full.md; `_emit_result_packet`
+  source flip), `tests/test_workspace_flow.py` (fixture -> new convention).
+- tests: test_workspace_flow 40 green; green-gate 434/0.
+- verify: green-gate 434/0; the explicit `results --full` still emits inlined SQL (current_full.md),
+  default/`results` + Active Run forward the compact file.
+
 ### 2026-06-11  Fix the 3 pre-existing test_failure_contracts failures (pipeline-SQL validator)
 - what: `WorkspaceArtifactValidator._validate_pipeline_harnesses` now enforces the
   pipeline-SQL content contract the 3 long-red tests assert: (1) empty `pipeline_layers.sql`

@@ -1204,32 +1204,40 @@ class WorkspaceFlow:
             "kpis": entries,
         }
         json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
-        results_markdown = _render_results_markdown(payload)
-        md_path.write_text(results_markdown, encoding="utf-8")
-        # Compact sibling: same packet with SQL linked (not inlined), for the
-        # auto-surface at completion/review so the emitted output stays small
-        # enough not to trip CLI truncation (which agents misread as a failed read).
-        compact_md_path = result_dir / "current_compact.md"
-        compact_md_path.write_text(
-            _render_results_markdown(payload, compact=True), encoding="utf-8"
-        )
-        self._write_runs_snapshot(payload, results_markdown)
+        # `current.md` (the canonical file an agent naively cats and the doc rule says
+        # to forward verbatim) is the COMPACT packet: definition + result table + a
+        # `SQL:` link, no inlined SQL. Small enough not to trip CLI/UI truncation, which
+        # agents misread as a failed read and then re-read 6-7x (the observed loop).
+        # The full inlined-SQL packet lives in `current_full.md` for drill-down.
+        compact_markdown = _render_results_markdown(payload, compact=True)
+        full_markdown = _render_results_markdown(payload)
+        md_path.write_text(compact_markdown, encoding="utf-8")
+        full_md_path = result_dir / "current_full.md"
+        full_md_path.write_text(full_markdown, encoding="utf-8")
+        # Back-compat alias (older callers/tools referenced current_compact.md).
+        (result_dir / "current_compact.md").write_text(compact_markdown, encoding="utf-8")
+        self._write_runs_snapshot(payload, compact_markdown, full_markdown)
         return {
             "json_path": _rel(json_path, self.repo_root),
             "markdown_path": _rel(md_path, self.repo_root),
-            "compact_markdown_path": _rel(compact_md_path, self.repo_root),
+            "full_markdown_path": _rel(full_md_path, self.repo_root),
             "kpi_count": len(entries),
             "error_count": sum(1 for item in entries if item.get("status") != "ok"),
             "kpis": entries,
         }
 
-    def _write_runs_snapshot(self, payload: dict[str, Any], results_markdown: str) -> None:
+    def _write_runs_snapshot(
+        self, payload: dict[str, Any], compact_markdown: str, full_markdown: str
+    ) -> None:
         """Mirror the just-executed results into a dated runs/<date>/ snapshot.
 
         The snapshot is written here — by the executor that re-runs the on-disk
         SQL — so the dated record always reflects what was actually executed,
-        not what the generator first emitted. Per-KPI files plus a combined
-        results.md, both overwritten on each run (no append graveyard).
+        not what the generator first emitted. Per-KPI files (compact, SQL linked)
+        plus a combined `results.md` (compact — the Active Run forward target) and
+        `results_full.md` (inlined SQL). All overwritten each run (no graveyard).
+        The combined file is compact so following the Active Run pointer doesn't hit
+        a long, UI-truncating file.
         """
         run_dir = self.layout.runs_dir / date.today().isoformat()
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -1237,9 +1245,10 @@ class WorkspaceFlow:
             kpi_id = entry.get("kpi_id")
             if not kpi_id:
                 continue
-            section = "\n".join(render_kpi_block(entry, heading_level=2)).rstrip() + "\n"
+            section = "\n".join(render_kpi_block(entry, heading_level=2, include_sql=False)).rstrip() + "\n"
             (run_dir / f"{kpi_id}.md").write_text(section, encoding="utf-8")
-        (run_dir / "results.md").write_text(results_markdown, encoding="utf-8")
+        (run_dir / "results.md").write_text(compact_markdown, encoding="utf-8")
+        (run_dir / "results_full.md").write_text(full_markdown, encoding="utf-8")
 
     def _base_state(self, intent: str) -> dict[str, Any]:
         return {
@@ -2606,10 +2615,15 @@ def _emit_result_packet(
         if md_path is None:
             note = f"[~] {kpi_id} not found in the latest run — showing the combined packet."
     if md_path is None and compact:
-        compact_path = reports / "current_compact.md"
-        md_path = compact_path if compact_path.exists() else reports / "current.md"
-    if md_path is None:
+        # current.md IS the compact packet now; current_compact.md kept as alias.
         md_path = reports / "current.md"
+        if not md_path.exists():
+            md_path = reports / "current_compact.md"
+    if md_path is None:
+        # Full packet (explicit `results --full`): current_full.md; fall back to
+        # current.md for runs predating the split.
+        full_path = reports / "current_full.md"
+        md_path = full_path if full_path.exists() else reports / "current.md"
     if not md_path.exists():
         return False
     # Packet integrity (BUG-015/BUG-024 follow-on): warn loudly if the on-disk SQL
