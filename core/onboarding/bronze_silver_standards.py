@@ -98,11 +98,11 @@ class BronzeSilverStandardsBuilder:
             "rules": [
                 {
                     "rule_id": "skip_data_quality_before_kpi_or_generation",
-                    "replacement_command": f"uv run run-data-quality-harness --workspace {_rel(self.workspace, self.repo_root)}",
+                    "replacement_command": f"uv run harness data-quality --workspace {_rel(self.workspace, self.repo_root)}",
                 },
                 {
                     "rule_id": "code_generation_before_contracts_and_harnesses",
-                    "replacement_command": f"uv run run-layered-pipeline-harness --workspace {_rel(self.workspace, self.repo_root)}",
+                    "replacement_command": f"uv run harness layered-pipeline --workspace {_rel(self.workspace, self.repo_root)}",
                 },
             ],
         }

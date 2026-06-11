@@ -559,10 +559,10 @@ the matching `### <command>` section of `TOOLS.md` for the one command you are a
 | Source catalog + external intake | `prepare-source-catalog`, `build-catalog-contract`, `build-source-family-contracts`, `discover-external-sources`, `prepare-external-source-intake`, `ingest-source-catalog` |
 | Engineering route + pipeline | `prepare-data-engineering-route`, `prepare-pipeline-plan`, `prepare-pipeline-format-panel`, `prepare-pipeline-deployment-plan`, `apply-pipeline-decision`, `generate-pipeline-sql` |
 | Generation + execution | `run-kpi-pipeline`, `workspace-flow`, `generate-kpi-sql`, `generate-kpi-engines`, `kpi-proof-packet` |
-| Validation + QA | `validate-workspace-artifacts`, `validate-project-harness`, `run-reliability-suite`, `validate-workflow-guardrails`, `run-data-quality-harness`, `prepare-duplicate-review-panel`, `apply-duplicate-review-answer`, `run-layered-pipeline-harness`, `run-pipeline-execution-harness`, `validate-git-hygiene`, `validate-memory-health` |
+| Validation + QA | `validate-workspace-artifacts`, `validate-project-harness`, `harness reliability`, `harness workflow-guardrails`, `harness data-quality`, `prepare-duplicate-review-panel`, `apply-duplicate-review-answer`, `harness layered-pipeline`, `harness pipeline-execution`, `validate-git-hygiene`, `validate-memory-health` |
 | Evidence + reporting | `record-workspace-trajectory`, `build-workspace-evidence-graph`, `export-kpi-registry-excel`, `export-workspace-presentation`, `prepare-wiki-memory`, `prepare-workspace-bug-report`, `record-engine-evolution` |
 | Context + budget | `context-router`, `resource-preflight`, `cleanup-workspace-references` |
-| Dev + harness | `prepare-agent-benchmark`, `run-ai-app-harness`, `run-ai-cli-harness`, `prepare-workspace-workflow`, `profiler.py`, `optimizer_finder.py`, `methodology_parser.py`, `generate-skill-adapters`, Databricks tools |
+| Dev + harness | `prepare-agent-benchmark`, `harness ai-app`, `harness ai-cli`, `prepare-workspace-workflow`, `profiler.py`, `optimizer_finder.py`, `methodology_parser.py`, `generate-skill-adapters`, Databricks tools |
 
 Hard registry-read gate:
 

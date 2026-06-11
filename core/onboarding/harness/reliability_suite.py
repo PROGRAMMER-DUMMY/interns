@@ -233,12 +233,12 @@ class ReliabilitySuite:
                 elif check["name"] == "build-workspace-evidence-graph":
                     commands.append(f"uv run build-workspace-evidence-graph --workspace {self.workspace_rel}")
                 else:
-                    commands.append(f"uv run validate-workflow-guardrails --workspace {self.workspace_rel}")
+                    commands.append(f"uv run harness workflow-guardrails --workspace {self.workspace_rel}")
             for command in (check.get("details") or {}).get("next_commands") or []:
                 if isinstance(command, str):
                     commands.append(command)
         if not commands:
-            commands.append(f"uv run run-reliability-suite --workspace {self.workspace_rel} --domain {self.domain}")
+            commands.append(f"uv run harness reliability --workspace {self.workspace_rel} --domain {self.domain}")
         return _dedupe(commands)
 
 

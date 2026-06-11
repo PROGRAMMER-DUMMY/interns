@@ -398,14 +398,14 @@ workspaces/<project>/interns/generated/evidence/project_harness.json
 workspaces/<project>/interns/reports/project_harness.md
 ```
 
-### run-reliability-suite
+### harness reliability  (formerly run-reliability-suite)
 
 Command:
 
 ```powershell
-uv run run-reliability-suite --workspace workspaces/<project> --domain <domain>
-uv run run-reliability-suite --workspace workspaces/<project> --project-harness skip
-uv run run-reliability-suite --workspace workspaces/<project> --project-harness run
+uv run harness reliability --workspace workspaces/<project> --domain <domain>
+uv run harness reliability --workspace workspaces/<project> --project-harness skip
+uv run harness reliability --workspace workspaces/<project> --project-harness run
 ```
 
 Use for scheduled or local-safe reliability checks that should compose existing workspace harnesses
@@ -421,12 +421,12 @@ workspaces/<project>/interns/reports/reliability_suite/current.md
 workspaces/<project>/interns/generated/evidence/reliability_suite/current.json
 ```
 
-### run-ai-app-harness
+### harness ai-app  (formerly run-ai-app-harness)
 
 Command:
 
 ```powershell
-uv run run-ai-app-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_harness/datasets/happy_path.jsonl
+uv run harness ai-app --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_harness/datasets/happy_path.jsonl
 ```
 
 Use when a workspace needs dependency-free AI application tests from JSONL cases. The harness
@@ -462,13 +462,13 @@ workspaces/<project>/interns/reports/ai_app_harness/current.md
 workspaces/<project>/interns/generated/evidence/ai_app_harness/current.json
 ```
 
-### run-ai-cli-harness
+### harness ai-cli  (formerly run-ai-cli-harness)
 
 Command:
 
 ```powershell
-uv run run-ai-cli-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl
-uv run run-ai-cli-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl --config config/ai_cli_harness.example.json --allow-cli-exec
+uv run harness ai-cli --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl
+uv run harness ai-cli --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl --config config/ai_cli_harness.example.json --allow-cli-exec
 ```
 
 Use when a CLI agent such as Claude, Gemini, Codex, or a custom CLI needs to be tested against the
@@ -483,7 +483,7 @@ Supported eval types:
   use, raw-data read avoidance, and non-portable shell markers.
 - `artifact_exists`: asserts generated files exist.
 - `artifact_json_path`: checks JSON artifact fields such as `feature` or `status`.
-- `workflow_guard`: runs `validate-workflow-guardrails` against the case transcript.
+- `workflow_guard`: runs `harness workflow-guardrails` against the case transcript.
 - `cli_text`: checks required keywords in final CLI output.
 
 Example CLI suite rows live at `config/ai_cli_harness.governed_suite.example.jsonl`.
@@ -498,13 +498,13 @@ workspaces/<project>/interns/reports/ai_cli_harness/current.md
 workspaces/<project>/interns/generated/evidence/ai_cli_harness/current.json
 ```
 
-### validate-workflow-guardrails
+### harness workflow-guardrails  (formerly validate-workflow-guardrails)
 
 Command:
 
 ```powershell
-uv run validate-workflow-guardrails --workspace workspaces/<project>
-uv run validate-workflow-guardrails --workspace workspaces/<project> --command-log workspaces/<project>/interns/state/commands.jsonl
+uv run harness workflow-guardrails --workspace workspaces/<project>
+uv run harness workflow-guardrails --workspace workspaces/<project> --command-log workspaces/<project>/interns/state/commands.jsonl
 ```
 
 Use when the workflow itself needs a reliability gate. It checks for invented generic KPI features
@@ -521,12 +521,12 @@ workspaces/<project>/interns/reports/workflow_guard_harness/current.md
 workspaces/<project>/interns/generated/evidence/workflow_guard_harness/current.json
 ```
 
-### run-layered-pipeline-harness
+### harness layered-pipeline  (formerly run-layered-pipeline-harness)
 
 Command:
 
 ```powershell
-uv run run-layered-pipeline-harness --workspace workspaces/<project>
+uv run harness layered-pipeline --workspace workspaces/<project>
 ```
 
 Use after `build-catalog-contract`, `prepare-data-engineering-route`, and
@@ -544,12 +544,12 @@ workspaces/<project>/interns/reports/layered_pipeline_harness/current.md
 workspaces/<project>/interns/generated/evidence/layered_pipeline_harness/current.json
 ```
 
-### run-pipeline-execution-harness
+### harness pipeline-execution  (formerly run-pipeline-execution-harness)
 
 Command:
 
 ```powershell
-uv run run-pipeline-execution-harness --workspace workspaces/<project>
+uv run harness pipeline-execution --workspace workspaces/<project>
 ```
 
 Use after `generate-pipeline-sql` to execute `pipeline_layers.sql` locally in DuckDB and verify
@@ -564,12 +564,12 @@ workspaces/<project>/interns/reports/pipeline_execution_harness/current.md
 workspaces/<project>/interns/generated/evidence/pipeline_execution_harness/current.json
 ```
 
-### run-data-quality-harness
+### harness data-quality  (formerly run-data-quality-harness)
 
 Command:
 
 ```powershell
-uv run run-data-quality-harness --workspace workspaces/<project>
+uv run harness data-quality --workspace workspaces/<project>
 ```
 
 Use after catalog, profile, and pipeline contracts exist when a workspace needs a local-safe data
@@ -595,7 +595,7 @@ Command:
 uv run prepare-duplicate-review-panel --workspace workspaces/<project>
 ```
 
-Use after `run-data-quality-harness` when duplicate findings need a JSON-backed stakeholder review
+Use after `harness data-quality` when duplicate findings need a JSON-backed stakeholder review
 panel. It prepares bounded, redacted duplicate evidence and options from profile/catalog/pipeline
 contracts. It does not apply a duplicate decision and does not generate or run deduplication or
 quarantine SQL in milestone 1.
@@ -641,7 +641,7 @@ uv run record-workspace-trajectory --workspace workspaces/<project> --render-onl
 
 Use when an agent, CLI, or workflow wrapper needs a workspace-scoped replay log. It appends
 secret-redacted JSONL events to the active workspace and writes current JSON/Markdown summaries.
-`validate-workflow-guardrails` reads this trajectory by default when present, so unsupported
+`harness workflow-guardrails` reads this trajectory by default when present, so unsupported
 commands, raw dataset reads, and failed steps without nearby recovery become scoreable findings.
 Controlled tools such as `workspace-flow`, `prepare-kpi-blocker-panel`, and
 `apply-kpi-panel-answer` record best-effort trajectory events automatically; this command remains

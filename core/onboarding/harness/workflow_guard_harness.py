@@ -339,7 +339,7 @@ class WorkflowGuardHarness:
                         recommendation="Run data quality before KPI blocker questions.",
                         details={
                             "violated_rule_id": "skip_data_quality_before_kpi_or_generation",
-                            "replacement_command": f"uv run run-data-quality-harness --workspace {self.workspace_rel}",
+                            "replacement_command": f"uv run harness data-quality --workspace {self.workspace_rel}",
                         },
                     )
                 )
@@ -417,7 +417,7 @@ class WorkflowGuardHarness:
         commands = []
         if any(item["code"] in {"invented_temporal_feature", "blocker_panel_invented_feature"} for item in findings):
             commands.append(f"uv run prepare-kpi-blocker-panel --workspace {self.workspace_rel} --domain healthcare")
-        commands.append(f"uv run validate-workflow-guardrails --workspace {self.workspace_rel}")
+        commands.append(f"uv run harness workflow-guardrails --workspace {self.workspace_rel}")
         return commands
 
     def _check_roster_utilization(self) -> list[dict[str, Any]]:

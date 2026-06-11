@@ -571,8 +571,8 @@ def _next_commands(workspace: str, domain: str, checks: dict[str, Any]) -> list[
     if checks["git_hygiene"].get("issues"):
         commands.append("uv run validate-git-hygiene")
     if checks.get("ai_cli_harness", {}).get("ok") is False:
-        commands.append(f"uv run run-ai-cli-harness --workspace {workspace} --dataset <dataset>")
-    workflow_command = f"uv run validate-workflow-guardrails --workspace {workspace}"
+        commands.append(f"uv run harness ai-cli --workspace {workspace} --dataset <dataset>")
+    workflow_command = f"uv run harness workflow-guardrails --workspace {workspace}"
     if checks.get("workflow_guardrails", {}).get("ok") is False:
         commands.append(workflow_command)
     elif _has_workflow_reliability_findings(checks.get("workflow_guardrails", {})):
@@ -584,9 +584,9 @@ def _next_commands(workspace: str, domain: str, checks: dict[str, Any]) -> list[
     if checks.get("evidence_graph", {}).get("ok") is False:
         commands.append(f"uv run build-workspace-evidence-graph --workspace {workspace}")
     if checks.get("pipeline_execution_harness", {}).get("ok") is False:
-        commands.append(f"uv run run-pipeline-execution-harness --workspace {workspace}")
+        commands.append(f"uv run harness pipeline-execution --workspace {workspace}")
     if checks.get("data_quality_harness", {}).get("ok") is False:
-        commands.append(f"uv run run-data-quality-harness --workspace {workspace}")
+        commands.append(f"uv run harness data-quality --workspace {workspace}")
     for route in (checks["agent_benchmark"].get("scorecard") or {}).get("blocker_routes") or []:
         command = str(route.get("next_command") or "")
         if command and command not in commands:

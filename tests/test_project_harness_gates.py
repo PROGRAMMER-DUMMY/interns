@@ -195,7 +195,7 @@ class WorkflowReliabilitySignalTests(unittest.TestCase):
         commands = _next_commands("workspaces/demo", "general", checks)
 
         self.assertIn(
-            "uv run validate-workflow-guardrails --workspace workspaces/demo", commands
+            "uv run harness workflow-guardrails --workspace workspaces/demo", commands
         )
 
     def test_missing_report_is_tolerated(self):

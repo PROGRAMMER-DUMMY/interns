@@ -67,7 +67,7 @@ class ReliabilitySuiteTests(unittest.TestCase):
             self.assertEqual(result.status, "blocked")
             checks = {check["name"]: check for check in result.checks}
             self.assertEqual(checks["validate-workflow-guardrails"]["status"], "failed")
-            self.assertIn("uv run validate-workflow-guardrails --workspace workspaces/demo", result.next_commands)
+            self.assertIn("uv run harness workflow-guardrails --workspace workspaces/demo", result.next_commands)
 
     def test_failed_pipeline_execution_harness_artifact_blocks_suite(self):
         with tempfile.TemporaryDirectory() as tmp:
