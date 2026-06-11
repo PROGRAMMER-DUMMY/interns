@@ -1,5 +1,5 @@
 """
-core/medallion/build_cli.py — `uv run build-medallion` CLI.
+core/medallion/build_cli.py — `uv run medallion build` CLI.
 
 Mirrors design_cli.py in structure and help style.
 """
@@ -34,19 +34,19 @@ _DESCRIPTION = (
 _EPILOG = """\
 examples:
   # full pipeline run:
-  uv run build-medallion --workspace workspaces/<your-workspace>
+  uv run medallion build --workspace workspaces/<your-workspace>
 
   # bronze only (skip silver/gold/kpi):
-  uv run build-medallion --workspace workspaces/<your-workspace> --only-layer bronze
+  uv run medallion build --workspace workspaces/<your-workspace> --only-layer bronze
 
   # single table:
-  uv run build-medallion --workspace workspaces/<your-workspace> --only-table patient
+  uv run medallion build --workspace workspaces/<your-workspace> --only-table patient
 
   # resume a partial run:
-  uv run build-medallion --workspace workspaces/<your-workspace> --resume 20260516T103045Z-7bcda0fa
+  uv run medallion build --workspace workspaces/<your-workspace> --resume 20260516T103045Z-7bcda0fa
 
   # proceed even if design panel has unresolved entries (use carefully):
-  uv run build-medallion --workspace workspaces/<your-workspace> --force-with-blockers
+  uv run medallion build --workspace workspaces/<your-workspace> --force-with-blockers
 
 exit codes:
   0                      success

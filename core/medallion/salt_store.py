@@ -54,7 +54,7 @@ def get_workspace_salt(workspace: str) -> str:
 
     raise SaltMissing(
         f"No medallion salt configured for workspace `{workspace}`. "
-        f"Run `uv run medallion-init-salt --workspace {workspace}` to generate one, "
+        f"Run `uv run medallion init-salt --workspace {workspace}` to generate one, "
         f"or set env var `{env_name}`."
     )
 
@@ -97,7 +97,7 @@ def materialize_salt_if_missing(workspace: str) -> str:
 
 
 def _init_salt_cli(argv=None) -> int:
-    """CLI entrypoint for `uv run medallion-init-salt --workspace <ws>`."""
+    """CLI entrypoint for `uv run medallion init-salt --workspace <ws>`."""
     import argparse
     import sys
     p = argparse.ArgumentParser(prog="medallion-init-salt",

@@ -1,5 +1,5 @@
 """
-core/medallion/design_cli.py — `uv run design-medallion` CLI.
+core/medallion/design_cli.py — `uv run medallion design` CLI.
 
 Argparse style mirrors `uv run onboard-workspace`. Help text includes
 example invocations and the exit-codes table (Section 19 of the PRD).
@@ -42,13 +42,13 @@ _DESCRIPTION = (
 _EPILOG = """\
 examples:
   # cheap dry-run (computes inputs_hash, no LLM, no writes):
-  uv run design-medallion --workspace workspaces/<your-workspace> --cheap --dry-run
+  uv run medallion design --workspace workspaces/<your-workspace> --cheap --dry-run
 
   # full design pass against an LLM-backed agent (default):
-  uv run design-medallion --workspace workspaces/<your-workspace>
+  uv run medallion design --workspace workspaces/<your-workspace>
 
   # force regeneration even if inputs_hash matches the prior manifest:
-  uv run design-medallion --workspace workspaces/<your-workspace> --force
+  uv run medallion design --workspace workspaces/<your-workspace> --force
 
 exit codes:
   0                          success
@@ -176,7 +176,7 @@ def _emit_human(result) -> None:
     else:
         print("  unconfirmed_decisions: 0")
         print("")
-        print(f"  Next: uv run build-medallion --workspace {result.workspace}")
+        print(f"  Next: uv run medallion build --workspace {result.workspace}")
 
 
 def _emit_exit(exc: MedallionExit, *, json_mode: bool) -> None:

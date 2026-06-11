@@ -106,7 +106,7 @@ def _run_build(
         raise MedallionBuildExit(
             EXIT_MEDALLION_BUILD_FAIL,
             f"No manifest found at {manifest_path}. Run design-medallion first.",
-            next_command=f"uv run design-medallion --workspace {workspace.name}",
+            next_command=f"uv run medallion design --workspace {workspace.name}",
         )
     manifest = _load_manifest(manifest_path)
 
