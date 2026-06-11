@@ -567,7 +567,15 @@ class DuckDBKPISQLGenerator:
             for column in sorted(_formula_inputs(feature), key=len, reverse=True):
                 qualified = self._qualified_column(column, source_aliases, profile_map)
                 if qualified:
-                    formula = re.sub(rf"\b{re.escape(column)}\b", qualified, formula)
+                    # Consume an already-quoted occurrence ("START") whole so
+                    # qualification cannot nest quotes (s0."START"" bug), and
+                    # never rewrite alias-prefixed references (p."START" inside
+                    # a self-join formula belongs to the formula's own alias).
+                    formula = re.sub(
+                        rf'(?<![.\w])(?:"{re.escape(column)}"|\b{re.escape(column)}\b)',
+                        qualified,
+                        formula,
+                    )
             return formula
         ref = self._choose_feature_ref(
             feature,

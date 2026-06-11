@@ -213,6 +213,14 @@ def _column_lookup(kpi: dict[str, Any]) -> dict[str, str]:
         label = str(feature.get("feature") or feature.get("name") or "")
         if not label:
             continue
+        # A derived-formula feature is MATERIALIZED in the features view under
+        # its own name; its source_columns list the formula INPUTS (e.g.
+        # START/STOP for over_24_hour). Resolving the label to an input column
+        # made the result view group by the input instead of the derived
+        # column. The label resolves to itself.
+        if str(feature.get("resolution_type") or "") == "derived_formula":
+            out[label.lower()] = label
+            continue
         resolved = label
         for source in feature.get("source_columns") or []:
             if isinstance(source, dict):

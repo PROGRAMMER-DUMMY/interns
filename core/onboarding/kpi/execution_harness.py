@@ -201,26 +201,33 @@ class KPIExecutionHarness:
             for path in sorted(self.layout.solutions_dir.glob("kpi_*.sql"))
             if KPI_SQL_PATTERN.match(path.name) and path.name != "kpi_metrics.sql"
         ]
-        # Orphan guard: a solutions file whose kpi_id is no longer in the
-        # current feature mapping is a stale leftover from an earlier registry
-        # (e.g. extraction noise since cleaned up). Executing it pollutes the
-        # harness/results with junk rows, so skip it. Empty/missing mapping
-        # applies no filter (mapping-less workspaces still execute everything).
-        known_ids = self._mapping_kpi_ids()
-        if known_ids:
-            files = [path for path in files if _kpi_id_from_path(path) in known_ids]
+        # Orphan/stale guard: a solutions file whose kpi_id is no longer in
+        # the current feature mapping is a stale leftover from an earlier
+        # registry (e.g. extraction noise since cleaned up); one whose KPI is
+        # currently BLOCKED is stale by definition — its contract changed and
+        # SQL cannot regenerate until the blocker is answered. Executing
+        # either pollutes the harness with junk and dead-locks the validation
+        # gate (a blocked KPI's old SQL can never pass its new contract).
+        # Empty/missing mapping applies no filter.
+        status_by_id = self._mapping_kpi_status()
+        if status_by_id:
+            files = [
+                path
+                for path in files
+                if status_by_id.get(_kpi_id_from_path(path), "") == "ready_for_sql"
+            ]
         return files
 
-    def _mapping_kpi_ids(self) -> set[str]:
+    def _mapping_kpi_status(self) -> dict[str, str]:
         path = self.layout.contracts_dir / "kpi_feature_mapping.json"
         if not path.exists():
-            return set()
+            return {}
         try:
             mapping = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            return set()
+            return {}
         return {
-            str(kpi.get("kpi_id") or "")
+            str(kpi.get("kpi_id") or ""): str(kpi.get("status") or "")
             for kpi in (mapping.get("kpis") or [])
             if isinstance(kpi, dict) and kpi.get("kpi_id")
         }

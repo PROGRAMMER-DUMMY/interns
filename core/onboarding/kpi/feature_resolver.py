@@ -353,6 +353,20 @@ class KPIFeatureResolver:
                 kpi,
                 expression_context,
             )
+            if not candidate_derived_options:
+                # Reusable derivation patterns (duration bucket / recurrence)
+                # detect from the QUESTION text and name their derived column
+                # after the threshold (over_24_hour, recurred_within_30_day).
+                # When the unresolved token IS that name, attach the pattern's
+                # confirmable option so the blocker panel offers the formula
+                # instead of a bare "define this" ask. Previously these options
+                # only surfaced on the empty-metric branch.
+                candidate_derived_options = [
+                    option
+                    for option in self._derivation_pattern_options(kpi)
+                    if normalize_blocker(str(option.get("derived_column_name") or ""))
+                    == norm
+                ]
             features.append({
                 "feature": token,
                 "state": "blocked_missing_evidence",
@@ -749,6 +763,16 @@ def contextual_column_candidates(
     """
     feature_norm = normalize_blocker(feature)
     if not feature_norm or feature_norm in {"year", "quarter", "month", "day", "duration"}:
+        return []
+    if _expression_shaped_feature(feature):
+        # An expression-shaped name (over_24_hour, recurred_within_30_day)
+        # names a derived COMPUTATION; any column candidate is semantically
+        # mismatched by construction (the no-mismatched-candidates rule).
+        # Returning candidates here also let the per-KPI dedupe MERGE the
+        # derived feature into the proven column feature sharing that physical
+        # column — silently dropping the derived grain and marking the KPI
+        # ready without it. No candidates -> it falls through to the
+        # unresolved branch and surfaces derived-feature options instead.
         return []
     context_tokens = _semantic_tokens(full_context)
     if not context_tokens:

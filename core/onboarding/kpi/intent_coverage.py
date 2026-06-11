@@ -140,6 +140,13 @@ def _feature_column_lookup(kpi: dict[str, Any]) -> dict[str, str]:
         label = str(feature.get("feature") or feature.get("name") or "")
         if not label:
             continue
+        # A derived-formula feature is materialized under its OWN name in the
+        # features view; its source_columns are the formula INPUTS. The label
+        # resolves to itself (mirrors the generator's _column_lookup, so the
+        # checker expects the same column the generator emits).
+        if str(feature.get("resolution_type") or "") == "derived_formula":
+            out[label.lower()] = label
+            continue
         resolved = label
         for source in feature.get("source_columns") or []:
             if isinstance(source, dict) and source.get("column"):
