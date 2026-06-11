@@ -412,24 +412,59 @@ class PolarsKPIGenerator:
                 lines.append("result = lf")
                 return lines
             # Row-based shares only (distinct-entity shares returned above):
-            # every row belongs to exactly one cell, so these sum to ~100%.
-            per = f'pl.col("{m.column}").{m.fn}().over("{share.partition}")'
-            total = f'pl.col("{m.column}").{m.fn}()'
+            # every row belongs to exactly one cell. Mirrors the SQL form:
+            # numerator per FULL grain cell, denominator per the share's
+            # partition when that partition is a grain dimension (within-period
+            # share, e.g. "for year") else the grand total; scaffolding inlined,
+            # one row per cell (SQL's SELECT DISTINCT == .unique()).
+            cells = [self._dim_out_name(d, band_width) for d in intent.dims]
+            cell_list = ", ".join(f'"{c}"' for c in cells)
+            per = f'pl.col("{m.column}").{m.fn}().over([{cell_list}])' if cells else f'pl.col("{m.column}").{m.fn}()'
+            if share.partition and share.partition in cells:
+                total = f'pl.col("{m.column}").{m.fn}().over("{share.partition}")'
+            else:
+                total = f'pl.col("{m.column}").{m.fn}()'
             lines.append(
-                f'lf = lf.with_columns([{per}.alias("share_per_group"), {total}.alias("share_total")])'
+                f'lf = lf.with_columns(({per} / {total} * 100).alias("percentage_share"))'
             )
+            select_cols = [f'"{c}"' for c in cells] + ['"percentage_share"']
             lines.append(
-                'lf = lf.with_columns((pl.col("share_per_group") / pl.col("share_total") * 100)'
-                '.alias("percentage_share"))'
+                "lf = lf.select([" + ", ".join(select_cols) + "]).unique(maintain_order=True)"
             )
-            select_cols = self._dim_select_cols(intent) + [
-                '"share_per_group"', '"share_total"', '"percentage_share"'
-            ]
-            lines.append("lf = lf.select([" + ", ".join(select_cols) + "])")
             lines.append("result = lf")
             return lines
-        # percent_of_total / percent_of_group — grouped then scoped division
-        group_exprs = self._group_exprs(intent)
+        # percent_of_total / percent_of_group — grouped then scoped division.
+        if (
+            share.kind != "percent_of_group"
+            and intent.filters
+            and not intent.dims
+        ):
+            # Filtered percent-of-total ("how many X had <condition>, and what
+            # percentage of all X"): the filter scopes the NUMERATOR only —
+            # mirroring the SQL FILTER (WHERE ...) rewrite. Note _filter_lines
+            # was already applied above, which would have filtered the
+            # denominator too; rebuild without it.
+            cond = " & ".join(self._filter_exprs(intent))
+            col = m.column
+            if m.distinct:
+                num = f'pl.col("{col}").filter({cond}).n_unique()'
+                den = f'pl.col("{col}").n_unique()'
+            elif m.fn == "count":
+                num = f'({cond}).cast(pl.UInt32).sum()'
+                den = "pl.len()"
+            else:
+                num = f'pl.col("{col}").filter({cond}).{m.fn}()'
+                den = f'pl.col("{col}").{m.fn}()'
+            lines = ["lf = features"] + self._derive_dim_lines(intent, band_width=band_width)
+            lines.append(
+                "lf = lf.select(["
+                f'{num}.alias("{m.alias}"), '
+                f'({num} / {den} * 100).alias("{share.alias}")'
+                "])"
+            )
+            lines.append("result = lf")
+            return lines
+        group_exprs = self._group_exprs(intent, band_width=band_width)
         base = self._metric_agg_expr(m)
         lines.append(
             "lf = lf.group_by([" + ", ".join(group_exprs) + f"]).agg([{base}.alias(\"group_val\")])"
@@ -444,7 +479,11 @@ class PolarsKPIGenerator:
                 'lf = lf.with_columns((pl.col("group_val") / pl.col("group_val").sum() * 100)'
                 f'.alias("{share.alias}"))'
             )
+        # Scaffolding (group_val) is inlined on the SQL side; emit only the
+        # grain + the share column.
+        share_select = self._dim_select_cols(intent, band_width=band_width) + [f'"{share.alias}"']
         lines.append(f'lf = lf.sort("{share.alias}", descending=True)')
+        lines.append("lf = lf.select([" + ", ".join(share_select) + "])")
         lines.append("result = lf")
         return lines
 
@@ -510,7 +549,7 @@ class PolarsKPIGenerator:
                     )
         return ["lf = lf.with_columns([" + ", ".join(with_cols) + "])"] if with_cols else []
 
-    def _filter_lines(self, intent: KPIIntent) -> list[str]:
+    def _filter_exprs(self, intent: KPIIntent) -> list[str]:
         exprs = []
         age_alias = next((d.alias for d in intent.dims if d.kind == "age"), None)
         for filt in intent.filters:
@@ -521,6 +560,10 @@ class PolarsKPIGenerator:
             op = _PL_OPS.get(filt.op, "==")
             value = f'"{filt.value}"' if filt.is_literal else filt.value
             exprs.append(f'(pl.col("{filt.target}") {op} {value})')
+        return exprs
+
+    def _filter_lines(self, intent: KPIIntent) -> list[str]:
+        exprs = self._filter_exprs(intent)
         return ["lf = lf.filter(" + " & ".join(exprs) + ")"] if exprs else []
 
     def _group_exprs(self, intent: KPIIntent, *, band_width: int | None = None) -> list[str]:
