@@ -1145,6 +1145,12 @@ class WorkspaceFlow:
             share_cols = [col[0] for col in description if cls._SHARE_COLUMN_PATTERN.search(str(col[0]))]
             if len(share_cols) != 1:
                 return None
+            row_count = conn.execute(f'SELECT COUNT(*) FROM "{view}"').fetchone()[0]
+            if int(row_count) <= 1:
+                # A single-row percent (e.g. percent-of-total with a filtered
+                # numerator) is one share of a whole, not a partition — the
+                # sum-to-100 expectation does not apply.
+                return None
             column = share_cols[0]
             total = conn.execute(f'SELECT ROUND(SUM("{column}"), 2) FROM "{view}"').fetchone()[0]
             total_value = float(total)
