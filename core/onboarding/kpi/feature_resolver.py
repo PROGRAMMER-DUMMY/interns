@@ -719,6 +719,22 @@ def enrich_schema_index_with_dictionaries(
             entry["dictionary_path"] = row.get("path", "")
 
 
+# A feature NAME that encodes a threshold/duration/recurrence EXPRESSION
+# (over_24_hour, recurred_within_30_day, under_7_days...) names a derived
+# computation, never a bare physical column. Generic shape: a numeral plus a
+# time unit or comparator word inside the name — no domain vocabulary.
+_EXPRESSION_SHAPED_NAME_RE = re.compile(
+    r"(?:^|_)(?:over|under|within|above|below|between|atleast|atmost|more|less)(?:_|\d)"
+    r"|\d+_?(?:hour|hr|day|week|month|year|minute|min|second|sec)s?(?:$|_)",
+    re.IGNORECASE,
+)
+
+
+def _expression_shaped_feature(feature: str) -> bool:
+    text = str(feature or "")
+    return bool(re.search(r"\d", text) and _EXPRESSION_SHAPED_NAME_RE.search(text))
+
+
 def contextual_column_candidates(
     feature: str,
     full_context: str,
@@ -763,7 +779,16 @@ def contextual_column_candidates(
     top = scored[0]
     second = float(scored[1].get("score", 0)) if len(scored) > 1 else 0.0
     top_score = float(top.get("score", 0))
-    auto_proven = top_score >= 14 and (len(scored) == 1 or top_score - second >= 4)
+    # An expression-shaped feature name (over_24_hour, recurred_within_30_day)
+    # is a derived COMPUTATION; auto-proving it as a column alias silently
+    # bound `over_24_hour` to an id column and faked an entire KPI. Such names
+    # may surface candidates but must always go through human confirmation
+    # (the derived-feature panel owns them).
+    auto_proven = (
+        not _expression_shaped_feature(feature)
+        and top_score >= 14
+        and (len(scored) == 1 or top_score - second >= 4)
+    )
     limit = 1 if auto_proven else 10
     candidates = scored[:limit]
     if auto_proven:

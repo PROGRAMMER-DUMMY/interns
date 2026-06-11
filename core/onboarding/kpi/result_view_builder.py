@@ -1023,6 +1023,8 @@ def parse_kpi(
                 # grand-total denominator are internal scaffolding: mark both
                 # project=False and inline them so the view emits only
                 # cuts + percent_of_total (consistent with the share-of-group path).
+                # (Filters are parsed AFTER this point; the filtered-numerator
+                # rewrite happens at the end of parse_kpi.)
                 base_agg = replace(agg, project=False)
                 total_agg = Aggregation(
                     fn=agg.fn, column=agg.column,
@@ -1237,6 +1239,42 @@ def parse_kpi(
 
     # HAVING — aggregate filters parsed from KPI text.
     parsed.having.extend(_detect_having(metric_text + " " + name_text, parsed.aggregations))
+
+    # Filtered percent-of-total rewrite (runs AFTER filter parsing): filters
+    # define the NUMERATOR subset ("how many X had <condition>, and what
+    # percentage of all X") — a WHERE clause would filter the denominator too
+    # and the percentage would always read 100%. Rewrite to a FILTER (WHERE
+    # ...) numerator over an unfiltered plain denominator, drop the WHERE, and
+    # also project the filtered count itself (the question's other half). Both
+    # sides become plain aggregates (the windowed denominator bound-errored
+    # without a GROUP BY anyway). Only the no-dimensions shape is rewritten.
+    if parsed.filters and not parsed.dimensions:
+        pct_idx = next(
+            (i for i, (_, alias) in enumerate(parsed.extra_select_exprs)
+             if alias == "percent_of_total"),
+            None,
+        )
+        windowed_total = next(
+            (a for a in parsed.aggregations
+             if a.window is not None and a.alias.startswith("total_")),
+            None,
+        )
+        base = next(
+            (a for a in parsed.aggregations
+             if a.window is None and not a.project),
+            None,
+        )
+        if pct_idx is not None and windowed_total is not None and base is not None:
+            filters_sql = " AND ".join(_filter_sql(f) for f in parsed.filters)
+            filtered_expr = f"{_agg_expr_no_alias(base)} FILTER (WHERE {filters_sql})"
+            total_expr = _agg_expr_no_alias(base)
+            parsed.aggregations = [a for a in parsed.aggregations if a is not windowed_total]
+            parsed.extra_select_exprs[pct_idx] = (
+                f"CAST({filtered_expr} AS DOUBLE) / NULLIF({total_expr}, 0) * 100",
+                "percent_of_total",
+            )
+            parsed.extra_select_exprs.insert(pct_idx, (filtered_expr, base.alias))
+            parsed.filters = []
 
     return parsed
 

@@ -196,11 +196,34 @@ class KPIExecutionHarness:
     def _sql_files(self) -> list[Path]:
         if not self.layout.solutions_dir.exists():
             return []
-        return [
+        files = [
             path
             for path in sorted(self.layout.solutions_dir.glob("kpi_*.sql"))
             if KPI_SQL_PATTERN.match(path.name) and path.name != "kpi_metrics.sql"
         ]
+        # Orphan guard: a solutions file whose kpi_id is no longer in the
+        # current feature mapping is a stale leftover from an earlier registry
+        # (e.g. extraction noise since cleaned up). Executing it pollutes the
+        # harness/results with junk rows, so skip it. Empty/missing mapping
+        # applies no filter (mapping-less workspaces still execute everything).
+        known_ids = self._mapping_kpi_ids()
+        if known_ids:
+            files = [path for path in files if _kpi_id_from_path(path) in known_ids]
+        return files
+
+    def _mapping_kpi_ids(self) -> set[str]:
+        path = self.layout.contracts_dir / "kpi_feature_mapping.json"
+        if not path.exists():
+            return set()
+        try:
+            mapping = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return set()
+        return {
+            str(kpi.get("kpi_id") or "")
+            for kpi in (mapping.get("kpis") or [])
+            if isinstance(kpi, dict) and kpi.get("kpi_id")
+        }
 
     def _execute_one(self, conn: Any, sql_path: Path) -> KPIExecutionRecord:
         kpi_id = _kpi_id_from_path(sql_path)
@@ -291,12 +314,20 @@ class KPIExecutionHarness:
             # raw metric text here. This keeps the gate consistent with the
             # generator for every workspace and inherits its metric-token handling
             # (no metric-spelling rules duplicated in the verifier).
+            parsed_check = parse_kpi(kpi, grain_bucketing=grain_decision)
             expects_distinct_count = any(
-                agg.distinct
-                for agg in parse_kpi(kpi, grain_bucketing=grain_decision).aggregations
+                agg.distinct for agg in parsed_check.aggregations
             )
-            implements_sum = "sum(" in lowered_sql or (
-                expects_distinct_count and "count(distinct" in lowered_sql
+            # Single-attribution shares render the distinct-entity count as an
+            # attribution CTE (ROW_NUMBER ... __attribution_rn = 1 + COUNT(*)):
+            # one row per entity IS the distinct count. The legacy windowed
+            # COUNT(DISTINCT ...) rendering stays accepted for older SQL.
+            attribution_expected = parsed_check.share_attribution is not None
+            implements_sum = (
+                "sum(" in lowered_sql
+                or ((expects_distinct_count or attribution_expected)
+                    and "count(distinct" in lowered_sql)
+                or (attribution_expected and "__attribution_rn" in lowered_sql)
             )
             if not implements_sum:
                 errors.append(f"SQL does not implement workbook metric `{metric}`")
