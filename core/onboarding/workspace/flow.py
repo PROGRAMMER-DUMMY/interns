@@ -1178,6 +1178,14 @@ class WorkspaceFlow:
             except (json.JSONDecodeError, OSError):
                 parity_cache = {}
         conn = duckdb.connect(":memory:")
+        # Deterministic temporal semantics: CAST(timestamp AS DATE) uses the
+        # SESSION timezone, so the same SQL yields different year/date buckets
+        # on differently-configured machines (and diverges from engines that
+        # bucket in UTC). Pin UTC for reproducible, engine-parity-stable rows.
+        try:
+            conn.execute("SET TimeZone='UTC'")
+        except Exception:
+            pass
         old_cwd = Path.cwd()
         try:
             import os

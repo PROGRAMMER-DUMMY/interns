@@ -175,6 +175,12 @@ class KPIExecutionHarness:
             ]
 
         conn = duckdb.connect(":memory:")
+        # Deterministic temporal semantics: pin UTC so date bucketing does not
+        # depend on the machine's session timezone (see flow._write_result_preview).
+        try:
+            conn.execute("SET TimeZone='UTC'")
+        except Exception:
+            pass
         old_cwd = Path.cwd()
         try:
             import os

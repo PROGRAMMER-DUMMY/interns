@@ -90,19 +90,16 @@ class PySparkKPIGenerator:
         relationships = load_relationship_contracts(
             self.repo_root, _rel(self.workspace, self.repo_root)
         )
-        feature_refs = [
-            ref
-            for feature in kpi.get("features", [])
-            for ref in _feature_source_refs(feature, self.repo_root)
-        ]
-        base_source = _choose_base_source(feature_refs, profile_map)
+        # SAME source plan as the SQL generator (one chosen ref per feature),
+        # so cross-engine parity starts from identical sources. Unioning every
+        # candidate ref pulled in datasets with no executable relationship.
+        from core.onboarding.kpi.sql_generator import plan_required_sources
+
+        base_source, required_sources, _refs = plan_required_sources(
+            kpi, profile_map, self.repo_root
+        )
         if not base_source:
             raise ValueError(f"Cannot determine base source for KPI {kpi_id}")
-        required_sources = _unique_preserve_order(
-            [base_source]
-            + [ref["dataset"] for ref in feature_refs
-               if ref.get("dataset") and ref["dataset"] != base_source]
-        )
         source_aliases = {src: f"df_{_safe_name(Path(src).stem)}" for src in required_sources}
 
         intent = parse_intent(kpi)

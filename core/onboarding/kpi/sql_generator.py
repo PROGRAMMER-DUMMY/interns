@@ -547,29 +547,12 @@ class DuckDBKPISQLGenerator:
         all_refs: list[dict[str, str]],
         profile_map: dict[str, dict[str, Any]],
     ) -> dict[str, str] | None:
-        refs = _feature_source_refs(feature, self.repo_root)
-        feature_name = str(feature.get("feature") or "")
-        if refs:
-            for ref in refs:
-                if ref["dataset"] == base_source:
-                    return ref
-            base_schema = _schema(profile_map.get(base_source, {}))
-            for ref in refs:
-                if ref["column"] in base_schema:
-                    return {"dataset": base_source, "column": ref["column"]}
-            base_group = _source_group(base_source)
-            for ref in refs:
-                if _source_group(ref["dataset"]) == base_group:
-                    return ref
-            return refs[0]
-        base_schema = _schema(profile_map.get(base_source, {}))
-        for candidate in [feature_name, *_formula_inputs(feature)]:
-            if candidate in base_schema:
-                return {"dataset": base_source, "column": candidate}
-        for ref in all_refs:
-            if ref["column"] == feature_name:
-                return ref
-        return None
+        # Canonical per-feature resolution shared with the engine generators
+        # (choose_feature_ref module function) so every engine reads the same
+        # sources.
+        return choose_feature_ref(
+            feature, base_source, all_refs, profile_map, self.repo_root
+        )
 
     def _feature_expression(
         self,
@@ -783,6 +766,87 @@ def _choose_base_source(
             score += 3  # the largest referenced table is the fact
         scores[source] = score
     return sorted(scores, key=lambda source: (-scores[source], -_rows(source), source))[0]
+
+
+def choose_feature_ref(
+    feature: dict[str, Any],
+    base_source: str,
+    all_refs: list[dict[str, str]],
+    profile_map: dict[str, dict[str, Any]],
+    repo_root: Path,
+) -> dict[str, str] | None:
+    """Pick the ONE source ref this feature resolves to, preferring the base.
+
+    Order: a ref already on the base source -> the same column present in the
+    base schema -> a ref in the base's source group -> the first ref. This is
+    the canonical per-feature resolution every engine must share; unioning ALL
+    candidate refs instead pulled in datasets with no executable relationship
+    (the cross-engine parity skips/failures).
+    """
+    refs = _feature_source_refs(feature, repo_root)
+    feature_name = str(feature.get("feature") or "")
+    if refs:
+        for ref in refs:
+            if ref["dataset"] == base_source:
+                return ref
+        base_schema = _schema(profile_map.get(base_source, {}))
+        for ref in refs:
+            if ref["column"] in base_schema:
+                return {"dataset": base_source, "column": ref["column"]}
+        base_group = _source_group(base_source)
+        for ref in refs:
+            if _source_group(ref["dataset"]) == base_group:
+                return ref
+        return refs[0]
+    base_schema = _schema(profile_map.get(base_source, {}))
+    for candidate in [feature_name, *_formula_inputs(feature)]:
+        if candidate in base_schema:
+            return {"dataset": base_source, "column": candidate}
+    for ref in all_refs:
+        if ref["column"] == feature_name:
+            return ref
+    return None
+
+
+def plan_required_sources(
+    kpi: dict[str, Any],
+    profile_map: dict[str, dict[str, Any]],
+    repo_root: Path,
+) -> tuple[str, list[str], list[dict[str, str]]]:
+    """The canonical source plan for a KPI: (base_source, required_sources, refs).
+
+    Single source of truth for WHICH datasets a KPI reads and joins. The SQL
+    generator derives its FROM/JOIN chain from this; the Polars and PySpark
+    generators MUST consume the same plan so cross-engine parity starts from
+    identical sources. ``refs`` is the chosen one-ref-per-feature list
+    (including derived-formula inputs); ``base_source`` is "" when no plan can
+    be made.
+    """
+    feature_refs = [
+        ref
+        for feature in kpi.get("features", [])
+        for ref in _feature_source_refs(feature, repo_root)
+    ]
+    base_source = _choose_base_source(feature_refs, profile_map)
+    if not base_source:
+        return "", [], []
+    required_refs = [
+        choose_feature_ref(feature, base_source, feature_refs, profile_map, repo_root)
+        for feature in kpi.get("features", [])
+    ]
+    for feature in kpi.get("features", []):
+        if feature.get("resolution_type") != "derived_formula":
+            continue
+        for column in _formula_inputs(feature):
+            source = _source_for_column(column, base_source, profile_map)
+            if source:
+                required_refs.append({"dataset": source, "column": column})
+    chosen = [ref for ref in required_refs if ref and ref.get("dataset")]
+    required_sources = _unique_preserve_order(
+        [base_source]
+        + [ref["dataset"] for ref in chosen if ref["dataset"] != base_source]
+    )
+    return base_source, required_sources, chosen
 
 
 def _source_for_column(
