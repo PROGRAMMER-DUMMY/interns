@@ -700,8 +700,28 @@ class WorkspaceFlow:
         preview = self._write_result_preview(preview_rows=PREVIEW_ROW_CAP)
         self._record_step(state, "preview_kpi_results", "ok", preview)
         kpi_entries = preview.get("kpis") or []
+        # Phase 1: wiki notes + dashboard refresh are OPT-IN side outputs, not
+        # part of the KPI critical path. They previously appeared in workspaces
+        # as untracked surprises nobody asked for. Enable with
+        # AUTORESEARCH_SIDE_OUTPUTS=1 (or wiki/dashboard individually).
+        import os as _os
+
+        _side = _os.environ.get("AUTORESEARCH_SIDE_OUTPUTS", "")
+        _wiki_on = _side == "1" or _os.environ.get("AUTORESEARCH_WIKI", "") == "1"
+        _dash_on = _side == "1" or _os.environ.get("AUTORESEARCH_DASHBOARD", "") == "1"
+        if not _wiki_on:
+            self._record_step(
+                state, "upsert_kpi_wiki_notes", "skipped",
+                {"reason": "opt-in side output (set AUTORESEARCH_WIKI=1 or AUTORESEARCH_SIDE_OUTPUTS=1)"},
+            )
+        if not _dash_on:
+            self._record_step(
+                state, "refresh_workspace_dashboard", "skipped",
+                {"reason": "opt-in side output (set AUTORESEARCH_DASHBOARD=1 or AUTORESEARCH_SIDE_OUTPUTS=1)"},
+            )
         wiki_paths: list[str] = []
-        try:
+        if _wiki_on:
+          try:
             wiki_layout = WikiLayout(project_root=self.workspace)
             for entry in kpi_entries:
                 kpi_id = str(entry.get("kpi_id") or "")
@@ -710,32 +730,33 @@ class WorkspaceFlow:
                 scaffold = build_kpi_completion_scaffold(kpi_id=kpi_id, entry=entry)
                 note_path = upsert_kpi_note(wiki_layout, kpi_id, scaffold)
                 wiki_paths.append(_rel(note_path, self.repo_root))
-        except Exception as exc:
+          except Exception as exc:
             self._record_step(
                 state,
                 "upsert_kpi_wiki_notes",
                 "failed",
                 {"error": str(exc), "count": len(wiki_paths)},
             )
-        else:
+          else:
             self._record_step(
                 state,
                 "upsert_kpi_wiki_notes",
                 "ok",
                 {"count": len(wiki_paths), "notes": wiki_paths},
             )
-        try:
+        if _dash_on:
+          try:
             dash_summary = refresh_workspace_dashboard(
                 self.layout, completed_kpi_entries=kpi_entries
             )
-        except Exception as exc:
+          except Exception as exc:
             self._record_step(
                 state,
                 "refresh_workspace_dashboard",
                 "failed",
                 {"error": str(exc)},
             )
-        else:
+          else:
             self._record_step(
                 state,
                 "refresh_workspace_dashboard",
