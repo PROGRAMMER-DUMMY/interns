@@ -44,7 +44,6 @@ dependencies = [
 [project.scripts]
 loop      = "core.orchestration.loop:main"
 retrieve-docs = "core.context.doc_retrieval_cli:main"
-cli-inspect = "core.agents.cli_inspector:main"
 onboard-workspace = "core.onboarding.workspace.onboarding:main"
 kickstart-workspace = "core.onboarding.workspace.kickstart:main"
 resolve-kpi-features = "core.onboarding.kpi.feature_resolver:main"
@@ -52,7 +51,7 @@ plan-kpi-completion = "core.onboarding.kpi.parallel_completion:main"
 apply-kpi-definition = "core.onboarding.kpi.kpi_definition:main"
 generate-kpi-sql = "core.onboarding.kpi.sql_generator:main"
 generate-kpi-engines = "core.onboarding.kpi.generate_kpi_engines:main"
-warehouse = "core.onboarding.kpi.local_warehouse:main"
+kpi-local-warehouse = "core.onboarding.kpi.local_warehouse:main"
 run-kpi-execution-harness = "core.onboarding.kpi.execution_harness:main"
 validate-kpi-intent-coverage = "core.onboarding.harness.intent_coverage_harness:main"
 scan-document = "core.onboarding.documents.document_loader:main"
@@ -133,7 +132,6 @@ dashboard-verify = "tools.dashboard_verify:main"
 prepare-workspace-selection = "tools.workspace_selection_harness:main"
 session-snapshot = "tools.session_snapshot:main"
 validate-git-hygiene = "tools.git_hygiene:main"
-prepare   = "prepare:main"
 
 [build-system]
 requires      = ["hatchling"]

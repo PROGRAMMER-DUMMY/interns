@@ -270,7 +270,7 @@ class DuckDBKPISQLGenerator:
                 f"-- Warehouse: {_rel(warehouse_path, self.repo_root)}\n"
                 f"-- Staging views below proxy to registered fact/dim tables.\n"
                 f"-- Run this SQL inside the warehouse:\n"
-                f"--   uv run warehouse query --workspace {_rel(self.workspace, self.repo_root)} --sql @kpi.sql\n\n"
+                f"--   uv run kpi-local-warehouse query --workspace {_rel(self.workspace, self.repo_root)} --sql @kpi.sql\n\n"
             )
         else:
             header = "INSTALL delta;\nLOAD delta;\n\n"
