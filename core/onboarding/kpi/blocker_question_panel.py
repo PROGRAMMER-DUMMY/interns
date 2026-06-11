@@ -1712,8 +1712,11 @@ def _empty_panel(mapping: dict[str, Any], workspace: Path, repo_root: Path) -> d
             "feature-mapping gap. This needs definition help, not a column choice."
         )
         panel["question"] = (
-            "Define the metric and grain for the blocked KPI(s), or restart KPI "
-            "generation, before mapping features."
+            "Define the metric and grain for the blocked KPI(s) with "
+            "`uv run apply-kpi-definition --workspace <workspace> --kpi-id "
+            "<kpi_id> --metric \"...\" --cuts \"...\" --confirmed-by \"<name>\"` "
+            "(one per KPI), then re-run prepare-kpi-blocker-panel. "
+            "Or restart KPI generation."
         )
         try:
             from core.onboarding.workspace.delegation import routing_for

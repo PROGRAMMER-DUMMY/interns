@@ -553,7 +553,7 @@ the matching `### <command>` section of `TOOLS.md` for the one command you are a
 | --- | --- |
 | Workspace selection | `list-workspace-files`, `prepare-workspace-selection`, `session-snapshot` |
 | Onboarding | `onboard-workspace`, `kickstart-workspace`, `understand-data` |
-| KPI definition + blockers | `resolve-kpi-features`, `prepare-kpi-blocker-panel`, `blocker-question-panel`, `apply-kpi-panel-answer`, `derived-feature-markdown`, `confirm-cli-agent-proposal`, `prepare-kpi-generation`, `apply-kpi-generation-answer`, `finalize-kpi-generation` |
+| KPI definition + blockers | `resolve-kpi-features`, `prepare-kpi-blocker-panel`, `blocker-question-panel`, `apply-kpi-panel-answer`, `apply-kpi-definition`, `derived-feature-markdown`, `confirm-cli-agent-proposal`, `prepare-kpi-generation`, `apply-kpi-generation-answer`, `finalize-kpi-generation` |
 | Data model | `prepare-data-model-generation`, `apply-data-model-answer`, `finalize-data-model-generation`, `prepare-data-model-blocker-panel`, `apply-data-model-blocker-answer`, `parse-data-model-images`, `export-data-model-diagram` |
 | Relationships + source-to-target | `build-relationship-contracts`, `apply-relationship-answer`, `plan-source-to-target` |
 | Source catalog + external intake | `prepare-source-catalog`, `build-catalog-contract`, `build-source-family-contracts`, `discover-external-sources`, `prepare-external-source-intake`, `ingest-source-catalog` |

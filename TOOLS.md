@@ -1182,6 +1182,29 @@ The command is idempotent: a deterministic op id is derived from the arguments, 
 with the same arguments returns the prior result instead of duplicating decision history. Pass
 `--allow-replay` to force re-execution.
 
+### apply-kpi-definition
+
+Command:
+
+```powershell
+uv run apply-kpi-definition --workspace workspaces/<project> --kpi-id kpi_004 --metric "count(distinct Id)" --cuts "PAYER_COVERAGE = 0" --confirmed-by "<reviewer>"
+uv run apply-kpi-definition --workspace workspaces/<project> --business-question "<question text>" --metric "avg(BASE_COST)" --cuts "DESCRIPTION" --confirmed-by "<reviewer>"
+```
+
+Governed write-back for a human-confirmed KPI definition when the source row
+left `metric`/`cuts` empty and the blocker panel reports "definition help"
+(blocked KPIs with no answerable feature question). Records the decision in
+`interns/generated/decisions/kpi_definitions.json` keyed by the business
+question; onboarding re-applies accepted decisions on every registry rebuild.
+An empty `--confirmed-by` records the entry as agent-asserted per the
+human-gate provenance rule. Re-run `prepare-kpi-blocker-panel` afterwards.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/decisions/kpi_definitions.json
+```
+
 ### confirm-cli-agent-proposal
 
 Command:
