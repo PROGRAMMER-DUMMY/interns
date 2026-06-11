@@ -108,8 +108,41 @@ class PySparkKPIGenerator:
                 f"KPI {kpi_id} uses window pattern `{intent.unsupported_window}` not yet supported "
                 "in PySpark generation. Generate SQL for this KPI, or extend the PySpark renderer."
             )
+        # Per-source column pre-selection from the CHOSEN refs (mirrors the
+        # Polars emitter and the SQL catalog views): identically-named columns
+        # in joined tables otherwise become ambiguous after the join.
+        needed_by_source: dict[str, set[str]] = {src: set() for src in required_sources}
+        for ref in _refs:
+            if ref.get("dataset") in needed_by_source and ref.get("column"):
+                needed_by_source[ref["dataset"]].add(ref["column"])
+        join_keys: dict[str, tuple[str, str]] = {}
+        for source in required_sources[1:]:
+            rel = find_executable_relationship(relationships, base_source, source)
+            if rel:
+                left_col = str(rel.get("left_column") or "")
+                right_col = str(rel.get("right_column") or "")
+                if left_col and right_col:
+                    join_keys[source] = (left_col, right_col)
+                    needed_by_source[base_source].add(left_col)
+        # Same grain-bucketing decision the SQL/Polars paths consume.
+        from core.onboarding.kpi.result_view_builder import _band_width_from_decision
+
+        band_width = None
+        decisions_path = self.layout.contracts_dir / "pipeline_decisions.json"
+        if decisions_path.exists():
+            try:
+                decisions = json.loads(decisions_path.read_text(encoding="utf-8"))
+                if isinstance(decisions, dict):
+                    band_width = _band_width_from_decision(
+                        (decisions.get("grain_bucketing_decisions") or {}).get(kpi_id)
+                    )
+            except (json.JSONDecodeError, OSError):
+                band_width = None
+
         code = self._emit_script(
-            kpi, kpi_id, intent, required_sources, source_aliases, base_source, relationships
+            kpi, kpi_id, intent, required_sources, source_aliases, base_source,
+            relationships, needed_by_source=needed_by_source, join_keys=join_keys,
+            band_width=band_width,
         )
         suffix = "" if self.dialect == "local" else f"_{self.dialect}"
         out = self.layout.solutions_dir / f"{kpi_id}_pyspark{suffix}.py"
@@ -128,7 +161,13 @@ class PySparkKPIGenerator:
         source_aliases: dict[str, str],
         base_source: str,
         relationships: list[dict[str, Any]],
+        *,
+        needed_by_source: dict[str, set[str]] | None = None,
+        join_keys: dict[str, tuple[str, str]] | None = None,
+        band_width: int | None = None,
     ) -> str:
+        needed_by_source = needed_by_source or {}
+        join_keys = join_keys or {}
         lines: list[str] = [
             "# PySpark KPI script — generated from feature mappings + shared KPI intent.",
             f"# KPI: {kpi.get('name', kpi_id)}",
@@ -250,6 +289,15 @@ class PySparkKPIGenerator:
         for source in required_sources:
             alias = source_aliases[source]
             lines.extend(self._reader(alias, source))
+            # Pre-select each source to ITS chosen columns (+ its join key),
+            # mirroring the SQL catalog views / Polars emitter: identically
+            # named columns in joined tables otherwise become ambiguous.
+            keep = set(needed_by_source.get(source) or set())
+            if source in join_keys:
+                keep.add(join_keys[source][1])
+            if keep:
+                cols = ", ".join(f'"{c}"' for c in sorted(keep))
+                lines.append(f"{alias} = {alias}.select({cols})")
         lines.append("")
 
         lines.append("# ── Join chain (dimensions broadcast) ────────────────────────────────────")
@@ -261,13 +309,31 @@ class PySparkKPIGenerator:
             if not rel:
                 raise ValueError(f"No executable relationship: {base_source} → {source}")
             lc, rc = rel.get("left_column", ""), rel.get("right_column", "")
-            lines.append(
-                f'features = features.join(F.broadcast({alias}), '
-                f'features["{lc}"] == {alias}["{rc}"], "left").drop({alias}["{rc}"])'
-            )
+            needed_here = needed_by_source.get(source) or set()
+            if rc in needed_here:
+                # The right join key is ALSO a needed feature column: keep the
+                # data column by joining on a duplicated key (Polars-mirror of
+                # the dropped-right-key semantics).
+                dup = f"__join_{rc}"
+                lines.append(
+                    f'features = features.join('
+                    f'F.broadcast({alias}.withColumn("{dup}", F.col("{rc}"))), '
+                    f'features["{lc}"] == F.col("{dup}"), "left").drop("{dup}")'
+                )
+            else:
+                lines.append(
+                    f'features = features.join(F.broadcast({alias}), '
+                    f'features["{lc}"] == {alias}["{rc}"], "left").drop({alias}["{rc}"])'
+                )
         lines.append("")
 
         needed = self._needed_columns(intent)
+        if needed_by_source:
+            # The select can only reference columns the join produced (raw
+            # question tokens the SQL side resolves via group-column
+            # resolution would otherwise crash here).
+            available = set().union(*needed_by_source.values()) if needed_by_source else set()
+            needed = [c for c in needed if c in available]
         if needed:
             lines.append("# ── Keep only the columns this KPI needs ─────────────────────────────────")
             cols = ", ".join(f'"{c}"' for c in needed)
@@ -275,7 +341,7 @@ class PySparkKPIGenerator:
             lines.append("")
 
         lines.append("# ── KPI result ───────────────────────────────────────────────────────────")
-        lines.extend(self._result_lines(intent))
+        lines.extend(self._result_lines(intent, band_width=band_width))
         lines.append("")
 
         lines += [
@@ -312,13 +378,13 @@ class PySparkKPIGenerator:
                 needed.append(filt.target)
         return _unique_preserve_order(needed)
 
-    def _result_lines(self, intent: KPIIntent) -> list[str]:
+    def _result_lines(self, intent: KPIIntent, *, band_width: int | None = None) -> list[str]:
         if intent.share:
-            return self._share_lines(intent)
+            return self._share_lines(intent, band_width=band_width)
         if intent.ratio:
             return self._ratio_lines(intent)
-        lines = ["result = features"] + self._derive_dim_lines(intent) + self._filter_lines(intent)
-        group_cols = self._group_cols(intent)
+        lines = ["result = features"] + self._derive_dim_lines(intent, band_width=band_width) + self._filter_lines(intent)
+        group_cols = self._group_cols(intent, band_width=band_width)
         agg_expr, agg_alias = self._agg_expr(intent.metric)
         if group_cols:
             lines.append(f"result = result.groupBy({', '.join(group_cols)}).agg({agg_expr})")
@@ -329,11 +395,11 @@ class PySparkKPIGenerator:
             lines.append(f"result = result.limit({intent.top_n})")
         return lines
 
-    def _share_lines(self, intent: KPIIntent) -> list[str]:
+    def _share_lines(self, intent: KPIIntent, *, band_width: int | None = None) -> list[str]:
         share = intent.share
         assert share is not None
         m = share.metric
-        lines = ["result = features"] + self._derive_dim_lines(intent) + self._filter_lines(intent)
+        lines = ["result = features"] + self._derive_dim_lines(intent, band_width=band_width) + self._filter_lines(intent)
         if share.kind == "mismatched_grain_percentage":
             if m.distinct:
                 # Single attribution — mirrors the SQL share_attribution CTE and
@@ -362,7 +428,7 @@ class PySparkKPIGenerator:
                     "F.row_number().over(_attr_w))"
                 )
                 lines.append('result = result.filter(F.col("__attribution_rn") == 1)')
-                group_cols = self._group_cols(intent)
+                group_cols = self._group_cols(intent, band_width=band_width)
                 lines.append(
                     f'result = result.groupBy({", ".join(group_cols)})'
                     '.agg(F.count(F.lit(1)).alias("__attributed"))'
@@ -372,7 +438,7 @@ class PySparkKPIGenerator:
                     'F.col("__attributed") / F.sum("__attributed")'
                     ".over(Window.partitionBy()) * 100)"
                 )
-                select_cols = self._dim_select_cols(intent) + ['"percentage_share"']
+                select_cols = self._dim_select_cols(intent, band_width=band_width) + ['"percentage_share"']
                 lines.append(f"result = result.select({', '.join(select_cols)})")
                 return lines
             # Row-based shares only (distinct-entity shares returned above):
@@ -422,7 +488,7 @@ class PySparkKPIGenerator:
         )
         return lines
 
-    def _derive_dim_lines(self, intent: KPIIntent) -> list[str]:
+    def _derive_dim_lines(self, intent: KPIIntent, *, band_width: int | None = None) -> list[str]:
         # BUG-005 (cross-engine): date arithmetic must be anchored to the KPI's
         # event-date column when one exists — exactly like the SQL and Polars
         # paths — and fall back to today only when the grain has no event date.
@@ -447,6 +513,13 @@ class PySparkKPIGenerator:
                     f'result = result.withColumn("{dim.alias}", '
                     f'({as_of_year} - F.year(F.to_date(F.col("{dim.column}")))).cast("int"))'
                 )
+                if band_width:
+                    lines.append(
+                        f'result = result.withColumn("{dim.alias}_band", '
+                        f'F.format_string("%d-%d", '
+                        f'(F.floor(F.col("{dim.alias}") / {band_width}) * {band_width}).cast("long"), '
+                        f'(F.floor(F.col("{dim.alias}") / {band_width}) * {band_width} + {band_width - 1}).cast("long")))'
+                    )
             elif dim.kind == "days_since":
                 as_of_date = (
                     f'F.to_date(F.col("{event_date_col}"))'
@@ -471,17 +544,19 @@ class PySparkKPIGenerator:
             exprs.append(f'(F.col("{filt.target}") {op} {value})')
         return ["result = result.filter(" + " & ".join(exprs) + ")"] if exprs else []
 
-    def _group_cols(self, intent: KPIIntent) -> list[str]:
-        return [
-            f'"{d.column}"' if d.kind == "column" else f'"{d.alias}"'
-            for d in intent.dims
-        ]
+    @staticmethod
+    def _dim_out_name(dim, band_width: int | None) -> str:
+        """The dim's OUTPUT column name: banded continuous cuts emit
+        `<alias>_band` (exactly like the SQL/Polars paths)."""
+        if band_width and dim.kind in ("age", "days_since"):
+            return f"{dim.alias}_band"
+        return dim.column if dim.kind == "column" else dim.alias
 
-    def _dim_select_cols(self, intent: KPIIntent) -> list[str]:
-        return [
-            f'"{d.column}"' if d.kind == "column" else f'"{d.alias}"'
-            for d in intent.dims
-        ]
+    def _group_cols(self, intent: KPIIntent, *, band_width: int | None = None) -> list[str]:
+        return [f'"{self._dim_out_name(d, band_width)}"' for d in intent.dims]
+
+    def _dim_select_cols(self, intent: KPIIntent, *, band_width: int | None = None) -> list[str]:
+        return [f'"{self._dim_out_name(d, band_width)}"' for d in intent.dims]
 
     def _metric_agg_expr(self, m) -> str:
         col = m.column

@@ -537,6 +537,28 @@ class WorkspaceFlow:
                 cmd for cmd in recovery_commands
                 if cmd.get("command") and not (cmd["command"] in seen_cmds or seen_cmds.add(cmd["command"]))
             ]
+            if not recovery_commands:
+                # Dead-end guard (the #13/#15 family): a blocked panel with an
+                # EMPTY recovery list strands the operator. Name the standard
+                # re-resolution chain instead of going silent.
+                recovery_commands = [
+                    {
+                        "command": (
+                            f"uv run prepare-kpi-blocker-panel --workspace {self.workspace_rel} "
+                            f"--domain {self.domain}"
+                        ),
+                        "reason": (
+                            "No per-KPI recovery command was derivable; re-resolve features and "
+                            "surface the current blocker panel (definitions may have changed)."
+                        ),
+                    },
+                    {
+                        "command": (
+                            f"uv run workspace-flow status --workspace {self.workspace_rel} --diff --quiet"
+                        ),
+                        "reason": "Confirm the per-KPI gap list after re-resolution.",
+                    },
+                ]
             suggested_skills = [
                 {"name": "data-engineering-pipeline-design", "why": "Source-to-target blockers need pipeline-design judgment."},
                 {"name": "workspace-governance", "why": "Recovery commands mutate workspace contracts."},

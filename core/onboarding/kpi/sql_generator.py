@@ -564,6 +564,22 @@ class DuckDBKPISQLGenerator:
             formula = _derived_formula(feature)
             if not formula:
                 return None
+            # A formula may reference a SOURCE TABLE by its raw name
+            # (`FROM "encounters" p` in a self-join). The script only creates
+            # catalog views, so map known dataset stems to their view names —
+            # the author of a custom rule cannot know generator-internal names.
+            for source in profile_map:
+                stem = _safe_name(Path(source).stem)
+                view = (
+                    self.quote_ident(f"catalog_raw_{stem}")
+                    if self.dialect == "duckdb"
+                    else self.table_ident(stem)
+                )
+                formula = re.sub(
+                    rf'(?i)(\b(?:FROM|JOIN)\s+)"{re.escape(stem)}"',
+                    lambda m, v=view: m.group(1) + v,
+                    formula,
+                )
             for column in sorted(_formula_inputs(feature), key=len, reverse=True):
                 qualified = self._qualified_column(column, source_aliases, profile_map)
                 if qualified:

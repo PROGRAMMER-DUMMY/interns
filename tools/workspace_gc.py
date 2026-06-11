@@ -153,6 +153,34 @@ def collect_panel_previews(
     return out
 
 
+DEFAULT_KEEP_RUN_DIRS = 5
+
+
+def collect_old_runs(
+    layout: WorkspaceLayout,
+    *,
+    keep: int = DEFAULT_KEEP_RUN_DIRS,
+) -> list[tuple[Path, str, int]]:
+    """Dated `interns/runs/<YYYY-MM-DD>/` snapshots beyond the newest ``keep``.
+
+    Each run overwrites within its date, but dates accumulate forever without
+    retention. The newest ``keep`` date-dirs always survive.
+    """
+    runs_dir = layout.runs_dir
+    if not runs_dir.exists():
+        return []
+    dated = sorted(
+        (entry for entry in runs_dir.iterdir() if entry.is_dir()),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    out: list[tuple[Path, str, int]] = []
+    for entry in dated[keep:]:
+        size = sum(f.stat().st_size for f in entry.rglob("*") if f.is_file())
+        out.append((entry, f"run snapshot beyond newest {keep}", size))
+    return out
+
+
 def collect_handoffs(
     layout: WorkspaceLayout,
     *,
@@ -265,6 +293,11 @@ def garbage_collect(
 
     for path, reason, size in collect_delta_metadata(layout):
         report.actions.append(GcAction("delete_delta_metadata", str(path), reason, size))
+        if apply:
+            shutil.rmtree(path, ignore_errors=True)
+
+    for path, reason, size in collect_old_runs(layout):
+        report.actions.append(GcAction("delete_run_snapshot", str(path), reason, size))
         if apply:
             shutil.rmtree(path, ignore_errors=True)
 
