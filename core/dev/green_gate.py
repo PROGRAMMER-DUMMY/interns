@@ -27,6 +27,7 @@ import unittest
 # green gate: any failure here is a hard stop.
 CURATED_MODULES: tuple[str, ...] = (
     "tests.test_parser_parity",
+    "tests.test_engine_parity",
     "tests.test_kpi_engine_generators",
     "tests.test_verify_kpi_output",
     "tests.test_engine_recommender",

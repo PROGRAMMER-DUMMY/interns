@@ -183,9 +183,12 @@ class PolarsKPIGenerator:
             "# ── Write Silver (features) and Gold (result) → Delta ─────────────────────",
             "SILVER.mkdir(parents=True, exist_ok=True)",
             "GOLD.mkdir(parents=True, exist_ok=True)",
-            f'features.collect().write_delta(str(SILVER / "{kpi_id}_features"), mode="overwrite")',
+            "# schema_mode=overwrite: regeneration may rename/add columns; without it a",
+            "# stale Delta schema from a prior run fails the write (SchemaMismatchError).",
+            '_DELTA_OPTS = {"schema_mode": "overwrite"}',
+            f'features.collect().write_delta(str(SILVER / "{kpi_id}_features"), mode="overwrite", delta_write_options=_DELTA_OPTS)',
             "result_df = result.collect()",
-            f'result_df.write_delta(str(GOLD / "{kpi_id}_results"), mode="overwrite")',
+            f'result_df.write_delta(str(GOLD / "{kpi_id}_results"), mode="overwrite", delta_write_options=_DELTA_OPTS)',
             f'print("Silver + Gold written for {kpi_id}")',
             "print(result_df)",
             "",
@@ -302,6 +305,18 @@ class PolarsKPIGenerator:
         return lines
 
     def _derive_dim_lines(self, intent: KPIIntent) -> list[str]:
+        # BUG-005 (cross-engine): date arithmetic must be anchored to the KPI's
+        # event-date column when one exists — exactly like the SQL path — and
+        # fall back to today only when the grain has no event date. Anchoring
+        # Polars to `date.today()` while SQL anchors to the event date produced
+        # different age values and broke row parity.
+        event_date_col = next((d.column for d in intent.dims if d.kind == "time" and d.column), "")
+        if event_date_col:
+            as_of_year = f'pl.col("{event_date_col}").cast(pl.Date, strict=False).dt.year()'
+            as_of_date = f'pl.col("{event_date_col}").cast(pl.Date, strict=False)'
+        else:
+            as_of_year = "pl.lit(date.today().year)"
+            as_of_date = "pl.lit(date.today())"
         with_cols: list[str] = []
         for dim in intent.dims:
             if dim.kind == "time":
@@ -311,14 +326,14 @@ class PolarsKPIGenerator:
                     f'.dt.truncate("{every}").alias("{dim.alias}")'
                 )
             elif dim.kind == "age":
-                # calendar-year difference to match SQL date_diff('year', dob, today)
+                # calendar-year difference to match SQL date_diff('year', dob, as_of)
                 with_cols.append(
-                    f'(pl.lit(date.today().year) - pl.col("{dim.column}").cast(pl.Date, strict=False)'
+                    f'({as_of_year} - pl.col("{dim.column}").cast(pl.Date, strict=False)'
                     f'.dt.year()).cast(pl.Int32).alias("{dim.alias}")'
                 )
             elif dim.kind == "days_since":
                 with_cols.append(
-                    f'(pl.lit(date.today()) - pl.col("{dim.column}").cast(pl.Date, strict=False))'
+                    f'({as_of_date} - pl.col("{dim.column}").cast(pl.Date, strict=False))'
                     f'.dt.total_days().alias("{dim.alias}")'
                 )
         return ["lf = lf.with_columns([" + ", ".join(with_cols) + "])"] if with_cols else []

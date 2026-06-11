@@ -25,6 +25,7 @@ from core.onboarding.data_model.data_understanding import (
 from core.onboarding.data_quality import DataQualityHarness, DuplicateDecisionRecorder, DuplicateReviewPanel
 from core.onboarding.harness.trajectory_recorder import record_trajectory_event_safe
 from core.onboarding.kpi.blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
+from core.onboarding.kpi.engine_parity import MAX_PARITY_ROWS, run_polars_parity
 from core.onboarding.kpi.execution_harness import KPIExecutionHarness
 from core.onboarding.kpi.generation_workflow import KPIGenerationWorkflow
 from core.onboarding.kpi.registry_loader import load_kpi_definitions, render_kpi_block
@@ -1163,6 +1164,19 @@ class WorkspaceFlow:
         evidence_dir.mkdir(parents=True, exist_ok=True)
         kpi_definitions = load_kpi_definitions(self.layout)
         entries = []
+        # Cross-runtime parity (Polars vs the canonical DuckDB rows). Cached by
+        # sql_sha256 so unchanged KPIs never re-run the subprocess; disable with
+        # KPI_ENGINE_PARITY=0. Generic: no per-workspace logic.
+        import os as _os
+
+        parity_enabled = _os.environ.get("KPI_ENGINE_PARITY", "1").lower() not in {"0", "off", "false"}
+        parity_cache_path = self.layout.evidence_dir / "engine_parity" / "current.json"
+        parity_cache: dict[str, Any] = {}
+        if parity_enabled and parity_cache_path.exists():
+            try:
+                parity_cache = json.loads(parity_cache_path.read_text(encoding="utf-8")).get("kpis", {})
+            except (json.JSONDecodeError, OSError):
+                parity_cache = {}
         conn = duckdb.connect(":memory:")
         old_cwd = Path.cwd()
         try:
@@ -1225,6 +1239,56 @@ class WorkspaceFlow:
                                     "denominator scope both cause this; verify intent before "
                                     "presenting these shares as portions of a whole."
                                 )
+                        # Cross-runtime parity: same KPI, generated Polars
+                        # variant, compared against the rows just produced.
+                        if parity_enabled:
+                            cached = parity_cache.get(kpi_id) or {}
+                            # Cache only short-circuits a prior MATCH for the same
+                            # SQL: mismatch/skip/error re-run every time so a fix
+                            # on the engine-generator side self-heals (the cache
+                            # key cannot see non-SQL changes).
+                            if (
+                                cached.get("sql_sha256") == entry["sql_sha256"]
+                                and (cached.get("parity") or {}).get("status") == "match"
+                            ):
+                                parity = dict(cached.get("parity") or {})
+                                parity["cached"] = True
+                            else:
+                                try:
+                                    row_total = conn.execute(f'SELECT COUNT(*) FROM "{view}"').fetchone()[0]
+                                    if int(row_total) > MAX_PARITY_ROWS:
+                                        parity = {
+                                            "engine": "polars",
+                                            "kpi_id": kpi_id,
+                                            "status": "skipped",
+                                            "reason": f"result has {row_total} rows (> {MAX_PARITY_ROWS} parity cap)",
+                                        }
+                                    else:
+                                        cursor_all = conn.execute(f'SELECT * FROM "{view}"')
+                                        all_columns = [col[0] for col in cursor_all.description]
+                                        all_rows = cursor_all.fetchall()
+                                        parity = run_polars_parity(
+                                            self.repo_root, self.workspace_rel, kpi_id,
+                                            all_columns, all_rows,
+                                        )
+                                except Exception as exc:
+                                    parity = {
+                                        "engine": "polars",
+                                        "kpi_id": kpi_id,
+                                        "status": "error",
+                                        "reason": str(exc),
+                                    }
+                                parity_cache[kpi_id] = {
+                                    "sql_sha256": entry["sql_sha256"],
+                                    "parity": {k: v for k, v in parity.items() if k != "cached"},
+                                }
+                            entry["engine_parity"] = parity
+                            parity_marker = "[ok]" if parity.get("status") == "match" else "[~]"
+                            preview_md = (
+                                preview_md
+                                + f"\n\n{parity_marker} engine parity (polars vs sql): "
+                                f"{parity.get('status')} - {parity.get('reason')}"
+                            )
                         entry["preview_markdown"] = preview_md
                         entry["result_view"] = view
                     else:
@@ -1240,6 +1304,26 @@ class WorkspaceFlow:
 
             os.chdir(old_cwd)
             conn.close()
+
+        if parity_enabled:
+            try:
+                parity_cache_path.parent.mkdir(parents=True, exist_ok=True)
+                parity_cache_path.write_text(
+                    json.dumps(
+                        {
+                            "artifact_type": "engine_parity/current.json",
+                            "workspace": self.workspace_rel,
+                            "generated_at": _now(),
+                            "kpis": parity_cache,
+                        },
+                        indent=2,
+                        default=str,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
 
         json_path = evidence_dir / "current.json"
         md_path = result_dir / "current.md"

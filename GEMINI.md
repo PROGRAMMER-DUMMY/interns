@@ -1,7 +1,9 @@
 # Gemini CLI Init
 
 Read `AGENTS.md` first and follow it as the canonical operating guide for this repo.
-Then inspect `TOOLS.md` and `.agents/tools.json` before inventing workflows or helper scripts.
+For tool discovery use the Stage index in `AGENTS.md` > Tool And Evidence Discovery, then read
+only the matching `### <command>` section of `TOOLS.md` on demand. Do not read `TOOLS.md` or
+`.agents/tools.json` whole as session preamble.
 For Gemini CLI command, configuration, policy, tool, and memory behavior, use
 `docs/agents/gemini-cli-reference.md` as the repo-local reference.
 

@@ -16,8 +16,9 @@ rules.
 1. `README.md` for repo purpose, core layout, workspace output layout, and verification commands.
 2. `CONTEXT.md` for domain language and architecture.
 3. `config/tasks.json` for active task, workspace path, commands, contracts, and policy.
-4. `TOOLS.md` and `.agents/tools.json` for available project tools, routing, safety, and
-   evidence-order policy.
+4. The Stage index in `Tool And Evidence Discovery` (below) for available project tools; read a
+   command's `TOOLS.md` section on demand only. Do not read `TOOLS.md` / `.agents/tools.json`
+   whole.
 5. `program.md` only when the active benchmark/task refers to it.
 6. Relevant files in `core/`, `tools/`, `interns/`, `tests/`, or `workspaces/<project>/`.
 
@@ -541,13 +542,37 @@ Prefer existing project tools and generated artifacts over custom one-off script
 machine-readable registry in `.agents/tools.json` for routing, safety level, inputs, and expected
 outputs.
 
+### Stage index (registry summary)
+
+This index satisfies the registry-read gate. `TOOLS.md` (~16k tokens) and `.agents/tools.json`
+(~23k tokens) must NOT be read whole as session preamble — find the stage below, then read only
+the matching `### <command>` section of `TOOLS.md` for the one command you are about to run.
+`tools.json` is machine-only (programmatic routing); never page through it.
+
+| Stage | Commands (each is a `###` section in TOOLS.md) |
+| --- | --- |
+| Workspace selection | `list-workspace-files`, `prepare-workspace-selection`, `session-snapshot` |
+| Onboarding | `onboard-workspace`, `kickstart-workspace`, `understand-data` |
+| KPI definition + blockers | `resolve-kpi-features`, `prepare-kpi-blocker-panel`, `blocker-question-panel`, `apply-kpi-panel-answer`, `derived-feature-markdown`, `confirm-cli-agent-proposal`, `prepare-kpi-generation`, `apply-kpi-generation-answer`, `finalize-kpi-generation` |
+| Data model | `prepare-data-model-generation`, `apply-data-model-answer`, `finalize-data-model-generation`, `prepare-data-model-blocker-panel`, `apply-data-model-blocker-answer`, `parse-data-model-images`, `export-data-model-diagram` |
+| Relationships + source-to-target | `build-relationship-contracts`, `apply-relationship-answer`, `plan-source-to-target` |
+| Source catalog + external intake | `prepare-source-catalog`, `build-catalog-contract`, `build-source-family-contracts`, `discover-external-sources`, `prepare-external-source-intake`, `ingest-source-catalog` |
+| Engineering route + pipeline | `prepare-data-engineering-route`, `prepare-pipeline-plan`, `prepare-pipeline-format-panel`, `prepare-pipeline-deployment-plan`, `apply-pipeline-decision`, `generate-pipeline-sql` |
+| Generation + execution | `run-kpi-pipeline`, `workspace-flow`, `generate-kpi-sql`, `generate-kpi-engines`, `kpi-proof-packet` |
+| Validation + QA | `validate-workspace-artifacts`, `validate-project-harness`, `run-reliability-suite`, `validate-workflow-guardrails`, `run-data-quality-harness`, `prepare-duplicate-review-panel`, `apply-duplicate-review-answer`, `run-layered-pipeline-harness`, `run-pipeline-execution-harness`, `validate-git-hygiene`, `validate-memory-health` |
+| Evidence + reporting | `record-workspace-trajectory`, `build-workspace-evidence-graph`, `export-kpi-registry-excel`, `export-workspace-presentation`, `prepare-wiki-memory`, `prepare-workspace-bug-report`, `record-engine-evolution` |
+| Context + budget | `context-router`, `resource-preflight`, `cleanup-workspace-references` |
+| Dev + harness | `prepare-agent-benchmark`, `run-ai-app-harness`, `run-ai-cli-harness`, `prepare-workspace-workflow`, `profiler.py`, `optimizer_finder.py`, `methodology_parser.py`, `generate-skill-adapters`, Databricks tools |
+
 Hard registry-read gate:
 
-- Before choosing any workflow route or next command, the active agent must have read
-  `.agents/tools.json`, `TOOLS.md`, or its generated adapter under `.agents/<tool>/SKILLS.md` in the
-  current session.
-- If the agent has not read the registry/adapter, it must stop, reread it, and restart route
+- Before choosing any workflow route or next command, the active agent must have read the Stage
+  index above (or the specific command's `###` section in `TOOLS.md`, or its generated adapter
+  under `.agents/<tool>/SKILLS.md`) in the current session.
+- If the agent has not read any of those, it must stop, read the Stage index, and restart route
   selection instead of guessing from memory.
+- Reading `TOOLS.md` or `.agents/tools.json` end-to-end as session preamble is a token-discipline
+  violation, not diligence: drill into single sections on demand.
 - For an external profiled workspace with no KPI registry entries, do not run KPI feature
   resolution first. Run `uv run build-source-family-contracts --workspace workspaces/<project>` and
   review schema drift before `prepare-data-engineering-route` or medallion planning.

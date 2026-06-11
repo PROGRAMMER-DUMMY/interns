@@ -227,17 +227,22 @@ steps, and shows manual/local-safe/autopilot options. Modes:
 Command:
 
 ```powershell
-uv run workspace-flow start --workspace workspaces/<project> --intent kpi_generation --domain healthcare
+uv run workspace-flow start --workspace workspaces/<project> --intent kpi_generation --domain <domain>
 uv run workspace-flow status --session <session-id>
 uv run workspace-flow --quiet status --diff --workspace workspaces/<project>   # compact KPI-readiness summary
 uv run workspace-flow answer --session <session-id> --answer option_a
 uv run workspace-flow results --session <session-id>
+uv run workspace-flow results --workspace workspaces/<project>   # latest session auto-resolved
+uv run workspace-flow results --workspace workspaces/<project> --full --kpi kpi_002
 ```
 
-`--quiet` is a top-level flag (place it before the subcommand). For `status --diff` it prints a
-compact ready/blocked/gap summary plus the manifest path instead of the full diff JSON. `start`
-resumes an existing open session when one exists; do not re-run `start` in a loop — read the
-artifact paths it prints.
+`--quiet` and `--json` are accepted both before and after the subcommand. For `status --diff`,
+`--quiet` prints a compact ready/blocked/gap summary plus the manifest path instead of the full
+diff JSON. `status`/`answer`/`results`/`review` accept `--workspace` in place of `--session` and
+resolve that workspace's most recent session. `start` resumes an existing open session when one
+exists; do not re-run `start` in a loop — read the artifact paths it prints. `results` emits the
+result packet itself (compact by default, `--full` inlines SQL, `--kpi <id>` forwards one KPI's
+file) — do not re-run it with different flags to "see more".
 
 Use as the quiet front door for agent-led workspace workflows. It persists session state under
 `interns/state/workflow_sessions/<session-id>/`, runs existing governed tools in-process, hides
@@ -256,7 +261,47 @@ workspaces/<project>/interns/reports/kpi_results/current.md
 workspaces/<project>/interns/generated/evidence/kpi_results/current.json
 ```
 
-### prepare-wiki-memory
+### run-kpi-pipeline
+
+Command:
+
+```powershell
+uv run run-kpi-pipeline --workspace workspaces/<project> --domain <domain>
+uv run run-kpi-pipeline --workspace workspaces/<project> --domain <domain> --quiet
+uv run run-kpi-pipeline --workspace workspaces/<project> --domain <domain> --new-session
+```
+
+The preferred single entry point for the deterministic KPI chain (see CLAUDE.md Token
+Discipline). Runs onboard-workspace -> prepare-kpi-blocker-panel -> [human KPI-blocker gate] ->
+build-relationship-contracts -> [human relationship-approval gate] -> workspace-flow start
+--intent full_kpi_sql -> [human kpi-analyst review gate] -> results, stopping only at genuine
+human gates with the exact resolving command. Idempotent and resumable: re-invoke after each gate
+is resolved. Never auto-approves relationships or review verdicts (BUG-014).
+
+Outputs: same session/panel/result artifacts as `workspace-flow` (it drives the same flow).
+
+### generate-kpi-engines
+
+Command:
+
+```powershell
+uv run generate-kpi-engines --workspace workspaces/<project> --engine recommended
+uv run generate-kpi-engines --workspace workspaces/<project> --engine sql,polars --kpi-id kpi_002
+```
+
+Generates KPI code for the recommended engine (or `all`, or a comma list; SQL is always the
+baseline) from the same ready feature mappings the SQL generator uses, preserving cross-engine
+parity. PySpark execution requires JDK 8/11/17 (parity gates env-skip Spark when the JVM is
+unsuitable); SQL/Polars need no JVM. The `guard_uv_run` hook blocks `uv run` for engine
+generation in test contexts — use the venv interpreter (`.venv\Scripts\python.exe -m
+core.onboarding.kpi.generate_kpi_engines ...`) or `green-gate` there.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/solutions/kpi_*_polars.py   (and *_pyspark.py)
+workspaces/<project>/interns/reports/engine_generation/current.md  (+ current.json)
+```
 
 Command:
 

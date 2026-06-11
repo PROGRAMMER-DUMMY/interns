@@ -1,7 +1,9 @@
 # Claude Code Init
 
 Read `AGENTS.md` first and follow it as the canonical operating guide for this repo.
-Then inspect `TOOLS.md` and `.agents/tools.json` before inventing workflows or helper scripts.
+For tool discovery use the Stage index in `AGENTS.md` > Tool And Evidence Discovery, then read
+only the matching `### <command>` section of `TOOLS.md` on demand. Do not read `TOOLS.md` or
+`.agents/tools.json` whole as session preamble.
 
 For startup commands such as `set <workspace>`, `set current workspace to ...`, or a bare project
 name, treat the message as workspace selection only. File mutation during selection is a hard stop.
