@@ -287,71 +287,6 @@
       }
     },
     {
-      "name": "agent-advisor-router",
-      "display_name": "Agent Advisor Router",
-      "description": "Advises which specialist agent, skill chain, sandbox, and model tier should handle a task before expensive work starts.",
-      "skills": [
-        "workspace-governance",
-        "clarify-ambiguity",
-        "evolution"
-      ],
-      "default_prompt": "Act as the advisor/router. Classify the user's request, choose the narrowest specialist role, choose the cheapest sufficient model tier, and name the required skills and tool route. Escalate only when ambiguity, production risk, security, or semantic correctness requires it. Do not perform the downstream implementation yourself unless no specialist route fits.",
-      "safety": "read_only_routing_and_cost_control_advice",
-      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
-      "targets": {
-        "codex": {
-          "enabled": true,
-          "sandbox_mode": "read-only"
-        },
-        "claude": {
-          "enabled": true,
-          "permission": "read-only"
-        },
-        "gemini": {
-          "enabled": true
-        }
-      },
-      "model_policy": {
-        "default_tier": "light",
-        "use_light_for": [
-          "task classification",
-          "agent selection",
-          "model tier recommendation"
-        ],
-        "escalate_to_standard_for": [
-          "conflicting routes",
-          "missing active workspace context"
-        ],
-        "escalate_to_deep_for": [
-          "only when route selection itself affects production safety"
-        ]
-      }
-    },
-    {
-      "name": "databricks-access-gates",
-      "display_name": "Databricks Access Gates",
-      "description": "Ask for missing Databricks access gates",
-      "skills": [
-        "databricks-access-gates"
-      ],
-      "default_prompt": "Use Databricks access gates to identify missing scopes, grants, policies, approvals, warehouse paths, and workspace permissions before retrying Databricks remote actions.",
-      "safety": "follows_skill_policy",
-      "source_path": "skills/databricks-access-gates/agents/openai.yaml",
-      "targets": {}
-    },
-    {
-      "name": "feature-derivation-library",
-      "display_name": "Feature Derivation Library",
-      "description": "Use reusable KPI feature derivation patterns safely.",
-      "skills": [
-        "feature-derivation-library"
-      ],
-      "default_prompt": "Use reusable derivation patterns to propose evidence-backed KPI feature mappings without treating candidates as proof.",
-      "safety": "follows_skill_policy",
-      "source_path": "skills/feature-derivation-library/agents/openai.yaml",
-      "targets": {}
-    },
-    {
       "name": "kpi-analyst",
       "display_name": "KPI Analyst",
       "description": "Interpret KPI sheets and validate KPI queries.",
@@ -427,32 +362,6 @@
       ],
       "default_prompt": "Run local-safe validation gates only. Treat validation errors as blockers, summarize artifact paths, and never hand-edit generated contracts to clear failures. Enforce Bronze/Silver standards, strict exception compensating controls, workflow reroute policy, data-quality, layered pipeline, project, and reliability harnesses before promotion.",
       "safety": "local_safe_validation_no_generated_contract_edits",
-      "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
-      "targets": {
-        "codex": {
-          "enabled": true,
-          "sandbox_mode": "workspace-write"
-        },
-        "claude": {
-          "enabled": true,
-          "permission": "workspace-write"
-        },
-        "gemini": {
-          "enabled": true
-        }
-      }
-    },
-    {
-      "name": "integration-notification-operator",
-      "display_name": "Integration Notification Operator",
-      "description": "Bridges Slack, Teams, MCP, or plugin frontends to existing workspace-flow and session-snapshot commands.",
-      "skills": [
-        "workspace-governance",
-        "stakeholder-memory",
-        "evolution"
-      ],
-      "default_prompt": "Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post the generated current.md verbatim as the human card, use current.json only for buttons/options and answer application, and record trajectory/session events. Do not collapse panels into a generic ask-user text box.",
-      "safety": "notification_and_approval_bridge_no_direct_dataset_or_remote_mutation",
       "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
       "targets": {
         "codex": {
