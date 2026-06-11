@@ -167,6 +167,82 @@ class MultiTableTimeGrainTest(unittest.TestCase):
         self.assertEqual(result["cuts"]["value"], "year(order_date)")
         self.assertNotIn("signup_date", result["cuts"]["value"])
 
+    def _entity_attr_vs_event_cols(self) -> list[dict]:
+        # Entity table (customers: own id + a static attribute date) plus an
+        # event table referencing it via an entity-NAMED column (not id-shaped,
+        # so it cannot win the count itself) with its own event date.
+        return [
+            {"column": "id", "dataset": "datasets/customers.csv", "dtype": "String", "row_count": 800, "n_unique": 800},
+            {"column": "signup_date", "dataset": "datasets/customers.csv", "dtype": "Date", "row_count": 800, "n_unique": 790, "sample_values": ["2019-04-02"]},
+            {"column": "id", "dataset": "datasets/orders.csv", "dtype": "String", "row_count": 5000, "n_unique": 5000},
+            {"column": "customer", "dataset": "datasets/orders.csv", "dtype": "String", "row_count": 5000, "n_unique": 800},
+            {"column": "order_date", "dataset": "datasets/orders.csv", "dtype": "Date", "row_count": 5000, "n_unique": 1200, "sample_values": ["2021-03-04"]},
+        ]
+
+    def test_passive_event_on_entity_makes_temporal_anchor_ambiguous(self) -> None:
+        # "customers were onboarded each quarter": the counted entity is
+        # customers, but the PASSIVE phrasing names an event done TO the
+        # entity, and orders (a table referencing customers via an
+        # entity-named column) carries its own date. Anchoring to the entity's
+        # static attribute date (signup_date) would silently bucket an event
+        # series by an entity attribute — so the anchor must be left ambiguous
+        # (below threshold, candidates listed) for the definition gate.
+        result = derive_metric_and_cuts(
+            "How many unique customers were onboarded each quarter over time?",
+            self._entity_attr_vs_event_cols(),
+        )
+        self.assertEqual(result["intent"], "count")
+        self.assertEqual(result["cuts"]["value"], "")
+        self.assertLess(result["cuts"]["confidence"], 0.6)
+        alt_values = [str(a.get("value", "")) for a in result["cuts"]["alternatives"]]
+        self.assertTrue(any("signup_date" in v for v in alt_values))
+        self.assertTrue(any("order_date" in v for v in alt_values))
+
+    def test_active_event_count_keeps_own_table_anchor(self) -> None:
+        # Active phrasing ("orders occurred") counts the dated events
+        # themselves; the same-table anchor stays confident even though
+        # customers also references nothing — autonomy preserved.
+        result = derive_metric_and_cuts(
+            "How many orders occurred each month over time?", self._two_table_cols()
+        )
+        self.assertEqual(result["cuts"]["value"], "month(order_date)")
+
+
+class EntityCountAmbiguityTest(unittest.TestCase):
+    """A count question whose nouns name TWO countable entities (the entity
+    and its event) must not silently pick one — counting events as entities
+    answers a different question."""
+
+    def _entity_event_cols(self) -> list[dict]:
+        return [
+            {"column": "Id", "dataset": "datasets/customers.csv", "dtype": "String", "row_count": 800, "n_unique": 800},
+            {"column": "signup_date", "dataset": "datasets/customers.csv", "dtype": "Date", "row_count": 800, "n_unique": 790, "sample_values": ["2019-04-02"]},
+            {"column": "Id", "dataset": "datasets/orders.csv", "dtype": "String", "row_count": 5000, "n_unique": 5000},
+            {"column": "order_date", "dataset": "datasets/orders.csv", "dtype": "Date", "row_count": 5000, "n_unique": 1200, "sample_values": ["2021-03-04"]},
+        ]
+
+    def test_two_term_backed_entities_block_the_count(self) -> None:
+        result = derive_metric_and_cuts(
+            "How many customers reordered within 30 days of a previous order?",
+            self._entity_event_cols(),
+        )
+        self.assertEqual(result["intent"], "count")
+        self.assertEqual(result["metric"]["value"], "")
+        self.assertLess(result["metric"]["confidence"], 0.6)
+        # Both candidate counts ride along for the definition gate.
+        alt_values = " ".join(str(a.get("value", "")) for a in result["metric"]["alternatives"])
+        self.assertIn("count(distinct", alt_values)
+        reasons = " ".join(str(a.get("reason", "")) for a in result["metric"]["alternatives"])
+        self.assertIn("customers", reasons)
+        self.assertIn("orders", reasons)
+
+    def test_single_entity_count_stays_confident(self) -> None:
+        result = derive_metric_and_cuts(
+            "How many total orders occurred each year?", self._entity_event_cols()
+        )
+        self.assertEqual(result["metric"]["value"], "count(distinct Id)")
+        self.assertGreaterEqual(result["metric"]["confidence"], 0.6)
+
 
 class DictionaryEvidenceTest(unittest.TestCase):
     def test_dictionary_gloss_resolves_measure(self) -> None:

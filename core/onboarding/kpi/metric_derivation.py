@@ -354,14 +354,28 @@ def _best_measure_column(
 def _count_entity_column(
     question: str,
     columns: list[dict[str, Any]],
-) -> tuple[dict[str, Any] | None, float, list[str]]:
-    """For count intents, find a high-cardinality id column matching the entity."""
+) -> tuple[dict[str, Any] | None, float, list[str], list[dict[str, Any]]]:
+    """For count intents, find a high-cardinality id column matching the entity.
+
+    Returns ``(best_col, score, reasons, ambiguous_peers)``. ``ambiguous_peers``
+    is non-empty when MORE THAN ONE id column has term evidence (its own table
+    or name matches the question's nouns) from DIFFERENT tables at a comparable
+    score — e.g. "customers who reordered ... a previous order" matches both
+    ``customers.id`` and ``orders.id``. Counting the wrong one silently answers
+    a different question (events counted as entities), so the caller must treat
+    that as a human decision, not a coin flip.
+    """
     terms = {_singularize(t) for t in _content_tokens(question)}
-    ranked: list[tuple[float, dict[str, Any], list[str]]] = []
+    ranked: list[tuple[float, bool, dict[str, Any], list[str], set[str]]] = []
     for col in columns:
         if not _looks_like_id(col):
             continue
         score, reasons = _score_column_against_terms(col, terms)
+        term_backed = score > 0
+        # The question nouns this candidate matched — its entity identity. Two
+        # candidates that matched the SAME noun count the same entity (an fk
+        # column named after the entity table is the same count, not a rival).
+        matched_terms = (terms & _name_token_set(col)) | (terms & _dataset_token_set(col))
         ratio = _cardinality_ratio(col)
         if ratio is not None and ratio > 0.8:
             score = max(score, 0.5)
@@ -378,6 +392,7 @@ def _count_entity_column(
         dataset_hits = terms & _dataset_token_set(col)
         if dataset_hits:
             score = max(score, 0.6)
+            term_backed = True
             reasons.append(
                 f"table is named after the counted entity {sorted(dataset_hits)} "
                 "-> its id column is the count grain"
@@ -390,11 +405,32 @@ def _count_entity_column(
                 score = min(0.95, score + bonus)
                 reasons.append(bonus_reason)
         if score > 0:
-            ranked.append((score, col, reasons))
+            ranked.append((score, term_backed, col, reasons, matched_terms))
     ranked.sort(key=lambda item: item[0], reverse=True)
     if not ranked:
-        return None, 0.0, []
-    return ranked[0][1], ranked[0][0], ranked[0][2]
+        return None, 0.0, [], []
+    best_score, best_term_backed, best_col, best_reasons, best_matched = ranked[0]
+    # Entity ambiguity: another TERM-BACKED id column from a DIFFERENT table at
+    # a comparable score that matched DIFFERENT question nouns means the
+    # question names two countable entities. Cardinality-only competitors do
+    # not count (generic id-ness is not evidence the question meant that
+    # entity), and candidates that matched the SAME noun are the same entity
+    # seen through an fk — also not ambiguous.
+    ambiguous_peers = [
+        {
+            "column": col.get("column"),
+            "dataset": col.get("dataset"),
+            "confidence": round(score, 3),
+            "reasons": reasons,
+        }
+        for score, term_backed, col, reasons, matched in ranked[1:4]
+        if term_backed
+        and best_term_backed
+        and col.get("dataset") != best_col.get("dataset")
+        and best_score - score < 0.15
+        and matched.isdisjoint(best_matched)
+    ]
+    return best_col, best_score, best_reasons, ambiguous_peers
 
 
 def _derive_metric(
@@ -403,7 +439,38 @@ def _derive_metric(
     columns: list[dict[str, Any]],
 ) -> dict[str, Any]:
     if intent == "count":
-        entity_col, score, reasons = _count_entity_column(question, columns)
+        entity_col, score, reasons, ambiguous_peers = _count_entity_column(question, columns)
+        if entity_col is not None and ambiguous_peers:
+            # Two countable entities match the question's nouns (e.g. customers
+            # AND orders). Counting the wrong one silently answers a different
+            # question, so this is a human decision: keep value="" below the
+            # threshold so the definition-blocker gate asks.
+            return _facet(
+                "",
+                0.45,
+                [_evidence_ref(entity_col, "; ".join(reasons))],
+                [
+                    {
+                        "value": f"count(distinct {entity_col.get('column')})",
+                        "confidence": round(score, 3),
+                        "reason": (
+                            f"counts the `{entity_col.get('dataset')}` entity; "
+                            + ("; ".join(reasons))
+                        ),
+                    },
+                    *[
+                        {
+                            "value": f"count(distinct {p['column']})",
+                            "confidence": p["confidence"],
+                            "reason": (
+                                f"counts the `{p['dataset']}` entity; "
+                                + "; ".join(p.get("reasons") or [])
+                            ),
+                        }
+                        for p in ambiguous_peers
+                    ],
+                ],
+            )
         if entity_col is not None and score >= 0.5:
             return _facet(
                 f"count(distinct {entity_col.get('column')})",
@@ -508,6 +575,40 @@ def _resolve_time_grain(question: str) -> str | None:
     return None
 
 
+# Passive event phrasing: "<entities> were admitted/shipped/signed up ...".
+# A passive construction names an event done TO the counted entity, which is
+# generic English grammar evidence (not domain vocabulary) that the event
+# series may be recorded in a table referencing the entity rather than in the
+# entity table's own attribute dates.
+_PASSIVE_EVENT_RE = re.compile(r"\b(?:was|were|is|are|got|get|been)\s+(?:re)?\w+(?:ed|en)\b", re.IGNORECASE)
+
+
+def _referencing_event_datasets(
+    measure_dataset: str,
+    columns: list[dict[str, Any]],
+    temporal_pool: list[dict[str, Any]],
+) -> set[str]:
+    """Datasets that REFERENCE the measure table and carry their own dates.
+
+    FK-shape evidence: a column in another table whose name tokens overlap the
+    measure table's name tokens (e.g. an entity-named column in an event
+    table). Such a table holding typed temporal columns is where an event
+    series about the entity would live.
+    """
+    measure_tokens = _dataset_token_set({"dataset": measure_dataset})
+    if not measure_tokens:
+        return set()
+    temporal_datasets = {str(c.get("dataset") or "") for c in temporal_pool}
+    out: set[str] = set()
+    for col in columns:
+        dataset = str(col.get("dataset") or "")
+        if not dataset or dataset == measure_dataset or dataset not in temporal_datasets:
+            continue
+        if measure_tokens & _name_token_set(col):
+            out.add(dataset)
+    return out
+
+
 def _best_temporal_column(
     columns: list[dict[str, Any]], preferred_dataset: str = ""
 ) -> dict[str, Any] | None:
@@ -525,6 +626,108 @@ def _best_temporal_column(
         if same_table:
             return same_table[0]
     return pool[0]
+
+
+def _scored_temporal_anchor(
+    question: str,
+    columns: list[dict[str, Any]],
+    *,
+    preferred_dataset: str = "",
+    exclude_terms: set[str] | None = None,
+) -> tuple[dict[str, Any] | None, float, list[str], list[dict[str, Any]]]:
+    """Pick the temporal anchor with question-term evidence and honest ambiguity.
+
+    Returns ``(col, confidence, reasons, ambiguous_candidates)``.
+
+    The anchor question is "WHICH event does the time grain date?" — and the
+    entity noun the measure already consumed is NOT evidence for it ("customers
+    signed up each quarter" must not date by the customer table's attribute
+    date just because the entity noun matches its gloss; that buckets an event
+    series by a static entity attribute). So:
+
+    1. Score temporal columns against the question terms MINUS the measure's
+       entity terms. A unique term-backed winner is a confident anchor.
+    2. No term evidence + only ONE table has temporal columns -> that table's
+       column is safe (the "orders each year" case).
+    3. No term evidence + the measure table has its own date column -> still
+       safe when the counted rows ARE the dated events ("orders occurred each
+       year"). But a PASSIVE event phrasing ("<entities> were <verb>ed each
+       quarter") names an event done TO the entity — and when another table
+       references the entity (an FK-shaped column named after the measure
+       table) and carries its own typed date, that referencing table is where
+       the event series lives. Then the anchor is genuinely ambiguous: return
+       no pick with the candidates listed, so the definition gate asks instead
+       of silently dating an event series by a static entity attribute.
+    """
+    temporal = [c for c in columns if _is_temporal(c)]
+    if not temporal:
+        return None, 0.0, [], []
+    typed = [
+        c for c in temporal
+        if any(tok in str(c.get("dtype") or "").lower() for tok in _DATE_DTYPE_TOKENS)
+    ]
+    pool = typed or temporal
+
+    anchor_terms = {_singularize(t) for t in _content_tokens(question)} - (exclude_terms or set())
+    scored: list[tuple[float, dict[str, Any], list[str]]] = []
+    for col in pool:
+        score, reasons = _score_column_against_terms(col, anchor_terms)
+        bonus, bonus_reason = _dataset_term_bonus(col, anchor_terms)
+        if score > 0 and bonus:
+            score = min(0.95, score + bonus)
+            reasons.append(bonus_reason)
+        scored.append((score, col, reasons))
+    scored.sort(key=lambda item: item[0], reverse=True)
+
+    best_score, best_col, best_reasons = scored[0]
+    runner_up = scored[1][0] if len(scored) > 1 else 0.0
+    if best_score > 0 and best_score > runner_up:
+        return (
+            best_col,
+            0.8,
+            best_reasons
+            + ["question terms (excluding the measure's entity) match this date column"],
+            [],
+        )
+
+    datasets = {str(c.get("dataset") or "") for _, c, _ in scored}
+    if len(datasets) <= 1:
+        pick = _best_temporal_column(columns, preferred_dataset)
+        return (
+            pick,
+            0.8,
+            ["only one table carries temporal evidence; its date column is the anchor"],
+            [],
+        )
+
+    same_table = [c for _, c, _ in scored if str(c.get("dataset") or "") == preferred_dataset]
+    if same_table and preferred_dataset:
+        passive_event = bool(_PASSIVE_EVENT_RE.search(question or ""))
+        referencing_event_tables = (
+            _referencing_event_datasets(preferred_dataset, columns, pool)
+            if passive_event
+            else set()
+        )
+        if not referencing_event_tables:
+            return (
+                same_table[0],
+                0.8,
+                ["the measure table's own date column anchors its events"],
+                [],
+            )
+        # Passive event + FK-shaped referencing table(s) with their own dates:
+        # the event series may live there, not in the entity's attribute date.
+
+    # Ambiguous anchor: no term evidence and no safe structural pick.
+    candidates = [
+        {
+            "column": c.get("column"),
+            "dataset": c.get("dataset"),
+            "confidence": round(s, 3),
+        }
+        for s, c, _ in scored[:4]
+    ]
+    return None, 0.45, [], candidates
 
 
 def _categorical_grain_phrases(question: str) -> list[str]:
@@ -573,6 +776,7 @@ def _derive_cuts(
     columns: list[dict[str, Any]],
     *,
     measure_dataset: str = "",
+    measure_terms: set[str] | None = None,
 ) -> dict[str, Any]:
     cut_values: list[str] = []
     evidence: list[dict[str, Any]] = []
@@ -581,16 +785,40 @@ def _derive_cuts(
 
     grain = _resolve_time_grain(question)
     if grain is not None:
-        time_col = _best_temporal_column(columns, preferred_dataset=measure_dataset)
+        time_col, t_conf, t_reasons, t_candidates = _scored_temporal_anchor(
+            question,
+            columns,
+            preferred_dataset=measure_dataset,
+            exclude_terms=measure_terms,
+        )
         if time_col is not None:
             cut_values.append(f"{grain}({time_col.get('column')})")
             evidence.append(
                 _evidence_ref(
                     time_col,
-                    f"question grain `{grain}` mapped to date/time column via profile dtype",
+                    f"question grain `{grain}` anchored: " + "; ".join(t_reasons),
                 )
             )
-            confidences.append(0.8)
+            confidences.append(t_conf)
+        elif t_candidates:
+            # Temporal anchor is ambiguous across tables (e.g. an entity
+            # attribute date vs an event date). Dating by the wrong one
+            # silently changes the question (an event series bucketed by a
+            # static entity attribute), so keep this below the threshold and
+            # list the candidates for the definition gate.
+            confidences.append(t_conf)
+            alternatives.extend(
+                {
+                    "value": f"{grain}({c['column']})",
+                    "confidence": c["confidence"],
+                    "reason": (
+                        f"temporal anchor ambiguous: `{c['column']}` in "
+                        f"`{c['dataset']}` is one of several event-date candidates; "
+                        "confirm WHICH event the time grain refers to"
+                    ),
+                }
+                for c in t_candidates
+            )
         else:
             # Time grain requested but no date column found -> ambiguous.
             confidences.append(0.25)
@@ -664,11 +892,23 @@ def derive_metric_and_cuts(
     metric = _derive_metric(question, intent, columns)
     # Anchor the time grain to the SAME table the measure came from, so an
     # event count is dated by its own event date, not a stray date column.
+    # The measure's OWN terms (its column + table tokens) are excluded from
+    # temporal-anchor evidence: the entity noun matching an entity-attribute
+    # date's gloss is what bucketed an event series ("customers signed up each
+    # quarter") by the entity's static attribute date instead of the event date.
     measure_dataset = ""
+    measure_terms: set[str] = set()
     metric_evidence = metric.get("evidence") or []
     if metric_evidence:
         measure_dataset = str(metric_evidence[0].get("dataset") or "")
-    cuts = _derive_cuts(question, columns, measure_dataset=measure_dataset)
+        measure_ref = {
+            "column": metric_evidence[0].get("column"),
+            "dataset": metric_evidence[0].get("dataset"),
+        }
+        measure_terms = _name_token_set(measure_ref) | _dataset_token_set(measure_ref)
+    cuts = _derive_cuts(
+        question, columns, measure_dataset=measure_dataset, measure_terms=measure_terms
+    )
 
     # For a top-N ranking the generic "by <X>" grain extractor latches onto the
     # ranking MEASURE (e.g. "by total order value" -> the value column), not the
