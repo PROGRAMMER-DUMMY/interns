@@ -768,13 +768,26 @@ def parse_kpi(
     as_of_expr = (
         f"CAST({_quote(event_date_col)} AS DATE)" if event_date_col else "CURRENT_DATE"
     )
+    if not event_date_col:
+        # Record the fallback so it is auditable in the contract AND visible in
+        # the emitted SQL (comment) + result packet, instead of silently making
+        # date arithmetic drift with the run date.
+        parsed.age_as_of_assumption = (
+            "date arithmetic anchored to CURRENT_DATE (no event-date column in "
+            "the KPI grain); values shift as the run date advances"
+        )
 
     # Mismatched-grain percentage is handled via window functions.
     # The metric reads "<agg> / <same agg> for <group>": a share-of-total by
     # <group>. The numerator is the aggregate within each group and the
     # denominator is the grand total of the same aggregate, so each row is one
     # group and its percentage of the whole (e.g. a department's distinct lives
-    # as a fraction of all distinct lives). Shares sum to ~100% across groups.
+    # as a fraction of all distinct lives). NOTE: shares sum to ~100% across
+    # groups ONLY when each entity maps to exactly one group. When the same
+    # entity appears in multiple grain cells (e.g. one patient with visits in
+    # several departments), per-cell DISTINCT counts overlap and the shares
+    # total >100%. The post-execution share-sum check in
+    # flow._write_result_preview measures and surfaces this in the packet.
     if window_intent.get("kind") == "mismatched_grain_percentage":
         partition = window_intent.get("partition", "")
         inner = _AGG_FN_PATTERN.search(metric_text)
@@ -791,7 +804,9 @@ def parse_kpi(
             # stated cuts and forced a manual SQL edit. Numerator now counts
             # within each full-grain cell; the denominator stays the grand total
             # (OVER ()), so each row is one cell and its percentage of the whole
-            # population (shares sum to ~100% across all cells). Denominator-scope
+            # population. Shares sum to ~100% across cells only when each entity
+            # belongs to one cell; overlapping membership makes the total exceed
+            # 100% (measured and flagged post-execution). Denominator-scope
             # semantics (per-group vs grand-total) are intentionally left as-is.
             emitted = _emitted_columns(lookup)
             grain_dimensions: list[Dimension] = []
@@ -1331,6 +1346,10 @@ def build_result_view_sql(
     # implied (design/kpi_intent_contract.md §2 "Reported" + §5).
     if parsed.denominator_scope is not None:
         lines.append(f"-- denominator_scope: {parsed.denominator_scope}")
+    # Auditable as-of comment: emitted when date arithmetic fell back to
+    # CURRENT_DATE so the temporal anchor is visible in the generated SQL.
+    if parsed.age_as_of_assumption:
+        lines.append(f"-- as_of_assumption: {parsed.age_as_of_assumption}")
     lines += [
         f"CREATE OR REPLACE VIEW {result_view} AS",
         select_keyword,

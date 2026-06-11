@@ -1122,6 +1122,36 @@ class WorkspaceFlow:
             "available_modes": sorted(ORCHESTRATION_MODES),
         }
 
+    # Result columns that look like a share of a total (percentage_share, pct_*,
+    # *_percent...). Intentionally excludes "ratio" (not necessarily on a 0-100
+    # scale).
+    _SHARE_COLUMN_PATTERN = re.compile(r"(percent|share|pct)", re.IGNORECASE)
+
+    @classmethod
+    def _share_sum_check(cls, conn: Any, view: str) -> dict[str, Any] | None:
+        """Generic share-sum invariant for percentage-share KPI results.
+
+        If the result view has exactly one share-like column, sum it across all
+        rows. A partition of a total sums to ~100%; a materially different total
+        means overlapping group membership (one entity counted in several grain
+        cells) or a non-grand-total denominator scope. Returns None when the
+        check does not apply, else {column, sum, status} with status "ok" or
+        "not_a_partition". Workspace- and domain-agnostic: driven only by the
+        emitted result schema, never by column semantics from any one dataset.
+        """
+        try:
+            description = conn.execute(f'SELECT * FROM "{view}" LIMIT 0').description or []
+            share_cols = [col[0] for col in description if cls._SHARE_COLUMN_PATTERN.search(str(col[0]))]
+            if len(share_cols) != 1:
+                return None
+            column = share_cols[0]
+            total = conn.execute(f'SELECT ROUND(SUM("{column}"), 2) FROM "{view}"').fetchone()[0]
+            total_value = float(total)
+        except Exception:
+            return None
+        status = "ok" if abs(total_value - 100.0) <= 0.5 else "not_a_partition"
+        return {"column": column, "sum": total_value, "status": status}
+
     def _write_result_preview(self, *, preview_rows: int) -> dict[str, Any]:
         import duckdb
 
@@ -1177,6 +1207,24 @@ class WorkspaceFlow:
                                 )
                         except Exception:
                             pass
+                        # Share-sum invariant: a share/percentage result that is a
+                        # true partition of its total sums to ~100%. Overlapping
+                        # group membership silently breaks that expectation, so
+                        # measure it and say so in the packet instead of letting
+                        # the reader discover it by adding rows up.
+                        share_check = self._share_sum_check(conn, view)
+                        if share_check:
+                            entry["share_sum_check"] = share_check
+                            if share_check["status"] != "ok":
+                                preview_md = (
+                                    preview_md
+                                    + f"\n\n[~] share check: `{share_check['column']}` sums to "
+                                    f"{share_check['sum']}% across all result rows (a partition "
+                                    "of the total would sum to ~100%). One entity counted in "
+                                    "multiple groups (overlapping cuts) or a non-grand-total "
+                                    "denominator scope both cause this; verify intent before "
+                                    "presenting these shares as portions of a whole."
+                                )
                         entry["preview_markdown"] = preview_md
                         entry["result_view"] = view
                     else:
@@ -2148,6 +2196,70 @@ def latest_open_session(repo_root: Path, workspace_rel: str, *, max_age_hours: i
     return candidates[0][1]
 
 
+def latest_session(repo_root: Path, workspace_rel: str) -> str | None:
+    """Return the most recent workflow_session id for a workspace, any status.
+
+    Unlike `latest_open_session` this does not filter on status or age:
+    `results` / `review` / `status` legitimately target sessions that are
+    already complete. Sorted by `updated_at` (session dir mtime as fallback).
+    """
+    layout = WorkspaceLayout(project_root=(Path(repo_root) / workspace_rel).resolve())
+    sessions_dir = layout.workflow_sessions_dir
+    if not sessions_dir.exists():
+        return None
+    candidates: list[tuple[datetime, str]] = []
+    for session_path in sessions_dir.iterdir():
+        if not session_path.is_dir():
+            continue
+        state_file = session_path / "session.json"
+        if not state_file.exists():
+            continue
+        updated_dt: datetime | None = None
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+            updated_dt = datetime.fromisoformat(str(data.get("updated_at") or ""))
+        except (json.JSONDecodeError, OSError, ValueError):
+            updated_dt = None
+        if updated_dt is None:
+            try:
+                updated_dt = datetime.fromtimestamp(state_file.stat().st_mtime, tz=timezone.utc)
+            except OSError:
+                continue
+        if updated_dt.tzinfo is None:
+            updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+        candidates.append((updated_dt, session_path.name))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def _resolve_session_id(repo_root: Path, session: str, workspace: str, cmd: str) -> str:
+    """Resolve the target session for a session-bound subcommand.
+
+    Explicit `--session` wins. Otherwise `--workspace` resolves to that
+    workspace's most recent session (any status). Errors with the exact
+    accepted forms instead of a bare `--session is required`, so a driving
+    agent can self-correct in one step instead of flailing through flag
+    permutations.
+    """
+    if session:
+        return session
+    if workspace:
+        resolved = latest_session(repo_root, workspace)
+        if resolved:
+            return resolved
+        raise SystemExit(
+            f"workspace-flow {cmd}: no workflow sessions found under "
+            f"{workspace}/interns/state/workflow_sessions/. "
+            f"Run `workspace-flow start --workspace {workspace}` first."
+        )
+    raise SystemExit(
+        f"workspace-flow {cmd}: pass --session <id>, or --workspace <path> "
+        f"to target that workspace's latest session."
+    )
+
+
 def write_session_handoff(repo_root: Path, workspace_rel: str, session_id: str) -> str | None:
     """Write a compact handoff doc for a session and return its relative path.
 
@@ -2898,7 +3010,11 @@ def main(argv: list[str] | None = None) -> int:
     # Strategy: parse the raw argv for a pre-subcommand --quiet first, then
     # add --quiet to every subparser.  After parse_args we OR the two values
     # so either placement is honoured without either overriding the other.
+    # `--json` gets the same treatment: driving agents naturally append it
+    # after the subcommand, and "unrecognized arguments: --json" triggers a
+    # retry/flail loop.
     _toplevel_quiet: bool = bool(argv and "--quiet" in _args_before_subcommand(argv))
+    _toplevel_json: bool = bool(argv and "--json" in _args_before_subcommand(argv))
 
     parser = argparse.ArgumentParser(prog="workspace-flow")
     parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
@@ -2916,6 +3032,19 @@ def main(argv: list[str] | None = None) -> int:
             help="Print a compact summary + artifact paths instead of full JSON.",
         )
 
+    def _add_session_or_workspace(p: argparse.ArgumentParser) -> None:
+        """Session-bound subcommands accept --session OR --workspace.
+
+        --workspace resolves to that workspace's most recent session, so a
+        driving agent that only knows the workspace path never errors on a
+        missing --session.
+        """
+        p.add_argument("--session", default="", help="Workflow session id (e.g. wf_...).")
+        p.add_argument(
+            "--workspace", default="",
+            help="Workspace path; targets its latest session when --session is omitted.",
+        )
+
     start = sub.add_parser("start")
     _add_quiet(start)
     start.add_argument("--workspace", required=True)
@@ -2930,8 +3059,7 @@ def main(argv: list[str] | None = None) -> int:
 
     status = sub.add_parser("status")
     _add_quiet(status)
-    status.add_argument("--session", default="")
-    status.add_argument("--workspace", default="")
+    _add_session_or_workspace(status)
     status.add_argument(
         "--diff",
         action="store_true",
@@ -2940,14 +3068,14 @@ def main(argv: list[str] | None = None) -> int:
 
     answer = sub.add_parser("answer")
     _add_quiet(answer)
-    answer.add_argument("--session", required=True)
+    _add_session_or_workspace(answer)
     answer.add_argument("--answer", required=True)
     answer.add_argument("--custom-definition", default="")
     answer.add_argument("--evidence-note", default="")
 
     results = sub.add_parser("results")
     _add_quiet(results)
-    results.add_argument("--session", required=True)
+    _add_session_or_workspace(results)
     results.add_argument("--preview-rows", type=int, default=PREVIEW_ROW_CAP)
     results.add_argument(
         "--kpi", default="",
@@ -2961,7 +3089,7 @@ def main(argv: list[str] | None = None) -> int:
 
     review_p = sub.add_parser("review")
     _add_quiet(review_p)
-    review_p.add_argument("--session", required=True)
+    _add_session_or_workspace(review_p)
     review_p.add_argument(
         "--verdict", choices=["ok", "blocked"], required=True,
         help="kpi-analyst's semantic verdict: ok = every KPI answers its intent; blocked = at least one does not.",
@@ -3052,10 +3180,19 @@ def main(argv: list[str] | None = None) -> int:
         help="Rotate trajectory.jsonl / events.jsonl when over this size.",
     )
 
+    # Accept --json after any subcommand name (same BUG-019 rationale as --quiet).
+    for _subparser in sub.choices.values():
+        if not any(action.dest == "json" for action in _subparser._actions):
+            _subparser.add_argument(
+                "--json", action="store_true",
+                help="Print the machine-readable result summary only.",
+            )
+
     args = parser.parse_args(argv)
-    # BUG-019: merge top-level --quiet (pre-subcommand) with subparser --quiet
-    # (post-subcommand) so both orderings are honoured.
+    # BUG-019: merge top-level --quiet/--json (pre-subcommand) with subparser
+    # values (post-subcommand) so both orderings are honoured.
     args.quiet = bool(args.quiet) or _toplevel_quiet
+    args.json = bool(getattr(args, "json", False)) or _toplevel_json
     if args.cmd == "start":
         repo_root_path = Path(args.repo_root).resolve()
         workspace_layout = WorkspaceLayout(
@@ -3132,22 +3269,32 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(json.dumps(diff, indent=2))
             return 0
-        if not args.session:
-            raise SystemExit("workspace-flow status requires --session (or use --diff with --workspace)")
-        result = WorkspaceFlow.from_session(args.repo_root, args.session).status()
+        session_id = _resolve_session_id(
+            Path(args.repo_root).resolve(), args.session, args.workspace, args.cmd
+        )
+        result = WorkspaceFlow.from_session(args.repo_root, session_id).status()
     elif args.cmd == "answer":
-        result = WorkspaceFlow.from_session(args.repo_root, args.session).answer(
+        session_id = _resolve_session_id(
+            Path(args.repo_root).resolve(), args.session, args.workspace, args.cmd
+        )
+        result = WorkspaceFlow.from_session(args.repo_root, session_id).answer(
             answer=args.answer,
             custom_definition=args.custom_definition,
             evidence_note=args.evidence_note,
         )
     elif args.cmd == "results":
-        result = WorkspaceFlow.from_session(args.repo_root, args.session).results(
+        session_id = _resolve_session_id(
+            Path(args.repo_root).resolve(), args.session, args.workspace, args.cmd
+        )
+        result = WorkspaceFlow.from_session(args.repo_root, session_id).results(
             preview_rows=args.preview_rows,
         )
     elif args.cmd == "review":
         per_kpi = json.loads(args.kpi_notes) if args.kpi_notes else []
-        result = WorkspaceFlow.from_session(args.repo_root, args.session).review(
+        session_id = _resolve_session_id(
+            Path(args.repo_root).resolve(), args.session, args.workspace, args.cmd
+        )
+        result = WorkspaceFlow.from_session(args.repo_root, session_id).review(
             verdict=args.verdict,
             summary=args.summary,
             per_kpi=per_kpi,

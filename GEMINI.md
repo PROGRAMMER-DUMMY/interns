@@ -159,7 +159,11 @@ parallel agent work, subagents, workers, or a review team.
 
 ## Data Isolation Rule
 
-For any active workspace, always restrict dataset processing strictly to EMR data from Hospital A (datasets/EMR/trendytech-hospital-a). Ensure interns/state/workspace_settings.json is created or updated with a dataset_allowlist enforcing this path before running workspace commands like onboarding or profiling.
+When the operator scopes a workspace to a subset of its datasets, persist that scope as a
+`dataset_allowlist` in `workspaces/<project>/interns/state/workspace_settings.json` BEFORE running
+onboarding, profiling, or generation. If the allowlist file already exists, honor it in every
+session without being re-told. All downstream stages must read only from allowlisted paths. (Full
+rule: `AGENTS.md` > Dataset Isolation Rule.)
 
 ## KPI Result Packet Forwarding Rule
 
@@ -176,3 +180,46 @@ markdown, and the same packet is written to `interns/reports/kpi_results/current
   but you only printed paths or a one-line status, that is an under-presentation bug — surface the
   rendered tables.
 - If the user does ask "show results" after the fact, still forward the file; never rebuild it.
+- Compact vs full: by default forward the COMPACT packet (`interns/reports/kpi_results/current.md`,
+  same content as `interns/runs/<date>/results.md`). If the user asks for "full results" /
+  "entire results", forward the FULL packet (`current_full.md` / `runs/<date>/results_full.md`)
+  verbatim — never answer a full-results request with the compact packet or a hand-built summary.
+
+### Results read discipline (token/quota guardrail)
+
+Reading the packet must be ONE cheap read. Re-reading the results in many forms in a single
+"show me the results" turn burned ~7% of a quota in one go -- do not repeat that.
+
+- Read `interns/reports/kpi_results/current.md` with the NATIVE `ReadFile` tool, NOT a shell
+  command (`Get-Content`/`cat`/`powershell`). Shell output is summarized/capped by
+  `model.summarizeToolOutput.run_shell_command.tokenBudget` (12000), which truncates a long read
+  and is exactly what makes the re-read loop start. `ReadFile` is not shell-summarized and returns
+  the whole compact file in one read. `current.md` is now the COMPACT packet (SQL is linked, not
+  inlined; the full inlined-SQL packet is `current_full.md`), so it is small.
+- Do NOT re-read the same file with `-TotalCount`, `-Head`, `-Tail`, `-Raw`, `-Encoding`,
+  `Select-String`, or `workspace-flow results --preview-rows N` back-to-back to "see more" -- they
+  all return the same packet. One `ReadFile` is the whole thing.
+- For many KPIs, forward the per-KPI files `interns/runs/<date>/kpi_<id>.md` (one ReadFile each,
+  each self-contained) instead of the combined file -- this never exceeds the read cap.
+- NEVER `Get-Content` the evidence JSON `interns/generated/evidence/kpi_results/current.json`
+  (a ~2000-line machine artifact). Read the paired `.md`. (CLAUDE.md/AGENTS.md token discipline.)
+- NEVER use `-Wait` or any follow/stream flag on these files -- it hangs until cancelled.
+- If the CLI display shows "... first N lines hidden ...", the read SUCCEEDED -- that is a UI
+  truncation, not a failure. Forward what was read; do not retry with another command.
+
+## Grain-Bucketing Blocker Rule
+
+When the execution harness blocks a share/percentage KPI on a grain-bucketing decision (a raw
+continuous cut like Age/DOB fragmenting the denominator), the blocker question panel shows NO
+options -- this is a pipeline decision, not a feature blocker. Do NOT loop on
+`apply-kpi-panel-answer` or `workspace-flow answer` (they error with "current panel has no options"
+/ "not waiting for a supported answer"). Apply it deterministically, then re-run generation:
+
+```
+uv run apply-pipeline-decision --kpi-id <kpi_id> --grain-bucketing band_continuous_cuts
+uv run workspace-flow start --workspace workspaces/<project> --intent full_kpi_sql --domain <domain>
+```
+
+Use `band_continuous_cuts:<width>` for a non-default band width (default 10), or `exact_value_grain`
+only if exact-value rows are genuinely wanted. (The panel route for this facet is a known open bug --
+see `develop_spec/follow_ups.md`.)

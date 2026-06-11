@@ -138,6 +138,10 @@ Do NOT re-type or reconstruct the generated SQL or result tables from memory. Re
 memory caused a fabricated data-source render (BUG-015). Show the emitted packet once; do not
 paraphrase the SQL. (Residual from BUG-015.)
 
+Default = the compact packet above (same content as `interns/runs/<date>/results.md`). On
+"full results" forward `interns/reports/kpi_results/current_full.md` (= `runs/<date>/results_full.md`)
+verbatim instead. See `AGENTS.md` > Compact vs full results.
+
 ## Token Discipline
 
 Per-run token cost is ~44 pp of quota. These habits reduce it:

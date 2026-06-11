@@ -392,6 +392,79 @@ under-presented and should be treated as a bug, not a normal step.
 (Residual from BUG-015; the completion path now auto-emits this packet, but any explicit "show
 results" turn must still forward the file, not reconstruct from memory.)
 
+### Compact vs full results
+
+Two packet variants exist; pick by what the user asked for and forward the file verbatim either way:
+
+- Default ("results", "show results", or pipeline completion): forward the COMPACT packet —
+  `interns/reports/kpi_results/current.md` (same content as `interns/runs/<date>/results.md`).
+  SQL is linked per KPI, not inlined.
+- "full results" / "entire results": forward the FULL packet —
+  `interns/reports/kpi_results/current_full.md` (same content as
+  `interns/runs/<date>/results_full.md`). SQL is inlined per KPI.
+
+Never answer a "full results" request with the compact packet, a hand-built summary table, or a
+re-authored excerpt. Even the full packet caps result previews; the complete row set lives in
+`interns/generated/evidence/kpi_results/current.json` (machine-only — query it, do not dump it).
+
+### Results read discipline (token/quota guardrail)
+
+Reading the packet must be ONE cheap read. Re-reading the results in many forms in a single turn
+has burned ~7% of a model quota in one go — do not repeat that. These rules apply in every CLI
+(Claude, Gemini, Antigravity, or other agent frontends):
+
+- Read the packet with the agent's NATIVE file-read tool, not a shell command
+  (`Get-Content` / `cat` / `type`). Shell output is summarized or capped by the CLI harness, which
+  truncates long reads and is exactly what starts the re-read loop. Native reads return the whole
+  file once.
+- Do NOT re-read the same file with `-TotalCount`, `-Head`, `-Tail`, `-Raw`, `-Encoding`,
+  `Select-String`, or `workspace-flow results --preview-rows N` back-to-back to "see more" — they
+  all return the same packet. One native read is the whole thing.
+- For many KPIs, forward the per-KPI files `interns/runs/<date>/kpi_<id>.md` (one read each, each
+  self-contained) instead of the combined file — this never exceeds a read cap.
+- NEVER use `-Wait` or any follow/stream flag on these files — it hangs until cancelled.
+- If the CLI display shows "... first N lines hidden ...", the read SUCCEEDED — that is a UI
+  truncation, not a failure. Forward what was read; do not retry with another command.
+
+## Dataset Isolation Rule
+
+When the operator scopes a workspace to a subset of its datasets (a source system, a site, a
+partner, a date range of files — any subset), persist that scope as a `dataset_allowlist` in
+`workspaces/<project>/interns/state/workspace_settings.json` BEFORE running onboarding, profiling,
+or generation:
+
+```json
+{
+  "dataset_allowlist": ["datasets/<subset-path>"]
+}
+```
+
+- All downstream stages (profiling, contracts, feature mapping, medallion ingestion, generated
+  SQL/engine code) must read only from allowlisted paths.
+- The scope is workspace state, not prose: do not rely on the conversation to remember it. If the
+  allowlist file exists, honor it in every session and every CLI without being re-told.
+- When verifying isolation, compare VALUES, not keys or row counts — sibling datasets can share
+  identical ID sets and row counts while differing in measures. A provenance check that only joins
+  on keys can silently pass for the wrong source.
+
+## Grain-Bucketing Blocker Rule
+
+When the execution harness blocks a share/percentage KPI on a grain-bucketing decision (a raw
+continuous cut fragmenting the denominator — e.g. an exact-valued numeric or date-derived
+dimension), the blocker question panel shows NO options — this is a pipeline decision, not a
+feature blocker. Do NOT loop on `apply-kpi-panel-answer` or `workspace-flow answer` (they error
+with "current panel has no options" / "not waiting for a supported answer"). Apply it
+deterministically, then re-run generation:
+
+```powershell
+uv run apply-pipeline-decision --kpi-id <kpi_id> --grain-bucketing band_continuous_cuts
+uv run workspace-flow start --workspace workspaces/<project> --intent full_kpi_sql --domain <domain>
+```
+
+Use `band_continuous_cuts:<width>` for a non-default band width (default 10), or
+`exact_value_grain` only if exact-value rows are genuinely wanted. (The panel route for this facet
+is a known open bug — see `develop_spec/follow_ups.md`.)
+
 ## Token Discipline
 
 Per-run token cost is currently ~44 pp of model quota. These habits reduce it materially:
