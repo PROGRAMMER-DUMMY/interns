@@ -874,9 +874,24 @@ def parse_kpi(
             # fallback to the cut columns) and make sure it is part of the grain.
             # A raw/aliased token must never reach PARTITION BY or the view is
             # non-executable (BUG-011).
-            partition_col = _resolve_group_column(
-                partition, lookup, kpi, tuple(cut_columns)
-            ) if partition else ""
+            # A bare TIME-GRAIN word as the group ("for year") is not a column:
+            # it names the time-bucket dimension already in the grain, and the
+            # share is within-period (each year's groups sum to ~100%). Letting
+            # it fall through to column resolution bound it to an unrelated
+            # emitted column (the metric's own id input), polluting the grain
+            # with one row per entity.
+            partition_time_expr = ""
+            partition_low = str(partition or "").strip().lower()
+            if partition_low in {"year", "quarter", "month", "week", "day"}:
+                partition_time_expr = next(
+                    (d.expression for d in grain_dimensions if d.alias == partition_low),
+                    "",
+                )
+            partition_col = ""
+            if partition and not partition_time_expr:
+                partition_col = _resolve_group_column(
+                    partition, lookup, kpi, tuple(cut_columns)
+                )
             if partition_col and partition_col in emitted:
                 _add_grain(_quote(partition_col), _norm_alias(partition_col))
 
@@ -967,7 +982,12 @@ def parse_kpi(
                 denominator_scope is not None
                 and denominator_scope not in {"grand_total", "global_total"}
             )
-            if _denom_is_within and partition_col and partition_col in emitted:
+            if partition_time_expr:
+                # "for <time-grain>" in the metric is an explicit within-period
+                # share: each period's groups sum to ~100%.
+                _denom_window = WindowSpec(partition_by=(partition_time_expr,))
+                _scope_label = f"within_{partition_low}"
+            elif _denom_is_within and partition_col and partition_col in emitted:
                 _denom_window = WindowSpec(partition_by=(_quote(partition_col),))
                 _scope_label = denominator_scope
             else:
