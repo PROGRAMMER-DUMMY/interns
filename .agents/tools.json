@@ -55,7 +55,7 @@
                       "safety":  "local_safe_file_paths_only_no_content_reads",
                       "required_skills":  [
                                               "workspace-governance",
-                                              "clarify-ambiguity"
+                                              "grill-requirements"
                                           ]
                   },
                   {
@@ -494,7 +494,7 @@
                       "required_skills":  [
                                               "workspace-governance",
                                               "data-engineering-pipeline-design",
-                                              "clarify-ambiguity"
+                                              "grill-requirements"
                                           ]
                   },
                   {
@@ -730,7 +730,6 @@
                       "safety":  "local_safe",
                       "required_skills":  [
                                               "domain-model",
-                                              "clarify-ambiguity",
                                               "grill-requirements"
                                           ]
                   },
@@ -872,7 +871,7 @@
                                               "domain-model",
                                               "feature-derivation-library",
                                               "workspace-kpi-query-optimizer",
-                                              "clarify-ambiguity"
+                                              "grill-requirements"
                                           ]
                   },
                   {
@@ -912,7 +911,7 @@
                                               "domain-model",
                                               "feature-derivation-library",
                                               "workspace-kpi-query-optimizer",
-                                              "clarify-ambiguity"
+                                              "grill-requirements"
                                           ]
                   },
                   {
@@ -1066,7 +1065,7 @@
                       "safety":  "local_safe_json_backed_user_choice_panel",
                       "required_skills":  [
                                               "data-engineering-pipeline-design",
-                                              "clarify-ambiguity"
+                                              "grill-requirements"
                                           ]
                   },
                   {
@@ -1232,7 +1231,6 @@
                                   ],
                       "safety":  "local_safe",
                       "required_skills":  [
-                                              "clarify-ambiguity",
                                               "grill-requirements",
                                               "workspace-kpi-query-optimizer"
                                           ]

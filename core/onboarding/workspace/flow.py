@@ -938,7 +938,7 @@ class WorkspaceFlow:
                     "completion_headline": completion_headline,
                     "suggested_skills": [
                         {"name": "kpi-analyst", "why": "Validate generated SQL and result samples against KPI intent."},
-                        {"name": "self-grill", "why": "EXECUTED — see summary.self_grill and the delegation brief for kpi_output_verification."},
+                        {"name": "grill-requirements", "why": "self-grill mode EXECUTED — see summary.self_grill and the delegation brief for kpi_output_verification."},
                     ],
                     "required_specialists": [
                         "data-engineer",
@@ -1582,7 +1582,7 @@ def _compact_panel(
         panel["suggested_skills"] = [
             {"name": "kpi-analyst", "why": "Interpret the KPI question and validate proposed mappings."},
             {"name": "feature-derivation-library", "why": "Choose between direct and derived feature options."},
-            {"name": "clarify-ambiguity", "why": "Flag missing context before applying an answer."},
+            {"name": "grill-requirements", "why": "Clarify-ambiguity mode: flag missing context before applying an answer."},
         ]
     if orchestration_context:
         panel["orchestration_context"] = orchestration_context

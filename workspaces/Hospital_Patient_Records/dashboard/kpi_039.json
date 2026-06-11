@@ -1,0 +1,23 @@
+{
+  "artifact_type": "dashboard_spec",
+  "version": 2,
+  "kpi_id": "kpi_039",
+  "updated_at": "2026-06-11T08:45:24.320718+00:00",
+  "machine_defaults": {
+    "title": "KPI: kpi_008",
+    "metric": "",
+    "y_label": "",
+    "chart_type": "big_number",
+    "y": "value",
+    "agg": "sum",
+    "sql_path": "",
+    "definition": {
+      "business_question": "KPI: kpi_008",
+      "description": "",
+      "metric": "",
+      "cuts": ""
+    },
+    "_column_validation": []
+  },
+  "user_overrides": {}
+}

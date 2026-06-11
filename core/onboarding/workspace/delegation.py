@@ -200,7 +200,7 @@ _STAGE_BRIEFS: dict[str, dict[str, Any]] = {
             "answer the business question (semantic correctness, not just 'it ran')"
         ),
         "prompt_template": (
-            "Act as the kpi-analyst / self-grill specialist for workspace `{workspace}`. The self-grill "
+            "Act as the kpi-analyst specialist (grill-requirements self-grill mode) for workspace `{workspace}`. The self-grill "
             "gate already EXECUTED each KPI and cross-checked metric, cuts, filters, and cross-engine "
             "parity: `{verdict_status}` — {verdict_summary}. Read "
             "`interns/reports/kpi_output_verification.md`. For each KPI, judge whether the actual result "
@@ -225,12 +225,12 @@ STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
     },
     "kpi_definition": {
         "agents": ["business-analyst", "kpi-analyst"],
-        "skills": ["grill-requirements", "clarify-ambiguity", "kpi-clarification",
+        "skills": ["grill-requirements", "kpi-clarification",
                    "stakeholder-memory", "to-solution-brief", "workspace-kpi-query-optimizer"],
     },
     "data_model_design": {
         "agents": ["data-engineer", "source-to-target-reviewer"],
-        "skills": ["data-model-creation", "domain-model", "grill-requirements", "clarify-ambiguity"],
+        "skills": ["data-model-creation", "domain-model", "grill-requirements"],
     },
     "relationship_review": {
         "agents": ["data-engineer"],
@@ -267,15 +267,15 @@ STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
     },
     "kpi_completion_review": {
         "agents": ["kpi-analyst"],
-        "skills": ["kpi-analyst", "self-grill"],
+        "skills": ["kpi-analyst", "grill-requirements"],
     },
     "kpi_output_verification": {
         "agents": ["kpi-analyst", "validation-gatekeeper"],
-        "skills": ["kpi-analyst", "self-grill"],
+        "skills": ["kpi-analyst", "grill-requirements"],
     },
     "result_review": {
         "agents": ["data-analyst"],
-        "skills": ["clarify-ambiguity"],
+        "skills": ["grill-requirements"],
     },
     "dashboard_refresh": {
         "agents": ["dashboard-engineer"],

@@ -126,7 +126,7 @@ def prepare_vocabulary_confirmation_panel(
             "docs/data_dictionary.*",
         ],
         "suggested_skills": [
-            {"name": "clarify-ambiguity",
+            {"name": "grill-requirements",
              "why": "Confirm which workspace-derived terms map to which category before they bake into the lexicon."},
             {"name": "domain-model",
              "why": "Cross-check derived entity_terms against the data model."},

@@ -477,10 +477,10 @@ def _conversation_skills(session: dict[str, Any]) -> list[dict[str, Any]]:
     """
     score = int((session.get("quality_score") or {}).get("understanding_score") or 0)
     return [
-        {"name": "grill-requirements", "active": score < 85,
-         "why": "Interview the user one decision at a time to resolve KPI question, metric, grain, cuts, and filters."},
-        {"name": "clarify-ambiguity", "active": score >= 60,
-         "why": "Resolve the few high-impact ambiguities the understanding score still flags before finalizing."},
+        {"name": "grill-requirements", "active": True,
+         "why": ("Interview the user one decision at a time to resolve KPI question, metric, grain, cuts, and filters."
+                 if score < 60 else
+                 "Clarify-ambiguity mode: resolve the few high-impact ambiguities the understanding score still flags before finalizing.")},
         {"name": "stakeholder-memory", "active": True,
          "why": "Save accepted KPI definitions, formats, and preferences as durable decisions."},
         {"name": "to-solution-brief", "active": score >= 85,

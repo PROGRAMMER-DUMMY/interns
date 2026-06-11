@@ -9,11 +9,6 @@
   },
   "skills": [
     {
-      "name": "clarify-ambiguity",
-      "description": "Use when a request is underspecified, ambiguous, assumption-heavy, or likely to produce a wrong, unsafe, costly, or irrelevant answer without clarification. Trigger when missing context materially affects correctness, safety, user intent, implementation choices, or recommendation quality. Do not trigger for clear requests or minor ambiguities that can be handled by stating a reasonable assumption.",
-      "path": "skills/clarify-ambiguity/SKILL.md"
-    },
-    {
       "name": "dashboard-design",
       "description": "Design, customize, debug, and verify per-workspace BI dashboards. Owns the dashboard/ directory in any workspace: JSON spec contracts (machine_defaults + user_overrides), chart-type inference, Dash renderer, static HTML export, dialect dispatch, and live callback testing. Use whenever the user wants a chart, a layout change, a new filter, a customization, or a dashboard bug investigated.",
       "path": "skills/dashboard-design/SKILL.md"
@@ -25,7 +20,7 @@
     },
     {
       "name": "data-model-creation",
-      "description": "Create a data model WITH the user through conversation, not by guessing from column names. Interview for grain, entities, keys, facts/dimensions, relationships, cardinality, temporal anchors, and SCD policy; score how well the model is understood; then produce a governed model + ERD/SVG. Use when a workspace needs a data model created, refined, or proven before SQL/pipeline generation, or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[clarify-ambiguity]], [[domain-model]], [[stakeholder-memory]], and [[dashboard-design]] (for the diagram export).",
+      "description": "Create a data model WITH the user through conversation, not by guessing from column names. Interview for grain, entities, keys, facts/dimensions, relationships, cardinality, temporal anchors, and SCD policy; score how well the model is understood; then produce a governed model + ERD/SVG. Use when a workspace needs a data model created, refined, or proven before SQL/pipeline generation, or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[grill-requirements]], [[domain-model]], [[stakeholder-memory]], and [[dashboard-design]] (for the diagram export).",
       "path": "skills/data-model-creation/SKILL.md"
     },
     {
@@ -72,11 +67,6 @@
       "name": "kpi-clarification",
       "description": "Converts ambiguous or loosely written KPI descriptions into precise, unambiguous business metric definitions. Use this skill whenever a user mentions a KPI, metric, business measure, or indicator that needs to be defined, clarified, structured, or documented \u2014 even if they don't use the word \"KPI\" explicitly. Trigger examples: \"define this metric\", \"what does this KPI mean\", \"help me document our conversion rate\", \"clarify this measure for our BI team\", \"we track X, can you write it up properly\", \"our dashboard shows Y, not sure what it means\", \"turn this into a proper metric definition\". Always use this skill when the user presents any business performance metric, OKR component, or analytics measure that needs structured decomposition.",
       "path": "skills/kpi-clarification/SKILL.md"
-    },
-    {
-      "name": "self-grill",
-      "description": "Use BEFORE you commit to a plan, design recommendation, or implementation approach. The skill turns the orchestrating agent into its own interviewer: it generates 3-6 grilling questions tailored to the current proposal, answers each with concrete evidence (file paths, samples, prior decisions), and surfaces any unknown-unknowns it can no longer brush past. Output is a short Self-Grill Audit block that goes into the response BEFORE the final recommendation.",
-      "path": "skills/self-grill/SKILL.md"
     },
     {
       "name": "stakeholder-memory",
@@ -159,7 +149,7 @@
         "safety": "local_safe_file_paths_only_no_content_reads",
         "required_skills": [
           "workspace-governance",
-          "clarify-ambiguity"
+          "grill-requirements"
         ]
       },
       {
@@ -596,7 +586,7 @@
         "required_skills": [
           "workspace-governance",
           "data-engineering-pipeline-design",
-          "clarify-ambiguity"
+          "grill-requirements"
         ]
       },
       {
@@ -832,7 +822,6 @@
         "safety": "local_safe",
         "required_skills": [
           "domain-model",
-          "clarify-ambiguity",
           "grill-requirements"
         ]
       },
@@ -973,7 +962,7 @@
           "domain-model",
           "feature-derivation-library",
           "workspace-kpi-query-optimizer",
-          "clarify-ambiguity"
+          "grill-requirements"
         ]
       },
       {
@@ -1013,7 +1002,7 @@
           "domain-model",
           "feature-derivation-library",
           "workspace-kpi-query-optimizer",
-          "clarify-ambiguity"
+          "grill-requirements"
         ]
       },
       {
@@ -1167,7 +1156,7 @@
         "safety": "local_safe_json_backed_user_choice_panel",
         "required_skills": [
           "data-engineering-pipeline-design",
-          "clarify-ambiguity"
+          "grill-requirements"
         ]
       },
       {
@@ -1333,7 +1322,6 @@
         ],
         "safety": "local_safe",
         "required_skills": [
-          "clarify-ambiguity",
           "grill-requirements",
           "workspace-kpi-query-optimizer"
         ]
@@ -1479,13 +1467,12 @@
       "skills": [
         "workspace-governance",
         "dashboard-design",
-        "clarify-ambiguity",
-        "self-grill",
+        "grill-requirements",
         "domain-model",
         "kpi-analyst",
         "evolution"
       ],
-      "default_prompt": "Act as the dashboard-engineering role. Own everything under `workspaces/<ws>/dashboard/` and the platform modules at `core/dashboard/*`, `tools/workspace_dashboard.py`, `tests/test_dashboard_*.py`. Honor the two-section spec contract: rewrite `machine_defaults` on every regeneration; preserve `user_overrides` verbatim. Use live SQL re-execution via DuckDB \u2014 never read stale snapshots. Render blocked KPIs as recovery cards, not by hiding them. CHART-QUALITY DEFAULTS (produce a correct, readable chart by default, not just valid markup): no duplicate titles (card header carries the title; pass title='' to inline figures); trend/line charts aggregate the measure by the date axis (one value per period), never scatter raw rows; share/percentage charts aggregate by (x,color) so each stack is a true 0-100% and cap dense categoricals to a readable top-N with an 'Other' bucket; ranked/top-N charts rank by the highest-cardinality NON-constant categorical column, never a column pinned to one value by a filter; responsive sizing + margins so charts never clip; apply the shared corporate theme at one seam, do not hand-style. VISUAL VERIFICATION IS A MANDATORY GATE before showing any dashboard: structure/spec/headline checks are NOT verification. Run `uv run dashboard-verify --url <file:// or http://127.0.0.1:port> --screenshot <png>` which drives a real browser (agent-browser) and FAILS on overflow / blank charts / missing legend; a non-zero exit is a blocker \u2014 fix and re-run. THEN read the captured screenshot and judge it visually. Only claim 'looks professional' after the gate passes AND you have seen it. For the live Dash app, boot it and verify the URL; use agent-browser click/hover to confirm legend-toggle and panel select/deselect actually work. For any chart-type addition or schema change, ship a regression test that asserts the quality property (aggregated / percent 0-100% / ranked by non-constant column), not merely that a figure was produced. Debug callbacks via `/_dash-dependencies` and `/_dash-layout` before reaching for browser tests. Do not edit upstream contracts (`kpi_registry.json`, `relationship_contracts.json`, `source_to_target_plan.json`) \u2014 escalate to `data-engineer` or `kpi-analyst` when the chart is wrong because the data is wrong. JUDGMENT SKILLS (bounded firing): run `clarify-ambiguity` at the START only when the request is genuinely ambiguous (which KPI / dimension / chart type / fit-to-screen vs detail) \u2014 never on a clearly-specified request; run `self-grill` at the END to emit a short audit of the assumptions you made (e.g. why log scale, which dimensions you dropped) BEFORE presenting. self-grill is ADVISORY: it surfaces confidence/assumptions to the user but NEVER overrides the deterministic `dashboard-verify` gate, which remains the sole pass/fail authority. See skills/dashboard-design/SKILL.md for the full quality + verification procedure.",
+      "default_prompt": "Act as the dashboard-engineering role. Own everything under `workspaces/<ws>/dashboard/` and the platform modules at `core/dashboard/*`, `tools/workspace_dashboard.py`, `tests/test_dashboard_*.py`. Honor the two-section spec contract: rewrite `machine_defaults` on every regeneration; preserve `user_overrides` verbatim. Use live SQL re-execution via DuckDB \u2014 never read stale snapshots. Render blocked KPIs as recovery cards, not by hiding them. CHART-QUALITY DEFAULTS (produce a correct, readable chart by default, not just valid markup): no duplicate titles (card header carries the title; pass title='' to inline figures); trend/line charts aggregate the measure by the date axis (one value per period), never scatter raw rows; share/percentage charts aggregate by (x,color) so each stack is a true 0-100% and cap dense categoricals to a readable top-N with an 'Other' bucket; ranked/top-N charts rank by the highest-cardinality NON-constant categorical column, never a column pinned to one value by a filter; responsive sizing + margins so charts never clip; apply the shared corporate theme at one seam, do not hand-style. VISUAL VERIFICATION IS A MANDATORY GATE before showing any dashboard: structure/spec/headline checks are NOT verification. Run `uv run dashboard-verify --url <file:// or http://127.0.0.1:port> --screenshot <png>` which drives a real browser (agent-browser) and FAILS on overflow / blank charts / missing legend; a non-zero exit is a blocker \u2014 fix and re-run. THEN read the captured screenshot and judge it visually. Only claim 'looks professional' after the gate passes AND you have seen it. For the live Dash app, boot it and verify the URL; use agent-browser click/hover to confirm legend-toggle and panel select/deselect actually work. For any chart-type addition or schema change, ship a regression test that asserts the quality property (aggregated / percent 0-100% / ranked by non-constant column), not merely that a figure was produced. Debug callbacks via `/_dash-dependencies` and `/_dash-layout` before reaching for browser tests. Do not edit upstream contracts (`kpi_registry.json`, `relationship_contracts.json`, `source_to_target_plan.json`) \u2014 escalate to `data-engineer` or `kpi-analyst` when the chart is wrong because the data is wrong. JUDGMENT SKILLS (bounded firing): run `grill-requirements` at the START only when the request is genuinely ambiguous (which KPI / dimension / chart type / fit-to-screen vs detail) \u2014 never on a clearly-specified request; run `grill-requirements` at the END to emit a short audit of the assumptions you made (e.g. why log scale, which dimensions you dropped) BEFORE presenting. grill-requirements is ADVISORY: it surfaces confidence/assumptions to the user but NEVER overrides the deterministic `dashboard-verify` gate, which remains the sole pass/fail authority. See skills/dashboard-design/SKILL.md for the full quality + verification procedure.",
       "safety": "governed_dashboard_spec_local_safe_by_default",
       "source_path": "skills/dashboard-design/agents/dashboard-team.yaml",
       "targets": {
@@ -1747,71 +1734,6 @@
       }
     },
     {
-      "name": "agent-advisor-router",
-      "display_name": "Agent Advisor Router",
-      "description": "Advises which specialist agent, skill chain, sandbox, and model tier should handle a task before expensive work starts.",
-      "skills": [
-        "workspace-governance",
-        "clarify-ambiguity",
-        "evolution"
-      ],
-      "default_prompt": "Act as the advisor/router. Classify the user's request, choose the narrowest specialist role, choose the cheapest sufficient model tier, and name the required skills and tool route. Escalate only when ambiguity, production risk, security, or semantic correctness requires it. Do not perform the downstream implementation yourself unless no specialist route fits.",
-      "safety": "read_only_routing_and_cost_control_advice",
-      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
-      "targets": {
-        "codex": {
-          "enabled": true,
-          "sandbox_mode": "read-only"
-        },
-        "claude": {
-          "enabled": true,
-          "permission": "read-only"
-        },
-        "gemini": {
-          "enabled": true
-        }
-      },
-      "model_policy": {
-        "default_tier": "light",
-        "use_light_for": [
-          "task classification",
-          "agent selection",
-          "model tier recommendation"
-        ],
-        "escalate_to_standard_for": [
-          "conflicting routes",
-          "missing active workspace context"
-        ],
-        "escalate_to_deep_for": [
-          "only when route selection itself affects production safety"
-        ]
-      }
-    },
-    {
-      "name": "databricks-access-gates",
-      "display_name": "Databricks Access Gates",
-      "description": "Ask for missing Databricks access gates",
-      "skills": [
-        "databricks-access-gates"
-      ],
-      "default_prompt": "Use Databricks access gates to identify missing scopes, grants, policies, approvals, warehouse paths, and workspace permissions before retrying Databricks remote actions.",
-      "safety": "follows_skill_policy",
-      "source_path": "skills/databricks-access-gates/agents/openai.yaml",
-      "targets": {}
-    },
-    {
-      "name": "feature-derivation-library",
-      "display_name": "Feature Derivation Library",
-      "description": "Use reusable KPI feature derivation patterns safely.",
-      "skills": [
-        "feature-derivation-library"
-      ],
-      "default_prompt": "Use reusable derivation patterns to propose evidence-backed KPI feature mappings without treating candidates as proof.",
-      "safety": "follows_skill_policy",
-      "source_path": "skills/feature-derivation-library/agents/openai.yaml",
-      "targets": {}
-    },
-    {
       "name": "kpi-analyst",
       "display_name": "KPI Analyst",
       "description": "Interpret KPI sheets and validate KPI queries.",
@@ -1887,32 +1809,6 @@
       ],
       "default_prompt": "Run local-safe validation gates only. Treat validation errors as blockers, summarize artifact paths, and never hand-edit generated contracts to clear failures. Enforce Bronze/Silver standards, strict exception compensating controls, workflow reroute policy, data-quality, layered pipeline, project, and reliability harnesses before promotion.",
       "safety": "local_safe_validation_no_generated_contract_edits",
-      "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
-      "targets": {
-        "codex": {
-          "enabled": true,
-          "sandbox_mode": "workspace-write"
-        },
-        "claude": {
-          "enabled": true,
-          "permission": "workspace-write"
-        },
-        "gemini": {
-          "enabled": true
-        }
-      }
-    },
-    {
-      "name": "integration-notification-operator",
-      "display_name": "Integration Notification Operator",
-      "description": "Bridges Slack, Teams, MCP, or plugin frontends to existing workspace-flow and session-snapshot commands.",
-      "skills": [
-        "workspace-governance",
-        "stakeholder-memory",
-        "evolution"
-      ],
-      "default_prompt": "Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post the generated current.md verbatim as the human card, use current.json only for buttons/options and answer application, and record trajectory/session events. Do not collapse panels into a generic ask-user text box.",
-      "safety": "notification_and_approval_bridge_no_direct_dataset_or_remote_mutation",
       "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
       "targets": {
         "codex": {

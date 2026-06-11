@@ -58,18 +58,18 @@ When adding behavior, extend the data-driven engine; only touch the text-based
 
 Two repo-native skills wrap the work — bounded so a fragile agent doesn't stall:
 
-- **`clarify-ambiguity`** — at the INPUT, and ONLY when the request is genuinely
+- **`grill-requirements`** — at the INPUT, and ONLY when the request is genuinely
   ambiguous (which KPI / which dimension / which chart type / fit-to-screen vs
   detail). Do NOT fire it on a clearly-specified request. Stops the agent guessing
   wrong and building the wrong dashboard.
-- **`self-grill`** — at the OUTPUT, before presenting: emit a short audit of the
+- **`grill-requirements`** — at the OUTPUT, before presenting: emit a short audit of the
   assumptions made (why log scale, which dimensions were dropped, why this chart
   type). It is **advisory** — it surfaces confidence/assumptions to the user but
   **never overrides the `dashboard-verify` gate**, which stays the sole pass/fail
-  authority. A confident self-grill cannot wave through a failed overflow/color
+  authority. A confident grill-requirements cannot wave through a failed overflow/color
   check; a low-confidence one is a signal to the user, not a silent block.
 
-(Use the REPO skills `clarify-ambiguity` / `self-grill` — not the plugin
+(Use the REPO skills `grill-requirements` / `grill-requirements` — not the plugin
 `clarify`/`self-score`/`grill-me`, which aren't reliably present for repo agents.)
 
 ## Chart-quality defaults (auto-apply on every regeneration)

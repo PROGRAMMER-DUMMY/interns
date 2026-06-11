@@ -80,3 +80,24 @@ User answers that resolve KPI mappings, formula-derived features, temporal ancho
 contract questions must be recorded as accepted decisions before implementation relies on them.
 
 Do not write outputs outside `workspaces/<project>/interns/`.
+
+## Mode: Self-Grill (merged from the self-grill skill)
+
+Before committing to a plan, design recommendation, or implementation approach,
+turn the interrogation inward: generate 3-6 grilling questions tailored to the
+current proposal, answer each with concrete evidence (file paths, samples,
+prior decisions), and surface any unknown-unknowns. Emit a short Self-Grill
+Audit block BEFORE the final recommendation. Trigger before "what's the best
+approach for X" / "should I use A or B" style answers; skip for trivial or
+mechanical responses.
+
+## Mode: Clarify Ambiguity (merged from the clarify-ambiguity skill)
+
+Clarify only when a wrong assumption would materially change the answer or
+cause wasted work. If ambiguity is low-risk and reversible, proceed with the
+most likely interpretation and STATE the assumption. For KPI/query mappings,
+derivation formulas, temporal anchors, policy/SLA/contract, or
+production-impacting choices, never proceed from assumption: inspect available
+context first (files, configs, tests, panels, profiles), then ask ONE targeted
+question before generating executable logic. Ask only for intent, preference,
+permissions, or facts that are genuinely unavailable.

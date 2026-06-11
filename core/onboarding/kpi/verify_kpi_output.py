@@ -628,7 +628,7 @@ class KPIOutputVerifier:
 
 def _render_report(result: VerifyResult) -> str:
     lines = [
-        "# KPI Output Verification (self-grill)",
+        "# KPI Output Verification (grill-requirements self-grill mode)",
         "",
         f"- Workspace: `{result.workspace}`",
         f"- Verdict: `{'PASSED' if result.ok else 'BLOCKED'}`",

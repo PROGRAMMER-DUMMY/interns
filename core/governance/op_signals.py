@@ -174,12 +174,12 @@ def signals_to_skills(signals: OpSignals) -> list[dict[str, Any]]:
         )
 
     if signals.ambiguous:
-        _add("clarify-ambiguity", "business-analyst",
+        _add("grill-requirements", "business-analyst",
              "the result is ambiguous/underspecified; resolve before proceeding")
     if signals.empty_panel or signals.stuck:
         _add("kpi-analyst", "kpi-analyst",
              "the pipeline is blocked but surfaced no answerable question (dead-end)")
-        _add("self-grill", "kpi-analyst",
+        _add("grill-requirements", "kpi-analyst",
              "interrogate the stuck state with evidence before assuming it is resolved")
     if signals.confidence is not None and signals.confidence < _LOW_CONFIDENCE:
         _add("kpi-analyst", "kpi-analyst",

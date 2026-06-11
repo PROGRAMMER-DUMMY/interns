@@ -91,15 +91,19 @@ class ResultFormatCandidatesTests(unittest.TestCase):
 
 
 class SkillRoutingTests(unittest.TestCase):
-    def test_low_score_routes_to_grill_high_score_to_clarify(self):
+    def test_grill_active_with_score_driven_mode(self):
+        # Phase 1 consolidation: self-grill + clarify-ambiguity merged into
+        # grill-requirements. One entry, always active; the WHY switches from
+        # full interview (low score) to clarify-ambiguity mode (high score).
         from core.onboarding.kpi.generation_workflow import _conversation_skills
 
-        low = {s["name"]: s["active"] for s in _conversation_skills({"quality_score": {"understanding_score": 30}})}
-        high = {s["name"]: s["active"] for s in _conversation_skills({"quality_score": {"understanding_score": 90}})}
-        self.assertTrue(low["grill-requirements"])
-        self.assertFalse(low["clarify-ambiguity"])
-        self.assertTrue(high["clarify-ambiguity"])
-        self.assertTrue(high["to-solution-brief"])
+        low = {s["name"]: s for s in _conversation_skills({"quality_score": {"understanding_score": 30}})}
+        high = {s["name"]: s for s in _conversation_skills({"quality_score": {"understanding_score": 90}})}
+        self.assertTrue(low["grill-requirements"]["active"])
+        self.assertTrue(high["grill-requirements"]["active"])
+        self.assertNotIn("Clarify-ambiguity mode", low["grill-requirements"]["why"])
+        self.assertIn("Clarify-ambiguity mode", high["grill-requirements"]["why"])
+        self.assertTrue(high["to-solution-brief"]["active"])
 
 
 if __name__ == "__main__":

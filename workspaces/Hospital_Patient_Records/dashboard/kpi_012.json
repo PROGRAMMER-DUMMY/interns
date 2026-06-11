@@ -1,0 +1,36 @@
+{
+  "artifact_type": "dashboard_spec",
+  "version": 2,
+  "kpi_id": "kpi_012",
+  "updated_at": "2026-06-11T08:45:24.301791+00:00",
+  "machine_defaults": {
+    "title": "year",
+    "metric": "",
+    "y_label": "",
+    "chart_type": "big_number",
+    "x": "year",
+    "x_label": "year",
+    "y": "year",
+    "agg": "sum",
+    "color": "",
+    "panels": [
+      {
+        "chart_type": "big_number",
+        "y": "year",
+        "title": "Kpi"
+      }
+    ],
+    "sql_path": "workspaces/Hospital_Patient_Records/interns/generated/solutions/kpi_012.sql",
+    "definition": {
+      "business_question": "year",
+      "description": "",
+      "metric": "",
+      "cuts": "year(START)"
+    },
+    "_column_validation": [],
+    "_result_columns": [
+      "year"
+    ]
+  },
+  "user_overrides": {}
+}

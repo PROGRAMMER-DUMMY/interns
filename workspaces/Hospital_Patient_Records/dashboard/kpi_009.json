@@ -1,0 +1,39 @@
+{
+  "artifact_type": "dashboard_spec",
+  "version": 2,
+  "kpi_id": "kpi_009",
+  "updated_at": "2026-06-11T14:56:58.010215+00:00",
+  "machine_defaults": {
+    "title": "How many patients were readmitted within 30 days of a previous encounter?",
+    "metric": "count(distinct PATIENT)",
+    "y_label": "count(distinct PATIENT)",
+    "chart_type": "line",
+    "x": "recurred_within_30_day",
+    "x_label": "recurred_within_30_day",
+    "y": "count_distinct_patient",
+    "agg": "sum",
+    "color": "",
+    "panels": [
+      {
+        "chart_type": "line",
+        "x": "recurred_within_30_day",
+        "y": "count_distinct_patient",
+        "agg": "sum",
+        "title": "Count Distinct Patient over Recurred Within 30 Day"
+      }
+    ],
+    "sql_path": "workspaces/Hospital_Patient_Records/interns/generated/solutions/kpi_009.sql",
+    "definition": {
+      "business_question": "How many patients were readmitted within 30 days of a previous encounter?",
+      "description": "",
+      "metric": "count(distinct PATIENT)",
+      "cuts": "recurred_within_30_day"
+    },
+    "_column_validation": [],
+    "_result_columns": [
+      "recurred_within_30_day",
+      "count_distinct_patient"
+    ]
+  },
+  "user_overrides": {}
+}

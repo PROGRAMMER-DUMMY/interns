@@ -33,7 +33,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: workspace selection request; set current workspace; workspace may be empty or missing; external raw data should stay outside workspace
   - Outputs: guarded workspace selection status; active workspace listing summary; available workspace choices; empty or missing workspace blocker; external dataset_allowlist setup template
   - Safety: local_safe_file_paths_only_no_content_reads
-  - Required skills: workspace-governance; clarify-ambiguity
+  - Required skills: workspace-governance; grill-requirements
 - `session-snapshot`
   - Command: `uv run session-snapshot <start|append|command|file-change|decision|verify|finish>`
   - Use when: operator wants exact end-user conversation transcript; cross-CLI session monitoring; audit conversation turns, commands, file changes, decisions, and intent verification
@@ -159,7 +159,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: duplicate evidence from the data quality harness needs stakeholder review; duplicate handling options should be generated from bounded profile/catalog/pipeline contract evidence; agent needs a JSON-backed duplicate review panel before applying any decision
   - Outputs: interns/reports/duplicate_review/current.json; interns/reports/duplicate_review/current.md; interns/generated/contracts/data_quality_contract.json
   - Safety: local_safe_profile_catalog_pipeline_contract_driven_bounded_duplicate_evidence_redacted_samples_no_auto_dedup_or_quarantine_sql_mutation
-  - Required skills: workspace-governance; data-engineering-pipeline-design; clarify-ambiguity
+  - Required skills: workspace-governance; data-engineering-pipeline-design; grill-requirements
 - `apply-duplicate-review-answer`
   - Command: `uv run apply-duplicate-review-answer --workspace <workspace> --answer <option_id_or_label>`
   - Use when: user answered the current duplicate review panel; accepted duplicate decision should be resolved against current.json; decision should be recorded without executing deduplication or quarantine SQL
@@ -231,7 +231,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: data model draft exists; agent needs the next JSON-backed data-model blocker question; grain, primary key, relationship, temporal anchor, or SCD decisions need deterministic resolution
   - Outputs: interns/reports/data_model_blocker_panel/current.json; interns/reports/data_model_blocker_panel/current.md; updated data_model_generation_session.json
   - Safety: local_safe
-  - Required skills: domain-model; clarify-ambiguity; grill-requirements
+  - Required skills: domain-model; grill-requirements
 - `apply-data-model-blocker-answer`
   - Command: `uv run apply-data-model-blocker-answer --workspace <workspace> --answer <option_id_or_label>`
   - Use when: user answered the current data-model blocker panel; accepted option should apply a structured data-model operation; next blocker panel should be generated
@@ -273,7 +273,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: KPI features need mapping; blockers need clustering; accepted definitions need applying
   - Outputs: interns/generated/contracts/kpi_feature_mapping.json; strict derived_feature_options with formula/input/observed_values/value_profile/semantic_meaning_sources/reason/example/evidence_sources/derivation_reasoning/evidence_state/confidence; semantically mismatched candidates rejected; interns/reports/blocker_question_panel/current.json; interns/reports/blocker_question_panel/current.md; interns/reports/open_questions.md
   - Safety: local_safe
-  - Required skills: domain-model; feature-derivation-library; workspace-kpi-query-optimizer; clarify-ambiguity
+  - Required skills: domain-model; feature-derivation-library; workspace-kpi-query-optimizer; grill-requirements
 - `apply-workspace-definition`
   - Command: `uv run resolve-kpi-features --workspace <workspace> --apply-workspace-definition --feature <feature> --definition <definition> --evidence-note <note>`
   - Use when: one accepted feature definition applies across multiple KPIs
@@ -285,7 +285,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: agent needs the next validated KPI blocker question; avoid hand-chaining onboarding, resolver, markdown, panel, and validation commands; fresh or existing KPI workspace needs deterministic blocker preparation
   - Outputs: interns/generated/contracts/kpi_feature_mapping.json; interns/reports/derived_feature_reviews; interns/reports/blocker_question_panel/current.json; interns/reports/blocker_question_panel/current.md; validation summary
   - Safety: local_safe
-  - Required skills: domain-model; feature-derivation-library; workspace-kpi-query-optimizer; clarify-ambiguity
+  - Required skills: domain-model; feature-derivation-library; workspace-kpi-query-optimizer; grill-requirements
 - `apply-kpi-panel-answer`
   - Command: `uv run apply-kpi-panel-answer --workspace <workspace> --domain <domain> --answer <option_id_or_label>`
   - Use when: user answered the current blocker question; accepted option should be applied without inventing unsupported resolver flags; friendly answer must be resolved against current.json
@@ -334,7 +334,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: ETL, ELT, medallion, or ingestion pipeline needs target table/file format selection; agent must ask whether to store outputs as Delta, Parquet, Iceberg, CSV, warehouse-native, or another approved format; prepare-pipeline-plan is blocked by pipeline_table_format_unresolved
   - Outputs: interns/reports/pipeline_format/current.json; interns/reports/pipeline_format/current.md
   - Safety: local_safe_json_backed_user_choice_panel
-  - Required skills: data-engineering-pipeline-design; clarify-ambiguity
+  - Required skills: data-engineering-pipeline-design; grill-requirements
 - `apply-pipeline-format-answer`
   - Command: `uv run apply-pipeline-format-answer --workspace <workspace> --answer <option_id_or_label_or_format>`
   - Use when: user answered the pipeline format panel; accepted storage format should be recorded before pipeline planning; medallion plan should use the approved table/file format
@@ -388,7 +388,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: agent needs to ask any KPI blocker question; direct mapping or source-of-truth choice needs stakeholder answer; non-technical panel is preferred over terminal option UI
   - Outputs: interns/reports/blocker_question_panel/current.json; interns/reports/blocker_question_panel/current.md; interns/reports/blocker_question_panel/index.json
   - Safety: local_safe
-  - Required skills: clarify-ambiguity; grill-requirements; workspace-kpi-query-optimizer
+  - Required skills: grill-requirements; workspace-kpi-query-optimizer
 - `validate-workspace-artifacts`
   - Command: `uv run validate-workspace-artifacts --workspace <workspace>`
   - Use when: generated workspace artifacts need schema checks; agent is about to rely on KPI registry, feature mapping, derived reviews, or blocker panel; detect manual edits to generated contracts
@@ -447,13 +447,13 @@ Use the narrowest role that fits the task and keep write access limited to imple
 
 - Display name: Dashboard Engineer
 - Description: Designs, customizes, debugs, and verifies per-workspace BI dashboards (JSON spec contract, Dash renderer, static HTML export, live callback tests).
-- Skills: workspace-governance; dashboard-design; clarify-ambiguity; self-grill; domain-model; kpi-analyst; evolution
+- Skills: workspace-governance; dashboard-design; grill-requirements; domain-model; kpi-analyst; evolution
 - Safety: governed_dashboard_spec_local_safe_by_default
 - Source: `skills/dashboard-design/agents/dashboard-team.yaml`
 - Target model: `default`
 - Target sandbox/permission: `role_defined`
 - Model policy: {"default_tier": "standard", "escalate_to_deep_for": ["cross-workspace dashboard schema migrations", "production embedding decisions", "performance investigations with large result sets"], "use_light_for": ["spec inventory", "render-tree inspection", "simple user_overrides edits", "static HTML export"], "use_standard_for": ["chart-type inference rule additions", "callback graph design", "dialect dispatch decisions", "regression test authoring"]}
-- Default prompt: Act as the dashboard-engineering role. Own everything under `workspaces/<ws>/dashboard/` and the platform modules at `core/dashboard/*`, `tools/workspace_dashboard.py`, `tests/test_dashboard_*.py`. Honor the two-section spec contract: rewrite `machine_defaults` on every regeneration; preserve `user_overrides` verbatim. Use live SQL re-execution via DuckDB — never read stale snapshots. Render blocked KPIs as recovery cards, not by hiding them. CHART-QUALITY DEFAULTS (produce a correct, readable chart by default, not just valid markup): no duplicate titles (card header carries the title; pass title='' to inline figures); trend/line charts aggregate the measure by the date axis (one value per period), never scatter raw rows; share/percentage charts aggregate by (x,color) so each stack is a true 0-100% and cap dense categoricals to a readable top-N with an 'Other' bucket; ranked/top-N charts rank by the highest-cardinality NON-constant categorical column, never a column pinned to one value by a filter; responsive sizing + margins so charts never clip; apply the shared corporate theme at one seam, do not hand-style. VISUAL VERIFICATION IS A MANDATORY GATE before showing any dashboard: structure/spec/headline checks are NOT verification. Run `uv run dashboard-verify --url <file:// or http://127.0.0.1:port> --screenshot <png>` which drives a real browser (agent-browser) and FAILS on overflow / blank charts / missing legend; a non-zero exit is a blocker — fix and re-run. THEN read the captured screenshot and judge it visually. Only claim 'looks professional' after the gate passes AND you have seen it. For the live Dash app, boot it and verify the URL; use agent-browser click/hover to confirm legend-toggle and panel select/deselect actually work. For any chart-type addition or schema change, ship a regression test that asserts the quality property (aggregated / percent 0-100% / ranked by non-constant column), not merely that a figure was produced. Debug callbacks via `/_dash-dependencies` and `/_dash-layout` before reaching for browser tests. Do not edit upstream contracts (`kpi_registry.json`, `relationship_contracts.json`, `source_to_target_plan.json`) — escalate to `data-engineer` or `kpi-analyst` when the chart is wrong because the data is wrong. JUDGMENT SKILLS (bounded firing): run `clarify-ambiguity` at the START only when the request is genuinely ambiguous (which KPI / dimension / chart type / fit-to-screen vs detail) — never on a clearly-specified request; run `self-grill` at the END to emit a short audit of the assumptions you made (e.g. why log scale, which dimensions you dropped) BEFORE presenting. self-grill is ADVISORY: it surfaces confidence/assumptions to the user but NEVER overrides the deterministic `dashboard-verify` gate, which remains the sole pass/fail authority. See skills/dashboard-design/SKILL.md for the full quality + verification procedure.
+- Default prompt: Act as the dashboard-engineering role. Own everything under `workspaces/<ws>/dashboard/` and the platform modules at `core/dashboard/*`, `tools/workspace_dashboard.py`, `tests/test_dashboard_*.py`. Honor the two-section spec contract: rewrite `machine_defaults` on every regeneration; preserve `user_overrides` verbatim. Use live SQL re-execution via DuckDB — never read stale snapshots. Render blocked KPIs as recovery cards, not by hiding them. CHART-QUALITY DEFAULTS (produce a correct, readable chart by default, not just valid markup): no duplicate titles (card header carries the title; pass title='' to inline figures); trend/line charts aggregate the measure by the date axis (one value per period), never scatter raw rows; share/percentage charts aggregate by (x,color) so each stack is a true 0-100% and cap dense categoricals to a readable top-N with an 'Other' bucket; ranked/top-N charts rank by the highest-cardinality NON-constant categorical column, never a column pinned to one value by a filter; responsive sizing + margins so charts never clip; apply the shared corporate theme at one seam, do not hand-style. VISUAL VERIFICATION IS A MANDATORY GATE before showing any dashboard: structure/spec/headline checks are NOT verification. Run `uv run dashboard-verify --url <file:// or http://127.0.0.1:port> --screenshot <png>` which drives a real browser (agent-browser) and FAILS on overflow / blank charts / missing legend; a non-zero exit is a blocker — fix and re-run. THEN read the captured screenshot and judge it visually. Only claim 'looks professional' after the gate passes AND you have seen it. For the live Dash app, boot it and verify the URL; use agent-browser click/hover to confirm legend-toggle and panel select/deselect actually work. For any chart-type addition or schema change, ship a regression test that asserts the quality property (aggregated / percent 0-100% / ranked by non-constant column), not merely that a figure was produced. Debug callbacks via `/_dash-dependencies` and `/_dash-layout` before reaching for browser tests. Do not edit upstream contracts (`kpi_registry.json`, `relationship_contracts.json`, `source_to_target_plan.json`) — escalate to `data-engineer` or `kpi-analyst` when the chart is wrong because the data is wrong. JUDGMENT SKILLS (bounded firing): run `grill-requirements` at the START only when the request is genuinely ambiguous (which KPI / dimension / chart type / fit-to-screen vs detail) — never on a clearly-specified request; run `grill-requirements` at the END to emit a short audit of the assumptions you made (e.g. why log scale, which dimensions you dropped) BEFORE presenting. grill-requirements is ADVISORY: it surfaces confidence/assumptions to the user but NEVER overrides the deterministic `dashboard-verify` gate, which remains the sole pass/fail authority. See skills/dashboard-design/SKILL.md for the full quality + verification procedure.
 
 ### business-analyst
 
@@ -515,42 +515,6 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Model policy: {"default_tier": "standard", "escalate_to_deep_for": ["production permission architecture", "failure recovery design", "remote apply risk assessment"], "use_light_for": ["access checklist review", "object naming review", "dry-run plan summaries"], "use_standard_for": ["Databricks deployment planning", "Delta and Unity Catalog design", "cost and compute control review"]}
 - Default prompt: Act as the Databricks engineering role. Review or design Databricks-specific deployment choices: Unity Catalog objects, Delta tables, Lakeflow or job orchestration, SQL warehouses, clusters, permissions, data quality expectations, lineage, cost controls, and remote execution approvals. Use databricks-access-gates before any remote action and keep local dry-runs as the default.
 
-### agent-advisor-router
-
-- Display name: Agent Advisor Router
-- Description: Advises which specialist agent, skill chain, sandbox, and model tier should handle a task before expensive work starts.
-- Skills: workspace-governance; clarify-ambiguity; evolution
-- Safety: read_only_routing_and_cost_control_advice
-- Source: `skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml`
-- Target model: `default`
-- Target sandbox/permission: `role_defined`
-- Model policy: {"default_tier": "light", "escalate_to_deep_for": ["only when route selection itself affects production safety"], "escalate_to_standard_for": ["conflicting routes", "missing active workspace context"], "use_light_for": ["task classification", "agent selection", "model tier recommendation"]}
-- Default prompt: Act as the advisor/router. Classify the user's request, choose the narrowest specialist role, choose the cheapest sufficient model tier, and name the required skills and tool route. Escalate only when ambiguity, production risk, security, or semantic correctness requires it. Do not perform the downstream implementation yourself unless no specialist route fits.
-
-### databricks-access-gates
-
-- Display name: Databricks Access Gates
-- Description: Ask for missing Databricks access gates
-- Skills: databricks-access-gates
-- Safety: follows_skill_policy
-- Source: `skills/databricks-access-gates/agents/openai.yaml`
-- Target model: `default`
-- Target sandbox/permission: `role_defined`
-- Model policy: Use the target CLI default model unless a workflow route specifies otherwise.
-- Default prompt: Use Databricks access gates to identify missing scopes, grants, policies, approvals, warehouse paths, and workspace permissions before retrying Databricks remote actions.
-
-### feature-derivation-library
-
-- Display name: Feature Derivation Library
-- Description: Use reusable KPI feature derivation patterns safely.
-- Skills: feature-derivation-library
-- Safety: follows_skill_policy
-- Source: `skills/feature-derivation-library/agents/openai.yaml`
-- Target model: `default`
-- Target sandbox/permission: `role_defined`
-- Model policy: Use the target CLI default model unless a workflow route specifies otherwise.
-- Default prompt: Use reusable derivation patterns to propose evidence-backed KPI feature mappings without treating candidates as proof.
-
 ### kpi-analyst
 
 - Display name: KPI Analyst
@@ -599,24 +563,7 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Model policy: Use the target CLI default model unless a workflow route specifies otherwise.
 - Default prompt: Run local-safe validation gates only. Treat validation errors as blockers, summarize artifact paths, and never hand-edit generated contracts to clear failures. Enforce Bronze/Silver standards, strict exception compensating controls, workflow reroute policy, data-quality, layered pipeline, project, and reliability harnesses before promotion.
 
-### integration-notification-operator
-
-- Display name: Integration Notification Operator
-- Description: Bridges Slack, Teams, MCP, or plugin frontends to existing workspace-flow and session-snapshot commands.
-- Skills: workspace-governance; stakeholder-memory; evolution
-- Safety: notification_and_approval_bridge_no_direct_dataset_or_remote_mutation
-- Source: `skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml`
-- Target model: `default`
-- Target sandbox/permission: `role_defined`
-- Model policy: Use the target CLI default model unless a workflow route specifies otherwise.
-- Default prompt: Do not implement workflow logic in chat integrations. Map external threads to workspace-flow sessions, post the generated current.md verbatim as the human card, use current.json only for buttons/options and answer application, and record trajectory/session events. Do not collapse panels into a generic ask-user text box.
-
 ## Available Skills
-
-### clarify-ambiguity
-
-- Path: `skills/clarify-ambiguity/SKILL.md`
-- Description: Use when a request is underspecified, ambiguous, assumption-heavy, or likely to produce a wrong, unsafe, costly, or irrelevant answer without clarification. Trigger when missing context materially affects correctness, safety, user intent, implementation choices, or recommendation quality. Do not trigger for clear requests or minor ambiguities that can be handled by stating a reasonable assumption.
 
 ### dashboard-design
 
@@ -631,7 +578,7 @@ Use the narrowest role that fits the task and keep write access limited to imple
 ### data-model-creation
 
 - Path: `skills/data-model-creation/SKILL.md`
-- Description: Create a data model WITH the user through conversation, not by guessing from column names. Interview for grain, entities, keys, facts/dimensions, relationships, cardinality, temporal anchors, and SCD policy; score how well the model is understood; then produce a governed model + ERD/SVG. Use when a workspace needs a data model created, refined, or proven before SQL/pipeline generation, or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[clarify-ambiguity]], [[domain-model]], [[stakeholder-memory]], and [[dashboard-design]] (for the diagram export).
+- Description: Create a data model WITH the user through conversation, not by guessing from column names. Interview for grain, entities, keys, facts/dimensions, relationships, cardinality, temporal anchors, and SCD policy; score how well the model is understood; then produce a governed model + ERD/SVG. Use when a workspace needs a data model created, refined, or proven before SQL/pipeline generation, or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[grill-requirements]], [[domain-model]], [[stakeholder-memory]], and [[dashboard-design]] (for the diagram export).
 
 ### databricks-access-gates
 
@@ -677,11 +624,6 @@ Use the narrowest role that fits the task and keep write access limited to imple
 
 - Path: `skills/kpi-clarification/SKILL.md`
 - Description: Converts ambiguous or loosely written KPI descriptions into precise, unambiguous business metric definitions. Use this skill whenever a user mentions a KPI, metric, business measure, or indicator that needs to be defined, clarified, structured, or documented — even if they don't use the word "KPI" explicitly. Trigger examples: "define this metric", "what does this KPI mean", "help me document our conversion rate", "clarify this measure for our BI team", "we track X, can you write it up properly", "our dashboard shows Y, not sure what it means", "turn this into a proper metric definition". Always use this skill when the user presents any business performance metric, OKR component, or analytics measure that needs structured decomposition.
-
-### self-grill
-
-- Path: `skills/self-grill/SKILL.md`
-- Description: Use BEFORE you commit to a plan, design recommendation, or implementation approach. The skill turns the orchestrating agent into its own interviewer: it generates 3-6 grilling questions tailored to the current proposal, answers each with concrete evidence (file paths, samples, prior decisions), and surfaces any unknown-unknowns it can no longer brush past. Output is a short Self-Grill Audit block that goes into the response BEFORE the final recommendation.
 
 ### stakeholder-memory
 

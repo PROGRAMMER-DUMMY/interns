@@ -33,7 +33,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: workspace selection request; set current workspace; workspace may be empty or missing; external raw data should stay outside workspace
   - Outputs: guarded workspace selection status; active workspace listing summary; available workspace choices; empty or missing workspace blocker; external dataset_allowlist setup template
   - Safety: local_safe_file_paths_only_no_content_reads
-  - Required skills: workspace-governance; clarify-ambiguity
+  - Required skills: workspace-governance; grill-requirements
 - `session-snapshot`
   - Command: `uv run session-snapshot <start|append|command|file-change|decision|verify|finish>`
   - Use when: operator wants exact end-user conversation transcript; cross-CLI session monitoring; audit conversation turns, commands, file changes, decisions, and intent verification
@@ -159,7 +159,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: duplicate evidence from the data quality harness needs stakeholder review; duplicate handling options should be generated from bounded profile/catalog/pipeline contract evidence; agent needs a JSON-backed duplicate review panel before applying any decision
   - Outputs: interns/reports/duplicate_review/current.json; interns/reports/duplicate_review/current.md; interns/generated/contracts/data_quality_contract.json
   - Safety: local_safe_profile_catalog_pipeline_contract_driven_bounded_duplicate_evidence_redacted_samples_no_auto_dedup_or_quarantine_sql_mutation
-  - Required skills: workspace-governance; data-engineering-pipeline-design; clarify-ambiguity
+  - Required skills: workspace-governance; data-engineering-pipeline-design; grill-requirements
 - `apply-duplicate-review-answer`
   - Command: `uv run apply-duplicate-review-answer --workspace <workspace> --answer <option_id_or_label>`
   - Use when: user answered the current duplicate review panel; accepted duplicate decision should be resolved against current.json; decision should be recorded without executing deduplication or quarantine SQL
@@ -231,7 +231,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: data model draft exists; agent needs the next JSON-backed data-model blocker question; grain, primary key, relationship, temporal anchor, or SCD decisions need deterministic resolution
   - Outputs: interns/reports/data_model_blocker_panel/current.json; interns/reports/data_model_blocker_panel/current.md; updated data_model_generation_session.json
   - Safety: local_safe
-  - Required skills: domain-model; clarify-ambiguity; grill-requirements
+  - Required skills: domain-model; grill-requirements
 - `apply-data-model-blocker-answer`
   - Command: `uv run apply-data-model-blocker-answer --workspace <workspace> --answer <option_id_or_label>`
   - Use when: user answered the current data-model blocker panel; accepted option should apply a structured data-model operation; next blocker panel should be generated
@@ -273,7 +273,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: KPI features need mapping; blockers need clustering; accepted definitions need applying
   - Outputs: interns/generated/contracts/kpi_feature_mapping.json; strict derived_feature_options with formula/input/observed_values/value_profile/semantic_meaning_sources/reason/example/evidence_sources/derivation_reasoning/evidence_state/confidence; semantically mismatched candidates rejected; interns/reports/blocker_question_panel/current.json; interns/reports/blocker_question_panel/current.md; interns/reports/open_questions.md
   - Safety: local_safe
-  - Required skills: domain-model; feature-derivation-library; workspace-kpi-query-optimizer; clarify-ambiguity
+  - Required skills: domain-model; feature-derivation-library; workspace-kpi-query-optimizer; grill-requirements
 - `apply-workspace-definition`
   - Command: `uv run resolve-kpi-features --workspace <workspace> --apply-workspace-definition --feature <feature> --definition <definition> --evidence-note <note>`
   - Use when: one accepted feature definition applies across multiple KPIs
@@ -285,7 +285,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: agent needs the next validated KPI blocker question; avoid hand-chaining onboarding, resolver, markdown, panel, and validation commands; fresh or existing KPI workspace needs deterministic blocker preparation
   - Outputs: interns/generated/contracts/kpi_feature_mapping.json; interns/reports/derived_feature_reviews; interns/reports/blocker_question_panel/current.json; interns/reports/blocker_question_panel/current.md; validation summary
   - Safety: local_safe
-  - Required skills: domain-model; feature-derivation-library; workspace-kpi-query-optimizer; clarify-ambiguity
+  - Required skills: domain-model; feature-derivation-library; workspace-kpi-query-optimizer; grill-requirements
 - `apply-kpi-panel-answer`
   - Command: `uv run apply-kpi-panel-answer --workspace <workspace> --domain <domain> --answer <option_id_or_label>`
   - Use when: user answered the current blocker question; accepted option should be applied without inventing unsupported resolver flags; friendly answer must be resolved against current.json
@@ -334,7 +334,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: ETL, ELT, medallion, or ingestion pipeline needs target table/file format selection; agent must ask whether to store outputs as Delta, Parquet, Iceberg, CSV, warehouse-native, or another approved format; prepare-pipeline-plan is blocked by pipeline_table_format_unresolved
   - Outputs: interns/reports/pipeline_format/current.json; interns/reports/pipeline_format/current.md
   - Safety: local_safe_json_backed_user_choice_panel
-  - Required skills: data-engineering-pipeline-design; clarify-ambiguity
+  - Required skills: data-engineering-pipeline-design; grill-requirements
 - `apply-pipeline-format-answer`
   - Command: `uv run apply-pipeline-format-answer --workspace <workspace> --answer <option_id_or_label_or_format>`
   - Use when: user answered the pipeline format panel; accepted storage format should be recorded before pipeline planning; medallion plan should use the approved table/file format
@@ -388,7 +388,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Use when: agent needs to ask any KPI blocker question; direct mapping or source-of-truth choice needs stakeholder answer; non-technical panel is preferred over terminal option UI
   - Outputs: interns/reports/blocker_question_panel/current.json; interns/reports/blocker_question_panel/current.md; interns/reports/blocker_question_panel/index.json
   - Safety: local_safe
-  - Required skills: clarify-ambiguity; grill-requirements; workspace-kpi-query-optimizer
+  - Required skills: grill-requirements; workspace-kpi-query-optimizer
 - `validate-workspace-artifacts`
   - Command: `uv run validate-workspace-artifacts --workspace <workspace>`
   - Use when: generated workspace artifacts need schema checks; agent is about to rely on KPI registry, feature mapping, derived reviews, or blocker panel; detect manual edits to generated contracts
@@ -443,30 +443,6 @@ This file is generated from canonical repo skills. Do not hand-edit it.
 These subagents are generated from `skills/*/agents/*.yaml`; do not hand-edit adapter output.
 Use the narrowest role that fits the task and keep write access limited to implementer-style roles.
 
-### databricks-access-gates
-
-- Display name: Databricks Access Gates
-- Description: Ask for missing Databricks access gates
-- Skills: databricks-access-gates
-- Safety: follows_skill_policy
-- Source: `skills/databricks-access-gates/agents/openai.yaml`
-- Target model: `default`
-- Target sandbox/permission: `role_defined`
-- Model policy: Use the target CLI default model unless a workflow route specifies otherwise.
-- Default prompt: Use Databricks access gates to identify missing scopes, grants, policies, approvals, warehouse paths, and workspace permissions before retrying Databricks remote actions.
-
-### feature-derivation-library
-
-- Display name: Feature Derivation Library
-- Description: Use reusable KPI feature derivation patterns safely.
-- Skills: feature-derivation-library
-- Safety: follows_skill_policy
-- Source: `skills/feature-derivation-library/agents/openai.yaml`
-- Target model: `default`
-- Target sandbox/permission: `role_defined`
-- Model policy: Use the target CLI default model unless a workflow route specifies otherwise.
-- Default prompt: Use reusable derivation patterns to propose evidence-backed KPI feature mappings without treating candidates as proof.
-
 ### kpi-analyst
 
 - Display name: KPI Analyst
@@ -481,11 +457,6 @@ Use the narrowest role that fits the task and keep write access limited to imple
 
 ## Available Skills
 
-### clarify-ambiguity
-
-- Path: `skills/clarify-ambiguity/SKILL.md`
-- Description: Use when a request is underspecified, ambiguous, assumption-heavy, or likely to produce a wrong, unsafe, costly, or irrelevant answer without clarification. Trigger when missing context materially affects correctness, safety, user intent, implementation choices, or recommendation quality. Do not trigger for clear requests or minor ambiguities that can be handled by stating a reasonable assumption.
-
 ### dashboard-design
 
 - Path: `skills/dashboard-design/SKILL.md`
@@ -499,7 +470,7 @@ Use the narrowest role that fits the task and keep write access limited to imple
 ### data-model-creation
 
 - Path: `skills/data-model-creation/SKILL.md`
-- Description: Create a data model WITH the user through conversation, not by guessing from column names. Interview for grain, entities, keys, facts/dimensions, relationships, cardinality, temporal anchors, and SCD policy; score how well the model is understood; then produce a governed model + ERD/SVG. Use when a workspace needs a data model created, refined, or proven before SQL/pipeline generation, or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[clarify-ambiguity]], [[domain-model]], [[stakeholder-memory]], and [[dashboard-design]] (for the diagram export).
+- Description: Create a data model WITH the user through conversation, not by guessing from column names. Interview for grain, entities, keys, facts/dimensions, relationships, cardinality, temporal anchors, and SCD policy; score how well the model is understood; then produce a governed model + ERD/SVG. Use when a workspace needs a data model created, refined, or proven before SQL/pipeline generation, or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[grill-requirements]], [[domain-model]], [[stakeholder-memory]], and [[dashboard-design]] (for the diagram export).
 
 ### databricks-access-gates
 
@@ -545,11 +516,6 @@ Use the narrowest role that fits the task and keep write access limited to imple
 
 - Path: `skills/kpi-clarification/SKILL.md`
 - Description: Converts ambiguous or loosely written KPI descriptions into precise, unambiguous business metric definitions. Use this skill whenever a user mentions a KPI, metric, business measure, or indicator that needs to be defined, clarified, structured, or documented — even if they don't use the word "KPI" explicitly. Trigger examples: "define this metric", "what does this KPI mean", "help me document our conversion rate", "clarify this measure for our BI team", "we track X, can you write it up properly", "our dashboard shows Y, not sure what it means", "turn this into a proper metric definition". Always use this skill when the user presents any business performance metric, OKR component, or analytics measure that needs structured decomposition.
-
-### self-grill
-
-- Path: `skills/self-grill/SKILL.md`
-- Description: Use BEFORE you commit to a plan, design recommendation, or implementation approach. The skill turns the orchestrating agent into its own interviewer: it generates 3-6 grilling questions tailored to the current proposal, answers each with concrete evidence (file paths, samples, prior decisions), and surfaces any unknown-unknowns it can no longer brush past. Output is a short Self-Grill Audit block that goes into the response BEFORE the final recommendation.
 
 ### stakeholder-memory
 
