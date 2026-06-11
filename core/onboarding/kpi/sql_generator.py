@@ -572,7 +572,7 @@ class DuckDBKPISQLGenerator:
                     # never rewrite alias-prefixed references (p."START" inside
                     # a self-join formula belongs to the formula's own alias).
                     formula = re.sub(
-                        rf'(?<![.\w])(?:"{re.escape(column)}"|\b{re.escape(column)}\b)',
+                        rf'(?<![.\w"])(?:"{re.escape(column)}"|{re.escape(column)}\b)(?!")',
                         qualified,
                         formula,
                     )
