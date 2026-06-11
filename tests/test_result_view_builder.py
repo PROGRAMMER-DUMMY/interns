@@ -353,17 +353,17 @@ def _kpi_uc(**kwargs):
 
 
 class ShareOfTotalByGroupTests(unittest.TestCase):
-    """BUG-024: a metric phrased '<agg> / <same agg> for <group>' whose KPI also
-    declares descriptive cuts is a share-of-total whose grain is the FULL cut set
-    (group + every descriptive cut). The numerator counts WITHIN each full-grain
-    cell (PARTITION BY all grain dimensions) and the denominator is the grand
-    total of the same aggregate (OVER ()), so each row is one cell and its
-    percentage of the whole population — shares sum to ~100% across all cells.
+    """BUG-024 + single attribution: a metric phrased '<agg> / <same agg> for
+    <group>' whose KPI also declares descriptive cuts is a share-of-total whose
+    grain is the FULL cut set (group + every descriptive cut).
 
-    (This reverses the prior group-only-grain reading: the KPI's stated cuts
-    must subdivide the share, e.g. "percentage share of lives by gender, age,
-    visit type, department" grains by all four, not by department alone. The
-    denominator scope is intentionally left as the grand total.)
+    For DISTINCT-entity shares, each entity is attributed to exactly ONE grain
+    cell (ROW_NUMBER over the entity, most-recent event first when an event
+    date exists, else a deterministic cell order) and the view is a plain
+    GROUP BY whose shares sum to ~100% by construction. Counting an entity in
+    every cell it touches made shares total >100% (229% measured on real
+    data). Row-based shares (sum / non-distinct count) keep the window path —
+    every row already belongs to exactly one cell.
     """
 
     def test_descriptive_cuts_subdivide_the_grain(self):
@@ -384,26 +384,24 @@ class ShareOfTotalByGroupTests(unittest.TestCase):
             kpi, kpi_id="kpi_002",
             feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
         )
-        # Numerator partitions by the FULL grain (group + descriptive cut).
-        self.assertIn('PARTITION BY "departement", "Gender"', sql)
-        # Denominator is the grand total: a bare OVER () window.
-        self.assertIn("OVER ()", sql)
+        # Single attribution: one row (= one grain cell) per entity.
+        self.assertIn("WITH __attributed AS", sql)
+        self.assertIn('ROW_NUMBER() OVER (PARTITION BY "PatientID"', sql)
+        self.assertIn("__attribution_rn = 1", sql)
+        # Plain GROUP BY over the FULL grain (group + descriptive cut).
+        self.assertIn('GROUP BY "departement", "Gender"', sql)
+        # Share = attributed cell count over the grand total; sums to ~100%.
+        self.assertIn("SUM(COUNT(*)) OVER ()", sql)
         self.assertIn("percentage_share", sql)
         self.assertIn("NULLIF", sql)
+        # The attribution choice is auditable in the emitted SQL.
+        self.assertIn("-- share_attribution: single", sql)
 
-        # Structurally: the numerator window partitions by every grain dimension,
-        # and exactly one agg is the global grand total (empty window).
         parsed = parse_kpi(kpi)
-        windowed = [a for a in parsed.aggregations if a.window is not None]
-        self.assertTrue(windowed)
-        self.assertTrue(
-            any(a.window.partition_by == ('"departement"', '"Gender"') for a in windowed),
-            "numerator must PARTITION BY every grain dimension (group + cuts)",
-        )
-        self.assertTrue(
-            any(a.window.partition_by == () for a in windowed),
-            "denominator must be the grand total (no partition)",
-        )
+        self.assertIsNotNone(parsed.share_attribution)
+        self.assertEqual(parsed.share_attribution["entity_column"], "PatientID")
+        # No event date in this grain -> deterministic cell order.
+        self.assertEqual(parsed.share_attribution["mode"], "deterministic_cell_order")
 
         # Grain is the group AND every descriptive cut — the cuts subdivide.
         self.assertEqual(
@@ -436,17 +434,19 @@ class ShareOfTotalByGroupTests(unittest.TestCase):
         self.assertNotIn("per_group", sql)
         self.assertNotIn("_total AS", sql)
         self.assertNotIn("patientid_total", sql)
-        # Exactly the declared cuts + the single percentage_share column are output
-        # (DOUBLE is the inline CAST inside percentage_share, not an output column).
+        # Exactly the declared cuts + the single percentage_share column are
+        # output (DOUBLE is the inline CAST inside percentage_share, not an
+        # output column). The outer SELECT follows the attribution CTE; the
+        # __attribution_rn scaffolding must stay inside the CTE.
         import re as _re
-        body = sql.split("SELECT DISTINCT", 1)[1].split("FROM", 1)[0]
+        outer = sql.split(")\nSELECT", 1)[1].split("FROM __attributed", 1)[0]
         output_aliases = [
-            a for a in _re.findall(r"\bAS\s+(\w+)", body) if a != "DOUBLE"
+            a for a in _re.findall(r"\bAS\s+(\w+)", outer) if a != "DOUBLE"
         ]
         self.assertEqual(output_aliases, ["departement", "gender", "percentage_share"])
-        # The numerator/denominator windows are inlined into percentage_share.
-        self.assertIn('OVER (PARTITION BY "departement", "Gender")', sql)
-        self.assertIn("OVER ()", sql)
+        self.assertNotIn("__attribution_rn", outer)
+        # The grand-total denominator is inlined into percentage_share.
+        self.assertIn("SUM(COUNT(*)) OVER ()", sql)
 
     def test_no_for_group_keeps_global_percent_of_total(self):
         # Without a "for <group>", the existing global percent-of-total path
@@ -506,24 +506,25 @@ class PercentageSingleMetricColumnTests(unittest.TestCase):
 
 
 class WindowedOnlyDedupRegressionTests(unittest.TestCase):
-    """BUG-012: a mismatched-grain percentage KPI parses into a window-only plan
-    (every aggregation carries an OVER clause, no plain aggregations), so the
-    builder emits no GROUP BY. Without deduping, the view returns one row per
-    source record (~10k duplicate grain rows). Windowed-only mode must emit
-    SELECT DISTINCT to collapse to one row per grain. The plain GROUP BY path
-    must NOT gain DISTINCT.
+    """BUG-012: a mismatched-grain percentage KPI on the WINDOW path (row-based
+    metric: every aggregation carries an OVER clause, no plain aggregations)
+    emits no GROUP BY. Without deduping, the view returns one row per source
+    record (~10k duplicate grain rows). Windowed-only mode must emit SELECT
+    DISTINCT to collapse to one row per grain. The plain GROUP BY path must NOT
+    gain DISTINCT.
+
+    (Distinct-entity shares no longer take this path: they use the
+    single-attribution CTE + plain GROUP BY — covered below.)
     """
 
     def _windowed_only_kpi(self):
+        # Row-based (non-distinct) share: stays on the window path.
         return _kpi_uc(
-            name="percentage share of lives by department",
-            metric=(
-                "percentage of sum(distinct PatientID) / "
-                "sum(distinct PatientID) for departement"
-            ),
+            name="percentage share of paid amount by department",
+            metric="percentage of sum(amount) / sum(amount) for departement",
             cuts="departement, Gender",
             features=[
-                {"feature": "PatientID", "source_columns": [{"column": "PatientID"}]},
+                {"feature": "amount", "source_columns": [{"column": "amount"}]},
                 {"feature": "departement", "source_columns": [{"column": "departement"}]},
                 {"feature": "Gender", "source_columns": [{"column": "Gender"}]},
             ],
@@ -556,6 +557,30 @@ class WindowedOnlyDedupRegressionTests(unittest.TestCase):
         )
         self.assertIn("SELECT DISTINCT", sql)
         self.assertIn("percentage_share", sql)
+
+    def test_distinct_share_takes_attribution_group_by_not_distinct(self):
+        # Distinct-entity share: attribution CTE + plain GROUP BY, no
+        # SELECT DISTINCT (GROUP BY already collapses to one row per cell).
+        kpi = _kpi_uc(
+            name="percentage share of lives by department",
+            metric=(
+                "percentage of sum(distinct PatientID) / "
+                "sum(distinct PatientID) for departement"
+            ),
+            cuts="departement, Gender",
+            features=[
+                {"feature": "PatientID", "source_columns": [{"column": "PatientID"}]},
+                {"feature": "departement", "source_columns": [{"column": "departement"}]},
+                {"feature": "Gender", "source_columns": [{"column": "Gender"}]},
+            ],
+        )
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_002",
+            feature_view='"kpi_002_features"', result_view='"kpi_002_results"',
+        )
+        self.assertIn("WITH __attributed AS", sql)
+        self.assertIn("GROUP BY", sql)
+        self.assertNotIn("SELECT DISTINCT", sql)
 
     def test_plain_group_by_kpi_does_not_get_distinct(self):
         # Guard against regressing the normal aggregating path: a plain GROUP BY
@@ -730,20 +755,18 @@ class ForGroupTokenResolvesToRealColumnTests(unittest.TestCase):
                 f"partition references {bare!r} which is absent from the feature set",
             )
 
-        # The per-group numerator must partition by the REAL department column
-        # ("Name"), never the phantom "departement" token. Under BUG-024 the
-        # descriptive cuts subdivide the grain, so the numerator window is the
-        # full cut set (Name + VisitType + Gender) — "Name" must be present and
-        # resolved, and the phantom token must be absent.
-        windowed = [a for a in parsed.aggregations if a.window is not None]
-        numerator = next(
-            (a for a in windowed if a.window.partition_by), None
-        )
-        self.assertIsNotNone(numerator, "a per-cell numerator window must exist")
+        # Distinct share -> single-attribution path. The grain must be the REAL
+        # resolved columns (Name + VisitType + Gender); the phantom token must
+        # never appear in the grain or the attribution ordering.
+        self.assertIsNotNone(parsed.share_attribution)
+        self.assertEqual(parsed.share_attribution["entity_column"], "PatientID")
+        grain_exprs = [d.expression for d in parsed.dimensions]
         self.assertEqual(
-            numerator.window.partition_by, ('"Name"', '"VisitType"', '"Gender"'),
-            "numerator must PARTITION BY the full resolved grain (group + cuts)",
+            grain_exprs, ['"Name"', '"VisitType"', '"Gender"'],
+            "grain must be the full resolved cut set (group + cuts)",
         )
+        for term in parsed.share_attribution["order_terms"]:
+            self.assertNotIn('"departement"', term)
 
     def test_unresolvable_group_token_does_not_emit_phantom_partition(self):
         # A group word that matches NOTHING (no feature label, no dataset stem)

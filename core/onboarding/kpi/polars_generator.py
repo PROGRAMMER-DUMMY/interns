@@ -248,14 +248,50 @@ class PolarsKPIGenerator:
         m = share.metric
         lines = ["lf = features"] + self._derive_dim_lines(intent) + self._filter_lines(intent)
         if share.kind == "mismatched_grain_percentage":
-            per = (
-                f'pl.col("{m.column}").n_unique().over("{share.partition}")'
-                if m.distinct else f'pl.col("{m.column}").{m.fn}().over("{share.partition}")'
-            )
-            total = (
-                f'pl.col("{m.column}").n_unique()'
-                if m.distinct else f'pl.col("{m.column}").{m.fn}()'
-            )
+            if m.distinct:
+                # Single attribution — mirrors the SQL share_attribution CTE:
+                # one row (= one grain cell) per entity (most recent event
+                # first when the grain has an event date, grain columns as
+                # deterministic tiebreakers), then a plain group count whose
+                # shares sum to ~100% by construction. Counting an entity in
+                # every cell it touches made shares total >100% (BUG: 229%
+                # measured on real data).
+                time_col = next(
+                    (d.column for d in intent.dims if d.kind == "time" and d.column), ""
+                )
+                sort_exprs: list[str] = []
+                descending: list[str] = []
+                if time_col:
+                    sort_exprs.append(f'pl.col("{time_col}").cast(pl.Date, strict=False)')
+                    descending.append("True")
+                for d in intent.dims:
+                    col = d.column if d.kind == "column" else d.alias
+                    sort_exprs.append(f'pl.col("{col}")')
+                    descending.append("False")
+                lines.append(
+                    f'lf = lf.sort([{", ".join(sort_exprs)}], '
+                    f'descending=[{", ".join(descending)}], nulls_last=True)'
+                )
+                lines.append(
+                    f'lf = lf.unique(subset=["{m.column}"], keep="first", maintain_order=True)'
+                )
+                group_exprs = self._group_exprs(intent)
+                lines.append(
+                    "lf = lf.group_by([" + ", ".join(group_exprs) + "])"
+                    '.agg([pl.len().alias("__attributed")])'
+                )
+                lines.append(
+                    'lf = lf.with_columns((pl.col("__attributed").cast(pl.Float64) '
+                    '/ pl.col("__attributed").sum() * 100).alias("percentage_share"))'
+                )
+                select_cols = self._dim_select_cols(intent) + ['"percentage_share"']
+                lines.append("lf = lf.select([" + ", ".join(select_cols) + "])")
+                lines.append("result = lf")
+                return lines
+            # Row-based shares only (distinct-entity shares returned above):
+            # every row belongs to exactly one cell, so these sum to ~100%.
+            per = f'pl.col("{m.column}").{m.fn}().over("{share.partition}")'
+            total = f'pl.col("{m.column}").{m.fn}()'
             lines.append(
                 f'lf = lf.with_columns([{per}.alias("share_per_group"), {total}.alias("share_total")])'
             )

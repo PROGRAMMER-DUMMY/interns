@@ -338,15 +338,50 @@ class PySparkKPIGenerator:
         m = share.metric
         lines = ["result = features"] + self._derive_dim_lines(intent) + self._filter_lines(intent)
         if share.kind == "mismatched_grain_percentage":
-            per = (
-                f'F.size(F.collect_set("{m.column}").over(Window.partitionBy("{share.partition}")))'
-                if m.distinct
-                else f'F.{m.fn}(F.col("{m.column}")).over(Window.partitionBy("{share.partition}"))'
-            )
-            total = (
-                f'F.size(F.collect_set("{m.column}").over(Window.partitionBy()))'
-                if m.distinct else f'F.{m.fn}(F.col("{m.column}")).over(Window.partitionBy())'
-            )
+            if m.distinct:
+                # Single attribution — mirrors the SQL share_attribution CTE and
+                # the Polars sort+unique path: each entity is counted in exactly
+                # ONE grain cell (most recent event first when the grain has an
+                # event date, grain columns as deterministic tiebreakers), so
+                # shares sum to ~100% by construction instead of >100% when
+                # entities appear in multiple cells.
+                time_col = next(
+                    (d.column for d in intent.dims if d.kind == "time" and d.column), ""
+                )
+                order_exprs: list[str] = []
+                if time_col:
+                    order_exprs.append(
+                        f'F.to_date(F.col("{time_col}")).desc_nulls_last()'
+                    )
+                for d in intent.dims:
+                    col = d.column if d.kind == "column" else d.alias
+                    order_exprs.append(f'F.col("{col}").asc_nulls_last()')
+                lines.append(
+                    f'_attr_w = Window.partitionBy("{m.column}")'
+                    f'.orderBy({", ".join(order_exprs)})'
+                )
+                lines.append(
+                    'result = result.withColumn("__attribution_rn", '
+                    "F.row_number().over(_attr_w))"
+                )
+                lines.append('result = result.filter(F.col("__attribution_rn") == 1)')
+                group_cols = self._group_cols(intent)
+                lines.append(
+                    f'result = result.groupBy({", ".join(group_cols)})'
+                    '.agg(F.count(F.lit(1)).alias("__attributed"))'
+                )
+                lines.append(
+                    'result = result.withColumn("percentage_share", '
+                    'F.col("__attributed") / F.sum("__attributed")'
+                    ".over(Window.partitionBy()) * 100)"
+                )
+                select_cols = self._dim_select_cols(intent) + ['"percentage_share"']
+                lines.append(f"result = result.select({', '.join(select_cols)})")
+                return lines
+            # Row-based shares only (distinct-entity shares returned above):
+            # every row belongs to exactly one cell, so these sum to ~100%.
+            per = f'F.{m.fn}(F.col("{m.column}")).over(Window.partitionBy("{share.partition}"))'
+            total = f'F.{m.fn}(F.col("{m.column}")).over(Window.partitionBy())'
             lines.append(f'result = result.withColumn("share_per_group", {per})')
             lines.append(f'result = result.withColumn("share_total", {total})')
             lines.append(
@@ -391,6 +426,16 @@ class PySparkKPIGenerator:
         return lines
 
     def _derive_dim_lines(self, intent: KPIIntent) -> list[str]:
+        # BUG-005 (cross-engine): date arithmetic must be anchored to the KPI's
+        # event-date column when one exists — exactly like the SQL and Polars
+        # paths — and fall back to today only when the grain has no event date.
+        event_date_col = next(
+            (d.column for d in intent.dims if d.kind == "time" and d.column), ""
+        )
+        if event_date_col:
+            as_of_year = f'F.year(F.to_date(F.col("{event_date_col}")))'
+        else:
+            as_of_year = "F.year(F.current_date())"
         lines: list[str] = []
         for dim in intent.dims:
             if dim.kind == "time":
@@ -400,15 +445,19 @@ class PySparkKPIGenerator:
                     f'F.date_trunc("{unit}", F.to_date(F.col("{dim.column}"))))'
                 )
             elif dim.kind == "age":
-                # calendar-year difference to match SQL date_diff('year', dob, today)
+                # calendar-year difference to match SQL date_diff('year', dob, as_of)
                 lines.append(
                     f'result = result.withColumn("{dim.alias}", '
-                    f'(F.year(F.current_date()) - F.year(F.to_date(F.col("{dim.column}")))).cast("int"))'
+                    f'({as_of_year} - F.year(F.to_date(F.col("{dim.column}")))).cast("int"))'
                 )
             elif dim.kind == "days_since":
+                as_of_date = (
+                    f'F.to_date(F.col("{event_date_col}"))'
+                    if event_date_col else "F.current_date()"
+                )
                 lines.append(
                     f'result = result.withColumn("{dim.alias}", '
-                    f'F.datediff(F.current_date(), F.to_date(F.col("{dim.column}"))))'
+                    f'F.datediff({as_of_date}, F.to_date(F.col("{dim.column}"))))'
                 )
         return lines
 

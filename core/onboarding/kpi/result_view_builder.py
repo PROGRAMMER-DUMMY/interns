@@ -175,6 +175,12 @@ class ParsedKPI:
     # (e.g. ~7k rows each ~0.2%). The block proposes banding the cut into ranges
     # instead of emitting the exploded GROUP BY. None = no bucketing block.
     grain_bucketing_block: dict[str, Any] | None = None
+    # Single-attribution share: set for distinct-entity share metrics so each
+    # entity is counted in exactly ONE grain cell (shares sum to ~100% instead
+    # of >100% when entities appear in multiple cells). Keys: entity_column,
+    # order_terms (ROW_NUMBER ordering), mode ("most_recent_event" or
+    # "deterministic_cell_order"). None = no attribution CTE.
+    share_attribution: dict[str, Any] | None = None
 
     @property
     def can_compose(self) -> bool:
@@ -363,6 +369,14 @@ def _resolve_group_column(
         return best_dim[1]
 
     return ""
+
+
+def _denom_is_within_scope(denominator_scope: str | None) -> bool:
+    """True when an explicit within-group denominator scope was chosen."""
+    return denominator_scope is not None and denominator_scope not in {
+        "grand_total",
+        "global_total",
+    }
 
 
 def _detect_time_bucket(token: str) -> tuple[str, str, str] | None:
@@ -866,6 +880,65 @@ def parse_kpi(
             parsed.dimensions.extend(grain_dimensions)
             grain_terms = tuple(d.expression for d in grain_dimensions)
 
+            # Single attribution for DISTINCT-entity shares: an entity that
+            # appears in multiple grain cells (one patient in several
+            # departments, one customer in several channels...) used to be
+            # counted in EVERY cell, so the shares totalled >100% (measured
+            # 229% on real data). Each entity is now attributed to exactly one
+            # cell — its most recent event when the grain has an event date,
+            # else a deterministic cell order — and the result is a plain
+            # GROUP BY whose shares sum to ~100% by construction. Row-based
+            # shares (sum / non-distinct count) already partition rows across
+            # cells and are left on the window path.
+            if distinct and column and column != "*" and grain_terms:
+                order_terms: list[str] = []
+                if event_date_col:
+                    order_terms.append(f"CAST({_quote(event_date_col)} AS DATE) DESC")
+                    attribution_mode = "most_recent_event"
+                else:
+                    attribution_mode = "deterministic_cell_order"
+                # Grain expressions as (tie)breakers make the pick fully
+                # deterministic across engines and runs.
+                order_terms.extend(grain_terms)
+                parsed.share_attribution = {
+                    "entity_column": column,
+                    "order_terms": order_terms,
+                    "mode": attribution_mode,
+                }
+                if _denom_is_within_scope(denominator_scope):
+                    _within_col = _resolve_group_column(
+                        partition, lookup, kpi, tuple(cut_columns)
+                    ) if partition else ""
+                    if _within_col and _within_col in emitted:
+                        denom_expr = (
+                            f"SUM(COUNT(*)) OVER (PARTITION BY {_quote(_within_col)})"
+                        )
+                        parsed.denominator_scope = denominator_scope
+                        parsed.denominator_scope_alternative = "grand_total"
+                    else:
+                        denom_expr = "SUM(COUNT(*)) OVER ()"
+                        parsed.denominator_scope = "grand_total"
+                else:
+                    denom_expr = "SUM(COUNT(*)) OVER ()"
+                    parsed.denominator_scope = denominator_scope or "grand_total"
+                    parsed.denominator_scope_alternative = None
+                # Plain aggregation (project=False) keeps the composer in
+                # GROUP BY mode; the share is the only emitted measure.
+                parsed.aggregations.append(
+                    Aggregation(
+                        fn="count", column="*",
+                        alias=_norm_alias(f"attributed_{column}_count"),
+                        project=False,
+                    )
+                )
+                parsed.extra_select_exprs.append(
+                    (
+                        f"CAST(COUNT(*) AS DOUBLE) / NULLIF({denom_expr}, 0) * 100",
+                        "percentage_share",
+                    )
+                )
+                return parsed
+
             # Numerator = lives within each full-grain cell (PARTITION BY grain).
             # project=False: it is inlined into percentage_share, NOT emitted as
             # its own output column (the metric is a single share column; the
@@ -1350,12 +1423,40 @@ def build_result_view_sql(
     # CURRENT_DATE so the temporal anchor is visible in the generated SQL.
     if parsed.age_as_of_assumption:
         lines.append(f"-- as_of_assumption: {parsed.age_as_of_assumption}")
-    lines += [
-        f"CREATE OR REPLACE VIEW {result_view} AS",
-        select_keyword,
-        "  " + ",\n  ".join(select_terms),
-        f"FROM {feature_view}",
-    ]
+    attribution = parsed.share_attribution
+    if attribution:
+        # Single-attribution share: ROW_NUMBER picks ONE row (= one grain cell)
+        # per entity, the outer query aggregates only those rows, so shares sum
+        # to ~100% by construction. The mode comment keeps the choice auditable.
+        lines.append(
+            f"-- share_attribution: single ({attribution['mode']}); "
+            "each entity counted in exactly one grain cell"
+        )
+        entity_q = _quote(attribution["entity_column"])
+        order_sql = ", ".join(attribution["order_terms"])
+        lines += [
+            f"CREATE OR REPLACE VIEW {result_view} AS",
+            "WITH __attributed AS (",
+            "  SELECT *,",
+            f"    ROW_NUMBER() OVER (PARTITION BY {entity_q} ORDER BY {order_sql})"
+            " AS __attribution_rn",
+            f"  FROM {feature_view}",
+            ")",
+            select_keyword,
+            "  " + ",\n  ".join(select_terms),
+            "FROM __attributed",
+        ]
+        rn_filter = "__attribution_rn = 1"
+        where_clause = (
+            where_clause + f" AND {rn_filter}" if where_clause else f"WHERE {rn_filter}"
+        )
+    else:
+        lines += [
+            f"CREATE OR REPLACE VIEW {result_view} AS",
+            select_keyword,
+            "  " + ",\n  ".join(select_terms),
+            f"FROM {feature_view}",
+        ]
     if where_clause:
         lines.append(where_clause)
     if group_by_clause:

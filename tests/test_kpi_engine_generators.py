@@ -153,7 +153,11 @@ class EngineGeneratorTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 PySparkKPIGenerator(tmp, "workspaces/demo").generate("kpi_001")
 
-    def test_percentage_share_renders_window_in_both_engines(self):
+    def test_distinct_share_renders_single_attribution_in_both_engines(self):
+        # A DISTINCT-entity share mirrors the SQL single-attribution semantics
+        # in every engine: one row (= one grain cell) per entity, then a plain
+        # group count — never the overlapping per-cell window count (which made
+        # shares total >100%).
         ds = "workspaces/demo/datasets/sales.csv"
         kpi = {
             "kpi_id": "kpi_001",
@@ -174,12 +178,15 @@ class EngineGeneratorTests(unittest.TestCase):
             psrc = (tmp / pol.path).read_text(encoding="utf-8")
             compile(psrc, pol.path, "exec")
             self.assertIn("percentage_share", psrc)
-            self.assertIn(".over(", psrc)
+            self.assertIn('unique(subset=["amount"], keep="first"', psrc)
+            self.assertNotIn("n_unique().over(", psrc)
             spk = PySparkKPIGenerator(tmp, "workspaces/demo").generate("kpi_001")
             ssrc = (tmp / spk.path).read_text(encoding="utf-8")
             compile(ssrc, spk.path, "exec")
             self.assertIn("percentage_share", ssrc)
-            self.assertIn("Window.partitionBy", ssrc)
+            self.assertIn('Window.partitionBy("amount")', ssrc)
+            self.assertIn("F.row_number()", ssrc)
+            self.assertNotIn("F.collect_set", ssrc)
 
 
 if __name__ == "__main__":
