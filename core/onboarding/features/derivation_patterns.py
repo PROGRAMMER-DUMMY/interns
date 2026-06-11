@@ -87,12 +87,31 @@ def _name_has(col: dict[str, Any], hints: tuple[str, ...]) -> bool:
 
 
 def _input_col(col: dict[str, Any], role: str) -> dict[str, Any]:
+    # Same shape as derived_evidence.derived_input_column — the blocker-panel
+    # validator (derived_markdown REQUIRED_INPUT_COLUMN_FIELDS) requires the
+    # full evidence form (role / observed_values / value_profile /
+    # semantic_meaning_sources / reason); a thin column crashes panel prep.
+    from core.onboarding.features.derived_evidence import (
+        example_value,
+        input_column_reason,
+        semantic_meaning_sources,
+        value_profile,
+    )
+
+    column = str(col.get("column") or "")
     return {
         "input_name": role,
         "column": col.get("column"),
         "dataset": col.get("dataset"),
         "dtype": col.get("dtype"),
+        "role": "formula_input",
         "profile_path": col.get("profile_path"),
+        "row_count": col.get("row_count"),
+        "observed_values": col.get("sample_values") or [],
+        "value_profile": value_profile(col),
+        "semantic_meaning_sources": semantic_meaning_sources(role, column, col),
+        "reason": input_column_reason(role, column, col),
+        "example_value": example_value(role, col),
         "evidence_state": "profile_inferred",
     }
 
@@ -111,16 +130,54 @@ def _option(
     reasoning: str,
     confidence: str,
 ) -> dict[str, Any]:
+    # Full option contract (derived_markdown REQUIRED_OPTION_FIELDS /
+    # REQUIRED_EXAMPLE_FIELDS / REQUIRED_REASONING_FIELDS) — same shape as
+    # derived_evidence.derived_feature_options, so the blocker panel renders it.
+    example_inputs = {
+        str(col.get("column")): col.get("example_value") for col in input_columns
+    }
     return {
         "derived_column_name": name,
         "source_pattern_id": pattern_id,
         "business_meaning": business_meaning,
         "formula": formula,
         "input_columns": input_columns,
-        "example": {},
-        "evidence_sources": [c.get("profile_path") for c in input_columns if c.get("profile_path")],
+        "example": {
+            "example_type": "synthetic_formula_example",
+            "input": example_inputs,
+            "output": {name: "apply the formula to the example inputs"},
+            "substituted_formula": formula,
+            "warning": (
+                "Example demonstrates formula mechanics only; "
+                "it is not workspace ground truth."
+            ),
+        },
+        "evidence_sources": [
+            {
+                "file": col.get("profile_path")
+                or "interns/generated/profiles/profile_index.json",
+                "dataset": col.get("dataset"),
+                "column": col.get("column"),
+                "evidence_type": "profile_schema",
+                "evidence": (
+                    f"Input column `{col.get('column')}` is present in generated "
+                    "profile evidence."
+                ),
+                "evidence_state": "schema_presence_only",
+            }
+            for col in input_columns
+        ],
         "derivation_reasoning": {
             "summary": reasoning,
+            "why_this_formula": reasoning,
+            "why_not_ground_truth": (
+                "No source artifact explicitly defines this derived column "
+                "with this formula."
+            ),
+            "remaining_risk": (
+                "Input columns are profile-backed, but the business meaning "
+                "still needs confirmation."
+            ),
             "evidence_state": "candidate_derivation_not_ground_truth",
         },
         "evidence_state": "candidate_derivation_not_ground_truth",

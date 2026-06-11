@@ -3057,6 +3057,25 @@ def _kpi_review_signature(completed_kpis: list[dict[str, Any]]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _utf8_safe_stdio() -> None:
+    """Make stdout/stderr UTF-8 tolerant on cp1252 consoles.
+
+    Result packets / generated SQL can contain non-ASCII (em-dash, arrow),
+    which crashes a Windows cp1252 console with UnicodeEncodeError when piped.
+    `errors="replace"` degrades gracefully instead of aborting mid-output
+    (which derails a driving CLI). Shared by every CLI entry point that prints
+    packets — main() AND pipeline_main() (the latter crashed on '→' when
+    only main() had the guard).
+    """
+    import sys
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except (AttributeError, ValueError):
+            pass
+
+
 _SUBCOMMANDS: frozenset[str] = frozenset(
     {"start", "status", "answer", "results", "review", "artifacts",
      "handoff", "context-status", "skill-excerpt", "gc"}
@@ -3078,16 +3097,7 @@ def _args_before_subcommand(argv: list[str]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Make stdout/stderr UTF-8 tolerant: result packets / generated SQL can contain
-    # non-ASCII (e.g. an em-dash or arrow), which crashes a Windows cp1252 console
-    # with UnicodeEncodeError when piped. `errors="replace"` degrades gracefully
-    # instead of aborting mid-output (which can derail a driving CLI).
-    import sys
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
-        except (AttributeError, ValueError):
-            pass
+    _utf8_safe_stdio()
     # BUG-019: --quiet must be accepted both at the top level
     # (workspace-flow --quiet status --diff) AND after the subcommand
     # (workspace-flow status --diff --quiet).
@@ -3552,6 +3562,8 @@ def pipeline_main(argv: list[str] | None = None) -> int:
         run-kpi-pipeline --workspace workspaces/<project> --domain <domain> --new-session
     """
     import sys
+
+    _utf8_safe_stdio()
 
     parser = argparse.ArgumentParser(prog="run-kpi-pipeline")
     parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
