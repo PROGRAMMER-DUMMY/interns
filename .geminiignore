@@ -1,32 +1,64 @@
-# BUG-018 fix: un-ignore the small, agent-readable artifacts inside interns/state/.
+# .geminiignore -- agent file visibility for Gemini CLI tools
+# (ReadFile / Glob / SearchText / ReadFolder)
 #
-# .gitignore has a bare "state/" rule (line 16) that matches
-# workspaces/**/interns/state/**  — so Gemini CLI (which respects .gitignore) was
-# blocked from reading those paths directly.  The workaround was a copy/read/delete
-# dance that burned context (35% -> 81% in one session) and left orphaned copies.
+# THIS IS A SELF-CONTAINED DENYLIST (rewritten 2026-06-07; supersedes BUG-018 attempt).
 #
-# Strategy: keep .gitignore's "state/" rule (it correctly hides large/noisy blobs),
-# but negate-override the small, human-facing files that agents need to read:
-#   current.json / current.md  — live workflow panel state (~12-155 KB)
-#   handoffs/*.md              — specialist hand-off notes (<2 KB each)
-#   metadata_store/**/*.json   — contract/profile copies (<115 KB each)
+# Why the old version was broken:
+#   Gemini's native file tools previously honored BOTH .gitignore and this file.
+#   .gitignore has a blanket directory rule `workspaces/**/interns/`. A gitignore
+#   DIRECTORY exclusion cannot be undone by a child `!negation` (git never descends
+#   into an ignored dir), so the old `!.../interns/reports/**/*.md` re-includes here
+#   were inert. Read-only subagents (the built-in `generalist`) therefore got
+#   "ignored by configured ignore patterns" and could not read any interns/ artifact.
 #
-# Still ignored (large / noisy / sensitive):
-#   interns/state/**/session.json       (~740 KB full session log)
-#   interns/state/**/trajectory.jsonl   (~375 KB tool-call trace)
-#   interns/state/**/medallion/         (raw Delta data files)
-#   datasets/                           (raw source CSVs — may contain PHI)
-#   .env / *.databrickscfg / *.key      (secrets — already in .gitignore)
+# The fix:
+#   .gemini/settings.json now sets fileFiltering.respectGitIgnore=false and
+#   respectGeminiIgnore=true. So this file is the ONLY visibility filter for agents
+#   and MUST positively hide everything sensitive/heavy on its own. git commit
+#   behavior is UNCHANGED (git still ignores interns/ via .gitignore).
+#
+#   The lightweight interns/ artifacts (reports/**, generated/**, current.json|md,
+#   handoffs/*.md, metadata_store/**) are intentionally NOT listed below, so native
+#   ReadFile/Glob can reach them.
+#
+# MAINTENANCE RULE: because git's denylist no longer protects agent visibility, any
+# NEW secret/PHI/heavy path must be added here explicitly.
 
-# -- un-ignore lightweight workflow state artifacts --------------------------
-!workspaces/**/interns/state/**/current.json
-!workspaces/**/interns/state/**/current.md
-!workspaces/**/interns/state/**/handoffs/*.md
-!workspaces/**/interns/state/**/metadata_store/**/*.json
+# -- secrets (NEVER expose to an agent) --------------------------------------
+.env
+.env.*
+!.env.example
+*.databrickscfg
+*.pem
+*.key
+*.p12
+credentials*
+config/lock.toml
+!config/lock.toml.example
 
-# -- also explicitly un-ignore reports/ and generated/ so any future .gitignore
-#    tightening cannot accidentally re-block them  --------------------------
-!workspaces/**/interns/reports/**/*.md
-!workspaces/**/interns/reports/**/*.json
-!workspaces/**/interns/generated/**/*.md
-!workspaces/**/interns/generated/**/*.json
+# -- raw source data (may contain PHI) ---------------------------------------
+workspaces/**/datasets/
+
+# -- heavy / noisy machine artifacts (token discipline) ----------------------
+#    full session logs, tool-call traces, and raw Delta/medallion data
+workspaces/**/interns/state/**/session.json
+workspaces/**/interns/state/**/*trajectory*
+workspaces/**/interns/state/**/medallion/
+state/
+.agents/sessions/
+*.duckdb
+*.db
+*.sqlite
+*.log
+
+# -- caches / build / vcs (performance) --------------------------------------
+.git/
+__pycache__/
+*.py[cod]
+.venv/
+.idea/
+.ruff_cache/
+.pytest_cache/
+node_modules/
+dist/
+build/

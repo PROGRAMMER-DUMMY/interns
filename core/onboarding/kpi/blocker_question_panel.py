@@ -24,6 +24,12 @@ from core.onboarding.kpi.pii_redaction import is_pii_column, redact_rows, redact
 
 PANEL_VERSION = 1
 
+# Intent-contract facets are normally advisory (surfaced in the panel SET, enforced
+# via gate-provenance, not made `current`). The exception is a facet that ALSO hard-
+# blocks the execution harness: it must be answerable as `current` so the operator
+# can resolve it via apply-kpi-panel-answer instead of looping on an empty panel.
+_HARD_BLOCKING_INTENT_FACETS = frozenset({"grain_bucketing"})
+
 register_contract("blocker_question_panel/current.json", current_version=PANEL_VERSION)
 INTERACTION_CONTRACT = {
     "display_mode": "project_blocker_panel",
@@ -102,18 +108,11 @@ class BlockerQuestionPanelBuilder:
         feature_questions = _build_questions(
             mapping, self.workspace, self.repo_root, self.deferred_kpi_ids
         )
-        # `current` (the answerable / flow-blocking panel) is driven ONLY by
-        # unresolved feature-mapping clusters, preserving flow stop semantics.
-        current = (
-            feature_questions[0]
-            if feature_questions
-            else _empty_panel(mapping, self.workspace, self.repo_root)
-        )
         # Route low-confidence KPI intent-contract facets into the panel SET
-        # (index.json) so they are visible/answerable, but NOT into `current`:
-        # intent ambiguities are surfaced + enforced via gate-provenance
-        # (--require-human-gates), not by hard-blocking the KPI flow. Additive;
-        # never breaks panel emission.
+        # (index.json) so they are visible/answerable. Most are advisory -- surfaced
+        # + enforced via gate-provenance (--require-human-gates), not hard-blocking
+        # the KPI flow -- so they stay out of `current`. Additive; never breaks
+        # panel emission.
         intent_questions: list[dict[str, Any]] = []
         try:
             from core.onboarding.kpi.intent_contract import intent_facet_panel_questions
@@ -123,6 +122,24 @@ class BlockerQuestionPanelBuilder:
             )
         except Exception:  # pragma: no cover - defensive; intent routing is additive
             intent_questions = []
+        # `current` (the answerable / flow-blocking panel) is an unresolved
+        # feature-mapping cluster first, preserving flow-stop semantics. With none
+        # left, fall back to the first HARD-blocking intent facet (grain_bucketing) --
+        # it also blocks the execution harness, so it MUST be answerable here via
+        # apply-kpi-panel-answer rather than leaving an empty panel (the loop that
+        # burned operator quota). Advisory facets remain set-only.
+        if feature_questions:
+            current = feature_questions[0]
+        else:
+            hard_intent = [
+                q for q in intent_questions
+                if str(q.get("facet")) in _HARD_BLOCKING_INTENT_FACETS
+            ]
+            current = (
+                hard_intent[0]
+                if hard_intent
+                else _empty_panel(mapping, self.workspace, self.repo_root)
+            )
         questions = feature_questions + intent_questions
         # Attach the new "real-ops-dashboard" preview sections to every
         # generated panel so the renderer has data to work with.

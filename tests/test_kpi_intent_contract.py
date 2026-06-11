@@ -808,5 +808,123 @@ class TestGrainBucketingPanelE2E(unittest.TestCase):
             )
 
 
+class TestRegistryWithoutKpiIdBackfill(unittest.TestCase):
+    """The real onboarding kpi_registry.json rows carry NO explicit kpi_id (keys are
+    name/metric/cuts/...). intent_facet_panel_questions must backfill the positional
+    ``kpi_{idx:03d}`` so questions key to a real KPI -- otherwise question_id becomes
+    ``intent__<facet>``, applies_to_kpis is empty, and record_intent_answer mirrors the
+    decision to pipeline_decisions[""] which the generator never reads (follow_ups #1).
+
+    Regression guard: prior fixtures always set kpi_id explicitly, masking this bug."""
+
+    def _registry_no_ids(self):
+        # Mirrors the on-disk shape: positional order defines the id; no kpi_id key.
+        return [
+            {
+                "name": "trend of amount paid",
+                "metric": "sum(amount_paid)",
+                "cuts": "month(service_date), region",
+            },
+            {
+                "name": "share of customers by age",
+                "metric": "share of count(distinct customer_id) / count(distinct customer_id) for region",
+                "cuts": "region, age(date_of_birth)",
+            },
+        ]
+
+    def test_questions_backfill_positional_kpi_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace_path = "workspaces/proj"
+            contracts_dir = root / workspace_path / "interns" / "generated" / "contracts"
+            contracts_dir.mkdir(parents=True)
+            (contracts_dir / "kpi_registry.json").write_text(
+                json.dumps({"kpis": self._registry_no_ids()}), encoding="utf-8"
+            )
+
+            questions = intent_facet_panel_questions(root, workspace_path)
+            self.assertTrue(questions, "no intent questions surfaced")
+
+            # No question may carry an empty kpi_id, and ids/feature keys must be well-formed.
+            for q in questions:
+                self.assertTrue(
+                    str(q.get("kpi_id") or "").strip(),
+                    f"question {q.get('facet')} has empty kpi_id: {q.get('question_id')}",
+                )
+                self.assertNotIn("intent__", str(q.get("question_id")))
+                self.assertNotIn("::::", str(q.get("feature")))
+
+            # The share-by-raw-age KPI is the 2nd row -> positional id kpi_002.
+            gb = [q for q in questions if q.get("facet") == "grain_bucketing"]
+            self.assertTrue(gb, "grain_bucketing not surfaced for the share-by-age KPI")
+            self.assertEqual(gb[0].get("kpi_id"), "kpi_002")
+            self.assertEqual(gb[0].get("question_id"), "intent_kpi_002_grain_bucketing")
+            self.assertEqual(gb[0].get("applies_to_kpis"), ["kpi_002"])
+
+    def test_answer_mirrors_to_real_kpi_id_not_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace_path = "workspaces/proj"
+            contracts_dir = root / workspace_path / "interns" / "generated" / "contracts"
+            contracts_dir.mkdir(parents=True)
+            (contracts_dir / "kpi_registry.json").write_text(
+                json.dumps({"kpis": self._registry_no_ids()}), encoding="utf-8"
+            )
+
+            questions = intent_facet_panel_questions(root, workspace_path)
+            gb = [q for q in questions if q.get("facet") == "grain_bucketing"][0]
+            record_intent_answer(
+                root,
+                workspace_path,
+                kpi_id=str(gb.get("kpi_id")),
+                facet="grain_bucketing",
+                value="band_continuous_cuts",
+                confirmed_by="tester",
+            )
+            decisions = _load_pipeline_decisions((root / workspace_path).resolve())
+            recorded = decisions.get("grain_bucketing_decisions") or {}
+            self.assertIn("kpi_002", recorded, f"answer mis-keyed: {recorded}")
+            self.assertNotIn("", recorded, "decision mirrored to empty kpi_id")
+
+
+class TestHardBlockingFacetBecomesCurrent(unittest.TestCase):
+    """grain_bucketing also HARD-blocks the execution harness, so when there are no
+    feature-mapping blockers it must become the answerable `current` panel -- otherwise
+    apply-kpi-panel-answer returns an empty panel and the operator loops (the quota
+    burn). Advisory intent facets (denominator_scope, temporal_anchor) stay set-only."""
+
+    def test_grain_facet_is_current_when_no_feature_blockers(self):
+        from core.onboarding.kpi.blocker_question_panel import BlockerQuestionPanelBuilder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = "workspaces/proj"
+            contracts = root / ws / "interns" / "generated" / "contracts"
+            contracts.mkdir(parents=True)
+            # Registry (no kpi_id, mirroring real onboarding): a plain KPI then a
+            # share-by-raw-age KPI whose grain_bucketing is the hard blocker.
+            (contracts / "kpi_registry.json").write_text(
+                json.dumps({"kpis": [
+                    {"name": "trend", "metric": "sum(amount_paid)", "cuts": "month(service_date)"},
+                    {"name": "share of customers by age",
+                     "metric": "share of count(distinct customer_id) / count(distinct customer_id) for region",
+                     "cuts": "region, age(date_of_birth)"},
+                ]}),
+                encoding="utf-8",
+            )
+            # Feature mapping with no unresolved clusters -> zero feature questions.
+            mapping_path = contracts / "kpi_feature_mapping.json"
+            mapping_path.write_text(json.dumps({"kpis": []}), encoding="utf-8")
+
+            BlockerQuestionPanelBuilder(root, ws, mapping_path=mapping_path).run()
+            current = json.loads(
+                (root / ws / "interns" / "reports" / "blocker_question_panel"
+                 / "current.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(current.get("facet"), "grain_bucketing")
+            self.assertEqual(current.get("kpi_id"), "kpi_002")
+            self.assertTrue(current.get("options"), "current grain panel must carry options")
+
+
 if __name__ == "__main__":
     unittest.main()

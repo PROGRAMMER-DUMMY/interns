@@ -1352,6 +1352,17 @@ def _load_registry_with_features(workspace_root: Path) -> list[dict[str, Any]]:
         registry = []
     registry = [kpi for kpi in registry if isinstance(kpi, dict)]
 
+    # Backfill the positional kpi_id that the rest of the system uses (execution
+    # harness, feature resolver, evidence graph all key on
+    # ``kpi.get("kpi_id") or f"kpi_{idx:03d}"``). The on-disk registry rows carry
+    # no explicit kpi_id, so without this every intent-contract question/answer
+    # keyed to "" -> question_id "intent__<facet>", feature "intent::::<facet>",
+    # and decisions mirrored to pipeline_decisions[""] which the generator never
+    # reads (follow_ups #1). Enumerate order matches the harness's scheme.
+    for idx, kpi in enumerate(registry, start=1):
+        if not str(kpi.get("kpi_id") or "").strip():
+            kpi["kpi_id"] = f"kpi_{idx:03d}"
+
     # Try to merge feature mapping (source_columns resolution)
     feat_path = layout.kpi_feature_mapping_path
     if feat_path.exists():
