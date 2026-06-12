@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\maintenance.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\maintenance.csv",
   "format": "csv",
   "row_count": 280,
   "file_count": 1,
@@ -13,7 +13,8 @@
     "downtime_hrs": "Int64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -22,14 +23,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "MN0271",
-        "MN0157",
-        "MN0009",
-        "MN0067",
-        "MN0265",
-        "MN0266",
-        "MN0122",
-        "MN0211"
+        "MN0001",
+        "MN0002",
+        "MN0003",
+        "MN0004",
+        "MN0005",
+        "MN0006",
+        "MN0007",
+        "MN0008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -45,13 +46,13 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "VIN141",
-        "VIN211",
-        "VIN189",
-        "VIN191",
-        "VIN153",
-        "VIN139",
-        "VIN212",
+        "VIN100",
+        "VIN101",
+        "VIN102",
+        "VIN103",
+        "VIN104",
+        "VIN105",
+        "VIN106",
         "VIN107"
       ],
       "sample_min": null,
@@ -68,14 +69,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-04-04",
+        "2025-01-01",
+        "2025-01-05",
+        "2025-01-10",
+        "2025-01-13",
         "2025-01-17",
-        "2025-02-03",
-        "2025-04-24",
-        "2025-03-10",
-        "2025-11-23",
-        "2026-02-13",
-        "2025-10-14"
+        "2025-01-20",
+        "2025-01-26",
+        "2025-01-29"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -92,10 +93,10 @@
       "nullable": null,
       "sample_values": [
         "BODYWORK",
-        "MOT",
         "BRAKES",
-        "TYRES",
-        "SERVICE"
+        "MOT",
+        "SERVICE",
+        "TYRES"
       ],
       "sample_min": null,
       "sample_max": null,

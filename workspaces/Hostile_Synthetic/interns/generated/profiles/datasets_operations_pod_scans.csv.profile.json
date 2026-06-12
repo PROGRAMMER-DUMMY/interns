@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pod_scans.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pod_scans.csv",
   "format": "csv",
   "row_count": 3427,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "signee": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -21,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "POD42182",
-        "POD42847",
-        "POD42138",
-        "POD41619",
-        "POD42465",
-        "POD43243",
-        "POD43263",
-        "POD42644"
+        "POD40001",
+        "POD40002",
+        "POD40003",
+        "POD40004",
+        "POD40005",
+        "POD40006",
+        "POD40007",
+        "POD40008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH100562",
-        "SH102111",
-        "SH103383",
-        "SH103509",
-        "SH100832",
-        "SH103618",
-        "SH103843",
-        "SH103713"
+        "SH100001",
+        "SH100002",
+        "SH100006",
+        "SH100007",
+        "SH100008",
+        "SH100009",
+        "SH100010",
+        "SH100011"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +68,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-06-20 12:18",
-        "2026-01-29 09:19",
-        "2025-05-07 09:48",
-        "2025-06-21 18:22",
-        "2026-03-17 14:00",
-        "2025-02-04 15:34",
-        "2025-02-14 16:31",
-        "2026-04-08 13:19"
+        "2025-01-03 17:38",
+        "2025-01-03 19:53",
+        "2025-01-04 21:14",
+        "2025-01-05 07:42",
+        "2025-01-05 08:13",
+        "2025-01-05 09:20",
+        "2025-01-05 09:29",
+        "2025-01-05 10:49"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -90,14 +91,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-217",
-        "L-234",
-        "L-231",
-        "L-241",
-        "L-215",
-        "L-214",
-        "L-246",
-        "L-244"
+        "L-201",
+        "L-202",
+        "L-203",
+        "L-204",
+        "L-205",
+        "L-206",
+        "L-207",
+        "L-208"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -113,14 +114,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Omar Costa",
-        "Nadia Fuentes",
-        "Hamid Marek",
-        "Boris Gallo",
-        "Stefan Gallo",
-        "Tomas Iqbal",
-        "Boris Kovacs",
-        "Rosa Okafor"
+        "Aisha Adler",
+        "Aisha Brennan",
+        "Aisha Costa",
+        "Aisha Dvorak",
+        "Aisha Eriksen",
+        "Aisha Fuentes",
+        "Aisha Gallo",
+        "Aisha Hansen"
       ],
       "sample_min": null,
       "sample_max": null,

@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
   "format": "csv",
   "row_count": 6,
   "file_count": 1,
@@ -11,7 +11,8 @@
     "premium_flag": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -20,12 +21,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SVC4",
+        "SVC1",
         "SVC2",
-        "SVC5",
-        "SVC6",
         "SVC3",
-        "SVC1"
+        "SVC4",
+        "SVC5",
+        "SVC6"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -41,12 +42,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Economy Deferred",
         "Chilled Reefer",
-        "Priority 48",
-        "Standard Ground",
+        "Economy Deferred",
+        "Express Next-Day",
         "Pallet Freight",
-        "Express Next-Day"
+        "Priority 48",
+        "Standard Ground"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -83,8 +84,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Y",
-        "N"
+        "N",
+        "Y"
       ],
       "sample_min": null,
       "sample_max": null,

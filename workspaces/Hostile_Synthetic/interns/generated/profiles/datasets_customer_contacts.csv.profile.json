@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\contacts.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\customer\\contacts.csv",
   "format": "csv",
   "row_count": 360,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "email_domain": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -21,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CT0103",
-        "CT0187",
-        "CT0193",
-        "CT0232",
-        "CT0264",
-        "CT0148",
-        "CT0290",
-        "CT0058"
+        "CT0001",
+        "CT0002",
+        "CT0003",
+        "CT0004",
+        "CT0005",
+        "CT0006",
+        "CT0007",
+        "CT0008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1074",
-        "P-1035",
-        "P-1154",
-        "P-1040",
-        "P-1009",
-        "P-1179",
-        "P-1155",
-        "P-1171"
+        "P-1001",
+        "P-1003",
+        "P-1004",
+        "P-1005",
+        "P-1006",
+        "P-1007",
+        "P-1008",
+        "P-1009"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +68,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Ines Brennan",
-        "Priya Costa",
-        "Tomas Kovacs",
-        "Dev Quist",
-        "Greta Gallo",
-        "Greta Hansen",
-        "Dev Riva",
-        "Elena Novak"
+        "Aisha Adler",
+        "Aisha Brennan",
+        "Aisha Costa",
+        "Aisha Eriksen",
+        "Aisha Fuentes",
+        "Aisha Gallo",
+        "Aisha Iqbal",
+        "Aisha Jensen"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -90,10 +91,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "OPS",
         "BUYER",
-        "WAREHOUSE",
-        "FINANCE"
+        "FINANCE",
+        "OPS",
+        "WAREHOUSE"
       ],
       "sample_min": null,
       "sample_max": null,

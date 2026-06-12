@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\surveys.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\customer\\surveys.csv",
   "format": "csv",
   "row_count": 420,
   "file_count": 1,
@@ -11,7 +11,8 @@
     "nps": "Int64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -20,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SV0413",
-        "SV0129",
-        "SV0318",
-        "SV0021",
-        "SV0058",
-        "SV0142",
-        "SV0178",
-        "SV0220"
+        "SV0001",
+        "SV0002",
+        "SV0003",
+        "SV0004",
+        "SV0005",
+        "SV0006",
+        "SV0007",
+        "SV0008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -43,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1058",
-        "P-1054",
-        "P-1142",
-        "P-1077",
-        "P-1050",
-        "P-1057",
-        "P-1088",
-        "P-1170"
+        "P-1001",
+        "P-1002",
+        "P-1003",
+        "P-1004",
+        "P-1005",
+        "P-1007",
+        "P-1009",
+        "P-1010"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -66,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-05-06",
-        "2025-04-23",
-        "2026-03-03",
-        "2025-05-08",
-        "2025-10-14",
-        "2026-05-31",
-        "2025-10-15",
-        "2026-05-12"
+        "2025-01-02",
+        "2025-01-03",
+        "2025-01-07",
+        "2025-01-08",
+        "2025-01-10",
+        "2025-01-11",
+        "2025-01-13",
+        "2025-01-14"
       ],
       "sample_min": null,
       "sample_max": null,

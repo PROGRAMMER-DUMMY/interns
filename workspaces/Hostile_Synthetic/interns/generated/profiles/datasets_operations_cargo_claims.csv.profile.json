@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
   "format": "csv",
   "row_count": 176,
   "file_count": 1,
@@ -14,7 +14,8 @@
     "settled_amount": "Float64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -23,14 +24,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CLM5025",
-        "CLM5102",
-        "CLM5032",
-        "CLM5129",
-        "CLM5155",
         "CLM5001",
-        "CLM5036",
-        "CLM5089"
+        "CLM5002",
+        "CLM5003",
+        "CLM5004",
+        "CLM5005",
+        "CLM5006",
+        "CLM5007",
+        "CLM5008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -46,14 +47,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH103720",
-        "SH100604",
-        "SH103947",
-        "SH102221",
-        "SH103838",
-        "SH100554",
-        "SH100575",
-        "SH102452"
+        "SH100050",
+        "SH100055",
+        "SH100068",
+        "SH100087",
+        "SH100112",
+        "SH100141",
+        "SH100152",
+        "SH100260"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -69,14 +70,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-02-08",
-        "2025-08-23",
-        "2025-04-22",
-        "2025-06-07",
-        "2026-04-29",
-        "2025-03-24",
-        "2026-02-06",
-        "2026-03-09"
+        "2025-01-01",
+        "2025-01-05",
+        "2025-01-07",
+        "2025-01-10",
+        "2025-01-14",
+        "2025-01-18",
+        "2025-01-19",
+        "2025-01-21"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -92,8 +93,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "DELAY",
         "DAMAGE",
+        "DELAY",
         "LOSS"
       ],
       "sample_min": null,
@@ -133,9 +134,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SETTLED",
         "DENIED",
-        "FILED"
+        "FILED",
+        "SETTLED"
       ],
       "sample_min": null,
       "sample_max": null,

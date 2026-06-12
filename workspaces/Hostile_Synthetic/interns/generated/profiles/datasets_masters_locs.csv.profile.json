@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\locs.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\masters\\locs.csv",
   "format": "csv",
   "row_count": 60,
   "file_count": 1,
@@ -14,7 +14,8 @@
     "Status": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -23,14 +24,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-237",
-        "L-215",
-        "L-236",
-        "L-210",
-        "L-214",
+        "L-201",
+        "L-202",
+        "L-203",
+        "L-204",
+        "L-205",
         "L-206",
-        "L-222",
-        "L-248"
+        "L-207",
+        "L-208"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -46,14 +47,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Vector Depot 55",
-        "Lumen Customer_Dock 14",
-        "Solstice Customer_Dock 19",
-        "Yarrow Depot 35",
-        "Crest Port 22",
-        "North Railhead 28",
-        "Pinnacle Railhead 58",
-        "Orchard Railhead 18"
+        "Alfa Hub 31",
+        "Alfa Port 17",
+        "Alfa Port 52",
+        "Bravo Hub 21",
+        "Bravo Hub 6",
+        "Crest Customer_Dock 29",
+        "Crest Customer_Dock 34",
+        "Crest Port 22"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -69,10 +70,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "PORT",
+        "CUSTOMER_DOCK",
         "DEPOT",
         "HUB",
-        "CUSTOMER_DOCK",
+        "PORT",
         "RAILHEAD"
       ],
       "sample_min": null,
@@ -89,14 +90,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "Z01",
         "Z02",
-        "Z06",
-        "Z11",
+        "Z03",
         "Z04",
-        "Z12",
         "Z05",
-        "Z08",
-        "Z10"
+        "Z06",
+        "Z07",
+        "Z08"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -112,10 +113,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "05:00",
         "06:00",
-        "08:00",
         "07:00",
-        "05:00"
+        "08:00"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -132,9 +133,9 @@
       "nullable": null,
       "sample_values": [
         "18:00",
-        "23:00",
         "20:00",
-        "22:00"
+        "22:00",
+        "23:00"
       ],
       "sample_min": null,
       "sample_max": null,

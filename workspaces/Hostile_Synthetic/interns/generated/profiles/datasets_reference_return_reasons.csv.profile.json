@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\return_reasons.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\reference\\return_reasons.csv",
   "format": "csv",
   "row_count": 5,
   "file_count": 1,
@@ -9,7 +9,8 @@
     "Name": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -18,11 +19,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "RR2",
-        "RR4",
-        "RR5",
         "RR1",
-        "RR3"
+        "RR2",
+        "RR3",
+        "RR4",
+        "RR5"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -38,11 +39,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Wrong item shipped",
-        "Refused delivery",
-        "Duplicate shipment",
         "Damaged on arrival",
-        "Order cancelled"
+        "Duplicate shipment",
+        "Order cancelled",
+        "Refused delivery",
+        "Wrong item shipped"
       ],
       "sample_min": null,
       "sample_max": null,

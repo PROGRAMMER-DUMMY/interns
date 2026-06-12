@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
   "format": "csv",
   "row_count": 4200,
   "file_count": 1,
@@ -22,7 +22,8 @@
     "Status": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -31,14 +32,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH103750",
-        "SH104016",
-        "SH103405",
-        "SH102329",
-        "SH104005",
-        "SH104025",
-        "SH101016",
-        "SH103372"
+        "SH100001",
+        "SH100002",
+        "SH100003",
+        "SH100004",
+        "SH100005",
+        "SH100006",
+        "SH100007",
+        "SH100008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -54,14 +55,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-05-30",
-        "2026-01-18",
-        "2025-09-24",
-        "2026-01-16",
-        "2025-09-19",
-        "2025-07-19",
-        "2025-03-21",
-        "2025-07-20"
+        "2025-01-01",
+        "2025-01-02",
+        "2025-01-03",
+        "2025-01-04",
+        "2025-01-05",
+        "2025-01-06",
+        "2025-01-07",
+        "2025-01-08"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -77,14 +78,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1130",
-        "P-1139",
-        "P-1034",
-        "P-1134",
-        "P-1044",
-        "P-1119",
-        "P-1184",
-        "P-1020"
+        "P-1001",
+        "P-1002",
+        "P-1003",
+        "P-1004",
+        "P-1005",
+        "P-1006",
+        "P-1007",
+        "P-1008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -101,11 +102,11 @@
       "nullable": null,
       "sample_values": [
         "SVC1",
-        "SVC6",
-        "SVC5",
         "SVC2",
+        "SVC3",
         "SVC4",
-        "SVC3"
+        "SVC5",
+        "SVC6"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -121,9 +122,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CDRX",
         "ARRW",
         "BLTC",
+        "CDRX",
         "DNUB",
         "EGRT",
         "FNCH",
@@ -143,14 +144,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-209",
-        "L-251",
-        "L-240",
-        "L-227",
-        "L-249",
+        "L-201",
         "L-202",
-        "L-216",
-        "L-203"
+        "L-203",
+        "L-204",
+        "L-205",
+        "L-206",
+        "L-207",
+        "L-208"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -166,14 +167,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-215",
-        "L-214",
-        "L-222",
-        "L-226",
-        "L-253",
-        "L-255",
+        "L-201",
+        "L-202",
         "L-203",
-        "L-212"
+        "L-204",
+        "L-205",
+        "L-206",
+        "L-207",
+        "L-208"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -189,14 +190,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-01-22 11:24",
-        "2026-03-15 20:40",
-        "2025-04-10 15:52",
-        "2025-04-28 09:56",
-        "2025-03-22 14:32",
-        "2025-12-23 18:25",
-        "2025-12-15 11:45",
-        "2026-04-08 13:55"
+        "2025-01-01 17:36",
+        "2025-01-02 07:58",
+        "2025-01-02 09:52",
+        "2025-01-02 19:08",
+        "2025-01-02 21:36",
+        "2025-01-03 10:03",
+        "2025-01-03 10:45",
+        "2025-01-03 11:37"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -212,14 +213,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-04-18 20:44",
-        "2025-06-24 21:10",
-        "2025-03-31 06:24",
-        "2025-10-16 17:57",
-        "2025-04-01 09:52",
-        "2025-01-25 17:08",
-        "2025-01-10 18:00",
-        "2025-08-15 06:23"
+        "2025-01-03 17:38",
+        "2025-01-03 19:53",
+        "2025-01-04 21:14",
+        "2025-01-05 07:42",
+        "2025-01-05 08:13",
+        "2025-01-05 09:20",
+        "2025-01-05 09:29",
+        "2025-01-05 10:49"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -321,8 +322,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "GBP",
-        "EUR"
+        "EUR",
+        "GBP"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -338,10 +339,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "DELIVERED",
-        "IN_TRANSIT",
         "BOOKED",
-        "CANCELLED"
+        "CANCELLED",
+        "DELIVERED",
+        "IN_TRANSIT"
       ],
       "sample_min": null,
       "sample_max": null,

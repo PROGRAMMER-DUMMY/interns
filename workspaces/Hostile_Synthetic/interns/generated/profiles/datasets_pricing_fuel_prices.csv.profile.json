@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\fuel_prices.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\fuel_prices.csv",
   "format": "csv",
   "row_count": 74,
   "file_count": 1,
@@ -9,7 +9,8 @@
     "pence_per_litre": "Float64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -18,14 +19,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-05-06",
-        "2025-03-05",
-        "2025-11-05",
-        "2025-11-12",
-        "2025-12-03",
-        "2026-03-25",
+        "2025-01-01",
+        "2025-01-08",
+        "2025-01-15",
+        "2025-01-22",
+        "2025-01-29",
+        "2025-02-05",
         "2025-02-12",
-        "2026-05-13"
+        "2025-02-19"
       ],
       "sample_min": null,
       "sample_max": null,

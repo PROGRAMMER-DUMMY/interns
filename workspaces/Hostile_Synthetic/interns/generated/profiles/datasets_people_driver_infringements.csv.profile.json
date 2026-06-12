@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\driver_infringements.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\people\\driver_infringements.csv",
   "format": "csv",
   "row_count": 120,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "points": "Int64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -21,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "DI0081",
-        "DI0088",
-        "DI0021",
-        "DI0038",
-        "DI0095",
-        "DI0014",
-        "DI0120",
-        "DI0048"
+        "DI0001",
+        "DI0002",
+        "DI0003",
+        "DI0004",
+        "DI0005",
+        "DI0006",
+        "DI0007",
+        "DI0008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "D3097",
-        "D3007",
-        "D3079",
-        "D3112",
+        "D3000",
+        "D3001",
+        "D3002",
+        "D3003",
         "D3004",
-        "D3014",
-        "D3053",
-        "D3043"
+        "D3005",
+        "D3006",
+        "D3007"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +68,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-10-18",
-        "2026-04-07",
-        "2026-01-02",
-        "2025-09-01",
-        "2025-04-19",
-        "2026-03-23",
-        "2025-04-25",
-        "2026-05-28"
+        "2025-01-10",
+        "2025-01-11",
+        "2025-01-15",
+        "2025-01-16",
+        "2025-01-17",
+        "2025-01-19",
+        "2025-01-21",
+        "2025-01-24"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -90,10 +91,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "HOURS",
         "SPEED",
-        "WALKAROUND",
         "TACHO",
-        "HOURS"
+        "WALKAROUND"
       ],
       "sample_min": null,
       "sample_max": null,

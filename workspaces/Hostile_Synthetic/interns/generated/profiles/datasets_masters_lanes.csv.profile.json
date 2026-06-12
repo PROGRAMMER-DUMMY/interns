@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\lanes.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\masters\\lanes.csv",
   "format": "csv",
   "row_count": 160,
   "file_count": 1,
@@ -11,7 +11,8 @@
     "distance_km": "Int64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -20,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "LN0051",
-        "LN0097",
-        "LN0023",
-        "LN0032",
-        "LN0129",
-        "LN0149",
-        "LN0019",
-        "LN0106"
+        "LN0001",
+        "LN0002",
+        "LN0003",
+        "LN0004",
+        "LN0005",
+        "LN0006",
+        "LN0007",
+        "LN0008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -43,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-237",
-        "L-205",
-        "L-215",
-        "L-234",
-        "L-212",
-        "L-255",
+        "L-202",
         "L-203",
-        "L-257"
+        "L-204",
+        "L-205",
+        "L-206",
+        "L-207",
+        "L-208",
+        "L-209"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -66,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-214",
-        "L-215",
-        "L-255",
-        "L-228",
-        "L-219",
-        "L-210",
-        "L-259",
-        "L-236"
+        "L-201",
+        "L-202",
+        "L-203",
+        "L-204",
+        "L-205",
+        "L-206",
+        "L-207",
+        "L-208"
       ],
       "sample_min": null,
       "sample_max": null,

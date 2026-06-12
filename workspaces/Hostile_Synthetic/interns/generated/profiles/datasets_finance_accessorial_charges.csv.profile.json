@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\accessorial_charges.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\finance\\accessorial_charges.csv",
   "format": "csv",
   "row_count": 340,
   "file_count": 1,
@@ -11,7 +11,8 @@
     "Amount": "Float64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -20,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "AC9068",
-        "AC9120",
-        "AC9159",
-        "AC9069",
-        "AC9017",
-        "AC9048",
-        "AC9198",
-        "AC9181"
+        "AC9001",
+        "AC9002",
+        "AC9003",
+        "AC9004",
+        "AC9005",
+        "AC9006",
+        "AC9007",
+        "AC9008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -43,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH101187",
-        "SH100452",
-        "SH102465",
-        "SH101599",
-        "SH103308",
-        "SH103814",
-        "SH100490",
-        "SH104044"
+        "SH100027",
+        "SH100035",
+        "SH100040",
+        "SH100055",
+        "SH100065",
+        "SH100088",
+        "SH100104",
+        "SH100111"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -66,11 +67,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "S-WAIT",
         "S-ADR",
-        "S-REWT",
         "S-LIFT",
-        "S-RES"
+        "S-RES",
+        "S-REWT",
+        "S-WAIT"
       ],
       "sample_min": null,
       "sample_max": null,

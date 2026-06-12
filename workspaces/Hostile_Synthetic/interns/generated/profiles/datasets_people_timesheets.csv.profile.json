@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
   "format": "csv",
   "row_count": 1100,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "hours": "Float64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -21,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "TS01026",
-        "TS00460",
-        "TS00619",
-        "TS00942",
-        "TS00030",
-        "TS00110",
-        "TS00658",
-        "TS00395"
+        "TS00001",
+        "TS00002",
+        "TS00003",
+        "TS00004",
+        "TS00005",
+        "TS00006",
+        "TS00007",
+        "TS00008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "E535",
-        "E589",
-        "E551",
-        "E557",
-        "E592",
+        "E500",
         "E501",
-        "E512",
-        "E588"
+        "E502",
+        "E503",
+        "E504",
+        "E505",
+        "E506",
+        "E507"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +68,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-11-13",
-        "2025-03-01",
-        "2026-04-12",
+        "2025-01-01",
+        "2025-01-02",
         "2025-01-03",
-        "2026-01-19",
-        "2026-03-11",
-        "2025-12-27",
-        "2025-04-11"
+        "2025-01-04",
+        "2025-01-05",
+        "2025-01-07",
+        "2025-01-08",
+        "2025-01-09"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -90,10 +91,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH2",
         "SH1",
-        "SH4",
-        "SH3"
+        "SH2",
+        "SH3",
+        "SH4"
       ],
       "sample_min": null,
       "sample_max": null,

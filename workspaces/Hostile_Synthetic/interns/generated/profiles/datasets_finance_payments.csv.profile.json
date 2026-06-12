@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
   "format": "csv",
   "row_count": 2280,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "method": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -21,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "PMT61764",
-        "PMT60027",
-        "PMT60062",
-        "PMT60522",
-        "PMT60792",
-        "PMT60902",
-        "PMT61177",
-        "PMT61279"
+        "PMT60001",
+        "PMT60002",
+        "PMT60003",
+        "PMT60004",
+        "PMT60005",
+        "PMT60006",
+        "PMT60007",
+        "PMT60008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "INV-50035",
-        "INV-50064",
-        "INV-50092",
-        "INV-53309",
-        "INV-51784",
-        "INV-50556",
-        "INV-50042",
-        "INV-51935"
+        "INV-50002",
+        "INV-50003",
+        "INV-50004",
+        "INV-50006",
+        "INV-50007",
+        "INV-50009",
+        "INV-50010",
+        "INV-50011"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +68,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-02-25",
-        "2025-07-29",
-        "2025-02-10",
-        "2025-01-25",
-        "2025-10-10",
-        "2025-06-09",
-        "2025-11-27",
-        "2025-06-26"
+        "2025-01-01",
+        "2025-01-02",
+        "2025-01-03",
+        "2025-01-04",
+        "2025-01-05",
+        "2025-01-06",
+        "2025-01-07",
+        "2025-01-08"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -113,9 +114,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CHEQUE",
-        "CARD",
         "BACS",
+        "CARD",
+        "CHEQUE",
         "DD"
       ],
       "sample_min": null,

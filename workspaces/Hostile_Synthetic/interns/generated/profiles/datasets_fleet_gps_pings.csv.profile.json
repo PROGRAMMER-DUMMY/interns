@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\gps_pings.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\gps_pings.csv",
   "format": "csv",
   "row_count": 400,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "lon": "Float64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -21,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "GP00239",
-        "GP00038",
-        "GP00240",
-        "GP00298",
-        "GP00262",
-        "GP00190",
-        "GP00301",
-        "GP00122"
+        "GP00001",
+        "GP00002",
+        "GP00003",
+        "GP00004",
+        "GP00005",
+        "GP00006",
+        "GP00007",
+        "GP00008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "VIN132",
-        "VIN178",
-        "VIN130",
-        "VIN194",
-        "VIN175",
-        "VIN198",
-        "VIN193",
-        "VIN111"
+        "VIN100",
+        "VIN101",
+        "VIN102",
+        "VIN103",
+        "VIN104",
+        "VIN105",
+        "VIN106",
+        "VIN107"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +68,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-01-24 06:55",
-        "2025-09-10 18:40",
-        "2025-08-08 08:59",
-        "2025-06-05 07:49",
-        "2025-09-30 09:48",
-        "2025-05-24 09:31",
-        "2025-01-22 18:39",
-        "2025-11-15 16:31"
+        "2025-01-01 06:08",
+        "2025-01-03 19:48",
+        "2025-01-04 21:57",
+        "2025-01-05 07:46",
+        "2025-01-05 10:35",
+        "2025-01-05 16:15",
+        "2025-01-08 08:42",
+        "2025-01-08 17:32"
       ],
       "sample_min": null,
       "sample_max": null,

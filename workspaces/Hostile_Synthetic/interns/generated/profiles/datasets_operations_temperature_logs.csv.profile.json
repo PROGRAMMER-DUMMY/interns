@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\temperature_logs.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\operations\\temperature_logs.csv",
   "format": "csv",
   "row_count": 260,
   "file_count": 1,
@@ -11,7 +11,8 @@
     "temp_c": "Float64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -20,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "TL00205",
-        "TL00165",
-        "TL00106",
-        "TL00207",
-        "TL00220",
-        "TL00042",
-        "TL00256",
-        "TL00085"
+        "TL00001",
+        "TL00002",
+        "TL00003",
+        "TL00004",
+        "TL00005",
+        "TL00006",
+        "TL00007",
+        "TL00008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -43,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH102514",
-        "SH101178",
-        "SH100852",
-        "SH102661",
-        "SH102375",
-        "SH103020",
-        "SH103274",
-        "SH101566"
+        "SH100015",
+        "SH100020",
+        "SH100041",
+        "SH100063",
+        "SH100081",
+        "SH100096",
+        "SH100106",
+        "SH100122"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -66,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-09-17 11:35",
+        "2025-01-05 06:42",
+        "2025-01-06 21:23",
+        "2025-01-09 20:39",
+        "2025-01-12 08:19",
+        "2025-01-14 18:24",
+        "2025-01-17 06:44",
         "2025-01-17 13:33",
-        "2025-05-08 19:14",
-        "2025-03-24 12:56",
-        "2026-01-27 13:39",
-        "2025-03-31 10:28",
-        "2026-01-23 11:35",
-        "2026-03-14 20:25"
+        "2025-01-17 18:41"
       ],
       "sample_min": null,
       "sample_max": null,

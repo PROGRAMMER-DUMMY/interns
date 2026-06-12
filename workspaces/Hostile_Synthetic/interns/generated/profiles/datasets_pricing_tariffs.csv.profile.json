@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
   "format": "csv",
   "row_count": 180,
   "file_count": 1,
@@ -14,7 +14,8 @@
     "effective": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -23,14 +24,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "T0173",
-        "T0012",
-        "T0036",
-        "T0061",
-        "T0027",
-        "T0053",
-        "T0165",
-        "T0146"
+        "T0001",
+        "T0002",
+        "T0003",
+        "T0004",
+        "T0005",
+        "T0006",
+        "T0007",
+        "T0008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -46,12 +47,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SVC4",
-        "SVC6",
+        "SVC1",
         "SVC2",
-        "SVC5",
         "SVC3",
-        "SVC1"
+        "SVC4",
+        "SVC5",
+        "SVC6"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +68,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Z12",
-        "Z07",
-        "Z08",
+        "Z01",
+        "Z02",
+        "Z03",
+        "Z04",
         "Z05",
         "Z06",
-        "Z01",
-        "Z11",
-        "Z02"
+        "Z07",
+        "Z08"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -90,14 +91,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Z11",
-        "Z07",
-        "Z09",
-        "Z12",
+        "Z01",
+        "Z02",
+        "Z03",
         "Z04",
         "Z05",
-        "Z10",
-        "Z01"
+        "Z06",
+        "Z07",
+        "Z08"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -159,14 +160,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2024-08-16",
-        "2024-03-19",
-        "2024-01-23",
-        "2025-05-14",
-        "2024-06-01",
-        "2025-02-03",
-        "2024-10-04",
-        "2025-12-25"
+        "2024-01-03",
+        "2024-01-07",
+        "2024-01-12",
+        "2024-01-16",
+        "2024-01-17",
+        "2024-01-19",
+        "2024-01-20",
+        "2024-01-23"
       ],
       "sample_min": null,
       "sample_max": null,

@@ -25,6 +25,42 @@ try:
 except ImportError:  # pragma: no cover - optional at runtime
     pq = None
 
+try:
+    import duckdb
+except ImportError:  # pragma: no cover - optional at runtime
+    duckdb = None
+
+
+# Polars dtype string -> DuckDB column type, used to force DuckDB's CSV reader
+# onto the exact schema Polars inferred so pushdown aggregates match the legacy
+# Polars profile value-for-value. Dtypes outside this map (Decimal, List, ...)
+# disable pushdown for that file and fall back to the legacy path.
+_POLARS_TO_DUCKDB_TYPES: dict[str, str] = {
+    "Int8": "TINYINT",
+    "Int16": "SMALLINT",
+    "Int32": "INTEGER",
+    "Int64": "BIGINT",
+    "UInt8": "UTINYINT",
+    "UInt16": "USMALLINT",
+    "UInt32": "UINTEGER",
+    "UInt64": "UBIGINT",
+    "Float32": "FLOAT",
+    "Float64": "DOUBLE",
+    "Boolean": "BOOLEAN",
+    "String": "VARCHAR",
+    "Utf8": "VARCHAR",
+    "Date": "DATE",
+    "Time": "TIME",
+}
+
+
+def _duckdb_type_for_polars(dtype: str) -> str | None:
+    if dtype in _POLARS_TO_DUCKDB_TYPES:
+        return _POLARS_TO_DUCKDB_TYPES[dtype]
+    if dtype.startswith("Datetime"):
+        return "TIMESTAMP"
+    return None
+
 
 INTEGER_BOUNDS = [
     ("Int8", -(2**7), 2**7 - 1),
@@ -107,8 +143,18 @@ class DatasetProfile:
 
 
 class DataModelProfiler:
-    def __init__(self, downcast_policy: DowncastPolicy | None = None):
+    def __init__(
+        self,
+        downcast_policy: DowncastPolicy | None = None,
+        *,
+        pushdown: bool = True,
+    ):
         self.downcast_policy = downcast_policy or DowncastPolicy()
+        # When True (default) CSV profiling pushes aggregations down to DuckDB
+        # (row counts, null counts, min/max, observed values via SQL over
+        # read_csv) instead of materializing rows in Python. Falls back to the
+        # legacy Polars path on any DuckDB error or unmapped dtype.
+        self.pushdown = pushdown
 
     def profile_path(
         self,
@@ -139,7 +185,34 @@ class DataModelProfiler:
         elif fmt == "parquet":
             warnings.append("pyarrow_not_available_for_parquet_metadata")
 
-        if pl and files:
+        # Pushdown path: for plain CSV files, compute row counts, null counts,
+        # min/max, and observed values in DuckDB SQL over read_csv instead of
+        # materializing rows in Python. The legacy Polars path remains the
+        # fallback for malformed files, unmapped dtypes, or a missing duckdb.
+        pushdown_done = False
+        if (
+            self.pushdown
+            and fmt == "csv"
+            and duckdb is not None
+            and pl is not None
+            and len(files) == 1
+            and files[0].is_file()
+        ):
+            try:
+                pushed = self._profile_csv_duckdb(
+                    files[0], sample_rows=sample_rows, exact=exact
+                )
+            except Exception as exc:
+                warnings.append(f"duckdb_pushdown_failed:{type(exc).__name__}:{exc}")
+                pushed = None
+            if pushed is not None:
+                schema.update(pushed["schema"])
+                row_count = pushed["row_count"]
+                columns.update(pushed["columns"])
+                sources_used.extend(pushed["sources_used"])
+                pushdown_done = True
+
+        if not pushdown_done and pl and files:
             try:
                 lf = _scan_with_polars(target, fmt)
                 polars_schema = {name: str(dtype) for name, dtype in lf.collect_schema().items()}
@@ -155,7 +228,7 @@ class DataModelProfiler:
                     sources_used.append("exact_scan")
             except Exception as exc:
                 warnings.append(f"polars_profile_failed:{type(exc).__name__}:{exc}")
-        elif not pl:
+        elif not pushdown_done and not pl:
             warnings.append("polars_not_available_for_sample_or_exact_profile")
 
         column_list = [
@@ -307,6 +380,141 @@ class DataModelProfiler:
                 kwargs["exact_max"] = stats.get(f"{name}__max")
             columns[name] = ColumnProfile(**kwargs)
         return columns
+
+
+    def _profile_csv_duckdb(
+        self,
+        file: Path,
+        *,
+        sample_rows: int,
+        exact: bool,
+    ) -> dict[str, Any]:
+        """Profile one CSV by pushing aggregations down to DuckDB SQL.
+
+        The schema (and therefore every dtype string in the artifact) still
+        comes from Polars so the profile is value-identical to the legacy
+        path; DuckDB is forced onto those dtypes via a per-column ``types``
+        override. Aggregates run over a single sample materialization:
+        - row_count: ``count(*)`` over the full file;
+        - null_count / min / max: one aggregate SELECT over the first
+          ``sample_rows`` rows (full file when ``exact``);
+        - sample_values: ``SELECT DISTINCT ... ORDER BY ... LIMIT 8`` per
+          column, sorted for deterministic byte-identical output.
+        Any error (malformed file, header mismatch, unmapped dtype) raises and
+        the caller falls back to the legacy Polars path.
+        """
+        schema = {
+            name: str(dtype)
+            for name, dtype in pl.scan_csv(str(file)).collect_schema().items()
+        }
+        duck_types: dict[str, str] = {}
+        for name, dtype in schema.items():
+            mapped = _duckdb_type_for_polars(dtype)
+            if mapped is None:
+                raise ValueError(f"unmapped_polars_dtype:{name}:{dtype}")
+            duck_types[name] = mapped
+
+        path_literal = "'" + str(file).replace("'", "''") + "'"
+        types_literal = "{" + ", ".join(
+            "'" + name.replace("'", "''") + "': '" + duck_type + "'"
+            for name, duck_type in duck_types.items()
+        ) + "}"
+        source = f"read_csv_auto({path_literal}, types={types_literal})"
+
+        conn = duckdb.connect()
+        try:
+            conn.execute("SET preserve_insertion_order=true")
+            described = conn.execute(f"DESCRIBE SELECT * FROM {source}").fetchall()
+            duck_names = [row[0] for row in described]
+            if duck_names != list(schema):
+                raise ValueError(
+                    f"duckdb_polars_header_mismatch:{duck_names}!={list(schema)}"
+                )
+            row_count = int(conn.execute(f"SELECT count(*) FROM {source}").fetchone()[0])
+            conn.execute(
+                "CREATE OR REPLACE TEMP TABLE __ws_profile_sample AS "
+                f"SELECT * FROM {source} LIMIT {int(sample_rows)}"
+            )
+
+            stat_names = [
+                name
+                for name, dtype in schema.items()
+                if _is_numeric_dtype(dtype) or _is_temporal_dtype(dtype)
+            ]
+            stats = self._duckdb_column_stats(conn, "__ws_profile_sample", stat_names)
+            exact_stats = (
+                self._duckdb_column_stats(conn, f"(SELECT * FROM {source})", stat_names)
+                if exact
+                else {}
+            )
+
+            columns: dict[str, ColumnProfile] = {}
+            for name, dtype_str in schema.items():
+                quoted = _quote_ident(name)
+                value_rows = conn.execute(
+                    f"SELECT DISTINCT {quoted} AS v FROM __ws_profile_sample "
+                    f"WHERE {quoted} IS NOT NULL ORDER BY v LIMIT 8"
+                ).fetchall()
+                sample_values = [_json_safe_value(row[0]) for row in value_rows]
+                col_stats = stats.get(name) or {}
+                col_exact = exact_stats.get(name) or {}
+                columns[name] = ColumnProfile(
+                    name=name,
+                    dtype=dtype_str,
+                    null_count=(
+                        col_exact.get("null_count")
+                        if exact and name in exact_stats
+                        else col_stats.get("null_count")
+                    ),
+                    sample_values=sample_values,
+                    sample_min=col_stats.get("min"),
+                    sample_max=col_stats.get("max"),
+                    exact_min=col_exact.get("min"),
+                    exact_max=col_exact.get("max"),
+                    source="exact_scan" if exact else "sample_profile",
+                )
+        finally:
+            conn.close()
+
+        sources_used = ["sample_profile"]
+        if exact:
+            sources_used.append("exact_scan")
+        sources_used.append("duckdb_pushdown")
+        return {
+            "schema": schema,
+            "row_count": row_count,
+            "columns": columns,
+            "sources_used": sources_used,
+        }
+
+    @staticmethod
+    def _duckdb_column_stats(
+        conn: Any,
+        relation: str,
+        stat_names: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """min/max/null_count for the given columns in ONE aggregate query."""
+        if not stat_names:
+            return {}
+        exprs: list[str] = []
+        for name in stat_names:
+            quoted = _quote_ident(name)
+            exprs.extend(
+                [f"min({quoted})", f"max({quoted})", f"count(*) - count({quoted})"]
+            )
+        row = conn.execute(f"SELECT {', '.join(exprs)} FROM {relation}").fetchone()
+        stats: dict[str, dict[str, Any]] = {}
+        for idx, name in enumerate(stat_names):
+            stats[name] = {
+                "min": row[3 * idx],
+                "max": row[3 * idx + 1],
+                "null_count": int(row[3 * idx + 2]),
+            }
+        return stats
+
+
+def _quote_ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
 
 
 def _merge_columns(
