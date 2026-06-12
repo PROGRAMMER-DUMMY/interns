@@ -65,7 +65,7 @@ def new_run_id(manifest_hash: str) -> str:
 
 @dataclass
 class TableRunStatus:
-    status: str = "pending"          # pending | ok | failed
+    status: str = "pending"          # pending | ok | failed | skipped
     row_count_before: int = 0
     row_count_after: int = 0
     elapsed_s: float = 0.0

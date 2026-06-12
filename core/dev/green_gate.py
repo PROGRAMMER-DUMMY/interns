@@ -75,6 +75,8 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_blocked_kpi_invariant",
     "tests.test_documented_join_evidence",
     "tests.test_collision_blocking",
+    # Phase 3 track C: incremental medallion refresh + deploy-plan schema.
+    "tests.test_medallion_incremental",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

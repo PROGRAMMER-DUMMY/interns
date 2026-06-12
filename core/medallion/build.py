@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 from core.medallion.design import medallion_dirs
+from core.medallion.incremental import (
+    IncrementalPlan,
+    RefreshManifest,
+    plan_incremental,
+    record_built,
+)
 from core.medallion.manifest import Manifest
 from core.medallion.merge_emitter import emit_silver_merge
 from core.medallion.run_state import (
@@ -61,6 +67,7 @@ def build_medallion(
     only_layer: Optional[str] = None,
     only_table: Optional[str] = None,
     resume: Optional[str] = None,
+    force: bool = False,
     force_with_blockers: bool = False,
     resource_decision: ResourceDecision | None = None,
 ) -> RunState:
@@ -77,6 +84,7 @@ def build_medallion(
                 workspace, repo_root, layout, paths, cfg=cfg,
                 target_override=target_override,
                 only_layer=only_layer, only_table=only_table, resume=resume,
+                force=force,
                 force_with_blockers=force_with_blockers,
                 resource_decision=resource_decision,
             )
@@ -97,6 +105,7 @@ def _run_build(
     only_layer: Optional[str],
     only_table: Optional[str],
     resume: Optional[str],
+    force: bool,
     force_with_blockers: bool,
     resource_decision: ResourceDecision | None,
 ) -> RunState:
@@ -181,6 +190,11 @@ def _run_build(
             mlflow_finalize(state_dict, run_dir)
             return state
 
+    # Incremental refresh plan: fingerprints decide which tables can be skipped.
+    # Local (DuckDB) builds only — the Delta path above is wholesale for now.
+    refresh = RefreshManifest.load(paths["state"], workspace=workspace.name)
+    inc_plan = plan_incremental(manifest, paths, repo_root, refresh, force=force)
+
     # Open workspace DuckDB connection
     db_path = paths["state"] / "workspace.duckdb"
     import duckdb
@@ -193,25 +207,35 @@ def _run_build(
         # 8. Bronze layer
         if only_layer in (None, "bronze"):
             _execute_bronze(manifest, paths, con, state, governor, repo_root,
-                            only_table=only_table, db_path=str(db_path))
+                            only_table=only_table, db_path=str(db_path),
+                            inc_plan=inc_plan, refresh=refresh)
 
         # 9. Silver layer
         if only_layer in (None, "silver"):
             _execute_silver(manifest, paths, con, state, governor,
                             only_table=only_table, db_path=str(db_path),
-                            workspace_salt=workspace_salt)
+                            workspace_salt=workspace_salt,
+                            inc_plan=inc_plan, refresh=refresh)
 
         # 10. Gold layer
         if only_layer in (None, "gold"):
             _execute_gold(manifest, paths, con, state, governor,
-                          only_table=only_table, db_path=str(db_path))
+                          only_table=only_table, db_path=str(db_path),
+                          inc_plan=inc_plan, refresh=refresh)
 
-        # 11. KPI regeneration
+        # 11. KPI regeneration — downstream of Gold; skip when Gold inputs
+        # are unchanged (the regenerated SQL would be byte-identical).
         if only_layer in (None, "kpi") and manifest.kpi_regeneration.enabled:
-            _execute_kpi_regen(manifest, layout, paths, con, state, governor, workspace, repo_root)
+            if inc_plan.kpi_action == "build":
+                _execute_kpi_regen(manifest, layout, paths, con, state, governor, workspace, repo_root)
+            else:
+                state.per_table_status["kpi.regeneration"] = TableRunStatus(
+                    status="skipped",
+                )
 
     finally:
         con.close()
+        refresh.save(paths["state"])
 
     # 12. Finalize run.json
     state.finished_at = datetime.now(timezone.utc).isoformat()
@@ -373,11 +397,15 @@ def _execute_bronze(
     *,
     only_table: Optional[str],
     db_path: str,
+    inc_plan: IncrementalPlan | None = None,
+    refresh: RefreshManifest | None = None,
 ) -> None:
     for b in manifest.bronze:
         if only_table and b.name != only_table:
             continue
         key = f"bronze.{b.name}"
+        if _skip_unchanged(key, con, state, inc_plan):
+            continue
         sql_path = paths["bronze"] / f"{b.name}.duckdb.sql"
         if not sql_path.exists():
             state.per_table_status[key] = TableRunStatus(status="failed", error="SQL file missing")
@@ -412,6 +440,7 @@ def _execute_bronze(
             row_count_after=row_after,
             elapsed_s=round(time.time() - t0, 3),
         )
+        _record_refresh(key, inc_plan, refresh, state.run_id)
 
 
 # ── Silver execution ───────────────────────────────────────────────────────────
@@ -426,11 +455,15 @@ def _execute_silver(
     only_table: Optional[str],
     db_path: str,
     workspace_salt: Optional[str] = None,
+    inc_plan: IncrementalPlan | None = None,
+    refresh: RefreshManifest | None = None,
 ) -> None:
     for s in manifest.silver:
         if only_table and s.name != only_table:
             continue
         key = f"silver.{s.name}"
+        if _skip_unchanged(key, con, state, inc_plan):
+            continue
         sql_path = paths["silver"] / f"{s.name}.duckdb.sql"
         assertions_path = paths["silver"] / f"_{s.name}_assertions.sql"
 
@@ -499,6 +532,7 @@ def _execute_silver(
             elapsed_s=elapsed,
             assertions=assertion_results,
         )
+        _record_refresh(key, inc_plan, refresh, state.run_id)
 
 
 # ── Gold execution ─────────────────────────────────────────────────────────────
@@ -512,11 +546,15 @@ def _execute_gold(
     *,
     only_table: Optional[str],
     db_path: str,
+    inc_plan: IncrementalPlan | None = None,
+    refresh: RefreshManifest | None = None,
 ) -> None:
     for g in manifest.gold:
         if only_table and g.name != only_table:
             continue
         key = f"gold.{g.name}"
+        if _skip_unchanged(key, con, state, inc_plan):
+            continue
         sql_path = paths["gold"] / f"{g.name}.duckdb.sql"
         if not sql_path.exists():
             state.per_table_status[key] = TableRunStatus(status="failed", error="SQL file missing")
@@ -549,6 +587,46 @@ def _execute_gold(
             row_count_after=row_after,
             elapsed_s=round(time.time() - t0, 3),
         )
+        _record_refresh(key, inc_plan, refresh, state.run_id)
+
+
+# ── Incremental skip helpers ───────────────────────────────────────────────────
+
+def _skip_unchanged(key: str, con, state: RunState, inc_plan: IncrementalPlan | None) -> bool:
+    """True when the table's fingerprint is unchanged AND the table actually
+    exists in the workspace database (a missing table always rebuilds)."""
+    if inc_plan is None or not inc_plan.should_skip(key):
+        return False
+    if not _table_exists(con, key):
+        return False
+    row_count = _row_count(con, key)
+    state.per_table_status[key] = TableRunStatus(
+        status="skipped",
+        row_count_before=row_count,
+        row_count_after=row_count,
+    )
+    return True
+
+
+def _table_exists(con, fqn: str) -> bool:
+    try:
+        con.execute(f"SELECT 1 FROM {fqn} LIMIT 1")
+        return True
+    except Exception:
+        return False
+
+
+def _record_refresh(
+    key: str,
+    inc_plan: IncrementalPlan | None,
+    refresh: RefreshManifest | None,
+    run_id: str,
+) -> None:
+    if inc_plan is None or refresh is None:
+        return
+    decision = inc_plan.decision(key)
+    if decision is not None:
+        record_built(refresh, decision, run_id=run_id)
 
 
 # ── KPI regeneration ───────────────────────────────────────────────────────────
