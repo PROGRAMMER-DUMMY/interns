@@ -120,6 +120,7 @@ class KPIFeatureResolver:
         kpis = self._load_kpis()
         schema_index = self._schema_index()
         self._lexicon = load_workspace_lexicon(self.layout)
+        self._column_identity = _column_identity_groups(self._load_relationships())
         alias_index = self._alias_index(schema_index)
         available_columns = sorted({entry["column"] for entries in schema_index.values() for entry in entries})
         mapping = {
@@ -268,6 +269,22 @@ class KPIFeatureResolver:
                 continue
             if norm in schema_index:
                 evidences = schema_index[norm]
+                datasets = {
+                    normalize_blocker(Path(str(evidence.get("dataset") or "")).stem)
+                    for evidence in evidences
+                }
+                if len(datasets) > 1:
+                    # Name collision: the same column name exists in several
+                    # datasets, where it may mean different things. Evidence
+                    # order: (1) dictionary context, (2) relationship/lineage
+                    # unification, (3) accepted workspace definitions (applied
+                    # post-resolution), (4) name matching LAST -- a collision
+                    # that no higher tier resolves BLOCKS with per-candidate
+                    # evidence instead of silently auto-resolving.
+                    features.append(
+                        self._resolve_direct_collision(token, norm, evidences, full_context)
+                    )
+                    continue
                 features.append({
                     "feature": token,
                     "state": "proven_direct",
@@ -445,6 +462,133 @@ class KPIFeatureResolver:
         data = json.loads(path.read_text(encoding="utf-8"))
         return list(data.get("kpis", []))
 
+    def _load_relationships(self) -> list[dict[str, Any]]:
+        """Relationship contracts as lineage evidence for feature resolution.
+
+        Missing/unreadable contracts contribute nothing (the resolver still
+        works; collisions then simply block instead of unifying).
+        """
+        path = self.layout.contracts_dir / "relationship_contracts.json"
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return []
+        relationships = data.get("relationships")
+        return list(relationships) if isinstance(relationships, list) else []
+
+    def _resolve_direct_collision(
+        self,
+        token: str,
+        norm: str,
+        evidences: list[dict[str, Any]],
+        full_context: str,
+    ) -> dict[str, Any]:
+        """Resolve a multi-dataset direct name match in evidence order.
+
+        1. Dictionary context: if the KPI's own text semantically overlaps one
+           candidate's dictionary description / table clearly more than every
+           other (real terms, never the column name echoing itself), that
+           column wins with the dictionary evidence attached.
+        2. Relationship/lineage: if every colliding (dataset, column) endpoint
+           is connected through join-worthy relationship contracts (e.g. the
+           same key on both sides of a proven fact->dimension join), the
+           collision is one logical field and stays proven_direct.
+        3. Otherwise the collision BLOCKS with per-candidate evidence -- never
+           silently auto-resolved by name.
+        """
+        dictionary_choice = _dictionary_context_choice(norm, evidences, full_context)
+        if dictionary_choice is not None:
+            return _contextual_feature(token, [dictionary_choice], proven=True)
+        endpoints = [
+            (
+                normalize_blocker(Path(str(evidence.get("dataset") or "")).stem),
+                normalize_blocker(str(evidence.get("column") or "")),
+            )
+            for evidence in evidences
+        ]
+        identity = getattr(self, "_column_identity", {})
+        roots = {identity.get(endpoint, endpoint) for endpoint in endpoints}
+        if len(roots) == 1 and endpoints and endpoints[0] in identity:
+            return {
+                "feature": token,
+                "state": "proven_direct",
+                "resolution_type": "direct_column",
+                "source_columns": source_columns(evidences),
+                "grain": "physical_column",
+                "conflicts": [],
+                "decision_history": [],
+                "evidence": [
+                    {
+                        "type": "schema_profile",
+                        "source": evidence["dataset"],
+                        "column": evidence["column"],
+                    }
+                    for evidence in evidences
+                ]
+                + [
+                    {
+                        "type": "relationship_unification",
+                        "source": "interns/generated/contracts/relationship_contracts.json",
+                        "note": (
+                            "The colliding columns are endpoints of join-worthy "
+                            "relationship contracts and form one logical field."
+                        ),
+                    }
+                ],
+                "candidate_patterns": [],
+                "candidates": [],
+                "question": None,
+            }
+        descriptions = [
+            f"{Path(str(evidence.get('dataset') or '')).stem}.{evidence.get('column')}"
+            + (
+                f": {evidence.get('dictionary_description')}"
+                if evidence.get("dictionary_description")
+                else ""
+            )
+            for evidence in evidences
+        ]
+        return {
+            "feature": token,
+            "state": "blocked_ambiguous",
+            "resolution_type": "ambiguous_direct_columns",
+            "source_columns": source_columns(evidences),
+            "grain": "ambiguous_requires_user_choice",
+            "conflicts": descriptions,
+            "decision_history": [],
+            "evidence": [
+                {
+                    "type": "schema_profile_collision",
+                    "source": evidence["dataset"],
+                    "column": evidence["column"],
+                    "dictionary_description": evidence.get("dictionary_description", ""),
+                }
+                for evidence in evidences
+            ],
+            "candidate_patterns": [],
+            "derived_feature_options": [],
+            "candidates": [
+                {
+                    "state": "candidate_unconfirmed",
+                    "column": evidence["column"],
+                    "source": evidence["dataset"],
+                    "reason": (
+                        str(evidence.get("dictionary_description") or "").strip()
+                        or "Same column name; meaning differs per table -- needs a choice."
+                    ),
+                }
+                for evidence in evidences
+            ],
+            "question": (
+                f"Column name `{token}` exists in {len(evidences)} datasets with "
+                "table-specific meanings; no dictionary or relationship evidence "
+                f"singles one out. Which dataset.column should define `{token}` "
+                "for this KPI?"
+            ),
+        }
+
     def _schema_index(self) -> dict[str, list[dict[str, str]]]:
         schema_index = load_schema_index(self.layout.profiles_dir / "profile_index.json")
         dictionaries = self._load_data_dictionaries()
@@ -534,6 +678,113 @@ class KPIFeatureResolver:
             except OSError:
                 continue
         return rows
+
+
+def _dictionary_context_choice(
+    norm: str,
+    evidences: list[dict[str, Any]],
+    full_context: str,
+) -> dict[str, Any] | None:
+    """Dictionary-context disambiguation for a colliding column name.
+
+    Picks one colliding column only when the KPI's own text shares at least
+    two REAL semantic terms with that candidate's dictionary description or
+    table name, and beats every other candidate by two or more terms. The
+    column name itself is excluded from the overlap so a dictionary entry
+    merely echoing the name ("Amount: the amount...") never wins -- that would
+    be name matching laundered through the dictionary.
+    """
+    context_tokens = _semantic_tokens(full_context) - {norm}
+    if not context_tokens:
+        return None
+    scored: list[tuple[int, set[str], dict[str, Any]]] = []
+    for evidence in evidences:
+        description_tokens = _semantic_tokens(
+            str(evidence.get("dictionary_description") or "")
+        ) - {norm}
+        dataset_tokens = _semantic_tokens(
+            _split_identifier(Path(str(evidence.get("dataset") or "")).stem)
+        )
+        overlap = context_tokens & (description_tokens | dataset_tokens)
+        scored.append((len(overlap), overlap, evidence))
+    scored.sort(key=lambda item: (-item[0], str(item[2].get("dataset") or "")))
+    if not scored:
+        return None
+    top_count, top_overlap, top_evidence = scored[0]
+    runner_up = scored[1][0] if len(scored) > 1 else 0
+    if top_count >= 2 and top_count >= runner_up + 2:
+        return {
+            **top_evidence,
+            "score": float(top_count),
+            "reason": (
+                "KPI text semantically matches this candidate's dictionary "
+                f"description/table (terms: {', '.join(sorted(top_overlap))}) "
+                "clearly more than every colliding alternative."
+            ),
+        }
+    return None
+
+
+def _relationship_join_worthy(relationship: dict[str, Any]) -> bool:
+    """Whether a relationship is strong enough lineage to unify column names.
+
+    Documented/proven/user-confirmed edges qualify. Raw profile name-overlap
+    edges qualify only when their observed left->right key overlap passed
+    (``left_keys_resolve`` is True) -- name similarity alone must never unify
+    a collision (that would be circular name-matching).
+    """
+    state = str(relationship.get("state") or "")
+    if state in {"proven_data_model", "user_confirmed", "documented_data_model"}:
+        return True
+    if state == "profile_validated":
+        checks = relationship.get("referential_integrity_checks") or {}
+        return checks.get("left_keys_resolve") is True
+    return False
+
+
+def _column_identity_groups(
+    relationships: list[dict[str, Any]],
+) -> dict[tuple[str, str], tuple[str, str]]:
+    """Union-find over (dataset, column) endpoints of join-worthy relationships.
+
+    Two physical columns connected by a join-worthy relationship are one
+    logical field (a fact FK and the dimension key it references). The
+    returned map sends each endpoint to its group root; endpoints with no
+    relationship evidence are absent.
+    """
+    parent: dict[tuple[str, str], tuple[str, str]] = {}
+
+    def find(node: tuple[str, str]) -> tuple[str, str]:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    def union(left: tuple[str, str], right: tuple[str, str]) -> None:
+        parent.setdefault(left, left)
+        parent.setdefault(right, right)
+        root_left, root_right = find(left), find(right)
+        if root_left != root_right:
+            parent[root_right] = root_left
+
+    for relationship in relationships:
+        if not isinstance(relationship, dict):
+            continue
+        if not _relationship_join_worthy(relationship):
+            continue
+        left = (
+            normalize_blocker(Path(str(relationship.get("left_dataset") or "")).stem),
+            normalize_blocker(str(relationship.get("left_column") or "")),
+        )
+        right = (
+            normalize_blocker(Path(str(relationship.get("right_dataset") or "")).stem),
+            normalize_blocker(str(relationship.get("right_column") or "")),
+        )
+        if not left[1] or not right[1]:
+            continue
+        union(left, right)
+
+    return {node: find(node) for node in parent}
 
 
 def _column_pair(source: dict[str, Any]) -> tuple[str, str] | None:

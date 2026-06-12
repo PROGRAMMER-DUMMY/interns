@@ -79,6 +79,17 @@ def prepare_kpi_blocker_panel(
         WorkspaceOnboarder(root, _rel(workspace_path, root)).run()
         onboarded = True
 
+    # Relationship/lineage evidence feeds feature resolution (documented joins,
+    # collision unification), so contracts are rebuilt before resolving.
+    # Additive: a failure here degrades resolution (collisions block instead of
+    # unifying) but must never break panel preparation.
+    try:
+        from core.onboarding.relationships.contracts import RelationshipContractBuilder
+
+        RelationshipContractBuilder(root, _rel(workspace_path, root)).build()
+    except Exception:  # pragma: no cover - relationship evidence is additive
+        pass
+
     resolver_result = KPIFeatureResolver(
         root,
         _rel(workspace_path, root),
