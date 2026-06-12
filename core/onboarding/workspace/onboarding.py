@@ -1804,18 +1804,93 @@ def _read_json_kpis(path: Path, repo_root: Path) -> list[KpiDefinition]:
 
 
 def _read_markdown_kpis(path: Path, repo_root: Path) -> list[KpiDefinition]:
+    """Read KPI definitions from a markdown document.
+
+    Two authoring shapes are supported, both evidence-preserving:
+
+    1. Table rows (``| name | detail | ... |``) — unchanged behavior.
+    2. Prose sections: a heading whose text mentions a KPI starts a section;
+       every prose line until the next same-or-higher-level heading (or a
+       thematic break ``---``) is the KPI's authored body and is preserved as
+       the ``description``. Stakeholder sentences ARE the KPI definition in
+       natural-language registries; dropping them starves feature extraction
+       and produces blocked-with-no-question dead ends (hostile-workspace
+       finding F2). No heading layout beyond "heading + body" is assumed.
+    """
     text = path.read_text(encoding="utf-8")
-    kpis = []
+    source = _rel(path, repo_root)
+    kpis: list[KpiDefinition] = []
+    heading_re = re.compile(r"^(#{1,6})\s+(.*)$")
+    rule_re = re.compile(r"^(?:-{3,}|\*{3,}|_{3,})$")
+    current_name: str | None = None
+    current_level = 0
+    current_body: list[str] = []
+
+    def table_row_kpi(stripped: str) -> KpiDefinition | None:
+        if not stripped.startswith("|") or "kpi" in stripped.lower():
+            return None
+        if stripped.startswith("|---") or stripped.startswith("| :"):
+            return None
+        cells = [cell.strip(" *`") for cell in stripped.strip("|").split("|")]
+        if not cells or not cells[0]:
+            return None
+        return KpiDefinition(
+            name=cells[0], description=" | ".join(cells[1:]), source=source
+        )
+
+    def flush() -> None:
+        nonlocal current_name, current_body
+        if current_name is not None:
+            table_rows = [line for line in current_body if line.startswith("|")]
+            prose_lines = [
+                line for line in current_body if line and not line.startswith("|")
+            ]
+            if table_rows and not prose_lines:
+                # A "## KPIs" container heading over a table: the table rows are
+                # the KPIs, not the heading itself.
+                for row in table_rows:
+                    parsed = table_row_kpi(row)
+                    if parsed is not None:
+                        kpis.append(parsed)
+            else:
+                description = "\n".join(current_body).strip()
+                kpis.append(
+                    KpiDefinition(
+                        name=current_name, description=description, source=source
+                    )
+                )
+        current_name = None
+        current_body = []
+
     for line in text.splitlines():
         stripped = line.strip()
-        if not stripped or stripped.startswith("|---") or stripped.startswith("| :"):
+        heading = heading_re.match(stripped)
+        if heading:
+            level = len(heading.group(1))
+            title = heading.group(2).strip()
+            if "kpi" in title.lower():
+                flush()
+                current_name = title
+                current_level = level
+            elif current_name is not None and level <= current_level:
+                # A non-KPI heading at the same or higher level closes the
+                # current KPI section.
+                flush()
+            elif current_name is not None:
+                # A deeper non-KPI subheading stays part of the prose body.
+                current_body.append(title)
             continue
-        if stripped.startswith("|") and "kpi" not in stripped.lower():
-            cells = [cell.strip(" *`") for cell in stripped.strip("|").split("|")]
-            if cells and cells[0]:
-                kpis.append(KpiDefinition(name=cells[0], description=" | ".join(cells[1:]), source=_rel(path, repo_root)))
-        elif re.match(r"^#{1,4}\s+", stripped) and "kpi" in stripped.lower():
-            kpis.append(KpiDefinition(name=re.sub(r"^#{1,4}\s+", "", stripped), source=_rel(path, repo_root)))
+        if current_name is not None:
+            if rule_re.match(stripped):
+                # A thematic break ends the section (shared document trailer).
+                flush()
+                continue
+            current_body.append(stripped)
+            continue
+        parsed = table_row_kpi(stripped)
+        if parsed is not None:
+            kpis.append(parsed)
+    flush()
     return kpis
 
 
