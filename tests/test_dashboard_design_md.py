@@ -115,7 +115,9 @@ class AppliesToRendererTests(unittest.TestCase):
             config={"chart_type": "bar", "x": "region", "y": "v"},
             machine_defaults={}, user_overrides={}, spec_path="x.json",
         )
-        rows = [{"region": "n", "v": 10}, {"region": "s", "v": 20}]
+        # >8 categories so the bar stays single-series accent (low-cardinality
+        # bars now color per category from the categorical ramp instead).
+        rows = [{"region": f"r{i}", "v": 10 + i} for i in range(12)]
         try:
             set_active_design(parse_design_md("accent: #ff00ff\n"))
             fig = _figure_from_spec(spec, rows)

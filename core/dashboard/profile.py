@@ -37,6 +37,10 @@ _SHARE_NAME_RE = re.compile(r"(percent|share|ratio|rate|proportion)", re.IGNOREC
 # Above this distinct-count a categorical dimension is treated as a ranked
 # top-N entity (bars per value become unreadable); below it, a plain bar.
 _RANKED_CARDINALITY = 15
+
+# At or below this distinct-count, a SHARE metric's categorical breakdown is a
+# composition and renders as a donut instead of yet another bar panel.
+_DONUT_CARDINALITY = 5
 # Cap how many breakdown panels a single KPI emits (most-informative first).
 _MAX_PANELS = 4
 # A color split is only legible up to this many series.
@@ -218,6 +222,11 @@ def decide_panels(
             panel["chart_type"] = "ranked_bar"
             panel["limit"] = 10
             panel["orientation"] = "h"
+        elif is_share and p.distinct <= _DONUT_CARDINALITY:
+            # A share split across a handful of categories is a composition —
+            # a donut reads it at a glance and varies the chart language so a
+            # KPI's panel row is not four identical bar charts.
+            panel["chart_type"] = "donut"
         else:
             panel["chart_type"] = "bar"
         if is_share:

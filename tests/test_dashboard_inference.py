@@ -330,12 +330,29 @@ class CorporateThemeTests(unittest.TestCase):
         self.assertEqual(fig.layout.paper_bgcolor, "rgba(0,0,0,0)")
         self.assertEqual(fig.layout.plot_bgcolor, "rgba(0,0,0,0)")
 
-    def test_single_series_uses_editorial_accent(self):
+    def test_low_cardinality_bars_color_per_category_from_ramp(self):
+        # <=8 categories -> one ramp color per bar (user-requested variety;
+        # the axis names categories so no legend is shown).
         fig = _figure_from_spec(
             _spec({"chart_type": "bar", "x": "region", "y": "sum_amount", "title": "X"}),
             [{"region": "north", "sum_amount": 10}, {"region": "south", "sum_amount": 20}],
         )
-        # single series -> all bars the editorial accent (sienna)
+        from core.dashboard.design_md import DesignTokens
+
+        colors = {str(trace.marker.color).lower() for trace in fig.data}
+        ramp = [c.lower() for c in DesignTokens().categorical]
+        self.assertEqual(len(fig.data), 2)  # one trace per category
+        self.assertTrue(colors.issubset(set(ramp)))
+        self.assertEqual(len(colors), 2)  # genuinely different colors
+        self.assertFalse(fig.layout.showlegend)
+
+    def test_high_cardinality_single_series_bar_keeps_accent(self):
+        rows = [{"region": f"r{i}", "sum_amount": 10 + i} for i in range(12)]
+        fig = _figure_from_spec(
+            _spec({"chart_type": "bar", "x": "region", "y": "sum_amount", "title": "X"}),
+            rows,
+        )
+        # too many categories for per-category color -> editorial accent
         self.assertEqual(str(fig.data[0].marker.color).lower(), "#b4441c")
 
     def test_multi_series_uses_colorblind_safe_palette(self):

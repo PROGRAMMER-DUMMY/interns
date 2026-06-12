@@ -344,8 +344,11 @@ def _figure_from_spec(
     # colorblind-safe categorical ramp so series are genuinely separable. Forced
     # onto px traces via color_discrete_sequence (layout.colorway alone does not
     # color single-series bars — px would fall back to its default blue).
-    is_multi = bool(color_col) or chart_type == "stacked_bar_percent"
+    is_multi = bool(color_col) or chart_type in ("stacked_bar_percent", "donut")
     seq = list(_ACTIVE.categorical) if is_multi else [_ACTIVE.accent]
+    # Per-category coloring (donuts, low-cardinality bars) always uses the
+    # colorblind-safe ramp regardless of series count.
+    ramp = list(_ACTIVE.categorical)
 
     try:
         if chart_type == "line":
@@ -393,12 +396,32 @@ def _figure_from_spec(
                 data, x=x_col, y=y_col, color=color_col, barmode="group", title=title,
                 color_discrete_sequence=seq,
             )
+        elif chart_type == "donut":
+            # Part-of-whole for a LOW-cardinality breakdown of a share metric:
+            # a donut reads composition at a glance and gives each slice its
+            # own ramp color. The label+percent is on the slice, so the legend
+            # is redundant noise.
+            data = _aggregate_rows(rows, x_col, None, y_col)
+            fig = px.pie(
+                data, names=x_col, values=y_col, title=title, hole=0.45,
+                color_discrete_sequence=seq,
+            )
+            fig.update_traces(textinfo="label+percent", textposition="inside")
+            fig.update_layout(showlegend=False)
         else:
             data = _aggregate_rows(rows, x_col, color_col, y_col)
             if y_is_percent and not color_col:
                 data = _normalize_percent(data, y_col)
-            fig = px.bar(data, x=x_col, y=y_col, color=color_col, title=title,
-                         color_discrete_sequence=seq)
+            if not color_col and chart_type == "bar" and len(data) <= 8:
+                # Low-cardinality single-series bars: one ramp color per
+                # category (the axis already names them — no legend), so
+                # side-by-side panels aren't a wall of one accent color.
+                fig = px.bar(data, x=x_col, y=y_col, color=x_col, title=title,
+                             color_discrete_sequence=ramp)
+                fig.update_layout(showlegend=False)
+            else:
+                fig = px.bar(data, x=x_col, y=y_col, color=color_col, title=title,
+                             color_discrete_sequence=seq)
     except Exception as exc:
         fig = go.Figure()
         fig.add_annotation(text=f"(chart render failed: {exc})", showarrow=False, x=0.5, y=0.5)
