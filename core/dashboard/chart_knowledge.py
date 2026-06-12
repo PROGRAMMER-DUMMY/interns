@@ -107,9 +107,10 @@ def choose_categorical_chart(
             return ChartChoice(
                 "lollipop",
                 "top-N entities whose values are within "
-                f"{int(LOLLIPOP_SPREAD * 100)}% of each other read better as "
-                "lollipops — near-equal bars become an undifferentiated wall "
-                "(data-to-viz: lollipop for many similar-height bars)",
+                f"{int(LOLLIPOP_SPREAD * 100)}% of each other render as a "
+                "Cleveland dot plot on a value-zoomed axis — position (not "
+                "bar length) encodes, so near-equal values stay separable "
+                "(data-to-viz: lollipop/dot for many similar-height bars)",
                 modifiers={"limit": 10, "orientation": "h"},
             )
         return ChartChoice(
@@ -134,8 +135,9 @@ def choose_categorical_chart(
     if value_spread is not None and value_spread < LOLLIPOP_SPREAD and distinct >= 6:
         return ChartChoice(
             "lollipop",
-            "similar-height categories: lollipops emphasize the value mark "
-            "over redundant bar ink (data-to-viz recommendation)",
+            "similar-height categories render as a Cleveland dot plot on a "
+            "value-zoomed axis: position encodes the value, keeping near-equal "
+            "categories separable (data-to-viz recommendation)",
         )
     return ChartChoice(
         "bar",

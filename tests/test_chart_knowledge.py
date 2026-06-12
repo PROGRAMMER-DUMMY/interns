@@ -117,12 +117,16 @@ class RendererCoverageTest(unittest.TestCase):
         )
         return _figure_from_spec(spec, rows)
 
-    def test_lollipop_renders_markers(self) -> None:
+    def test_lollipop_renders_value_zoomed_dot_plot(self) -> None:
         rows = [{"payor": f"P{i}", "v": 1500 + i * 20} for i in range(10)]
         fig = self._fig({"chart_type": "lollipop", "x": "payor", "y": "v", "title": "T"}, rows)
         modes = {trace.mode for trace in fig.data}
-        self.assertIn("markers", modes)
+        self.assertIn("markers+text", modes)  # dots carry value labels
         self.assertEqual(fig.layout.yaxis.type, "category")
+        # Axis zooms to the data range: near-equal values must stay separable,
+        # so the lower bound sits near the min value, NOT at zero.
+        lo = fig.layout.xaxis.range[0]
+        self.assertGreater(lo, 1000)
 
     def test_treemap_renders(self) -> None:
         rows = [{"dept": f"D{i}", "share": 5 + i} for i in range(10)]

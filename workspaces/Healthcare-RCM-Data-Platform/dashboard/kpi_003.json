@@ -2,7 +2,7 @@
   "artifact_type": "dashboard_spec",
   "version": 2,
   "kpi_id": "kpi_003",
-  "updated_at": "2026-06-12T15:20:13.279737+00:00",
+  "updated_at": "2026-06-12T15:24:41.092292+00:00",
   "machine_defaults": {
     "title": "What are top 10 payers in Commercial LOB w.r.t. amount paid",
     "metric": "sum(PaidAmount)",
@@ -18,7 +18,7 @@
     "panels": [
       {
         "chart_type": "lollipop",
-        "selection_reason": "similar-height categories: lollipops emphasize the value mark over redundant bar ink (data-to-viz recommendation)",
+        "selection_reason": "similar-height categories render as a Cleveland dot plot on a value-zoomed axis: position encodes the value, keeping near-equal categories separable (data-to-viz recommendation)",
         "selection_source": "https://www.data-to-viz.com/",
         "x": "payorid",
         "y": "sum_paidamount",

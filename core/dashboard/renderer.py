@@ -424,8 +424,12 @@ def _figure_from_spec(
             )
             fig.update_geos(fitbounds="locations", bgcolor="rgba(0,0,0,0)")
         elif chart_type == "lollipop":
-            # data-to-viz: many bars of SIMILAR height read better as
-            # lollipops — the dot marks the value without redundant bar ink.
+            # data-to-viz: many SIMILAR-height values read better as a
+            # Cleveland dot plot than bars. POSITION (not length) encodes the
+            # value, so the axis zooms to the data range — on a zero axis,
+            # near-equal values collapse into one vertical line of dots and
+            # the chart says nothing. Each dot is value-labeled; a full-width
+            # pale guide ties the dot to its category label.
             rank_col = _first_non_constant_categorical(rows, y_col, preferred=x_col)
             data = _aggregate_rows(rows, rank_col, None, y_col)
             if y_is_percent:
@@ -434,19 +438,26 @@ def _figure_from_spec(
             ordered = sorted(data, key=lambda r: r.get(y_col) or 0, reverse=True)[:limit]
             ordered = list(reversed(ordered))
             cats = [str(r.get(rank_col)) for r in ordered]
-            vals = [r.get(y_col) or 0 for r in ordered]
+            vals = [float(r.get(y_col) or 0) for r in ordered]
+            lo, hi = min(vals), max(vals)
+            pad = max((hi - lo) * 0.18, hi * 0.005) or 1.0
             fig = go.Figure()
-            for cat, val in zip(cats, vals):
+            for cat in cats:
                 fig.add_trace(go.Scatter(
-                    x=[0, val], y=[cat, cat], mode="lines",
-                    line={"color": _GRID_COLOR, "width": 2}, showlegend=False,
+                    x=[lo - pad, hi + pad], y=[cat, cat], mode="lines",
+                    line={"color": _GRID_COLOR, "width": 1}, showlegend=False,
+                    hoverinfo="skip",
                 ))
+            labels = [f"{v:,.1f}%" if y_is_percent else f"{v:,.0f}" for v in vals]
             fig.add_trace(go.Scatter(
-                x=vals, y=cats, mode="markers",
+                x=vals, y=cats, mode="markers+text", text=labels,
+                textposition="middle right",
+                textfont={"size": 11, "color": _ACTIVE.ink_soft},
                 marker={"color": _ACTIVE.accent, "size": 11}, showlegend=False,
             ))
             fig.update_layout(title=title)
             fig.update_yaxes(type="category")
+            fig.update_xaxes(range=[lo - pad, hi + pad * 2.2])
         elif chart_type == "treemap":
             # Part-to-whole across more categories than a donut holds legibly.
             data = _aggregate_rows(rows, x_col, None, y_col)
