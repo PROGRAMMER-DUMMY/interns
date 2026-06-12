@@ -1,0 +1,11 @@
+comm_cd,Name,hazmat_flag
+C001,Dry food,N
+C002,Chilled food,N
+C003,Electronics,N
+C004,Paints,Y
+C005,Aerosols,Y
+C006,Apparel,N
+C007,Auto parts,N
+C008,Batteries,Y
+C009,Furniture,N
+C010,Print media,N

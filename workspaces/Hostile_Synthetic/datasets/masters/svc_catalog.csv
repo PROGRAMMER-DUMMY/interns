@@ -1,0 +1,7 @@
+svc_id,Name,sla_days,premium_flag
+SVC1,Express Next-Day,1,Y
+SVC2,Priority 48,2,Y
+SVC3,Standard Ground,4,N
+SVC4,Economy Deferred,7,N
+SVC5,Pallet Freight,5,N
+SVC6,Chilled Reefer,3,N
