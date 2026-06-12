@@ -352,6 +352,19 @@ Review `interns/generated/contracts/source_to_target_plan.json` and
 `interns/reports/source_to_target_plan.md`. If any KPI in the plan is blocked, resolve that blocker
 before generating SQL, Polars, PySpark, or medallion pipeline code.
 
+## Workspace Data Policy (user-authored)
+
+A workspace owner may place `data_policy.json` at the workspace root (or under `docs/`) to declare
+their own data-protection rules on top of the built-in HIPAA/PCI detection:
+`sensitive_columns` (exact names), `sensitive_column_patterns` (regexes), `categories`
+(named custom categories), `not_sensitive_columns` (reviewed false-positive allowlist), and
+`tier_override` (`"phi"` forces the PHI tier). Honored by the PHI gate (`assess_workspace_phi`),
+display redaction (blocker-panel samples and previews), and the semantic contract's
+`columns.<name>.is_sensitive` map that the SQL generator masks from. The policy can only WIDEN
+display redaction; the allowlist suppresses tier findings but never un-redacts rendered surfaces.
+This file is user input like datasets: agents must never write or edit it; a malformed policy
+surfaces as `errors` in its summary and must be reported to the owner, not auto-fixed.
+
 ## Human-Gate Provenance Rule
 
 When a human answers an approval or review gate — a relationship-join approval or the kpi-analyst

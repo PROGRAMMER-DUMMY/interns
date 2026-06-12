@@ -218,19 +218,71 @@ def _load_profile_index(layout: Any) -> dict[str, Any] | None:
         return None
 
 
+def _workspace_root(layout: Any) -> Any:
+    return getattr(layout, "project_root", None)
+
+
+def _apply_data_policy(
+    findings: list[PHIFinding],
+    profile_index: dict[str, Any],
+    layout: Any,
+    *,
+    base_tier_when_found: str,
+) -> tuple[list[PHIFinding], str]:
+    """Merge the user-authored workspace data policy into built-in findings.
+
+    Declared columns/patterns ADD findings tagged ``policy:<category>``;
+    allowlisted columns SUPPRESS built-in findings (the owner reviewed them);
+    ``tier_override: "phi"`` raises the tier even with zero findings. A policy
+    can never downgrade the tier while findings remain.
+    """
+    root = _workspace_root(layout)
+    if root is None:
+        return findings, base_tier_when_found if findings else "none"
+    from core.governance.data_policy import (
+        is_allowlisted,
+        load_workspace_data_policy,
+        policy_category_for_column,
+    )
+
+    policy = load_workspace_data_policy(root)
+    if policy is None:
+        return findings, base_tier_when_found if findings else "none"
+
+    merged = [f for f in findings if not is_allowlisted(policy, f.column)]
+    seen = {(f.dataset, f.column) for f in merged}
+    for dataset, column in _iter_profile_columns(profile_index):
+        category = policy_category_for_column(policy, column)
+        if category and (dataset, column) not in seen:
+            merged.append(
+                PHIFinding(dataset=dataset, column=column, identifier_category=category)
+            )
+            seen.add((dataset, column))
+
+    tier = base_tier_when_found if merged else "none"
+    if policy.tier_override == "phi" and base_tier_when_found == "phi":
+        tier = "phi"
+    return merged, tier
+
+
 def assess_workspace_phi(layout: Any) -> PHIAssessment:
     """Assess a workspace's PHI tier from its profile_index.json.
 
     Missing/unreadable profile -> tier 'none' (cannot assert PHI without
-    evidence). Any HIPAA-identifier column -> tier 'phi'.
+    evidence). Any HIPAA-identifier column -> tier 'phi'. A user-authored
+    ``data_policy.json`` at the workspace root adds owner-declared sensitive
+    columns, suppresses reviewed false positives, and may force tier 'phi'.
     """
     profile_index = _load_profile_index(layout)
     if profile_index is None:
         return PHIAssessment(tier="none")
     findings = detect_phi_columns(profile_index)
+    findings, tier = _apply_data_policy(
+        findings, profile_index, layout, base_tier_when_found="phi"
+    )
     datasets = sorted({f.dataset for f in findings if f.dataset})
     return PHIAssessment(
-        tier="phi" if findings else "none",
+        tier=tier,
         findings=findings,
         datasets=datasets,
     )
@@ -246,6 +298,16 @@ def assess_workspace_pci(layout: Any) -> PHIAssessment:
     if profile_index is None:
         return PHIAssessment(tier="none")
     findings = detect_pci_columns(profile_index)
+    # The workspace data policy's allowlist applies (owner-reviewed false
+    # positives); custom policy categories do NOT create PCI findings — they
+    # surface through the PHI/sensitive assessment instead.
+    root = _workspace_root(layout)
+    if root is not None:
+        from core.governance.data_policy import is_allowlisted, load_workspace_data_policy
+
+        policy = load_workspace_data_policy(root)
+        if policy is not None:
+            findings = [f for f in findings if not is_allowlisted(policy, f.column)]
     datasets = sorted({f.dataset for f in findings if f.dataset})
     return PHIAssessment(
         tier="pci" if findings else "none",

@@ -1185,12 +1185,66 @@ class WorkspaceOnboarder:
             "status": "generated_from_workspace_inputs",
         }
 
+    def _sensitive_columns_section(self) -> dict[str, Any]:
+        """The semantic contract's ``columns`` map + data-policy summary.
+
+        ``columns.<name>.is_sensitive`` is what the SQL generator consults to
+        mask sensitive output columns. Sources, in order: the user-authored
+        workspace ``data_policy.json`` (declared sensitive + allowlist), then
+        built-in HIPAA/PCI identifier detection over the profiled schema.
+        """
+        from core.governance.data_policy import (
+            is_allowlisted,
+            load_workspace_data_policy,
+            policy_category_for_column,
+        )
+        from core.governance.phi_gate import identifier_category, pci_identifier_category
+
+        policy = load_workspace_data_policy(self.workspace)
+        columns: dict[str, dict[str, Any]] = {}
+        try:
+            profile_index = json.loads(
+                (self.layout.profiles_dir / "profile_index.json").read_text(encoding="utf-8")
+            )
+        except (json.JSONDecodeError, OSError):
+            profile_index = {}
+        seen: set[str] = set()
+        for profile in profile_index.get("profiles") or []:
+            schema = profile.get("schema") if isinstance(profile, dict) else None
+            names = (
+                list(schema.keys())
+                if isinstance(schema, dict)
+                else [c.get("name") for c in schema or [] if isinstance(c, dict)]
+            )
+            for name in names:
+                if not isinstance(name, str) or name in seen:
+                    continue
+                seen.add(name)
+                if is_allowlisted(policy, name):
+                    columns[name] = {
+                        "is_sensitive": False,
+                        "source": "workspace_data_policy_allowlist",
+                    }
+                    continue
+                category = (
+                    policy_category_for_column(policy, name)
+                    or identifier_category(name)
+                    or pci_identifier_category(name)
+                )
+                if category:
+                    columns[name] = {"is_sensitive": True, "category": category}
+        section: dict[str, Any] = {"columns": columns}
+        if policy is not None:
+            section["data_policy"] = policy.summary()
+        return section
+
     def _build_semantic_contract(
         self,
         kpis: list[KpiDefinition],
         inputs: WorkspaceInputs,
     ) -> dict[str, Any]:
         return {
+            **self._sensitive_columns_section(),
             "workspace": inputs.workspace,
             "kpi_count": len(kpis),
             "term_resolution_order": [

@@ -59,7 +59,8 @@ jobs:
             tests.test_collision_blocking \
             tests.test_onboarding_incremental \
             tests.test_profile_pushdown \
-            tests.test_medallion_incremental
+            tests.test_medallion_incremental \
+            tests.test_workspace_data_policy
 
   pyspark-parity:
     runs-on: ubuntu-latest

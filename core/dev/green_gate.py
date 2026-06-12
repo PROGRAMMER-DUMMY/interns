@@ -81,6 +81,8 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_profile_pushdown",
     # Phase 3 track C: incremental medallion refresh + deploy-plan schema.
     "tests.test_medallion_incremental",
+    # User-authored workspace data policy (custom PII/PHI + allowlist + tier).
+    "tests.test_workspace_data_policy",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

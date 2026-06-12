@@ -2455,7 +2455,32 @@ def _build_feature_resolution_table(mapping: dict[str, Any]) -> list[dict[str, s
     return rows
 
 
-def _build_sample_evidence(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+def _workspace_redaction_patterns(workspace_path: Path | None) -> tuple[str, ...]:
+    """Default PII patterns extended with the workspace's user data policy.
+
+    The owner's ``data_policy.json`` can only WIDEN display redaction (custom
+    sensitive columns/categories); the allowlist never narrows what is hidden
+    on rendered surfaces.
+    """
+    from core.onboarding.kpi.pii_redaction import DEFAULT_PII_COLUMN_PATTERNS
+
+    if workspace_path is None:
+        return DEFAULT_PII_COLUMN_PATTERNS
+    try:
+        from core.governance.data_policy import (
+            load_workspace_data_policy,
+            policy_redaction_patterns,
+        )
+
+        extras = policy_redaction_patterns(load_workspace_data_policy(workspace_path))
+    except Exception:  # pragma: no cover - policy loading must never break panels
+        extras = ()
+    return DEFAULT_PII_COLUMN_PATTERNS + tuple(extras)
+
+
+def _build_sample_evidence(
+    mapping: dict[str, Any], workspace_path: Path | None = None
+) -> list[dict[str, Any]]:
     """Build the sample-evidence mini-table.
 
     For each feature that has source_columns with samples, emit one row with
@@ -2465,6 +2490,7 @@ def _build_sample_evidence(mapping: dict[str, Any]) -> list[dict[str, Any]]:
 
     seen: set[str] = set()
     rows: list[dict[str, Any]] = []
+    policy_patterns = _workspace_redaction_patterns(workspace_path)
     for kpi in mapping.get("kpis", []):
         for feature in kpi.get("features", []):
             name = str(feature.get("feature") or "")
@@ -2482,13 +2508,15 @@ def _build_sample_evidence(mapping: dict[str, Any]) -> list[dict[str, Any]]:
                 if not samples:
                     continue
                 seen.add(name)
-                display_samples = redact_sample_values(column, samples)
+                display_samples = redact_sample_values(
+                    column, samples, patterns=policy_patterns
+                )
                 rows.append(
                     {
                         "feature": name,
                         "column": f"{Path(str(source.get('dataset') or '')).stem}.{column}",
                         "first_samples": [str(value) for value in display_samples],
-                        "redacted": is_pii_column(column),
+                        "redacted": is_pii_column(column, patterns=policy_patterns),
                     }
                 )
                 break  # one row per feature
@@ -2583,7 +2611,12 @@ def _execute_option_preview(
     if payload.get("status") == "ok" and payload.get("rows"):
         # PII redaction first, then injection neutralization: sample values
         # are untrusted workspace data rendered into an LLM-facing panel.
-        payload["rows"] = neutralize_rows(redact_rows(payload["rows"]))
+        payload["rows"] = neutralize_rows(
+            redact_rows(
+                payload["rows"],
+                patterns=_workspace_redaction_patterns(workspace_path),
+            )
+        )
     if payload.get("status") == "ok":
         save_cached_preview(workspace_path, cache_key, payload)
     return payload
@@ -2600,7 +2633,7 @@ def _attach_preview_sections(
     recommended option has an executable preview that succeeded."""
 
     panel["feature_resolution_table"] = _build_feature_resolution_table(mapping)
-    panel["sample_evidence"] = _build_sample_evidence(mapping)
+    panel["sample_evidence"] = _build_sample_evidence(mapping, workspace_path)
     recommended_option_id = str(panel.get("recommended_option_id") or "")
     recommended_preview: dict[str, Any] | None = None
     for option in panel.get("options") or []:
