@@ -513,9 +513,13 @@ def _figure_from_spec(
 
     # Percent axes: our percent values are in PERCENT UNITS (0-100), so a Plotly
     # ".0%" tickformat (which expects 0-1 fractions) would x100 again -> 5000%.
-    # Always use a plain "%" suffix on the measure axis instead.
-    if y_is_percent or chart_type == "stacked_bar_percent":
-        measure_axis = "x" if chart_type == "ranked_bar" else "y"
+    # Always use a plain "%" suffix on the MEASURE axis instead — and only on
+    # charts whose measure IS an axis: a heatmap's measure is the color, a
+    # donut/treemap's is the slice/tile, so suffixing their (category) axes
+    # mislabels the categories ("80-89" -> "80-89%").
+    _NO_AXIS_MEASURE = ("heatmap", "donut", "treemap", "bubble_map")
+    if (y_is_percent or chart_type == "stacked_bar_percent") and chart_type not in _NO_AXIS_MEASURE:
+        measure_axis = "x" if chart_type in ("ranked_bar", "lollipop") else "y"
         if measure_axis == "y":
             fig.update_yaxes(ticksuffix="%")
         else:
