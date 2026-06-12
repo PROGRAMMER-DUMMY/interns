@@ -19,6 +19,7 @@ from core.onboarding.kpi.panel_preview_cache import (
     save_cached_preview,
 )
 from core.onboarding.kpi.panel_preview_executor import execute_preview
+from core.governance.injection_guard import neutralize_rows
 from core.onboarding.kpi.pii_redaction import is_pii_column, redact_rows, redact_sample_values
 
 
@@ -2438,7 +2439,9 @@ def _execute_option_preview(
     )
     payload = result.summary()
     if payload.get("status") == "ok" and payload.get("rows"):
-        payload["rows"] = redact_rows(payload["rows"])
+        # PII redaction first, then injection neutralization: sample values
+        # are untrusted workspace data rendered into an LLM-facing panel.
+        payload["rows"] = neutralize_rows(redact_rows(payload["rows"]))
     if payload.get("status") == "ok":
         save_cached_preview(workspace_path, cache_key, payload)
     return payload

@@ -61,22 +61,73 @@ HIPAA_IDENTIFIER_PATTERNS: dict[str, tuple[str, ...]] = {
     "biometric": (r"^(fingerprint|biometric|retina|voiceprint)([_ ]?id)?$",),
 }
 
+# ---------------------------------------------------------------------------
+# PCI DSS cardholder-data column-name patterns (anchored, case-insensitive).
+# Same workspace-agnostic, column-NAME-based approach as the HIPAA set: no raw
+# values are ever read. Covers PAN, verification codes, expiry, cardholder
+# name, and adjacent bank-account identifiers.
+# ---------------------------------------------------------------------------
+
+PCI_IDENTIFIER_PATTERNS: dict[str, tuple[str, ...]] = {
+    "primary_account_number": (
+        r"^pan$", r"^primary[_ ]?account[_ ]?number$",
+        r"^(credit[_ ]?|debit[_ ]?)?card[_ ]?(no|num|number)$",
+        r"^cc[_ ]?(no|num|number)$",
+        r"^credit[_ ]?card$",
+    ),
+    "card_verification": (
+        r"^cvv2?$", r"^cvc2?$", r"^cid$",
+        r"^card[_ ]?verification([_ ]?(code|value|no|number))?$",
+        r"^security[_ ]?code$",
+    ),
+    "card_expiry": (
+        # Card-scoped only: a bare "expiry_date" is too generic to block on
+        # (drug expiry, membership expiry, ...). "exp_month"/"exp_year" are
+        # card-vocabulary specific.
+        r"^card[_ ]?expir(y|ation)([_ ]?(date|month|year))?$",
+        r"^exp[_ ]?(month|year)$",
+    ),
+    "cardholder_name": (r"^card[_ ]?holder([_ ]?name)?$",),
+    "card_track_data": (r"^track[12]?[_ ]?data$", r"^magstripe([_ ]?data)?$"),
+    "bank_account": (
+        r"^iban$", r"^routing[_ ]?(no|num|number)$",
+        r"^bank[_ ]?account([_ ]?(no|num|number))?$",
+        r"^(aba|swift|bic)([_ ]?(code|no|number))?$",
+    ),
+}
+
 _COMPILED: dict[str, tuple[re.Pattern[str], ...]] = {
     category: tuple(re.compile(p, re.IGNORECASE) for p in patterns)
     for category, patterns in HIPAA_IDENTIFIER_PATTERNS.items()
 }
 
+_COMPILED_PCI: dict[str, tuple[re.Pattern[str], ...]] = {
+    category: tuple(re.compile(p, re.IGNORECASE) for p in patterns)
+    for category, patterns in PCI_IDENTIFIER_PATTERNS.items()
+}
 
-def identifier_category(column_name: str) -> str | None:
-    """Return the HIPAA identifier category a column name matches, else None."""
+
+def _match_category(
+    column_name: str, compiled: dict[str, tuple[re.Pattern[str], ...]]
+) -> str | None:
     if not isinstance(column_name, str) or not column_name.strip():
         return None
     name = column_name.strip()
-    for category, regexes in _COMPILED.items():
+    for category, regexes in compiled.items():
         for regex in regexes:
             if regex.match(name):
                 return category
     return None
+
+
+def identifier_category(column_name: str) -> str | None:
+    """Return the HIPAA identifier category a column name matches, else None."""
+    return _match_category(column_name, _COMPILED)
+
+
+def pci_identifier_category(column_name: str) -> str | None:
+    """Return the PCI identifier category a column name matches, else None."""
+    return _match_category(column_name, _COMPILED_PCI)
 
 
 @dataclass(frozen=True)
@@ -113,11 +164,10 @@ class PHIAssessment:
         }
 
 
-def detect_phi_columns(profile_index: dict[str, Any] | None) -> list[PHIFinding]:
-    """Scan a profile_index.json payload for HIPAA-identifier columns (names only)."""
+def _iter_profile_columns(profile_index: dict[str, Any] | None):
+    """Yield (dataset, column) pairs from a profile_index.json payload."""
     if not isinstance(profile_index, dict):
-        return []
-    findings: list[PHIFinding] = []
+        return
     for profile in profile_index.get("profiles") or []:
         if not isinstance(profile, dict):
             continue
@@ -135,10 +185,37 @@ def detect_phi_columns(profile_index: dict[str, Any] | None) -> list[PHIFinding]
         else:
             columns = []
         for column in columns:
-            category = identifier_category(column)
-            if category:
-                findings.append(PHIFinding(dataset=dataset, column=column, identifier_category=category))
+            yield dataset, column
+
+
+def detect_phi_columns(profile_index: dict[str, Any] | None) -> list[PHIFinding]:
+    """Scan a profile_index.json payload for HIPAA-identifier columns (names only)."""
+    findings: list[PHIFinding] = []
+    for dataset, column in _iter_profile_columns(profile_index):
+        category = identifier_category(column)
+        if category:
+            findings.append(PHIFinding(dataset=dataset, column=column, identifier_category=category))
     return findings
+
+
+def detect_pci_columns(profile_index: dict[str, Any] | None) -> list[PHIFinding]:
+    """Scan a profile_index.json payload for PCI cardholder-data columns (names only)."""
+    findings: list[PHIFinding] = []
+    for dataset, column in _iter_profile_columns(profile_index):
+        category = pci_identifier_category(column)
+        if category:
+            findings.append(PHIFinding(dataset=dataset, column=column, identifier_category=category))
+    return findings
+
+
+def _load_profile_index(layout: Any) -> dict[str, Any] | None:
+    path = layout.profiles_dir / "profile_index.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def assess_workspace_phi(layout: Any) -> PHIAssessment:
@@ -147,17 +224,31 @@ def assess_workspace_phi(layout: Any) -> PHIAssessment:
     Missing/unreadable profile -> tier 'none' (cannot assert PHI without
     evidence). Any HIPAA-identifier column -> tier 'phi'.
     """
-    path = layout.profiles_dir / "profile_index.json"
-    if not path.exists():
-        return PHIAssessment(tier="none")
-    try:
-        profile_index = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    profile_index = _load_profile_index(layout)
+    if profile_index is None:
         return PHIAssessment(tier="none")
     findings = detect_phi_columns(profile_index)
     datasets = sorted({f.dataset for f in findings if f.dataset})
     return PHIAssessment(
         tier="phi" if findings else "none",
+        findings=findings,
+        datasets=datasets,
+    )
+
+
+def assess_workspace_pci(layout: Any) -> PHIAssessment:
+    """Assess a workspace's PCI tier from its profile_index.json.
+
+    Missing/unreadable profile -> tier 'none'. Any PCI cardholder-data
+    column -> tier 'pci'.
+    """
+    profile_index = _load_profile_index(layout)
+    if profile_index is None:
+        return PHIAssessment(tier="none")
+    findings = detect_pci_columns(profile_index)
+    datasets = sorted({f.dataset for f in findings if f.dataset})
+    return PHIAssessment(
+        tier="pci" if findings else "none",
         findings=findings,
         datasets=datasets,
     )
@@ -175,6 +266,17 @@ def databricks_phi_covered(cfg: Any) -> bool:
     if db is None:
         db = cfg  # cfg may itself be the DatabricksConfig
     return bool(getattr(db, "phi_covered", False))
+
+
+def databricks_pci_covered(cfg: Any) -> bool:
+    """True only when the configured Databricks target is attested PCI DSS
+    in-scope for cardholder data. Defaults to False -- same posture as PHI:
+    a trial / default workspace is NOT a compliant cardholder-data environment.
+    """
+    db = getattr(cfg, "databricks", None)
+    if db is None:
+        db = cfg
+    return bool(getattr(db, "pci_covered", False))
 
 
 def enforce_remote_phi_gate(
@@ -221,6 +323,70 @@ def enforce_remote_phi_gate(
     )
 
 
+def enforce_remote_pci_gate(
+    layout: Any,
+    cfg: Any,
+    *,
+    operation: str = "remote_upload",
+    deidentified: bool = False,
+) -> StructuredFailure | None:
+    """Return a blocking StructuredFailure when cardholder data would reach a
+    non-PCI-compliant remote target; None when clear to proceed.
+
+    BLOCK when: workspace tier == 'pci' AND target is not PCI-covered AND the
+    data is not de-identified (tokenized/truncated per PCI DSS).
+    """
+    assessment = assess_workspace_pci(layout)
+    if assessment.tier != "pci":
+        return None
+    if deidentified:
+        return None
+    if databricks_pci_covered(cfg):
+        return None
+
+    categories = sorted({f.identifier_category for f in assessment.findings})
+    sample = ", ".join(
+        f"{f.dataset}:{f.column}" for f in assessment.findings[:6]
+    )
+    return remote_denied(
+        f"pci_gate.{operation}",
+        (
+            "PCI gate: refused — this workspace contains cardholder-data "
+            f"column(s) [{', '.join(categories)}] (e.g. {sample}) and the "
+            "configured Databricks target is NOT an attested PCI DSS "
+            "environment. Pushing cardholder data to a non-compliant target "
+            "violates PCI DSS scope controls."
+        ),
+        next_command=(
+            "Use local DuckDB (safe), tokenize/truncate the cardholder data and "
+            "re-run, OR set [databricks].pci_covered = true in config/lock.toml "
+            "only after the target is attested PCI DSS in-scope."
+        ),
+    )
+
+
+def enforce_remote_sensitive_gate(
+    layout: Any,
+    cfg: Any,
+    *,
+    operation: str = "remote_upload",
+    deidentified: bool = False,
+) -> StructuredFailure | None:
+    """Combined sensitive-data gate: PHI first, then PCI. First block wins.
+
+    This is the single entry point remote upload/exec paths should call so
+    new sensitive-data categories gate every remote path automatically.
+    """
+    failure = enforce_remote_phi_gate(
+        layout, cfg, operation=operation, deidentified=deidentified
+    )
+    if failure is not None:
+        return failure
+    return enforce_remote_pci_gate(
+        layout, cfg, operation=operation, deidentified=deidentified
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI: assess-workspace-phi --workspace <ws>.
 
@@ -251,12 +417,20 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         cfg = None
 
+    pci_assessment = assess_workspace_pci(layout)
     covered = databricks_phi_covered(cfg) if cfg is not None else False
+    pci_covered = databricks_pci_covered(cfg) if cfg is not None else False
     blocked = assessment.is_phi and not covered
+    pci_blocked = pci_assessment.tier == "pci" and not pci_covered
     payload = {
         **assessment.to_dict(),
         "databricks_phi_covered": covered,
         "remote_upload_blocked": blocked,
+        "pci": {
+            **pci_assessment.to_dict(),
+            "databricks_pci_covered": pci_covered,
+            "remote_upload_blocked": pci_blocked,
+        },
     }
     print(json.dumps(payload, indent=2))
     if assessment.is_phi:
@@ -267,18 +441,33 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         print("[ok] No HIPAA-identifier columns detected; PHI gate is not triggered.")
+    if pci_assessment.tier == "pci":
+        marker = "[blocked]" if pci_blocked else "[ok]"
+        print(
+            f"{marker} PCI tier with {len(pci_assessment.findings)} cardholder-data column(s); "
+            f"non-covered remote upload/exec is {'BLOCKED' if pci_blocked else 'allowed (covered)'}."
+        )
+    else:
+        print("[ok] No PCI cardholder-data columns detected; PCI gate is not triggered.")
     return 0
 
 
 __all__ = [
     "HIPAA_IDENTIFIER_PATTERNS",
+    "PCI_IDENTIFIER_PATTERNS",
     "identifier_category",
+    "pci_identifier_category",
     "PHIFinding",
     "PHIAssessment",
     "detect_phi_columns",
+    "detect_pci_columns",
     "assess_workspace_phi",
+    "assess_workspace_pci",
     "databricks_phi_covered",
+    "databricks_pci_covered",
     "enforce_remote_phi_gate",
+    "enforce_remote_pci_gate",
+    "enforce_remote_sensitive_gate",
     "main",
 ]
 

@@ -35,9 +35,71 @@ DEFAULT_PII_COLUMN_PATTERNS: tuple[str, ...] = (
     r"^dob$",
     r"^date[_ ]?of[_ ]?birth$",
     r"^birth[_ ]?date$",
+    # PCI cardholder data and adjacent bank-account identifiers. Mirrors
+    # PCI_IDENTIFIER_PATTERNS in core.governance.phi_gate (kept in sync by
+    # tests; duplicated here because this module is dependency-free).
+    r"^pan$",
+    r"^primary[_ ]?account[_ ]?number$",
+    r"^(credit[_ ]?|debit[_ ]?)?card[_ ]?(no|num|number)$",
+    r"^cc[_ ]?(no|num|number)$",
+    r"^credit[_ ]?card$",
+    r"^cvv2?$",
+    r"^cvc2?$",
+    r"^card[_ ]?verification([_ ]?(code|value|no|number))?$",
+    r"^security[_ ]?code$",
+    r"^card[_ ]?expir(y|ation)([_ ]?(date|month|year))?$",
+    r"^card[_ ]?holder([_ ]?name)?$",
+    r"^track[12]?[_ ]?data$",
+    r"^iban$",
+    r"^routing[_ ]?(no|num|number)$",
+    r"^bank[_ ]?account([_ ]?(no|num|number))?$",
 )
 
 REDACTION_PLACEHOLDER: str = "<redacted-pii>"
+
+# ---------------------------------------------------------------------------
+# Quasi-identifiers: values that are not direct identifiers but become
+# identifying at the extremes. HIPAA Safe Harbor requires ages over 89 to be
+# aggregated into a single "90+" category on any rendered surface.
+# ---------------------------------------------------------------------------
+
+QUASI_IDENTIFIER_AGE_PATTERNS: tuple[str, ...] = (
+    r"^age$",
+    r"^age[_ ]?(years|yrs|in[_ ]?years)$",
+    r"^(patient|member|subscriber|customer|person)[_ ]?age$",
+)
+
+AGE_SAFE_HARBOR_MAX: int = 89
+AGE_OVERFLOW_LABEL: str = "90+"
+
+_COMPILED_AGE: tuple[Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE) for p in QUASI_IDENTIFIER_AGE_PATTERNS
+)
+
+
+def is_age_column(column_name: str) -> bool:
+    """Return True if ``column_name`` looks like a person-age column."""
+    if not isinstance(column_name, str) or not column_name:
+        return False
+    return any(regex.match(column_name) for regex in _COMPILED_AGE)
+
+
+def bucket_age_value(value: object) -> object:
+    """Return ``value`` unchanged unless it is a numeric age > 89, which is
+    rendered as the Safe Harbor overflow label ("90+"). Non-numeric values and
+    None pass through untouched.
+    """
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        return AGE_OVERFLOW_LABEL if value > AGE_SAFE_HARBOR_MAX else value
+    if isinstance(value, str):
+        try:
+            numeric = float(value.strip())
+        except (ValueError, AttributeError):
+            return value
+        return AGE_OVERFLOW_LABEL if numeric > AGE_SAFE_HARBOR_MAX else value
+    return value
 
 
 _COMPILED_DEFAULT: tuple[Pattern[str], ...] = tuple(
@@ -90,9 +152,11 @@ def redact_sample_values(
     preserved so downstream null-rate analytics stay meaningful.
     """
 
-    if not is_pii_column(column_name, patterns=patterns):
-        return list(values)
-    return [None if v is None else placeholder for v in values]
+    if is_pii_column(column_name, patterns=patterns):
+        return [None if v is None else placeholder for v in values]
+    if is_age_column(column_name):
+        return [bucket_age_value(v) for v in values]
+    return list(values)
 
 
 def redact_row_dict(
@@ -111,6 +175,8 @@ def redact_row_dict(
     for key, value in row.items():
         if isinstance(key, str) and is_pii_column(key, patterns=patterns):
             redacted[key] = None if value is None else placeholder
+        elif isinstance(key, str) and is_age_column(key):
+            redacted[key] = bucket_age_value(value)
         else:
             redacted[key] = value
     return redacted
@@ -131,8 +197,13 @@ def redact_rows(
 
 
 __all__ = [
+    "AGE_OVERFLOW_LABEL",
+    "AGE_SAFE_HARBOR_MAX",
     "DEFAULT_PII_COLUMN_PATTERNS",
+    "QUASI_IDENTIFIER_AGE_PATTERNS",
     "REDACTION_PLACEHOLDER",
+    "bucket_age_value",
+    "is_age_column",
     "is_pii_column",
     "redact_row_dict",
     "redact_rows",

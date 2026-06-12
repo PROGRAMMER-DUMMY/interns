@@ -568,21 +568,22 @@ def build_execution_backend(cfg: "Config") -> ExecutionBackend:
 
 
 def _phi_gate_failure_for_task(task: dict, cfg):
-    """Return a blocking StructuredFailure if the task's workspace holds PHI and
-    the remote target is not HIPAA-covered; else None. Defense-in-depth for the
-    remote backends (the primary control is at the upload/deploy path)."""
+    """Return a blocking StructuredFailure if the task's workspace holds PHI or
+    PCI cardholder data and the remote target is not covered; else None.
+    Defense-in-depth for the remote backends (the primary control is at the
+    upload/deploy path)."""
     workspace_value = task.get("workspace")
     if not workspace_value:
         return None
     try:
-        from core.governance.phi_gate import enforce_remote_phi_gate
+        from core.governance.phi_gate import enforce_remote_sensitive_gate
         from core.storage.workspace_layout import WorkspaceLayout
 
         ws = (ROOT / str(workspace_value)).resolve()
         if not ws.exists() or not ws.is_relative_to(ROOT):
             return None
         layout = WorkspaceLayout(project_root=ws)
-        return enforce_remote_phi_gate(layout, cfg, operation="remote_execute")
+        return enforce_remote_sensitive_gate(layout, cfg, operation="remote_execute")
     except Exception:
         return None
 

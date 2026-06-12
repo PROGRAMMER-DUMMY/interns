@@ -31,6 +31,10 @@ class DatabricksConfig:
     # are in place for this target. Default False -> a trial/default workspace
     # is NOT HIPAA-covered and the PHI gate blocks identifiable-PHI upload/exec.
     phi_covered: bool = False
+    # PCI DSS coverage: True only when this target is attested in-scope for
+    # cardholder data (PCI DSS compliant environment). Default False -> the
+    # PCI gate blocks cardholder-data upload/exec to this target.
+    pci_covered: bool = False
 
     def is_active(self) -> bool:
         return self.enabled and bool(self.host) and bool(self.token)
@@ -56,6 +60,7 @@ class DatabricksConfig:
             trace_redact=block.get("trace_redact", True),
             http_timeout_sec=block.get("http_timeout_sec", 60),
             phi_covered=block.get("phi_covered", False),
+            pci_covered=block.get("pci_covered", False),
         )
 
 ROOT = PROJECT_ROOT

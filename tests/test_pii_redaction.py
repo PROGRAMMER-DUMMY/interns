@@ -5,8 +5,11 @@ from __future__ import annotations
 import unittest
 
 from core.onboarding.kpi.pii_redaction import (
+    AGE_OVERFLOW_LABEL,
     DEFAULT_PII_COLUMN_PATTERNS,
     REDACTION_PLACEHOLDER,
+    bucket_age_value,
+    is_age_column,
     is_pii_column,
     redact_row_dict,
     redact_rows,
@@ -227,6 +230,72 @@ class CustomPatternsTests(unittest.TestCase):
 
     def test_default_patterns_tuple_is_immutable(self) -> None:
         self.assertIsInstance(DEFAULT_PII_COLUMN_PATTERNS, tuple)
+
+
+class PciColumnTests(unittest.TestCase):
+    def test_cardholder_columns_are_pii(self) -> None:
+        for col in (
+            "CardNumber", "card_number", "credit_card_number", "PAN",
+            "CVV", "cvc", "CardExpiry", "CardholderName", "Track1Data",
+            "IBAN", "RoutingNumber", "bank_account_number",
+        ):
+            self.assertTrue(is_pii_column(col), col)
+
+    def test_generic_business_columns_stay_clear(self) -> None:
+        for col in ("PaidAmount", "OrderId", "expiry_date", "panel_id", "company"):
+            self.assertFalse(is_pii_column(col), col)
+
+    def test_card_values_redacted_in_rows(self) -> None:
+        rows = [{"CardNumber": "4111111111111111", "Amount": 12.5}]
+        result = redact_rows(rows)
+        self.assertEqual(result[0]["CardNumber"], REDACTION_PLACEHOLDER)
+        self.assertEqual(result[0]["Amount"], 12.5)
+
+
+class QuasiIdentifierAgeTests(unittest.TestCase):
+    def test_age_column_detection(self) -> None:
+        for col in ("age", "Age", "AGE", "patient_age", "PatientAge", "age_years"):
+            self.assertTrue(is_age_column(col), col)
+        for col in ("age_band", "average_age", "page", "agent"):
+            self.assertFalse(is_age_column(col), col)
+
+    def test_bucket_age_value_caps_over_89(self) -> None:
+        self.assertEqual(bucket_age_value(99), AGE_OVERFLOW_LABEL)
+        self.assertEqual(bucket_age_value(90), AGE_OVERFLOW_LABEL)
+        self.assertEqual(bucket_age_value(89), 89)
+        self.assertEqual(bucket_age_value(0), 0)
+        self.assertEqual(bucket_age_value("95"), AGE_OVERFLOW_LABEL)
+        self.assertEqual(bucket_age_value("42"), "42")
+        self.assertIsNone(bucket_age_value(None))
+        self.assertEqual(bucket_age_value("unknown"), "unknown")
+
+    def test_row_dict_buckets_age_but_keeps_other_columns(self) -> None:
+        row = {"Age": 97, "Gender": "Female", "PaidAmount": 167.59}
+        result = redact_row_dict(row)
+        self.assertEqual(result["Age"], AGE_OVERFLOW_LABEL)
+        self.assertEqual(result["Gender"], "Female")
+        self.assertEqual(result["PaidAmount"], 167.59)
+
+    def test_sample_values_bucket_ages(self) -> None:
+        self.assertEqual(
+            redact_sample_values("age", [88, 90, None, 102]),
+            [88, AGE_OVERFLOW_LABEL, None, AGE_OVERFLOW_LABEL],
+        )
+
+
+class GateRedactionSyncTests(unittest.TestCase):
+    """Every PCI gate category must also be covered by display redaction."""
+
+    def test_pci_gate_columns_are_redacted_on_display(self) -> None:
+        from core.governance.phi_gate import pci_identifier_category
+
+        representative = (
+            "card_number", "pan", "cvv", "card_expiry",
+            "cardholder_name", "track1_data", "iban",
+        )
+        for col in representative:
+            self.assertIsNotNone(pci_identifier_category(col), col)
+            self.assertTrue(is_pii_column(col), col)
 
 
 if __name__ == "__main__":

@@ -490,10 +490,11 @@ def run_deployment(
     if apply:
         _require_remote_approval(confirm_remote_mutation)
         cfg = load_config()
-        # PHI gate: refuse to upload identifiable PHI to a non-HIPAA-covered target.
-        from core.governance.phi_gate import enforce_remote_phi_gate
+        # Sensitive-data gate: refuse to upload identifiable PHI to a
+        # non-HIPAA-covered target or cardholder data to a non-PCI target.
+        from core.governance.phi_gate import enforce_remote_sensitive_gate
 
-        phi_failure = enforce_remote_phi_gate(
+        phi_failure = enforce_remote_sensitive_gate(
             planner.layout, cfg, operation="databricks_workspace_deploy"
         )
         if phi_failure is not None:

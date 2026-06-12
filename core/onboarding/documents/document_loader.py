@@ -380,10 +380,18 @@ def _parse_java_major(version_output: str) -> int | None:
 # ---------------------------------------------------------------------------
 
 def _redact_text(text: str) -> str:
-    """Apply conservative regex-based PHI redaction to a plain text string."""
+    """Apply conservative regex-based PHI redaction to a plain text string,
+    then neutralize prompt-injection patterns (extracted document text is
+    untrusted and flows into LLM-facing panels/sidecars)."""
     result = text
     for pattern in _PHI_TEXT_PATTERNS:
         result = pattern.sub("<redacted-pii>", result)
+    try:
+        from core.governance.injection_guard import neutralize_text
+
+        result = neutralize_text(result)
+    except ImportError:
+        pass
     return result
 
 
