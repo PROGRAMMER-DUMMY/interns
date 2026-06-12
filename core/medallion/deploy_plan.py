@@ -88,7 +88,7 @@ def build_deploy_plan(
 
     tables = _table_mappings(manifest, catalog, schemas)
     tasks = _job_tasks(manifest)
-    phi, pci, blockers = _sensitivity(layout, cfg)
+    phi, pci, blockers = _sensitivity(layout, cfg, repo_root=repo_root)
 
     plan: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -304,7 +304,9 @@ def _job_tasks(manifest: Manifest) -> list[dict[str, Any]]:
     return tasks
 
 
-def _sensitivity(layout: WorkspaceLayout, cfg: Any) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+def _sensitivity(
+    layout: WorkspaceLayout, cfg: Any, *, repo_root: Path
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     from core.governance.phi_gate import (
         assess_workspace_phi,
         assess_workspace_pci,
@@ -330,15 +332,28 @@ def _sensitivity(layout: WorkspaceLayout, cfg: Any) -> tuple[dict[str, Any], dic
             "deployment is blocked (core.governance.phi_gate)."
         )
 
+    # Dataset paths must be REPO-RELATIVE: the plan is a shareable artifact;
+    # absolute local paths leak machine layout and break plan-freshness
+    # comparison across checkouts. The validator rejects absolute paths.
+    def _relativize(paths: list[str]) -> list[str]:
+        out = []
+        for value in paths:
+            path = Path(value)
+            try:
+                out.append(path.resolve().relative_to(repo_root).as_posix())
+            except ValueError:
+                out.append(str(value).replace("\\", "/"))
+        return sorted(out)
+
     phi = {
         "tier": phi_assessment.tier,
-        "datasets": list(phi_assessment.datasets),
+        "datasets": _relativize(list(phi_assessment.datasets)),
         "target_covered": phi_covered,
         "gate": "core.governance.phi_gate.enforce_remote_sensitive_gate",
     }
     pci = {
         "tier": pci_assessment.tier,
-        "datasets": list(pci_assessment.datasets),
+        "datasets": _relativize(list(pci_assessment.datasets)),
         "target_covered": pci_covered,
         "gate": "core.governance.phi_gate.enforce_remote_sensitive_gate",
     }
@@ -456,6 +471,16 @@ def validate_deploy_plan(plan: dict[str, Any]) -> list[str]:
     phi = permissions.get("phi", {})
     if "tier" not in phi:
         errors.append("permissions.phi.tier is required")
+    # Dataset paths must be repo-relative: absolute paths leak machine layout
+    # and break cross-checkout plan comparison (PRD section 10 item 1).
+    for section_name in ("phi", "pci"):
+        for dataset in (permissions.get(section_name) or {}).get("datasets") or []:
+            text = str(dataset)
+            if re.match(r"^([A-Za-z]:[\\/]|[\\/])", text):
+                errors.append(
+                    f"permissions.{section_name}.datasets contains an absolute "
+                    f"path: {text!r} (must be repo-relative)"
+                )
     gates = plan["deployment_gates"]
     if not gates.get("local_green"):
         errors.append("deployment_gates.local_green must be non-empty")
