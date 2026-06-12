@@ -98,7 +98,7 @@ class WorkspaceArtifactValidator:
         self._validate_relationship_contracts()
         self._validate_source_to_target_plan()
         self._validate_data_engineering_contracts()
-        self._validate_open_questions()
+        self._validate_open_questions(mapping)
         self._validate_question_panel(mapping)
         self._validate_derived_reviews(mapping)
         self._validate_kpi_sql_solutions(mapping)
@@ -236,6 +236,22 @@ class WorkspaceArtifactValidator:
                 self._error(path, f"mapped KPI missing `{key}`")
         if kpi.get("status") not in {"ready_for_sql", "blocked_questions_pending"}:
             self._error(path, f"{kpi.get('kpi_id', '<unknown>')} has unsupported status `{kpi.get('status')}`")
+        if kpi.get("status") == "blocked_questions_pending":
+            # F1/F3 honesty invariant: a blocked KPI with no question anywhere
+            # is a silent dead end -- the user is stuck with no path forward
+            # while the reports claim nothing is left to ask.
+            features = kpi.get("features") if isinstance(kpi.get("features"), list) else []
+            has_question = bool(kpi.get("open_questions")) or any(
+                isinstance(feature, dict) and feature.get("question")
+                for feature in features
+            )
+            if not has_question:
+                self._error(
+                    path,
+                    f"{kpi.get('kpi_id', '<unknown>')} is blocked_questions_pending with zero "
+                    "questions and no machine-readable blocker (silent dead end); fix the "
+                    "resolver instead of shipping a stuck workspace",
+                )
         if not isinstance(kpi.get("features", []), list):
             self._error(path, f"{kpi.get('kpi_id', '<unknown>')} `features` must be a list")
             return
@@ -260,12 +276,29 @@ class WorkspaceArtifactValidator:
                     continue
                 self._validate_derived_feature_option(path, option)
 
-    def _validate_open_questions(self) -> None:
+    def _validate_open_questions(self, mapping: dict[str, Any] | None = None) -> None:
         path = self.layout.reports_dir / "open_questions.md"
         if not path.exists():
             self._warning(path, "open_questions.md is missing")
             return
         self._checked(path)
+        summary = (mapping or {}).get("summary") or {}
+        try:
+            blocked_count = int(summary.get("blocked_kpi_count") or 0)
+        except (TypeError, ValueError):
+            blocked_count = 0
+        if blocked_count > 0:
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError:
+                return
+            if "All KPI features resolved" in content:
+                self._error(
+                    path,
+                    f"open_questions.md claims all features are resolved while "
+                    f"{blocked_count} KPI(s) are blocked; the report contradicts the "
+                    "mapping (regenerate via resolve-kpi-features)",
+                )
 
     def _validate_question_panel(self, mapping: dict[str, Any] | None) -> None:
         summary = (mapping or {}).get("summary") or {}
@@ -302,6 +335,14 @@ class WorkspaceArtifactValidator:
         options = data.get("options") or []
         if data.get("status") == "needs_user_answer" and not options:
             self._error(json_path, "question panel needs_user_answer but has no options")
+        if blocked_count > 0 and not str(data.get("question") or "").strip() and not options:
+            # F3: a workspace with blocked KPIs whose panel asks nothing is the
+            # dead-end shape -- it must fail validation, not return ok:true.
+            self._error(
+                json_path,
+                f"{blocked_count} KPI(s) are blocked but the question panel asks nothing "
+                "and offers no options (silent dead end)",
+            )
         for idx, option in enumerate(options, start=1):
             self._validate_panel_option(json_path, idx, option)
         recommended = str(data.get("recommended_option_id") or "")

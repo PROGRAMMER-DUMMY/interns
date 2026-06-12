@@ -293,5 +293,162 @@ class BlockedKpiInvariantTests(unittest.TestCase):
             self.assertIn("Monthly revenue per active account", definition["question"])
 
 
+def _write_mapping(workspace: Path, kpis: list[dict], *, blocked: int) -> None:
+    contracts = workspace / "interns" / "generated" / "contracts"
+    contracts.mkdir(parents=True, exist_ok=True)
+    (contracts / "kpi_feature_mapping.json").write_text(
+        json.dumps(
+            {
+                "artifact_type": "kpi_feature_mapping.json",
+                "version": 2,
+                "generated_by": "resolve-kpi-features",
+                "workspace": "workspaces/demo",
+                "kpis": kpis,
+                "blocker_clusters": [],
+                "summary": {
+                    "kpi_count": len(kpis),
+                    "ready_kpi_count": len(kpis) - blocked,
+                    "blocked_kpi_count": blocked,
+                    "unresolved_feature_count": blocked,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _mapped_kpi(kpi_id: str, *, question: str | None) -> dict:
+    feature = {
+        "feature": "SomeFeature",
+        "state": "blocked_missing_evidence",
+        "resolution_type": "unresolved",
+        "source_columns": [],
+        "evidence": [],
+        "question": question,
+    }
+    return {
+        "kpi_id": kpi_id,
+        "name": f"{kpi_id} name",
+        "status": "blocked_questions_pending",
+        "features": [feature],
+        "open_questions": [question] if question else [],
+    }
+
+
+def _write_panel(
+    workspace: Path,
+    *,
+    question: str,
+    options: list[dict] | None = None,
+    status: str = "blocked_without_question",
+) -> None:
+    panel_dir = workspace / "interns" / "reports" / "blocker_question_panel"
+    panel_dir.mkdir(parents=True, exist_ok=True)
+    (panel_dir / "current.json").write_text(
+        json.dumps(
+            {
+                "artifact_type": "blocker_question_panel/current.json",
+                "version": 1,
+                "generated_by": "blocker-question-panel",
+                "workspace": "workspaces/demo",
+                "question_id": "q1",
+                "feature": "SomeFeature",
+                "status": status,
+                "blocker": "blocker text",
+                "question": question,
+                "answer_type": "none",
+                "recommended_answer": "",
+                "why": "",
+                "options": options or [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (panel_dir / "current.md").write_text("# panel\n", encoding="utf-8")
+
+
+class ValidatorDeadEndTests(unittest.TestCase):
+    """F3: validate-workspace-artifacts flags the silent dead-end shapes."""
+
+    def _validate(self, root: Path):
+        from core.onboarding.workspace.validation import WorkspaceArtifactValidator
+
+        return WorkspaceArtifactValidator(root, "workspaces/demo").run()
+
+    def test_blocked_kpi_with_zero_questions_is_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = _write_workspace(root, kpis=[], profiles={})
+            _write_mapping(
+                workspace, [_mapped_kpi("kpi_001", question=None)], blocked=1
+            )
+            _write_panel(workspace, question="ask something")
+            result = self._validate(root)
+            self.assertFalse(result.ok)
+            self.assertTrue(
+                any("silent dead end" in error for error in result.errors),
+                f"expected dead-end error, got: {result.errors}",
+            )
+
+    def test_panel_that_asks_nothing_while_blocked_is_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = _write_workspace(root, kpis=[], profiles={})
+            _write_mapping(
+                workspace, [_mapped_kpi("kpi_001", question="define it")], blocked=1
+            )
+            _write_panel(workspace, question="", options=[])
+            result = self._validate(root)
+            self.assertFalse(result.ok)
+            self.assertTrue(
+                any("asks nothing" in error for error in result.errors),
+                f"expected empty-panel error, got: {result.errors}",
+            )
+
+    def test_open_questions_contradicting_blocked_mapping_is_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = _write_workspace(root, kpis=[], profiles={})
+            _write_mapping(
+                workspace, [_mapped_kpi("kpi_001", question="define it")], blocked=1
+            )
+            _write_panel(workspace, question="define it")
+            reports = workspace / "interns" / "reports"
+            reports.mkdir(parents=True, exist_ok=True)
+            (reports / "open_questions.md").write_text(
+                "# Open Questions\n\nAll KPI features resolved — no open questions.\n",
+                encoding="utf-8",
+            )
+            result = self._validate(root)
+            self.assertFalse(result.ok)
+            self.assertTrue(
+                any("contradicts the" in error for error in result.errors),
+                f"expected contradiction error, got: {result.errors}",
+            )
+
+    def test_blocked_kpi_with_question_and_panel_passes_dead_end_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = _write_workspace(root, kpis=[], profiles={})
+            _write_mapping(
+                workspace, [_mapped_kpi("kpi_001", question="define it")], blocked=1
+            )
+            _write_panel(workspace, question="define it")
+            reports = workspace / "interns" / "reports"
+            reports.mkdir(parents=True, exist_ok=True)
+            (reports / "open_questions.md").write_text(
+                "# Open Questions\n\n- define it\n", encoding="utf-8"
+            )
+            result = self._validate(root)
+            dead_end = [
+                error
+                for error in result.errors
+                if "silent dead end" in error
+                or "asks nothing" in error
+                or "contradicts the" in error
+            ]
+            self.assertEqual(dead_end, [], f"unexpected dead-end errors: {dead_end}")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
