@@ -208,7 +208,7 @@ class KPIFeatureResolver:
             workspace_filter_terms=_vocab_terms_for(self.layout, "filter_terms"),
         )
         if _requires_kpi_definition(kpi, expression_context, extracted):
-            feature = _kpi_definition_feature(kpi, schema_index)
+            feature = _kpi_definition_feature(kpi, schema_index, placeholder=True)
             return {
                 "kpi_id": f"kpi_{idx:03d}",
                 "name": kpi.get("name", ""),
@@ -1384,6 +1384,8 @@ def _prose_anchor_evidence(
 def _kpi_definition_feature(
     kpi: dict[str, Any],
     schema_index: dict[str, list[dict[str, Any]]] | None = None,
+    *,
+    placeholder: bool = False,
 ) -> dict[str, Any]:
     name = str(kpi.get("name") or "").strip()
     description = str(kpi.get("description") or "").strip()
@@ -1394,7 +1396,7 @@ def _kpi_definition_feature(
             "refinement_required": kpi.get("refinement_required", ""),
         }
     ]
-    if description:
+    if description and not placeholder:
         evidence.append(
             {
                 "type": "kpi_prose",
@@ -1403,7 +1405,7 @@ def _kpi_definition_feature(
             }
         )
     evidence.extend(_prose_anchor_evidence(kpi, schema_index))
-    if name and description:
+    if name and description and not placeholder:
         question = (
             f"Define the metric and grain for `{name}`: which datasets, columns, "
             "filters, or derivations implement the prose definition? Matched "

@@ -379,16 +379,47 @@ def _question_for_cluster(
     if prior:
         base["prior_decision_wiki"] = prior
     if any(item["feature"].get("resolution_type") == "kpi_definition_required" for item in items):
-        return {
-            **base,
-            "blocker": (
+        definition_items = [
+            item
+            for item in items
+            if item["feature"].get("resolution_type") == "kpi_definition_required"
+        ]
+        has_prose = any(
+            isinstance(evidence, dict) and evidence.get("type") == "kpi_prose"
+            for item in definition_items
+            for evidence in item["feature"].get("evidence") or []
+        )
+        feature_question = next(
+            (
+                str(item["feature"].get("question") or "")
+                for item in definition_items
+                if item["feature"].get("question")
+            ),
+            "",
+        )
+        if has_prose:
+            blocker_text = (
+                "The KPI is defined in stakeholder prose; a concrete metric "
+                "expression and grain have not been confirmed yet. The prose and "
+                "matched workspace evidence are attached."
+            )
+            question_text = feature_question or (
+                "Which concrete metric expression and grain/dimensions implement "
+                "this KPI's prose definition?"
+            )
+        else:
+            blocker_text = (
                 "The current KPI registry contains a seed placeholder KPI, not a concrete "
                 "business metric that can be mapped to data."
-            ),
-            "question": (
+            )
+            question_text = (
                 "Which concrete KPI should replace the seed? Include the business question, "
                 "metric expression, grain/dimensions, owner, and acceptance tests."
-            ),
+            )
+        return {
+            **base,
+            "blocker": blocker_text,
+            "question": question_text,
             "answer_type": "kpi_definition_required",
             "recommended_option_id": "custom",
             "recommended_answer": "Provide a concrete KPI definition before mapping features.",
@@ -1692,6 +1723,50 @@ def _evidence_files(items: list[dict[str, Any]], repo_root: Path) -> list[dict[s
     )
 
 
+def _blocked_kpi_details(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+    """Per-KPI definition asks for the blocked-without-feature-question card.
+
+    Each blocked KPI contributes its name, prose excerpt, open questions, and
+    the workspace-evidence anchors its definition blocker carries, so the
+    definition-help card asks concretely per KPI instead of a bare command.
+    """
+    details: list[dict[str, Any]] = []
+    for kpi in mapping.get("kpis", []) or []:
+        if not isinstance(kpi, dict) or kpi.get("status") != "blocked_questions_pending":
+            continue
+        prose = ""
+        anchors: list[dict[str, Any]] = []
+        for feature in kpi.get("features") or []:
+            if not isinstance(feature, dict):
+                continue
+            for evidence in feature.get("evidence") or []:
+                if not isinstance(evidence, dict):
+                    continue
+                if evidence.get("type") == "kpi_prose" and not prose:
+                    prose = str(evidence.get("excerpt") or "")
+                elif evidence.get("type") == "prose_term_match":
+                    anchors.append(
+                        {
+                            "dataset": evidence.get("source", ""),
+                            "column": evidence.get("column", ""),
+                            "matched_terms": evidence.get("matched_terms") or [],
+                            "dictionary_description": evidence.get(
+                                "dictionary_description", ""
+                            ),
+                        }
+                    )
+        details.append(
+            {
+                "kpi_id": kpi.get("kpi_id", ""),
+                "name": kpi.get("name", ""),
+                "prose_excerpt": prose,
+                "open_questions": list(kpi.get("open_questions") or []),
+                "anchor_evidence": anchors[:6],
+            }
+        )
+    return details
+
+
 def _empty_panel(mapping: dict[str, Any], workspace: Path, repo_root: Path) -> dict[str, Any]:
     summary = mapping.get("summary", {}) or {}
     blocked_count = 0
@@ -1737,6 +1812,7 @@ def _empty_panel(mapping: dict[str, Any], workspace: Path, repo_root: Path) -> d
             "(one per KPI), then re-run prepare-kpi-blocker-panel. "
             "Or restart KPI generation."
         )
+        panel["blocked_kpi_details"] = _blocked_kpi_details(mapping)
         try:
             from core.onboarding.workspace.delegation import routing_for
 
@@ -1928,6 +2004,35 @@ def _render_markdown(panel: dict[str, Any]) -> str:
         str(panel.get("why", "")),
         "",
     ]
+    blocked_details = panel.get("blocked_kpi_details") or []
+    if blocked_details:
+        lines += [
+            "## Blocked KPIs (definition needed)",
+            "",
+        ]
+        for detail in blocked_details:
+            lines.append(f"### {detail.get('kpi_id', '')} -- {detail.get('name', '')}")
+            lines.append("")
+            prose = str(detail.get("prose_excerpt") or "").strip()
+            if prose:
+                lines.append("> " + " ".join(prose.split())[:400])
+                lines.append("")
+            for question in detail.get("open_questions") or []:
+                lines.append(f"- Ask: {question}")
+            anchors = detail.get("anchor_evidence") or []
+            if anchors:
+                lines.append("- Workspace evidence anchors:")
+                for anchor in anchors:
+                    dataset = str(anchor.get("dataset") or "")
+                    dataset_label = dataset.split("/")[-1] if dataset else ""
+                    terms = ", ".join(str(t) for t in anchor.get("matched_terms") or [])
+                    gloss = str(anchor.get("dictionary_description") or "")
+                    suffix = f" -- {gloss}" if gloss else ""
+                    lines.append(
+                        f"  - `{dataset_label}.{anchor.get('column', '')}` "
+                        f"(matched: {terms}){suffix}"
+                    )
+            lines.append("")
     cli_agent_task = panel.get("cli_agent_task") or {}
     if cli_agent_task:
         lines.extend(
