@@ -269,7 +269,7 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Safety: local_safe_presentation_export
   - Required skills: workspace-governance; domain-model; workspace-kpi-query-optimizer
 - `resolve-kpi-features`
-  - Command: `uv run resolve-kpi-features --workspace <workspace> --domain <domain> --include-candidates`
+  - Command: `uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>`
   - Use when: KPI features need mapping; blockers need clustering; accepted definitions need applying
   - Outputs: interns/generated/contracts/kpi_feature_mapping.json; strict derived_feature_options with formula/input/observed_values/value_profile/semantic_meaning_sources/reason/example/evidence_sources/derivation_reasoning/evidence_state/confidence; semantically mismatched candidates rejected; interns/reports/blocker_question_panel/current.json; interns/reports/blocker_question_panel/current.md; interns/reports/open_questions.md
   - Safety: local_safe
@@ -378,13 +378,13 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Safety: local_safe_validated_decision_write_prevents_manual_json_edits
   - Required skills: workspace-governance; domain-model; data-engineering-pipeline-design
 - `derived-feature-markdown`
-  - Command: `uv run derived-feature-markdown --workspace <workspace>`
+  - Command: `uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>`
   - Use when: stakeholders need readable derived-feature blocker reviews; strict derived_feature_options JSON needs Markdown rendering
   - Outputs: interns/reports/derived_feature_reviews/md/<kpi_id>_<feature>.md; interns/reports/derived_feature_reviews/json/<kpi_id>_<feature>.json; interns/reports/derived_feature_reviews/index.md
   - Safety: local_safe
   - Required skills: feature-derivation-library; workspace-kpi-query-optimizer
 - `blocker-question-panel`
-  - Command: `uv run blocker-question-panel --workspace <workspace>`
+  - Command: `uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>`
   - Use when: agent needs to ask any KPI blocker question; direct mapping or source-of-truth choice needs stakeholder answer; non-technical panel is preferred over terminal option UI
   - Outputs: interns/reports/blocker_question_panel/current.json; interns/reports/blocker_question_panel/current.md; interns/reports/blocker_question_panel/index.json
   - Safety: local_safe

@@ -944,7 +944,7 @@
       },
       {
         "name": "resolve-kpi-features",
-        "command": "uv run resolve-kpi-features --workspace <workspace> --domain <domain> --include-candidates",
+        "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
         "use_when": [
           "KPI features need mapping",
           "blockers need clustering",
@@ -1291,7 +1291,7 @@
       },
       {
         "name": "derived-feature-markdown",
-        "command": "uv run derived-feature-markdown --workspace <workspace>",
+        "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
         "use_when": [
           "stakeholders need readable derived-feature blocker reviews",
           "strict derived_feature_options JSON needs Markdown rendering"
@@ -1309,7 +1309,7 @@
       },
       {
         "name": "blocker-question-panel",
-        "command": "uv run blocker-question-panel --workspace <workspace>",
+        "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
         "use_when": [
           "agent needs to ask any KPI blocker question",
           "direct mapping or source-of-truth choice needs stakeholder answer",

@@ -371,7 +371,7 @@
     },
     {
       "tool": "resolve-kpi-features",
-      "command": "uv run resolve-kpi-features --workspace <workspace> --domain <domain> --include-candidates",
+      "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
       "required_skills": [
         "domain-model",
         "feature-derivation-library",
@@ -531,7 +531,7 @@
     },
     {
       "tool": "derived-feature-markdown",
-      "command": "uv run derived-feature-markdown --workspace <workspace>",
+      "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
       "required_skills": [
         "feature-derivation-library",
         "workspace-kpi-query-optimizer"
@@ -539,7 +539,7 @@
     },
     {
       "tool": "blocker-question-panel",
-      "command": "uv run blocker-question-panel --workspace <workspace>",
+      "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
       "required_skills": [
         "grill-requirements",
         "workspace-kpi-query-optimizer"

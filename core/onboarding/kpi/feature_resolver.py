@@ -1127,13 +1127,6 @@ def _rel(path: Path, root: Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from core.onboarding.cli_deprecation import warn_soft_deprecated_cli
-
-    warn_soft_deprecated_cli(
-        "resolve-kpi-features",
-        prefer="prepare-kpi-blocker-panel",
-        reason="the wrapper runs resolve + derived-feature markdown + panel + validation in lock-step",
-    )
     parser = argparse.ArgumentParser(description="Resolve KPI features from generated workspace evidence.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")
     parser.add_argument("--repo-root", default=".", help="Repository root. Defaults to current directory.")
@@ -1174,6 +1167,36 @@ def main(argv: list[str] | None = None) -> int:
         help="Attach reusable derivation pattern candidates to unresolved features.",
     )
     args = parser.parse_args(argv)
+    from core.onboarding.cli_deprecation import (
+        announce_deprecated_cli_redirect,
+        is_internal_cli_call,
+        warn_soft_deprecated_cli,
+    )
+
+    if args.apply_decision or args.apply_workspace_definition:
+        warn_soft_deprecated_cli(
+            "resolve-kpi-features",
+            prefer="apply-kpi-panel-answer",
+            reason="panel answers carry option provenance; direct apply is for debugging",
+        )
+    elif not is_internal_cli_call():
+        announce_deprecated_cli_redirect(
+            "resolve-kpi-features",
+            prefer="prepare-kpi-blocker-panel",
+            reason="the wrapper runs resolve + derived-feature markdown + panel + validation in lock-step",
+        )
+        from core.onboarding.kpi.blocker_cli import prepare_main
+
+        return prepare_main(
+            [
+                "--workspace",
+                args.workspace,
+                "--repo-root",
+                args.repo_root,
+                "--domain",
+                args.domain,
+            ]
+        )
     if args.apply_decision:
         missing = [
             name

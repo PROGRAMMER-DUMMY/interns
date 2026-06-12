@@ -2182,14 +2182,7 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-def main() -> None:
-    from core.onboarding.cli_deprecation import warn_soft_deprecated_cli
-
-    warn_soft_deprecated_cli(
-        "blocker-question-panel",
-        prefer="prepare-kpi-blocker-panel",
-        reason="the wrapper runs feature resolution, panel build, and validation atomically",
-    )
+def main(argv: list[str] | None = None) -> int | None:
     parser = argparse.ArgumentParser(
         description="Generate a stakeholder-friendly blocker question panel."
     )
@@ -2198,7 +2191,32 @@ def main() -> None:
     parser.add_argument("--mapping", help="Optional path to kpi_feature_mapping.json.")
     parser.add_argument("--out", help="Optional output directory.")
     parser.add_argument("--json", action="store_true", help="Print JSON summary.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    from core.onboarding.cli_deprecation import (
+        announce_deprecated_cli_redirect,
+        is_internal_cli_call,
+        warn_soft_deprecated_cli,
+    )
+
+    stage_only = bool(args.mapping or args.out)
+    if stage_only or is_internal_cli_call():
+        warn_soft_deprecated_cli(
+            "blocker-question-panel",
+            prefer="prepare-kpi-blocker-panel",
+            reason="the wrapper runs feature resolution, panel build, and validation atomically",
+        )
+    else:
+        announce_deprecated_cli_redirect(
+            "blocker-question-panel",
+            prefer="prepare-kpi-blocker-panel",
+            reason="the wrapper runs feature resolution, panel build, and validation atomically",
+        )
+        from core.onboarding.kpi.blocker_cli import prepare_main
+
+        return prepare_main(
+            ["--workspace", args.workspace, "--repo-root", args.repo_root]
+        )
 
     result = BlockerQuestionPanelBuilder(
         args.repo_root,
@@ -2208,15 +2226,16 @@ def main() -> None:
     ).run()
     if args.json:
         print(json.dumps(result.summary(), indent=2))
-        return
+        return None
     print(f"Wrote {result.question_count} blocker question panel(s) to {result.output_dir}")
     print(f"- {result.current_json}")
     print(f"- {result.current_markdown}")
     print(f"- {result.index_json}")
+    return None
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
 
 
 # ---------------------------------------------------------------------------

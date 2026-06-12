@@ -21,6 +21,38 @@ import os
 import sys
 
 
+def is_internal_cli_call() -> bool:
+    """True when a governed wrapper invoked the stage CLI internally.
+
+    Wrappers set ``AUTORESEARCH_INTERNAL_CALL=1`` before delegating to stage
+    logic; redirecting in that case would recurse back into the wrapper.
+    """
+
+    return os.environ.get("AUTORESEARCH_INTERNAL_CALL") == "1"
+
+
+def announce_deprecated_cli_redirect(command: str, *, prefer: str, reason: str = "") -> None:
+    """Print a single-line redirect notice to stderr.
+
+    Unlike :func:`warn_soft_deprecated_cli`, this announces that the deprecated
+    CLI is delegating to the canonical wrapper instead of running its own stage
+    logic. Stage-only flags (and ``AUTORESEARCH_INTERNAL_CALL=1``) keep the
+    legacy behavior, so debugging workflows are unaffected.
+    """
+
+    if os.environ.get("AUTORESEARCH_SUPPRESS_CLI_DEPRECATION") == "1":
+        return
+    suffix = f" — {reason}" if reason else ""
+    message = (
+        f"[deprecated] `{command}` now delegates to `{prefer}`{suffix}. "
+        f"Call `{prefer}` directly; stage-only flags keep the legacy behavior."
+    )
+    try:
+        print(message, file=sys.stderr)
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
 def warn_soft_deprecated_cli(command: str, *, prefer: str, reason: str = "") -> None:
     """Print a single-line deprecation hint to stderr.
 
@@ -47,4 +79,8 @@ def warn_soft_deprecated_cli(command: str, *, prefer: str, reason: str = "") -> 
         pass
 
 
-__all__ = ["warn_soft_deprecated_cli"]
+__all__ = [
+    "announce_deprecated_cli_redirect",
+    "is_internal_cli_call",
+    "warn_soft_deprecated_cli",
+]

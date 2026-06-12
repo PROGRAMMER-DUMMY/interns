@@ -24,8 +24,8 @@ After a shell command completes successfully, respond quickly. Do not spend minu
 re-reading generated artifacts, or expanding hidden output. Summarize from the returned command
 output in under 30 seconds, list key artifact paths, and give the next deterministic command. After
 `onboard-workspace`, the next command is usually
-`uv run resolve-kpi-features --workspace workspaces/<project> --domain <domain> --include-candidates`.
-`resolve-kpi-features` prints `question_panel_path` and `question_panel_markdown_path`; if
+`uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>`.
+It prints `question_panel_path` and `question_panel_markdown_path`; if
 `blocked_kpi_count` is nonzero, read `question_panel_markdown_path` next and do not invent a
 separate interview.
 After onboarding, feature resolution, derived-feature markdown, or question-panel generation, run
@@ -66,7 +66,7 @@ definitions before KPI-specific exceptions, save accepted answers as workspace-l
 and reuse them automatically for every KPI they apply to.
 
 Before asking any KPI blocker question, run
-`uv run blocker-question-panel --workspace <workspace>` and ask from
+`uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>` and ask from
 `interns/reports/blocker_question_panel/current.json` or `current.md` only. Do not create freehand
 Ask User prompts for direct mappings, source-of-truth choices, aliases, workspace definitions, or
 derived features. If the panel files are missing, generate them first, then run
@@ -80,8 +80,9 @@ For derived-column blockers, prose-only options are invalid. Show JSON-backed op
 `derived_column_name`, `formula`, `input_columns`, `observed_values`, `value_profile`,
 `semantic_meaning_sources`, per-column `reason`, `example`, `evidence_sources`,
 `derivation_reasoning`, `evidence_state`, `confidence`, and `needs_user_confirmation`. If
-`derived_feature_options` exist, run `uv run derived-feature-markdown --workspace <workspace>` and
-then `uv run blocker-question-panel --workspace <workspace>`, followed by
+`derived_feature_options` exist, run
+`uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>` (it owns
+derived-feature markdown, panel generation, and validation), followed by
 `uv run validate-workspace-artifacts --workspace <workspace>`. Ask from
 `interns/reports/blocker_question_panel/current.json` or `current.md`, not from freehand prose.
 

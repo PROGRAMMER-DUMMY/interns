@@ -1113,10 +1113,15 @@ files with hashes. Databricks UC remains metadata-only and returns `planned_only
 
 ### resolve-kpi-features
 
+[deprecated] The default invocation now redirects to `prepare-kpi-blocker-panel`
+(same workspace/repo-root/domain arguments). Only the `--apply-decision` and
+`--apply-workspace-definition` debug modes still run stage logic directly;
+prefer `apply-kpi-panel-answer` for those as well.
+
 Command:
 
 ```powershell
-uv run resolve-kpi-features --workspace workspaces/<project> --domain <domain> --include-candidates
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
 Use when KPI/query features must be mapped to schema/profile evidence,
@@ -1223,13 +1228,18 @@ never run this command on the user's behalf without explicit direction.
 
 ### derived-feature-markdown
 
+[deprecated] The default invocation now redirects to `prepare-kpi-blocker-panel`,
+which regenerates derived-feature markdown as part of the panel build. Stage-only
+flags (`--mapping`, `--out`, `--no-strict`) keep the legacy single-stage behavior
+for debugging.
+
 Command:
 
 ```powershell
-uv run derived-feature-markdown --workspace workspaces/<project>
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
-Use after `resolve-kpi-features --include-candidates` when business analysts,
+Use after feature resolution when business analysts,
 product leads, or stakeholders need readable Markdown review files for strict
 derived-feature JSON options. The converter validates required fields by
 default and writes separated `.md` and `.json` files under:
@@ -1244,13 +1254,17 @@ and one JSON file.
 
 ### blocker-question-panel
 
+[deprecated] The default invocation now redirects to `prepare-kpi-blocker-panel`,
+which runs feature resolution, panel build, and validation atomically. Stage-only
+flags (`--mapping`, `--out`) keep the legacy single-stage behavior for debugging.
+
 Command:
 
 ```powershell
-uv run blocker-question-panel --workspace workspaces/<project>
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
-Use after `resolve-kpi-features --include-candidates` whenever an agent needs to
+Use whenever an agent needs to
 ask a stakeholder a KPI blocker question. This is mandatory for direct mappings,
 source-of-truth choices, aliases, reusable workspace definitions, and
 derived-feature questions. The tool writes a stable question panel with the

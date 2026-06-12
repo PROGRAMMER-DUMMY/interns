@@ -153,10 +153,11 @@ artifact paths, and provide the next deterministic command. For `onboard-workspa
 command is usually:
 
 ```powershell
-uv run resolve-kpi-features --workspace workspaces/<project> --domain <domain> --include-candidates
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
-The `resolve-kpi-features` command writes `question_panel_path` and
+(`resolve-kpi-features` is deprecated; its default invocation now redirects to
+`prepare-kpi-blocker-panel`.) The wrapper writes `question_panel_path` and
 `question_panel_markdown_path` in its JSON output. If `blocked_kpi_count` is nonzero, the next step
 is to read `question_panel_markdown_path`; do not inspect generated contracts and invent a separate
 interview.
@@ -553,7 +554,7 @@ the matching `### <command>` section of `TOOLS.md` for the one command you are a
 | --- | --- |
 | Workspace selection | `list-workspace-files`, `prepare-workspace-selection`, `session-snapshot` |
 | Onboarding | `onboard-workspace`, `kickstart-workspace`, `understand-data` |
-| KPI definition + blockers | `resolve-kpi-features`, `prepare-kpi-blocker-panel`, `blocker-question-panel`, `apply-kpi-panel-answer`, `apply-kpi-definition`, `derived-feature-markdown`, `confirm-cli-agent-proposal`, `prepare-kpi-generation`, `apply-kpi-generation-answer`, `finalize-kpi-generation` |
+| KPI definition + blockers | `prepare-kpi-blocker-panel`, `apply-kpi-panel-answer`, `apply-kpi-definition`, `confirm-cli-agent-proposal`, `prepare-kpi-generation`, `apply-kpi-generation-answer`, `finalize-kpi-generation` (deprecated redirects: `resolve-kpi-features`, `blocker-question-panel`, `derived-feature-markdown`) |
 | Data model | `prepare-data-model-generation`, `apply-data-model-answer`, `finalize-data-model-generation`, `prepare-data-model-blocker-panel`, `apply-data-model-blocker-answer`, `parse-data-model-images`, `export-data-model-diagram` |
 | Relationships + source-to-target | `build-relationship-contracts`, `apply-relationship-answer`, `plan-source-to-target` |
 | Source catalog + external intake | `prepare-source-catalog`, `build-catalog-contract`, `build-source-family-contracts`, `discover-external-sources`, `prepare-external-source-intake`, `ingest-source-catalog` |
@@ -660,14 +661,16 @@ Then ask exactly one high-leverage question at a time. The question should name 
 offer concrete options when possible, include a recommended answer, and explain why that answer is
 the safest or most useful default.
 
-For KPI/query blocker questions, do not ask from freehand prose or a custom terminal prompt. After
-feature resolution, generate the standardized question packet first:
+For KPI/query blocker questions, do not ask from freehand prose or a custom terminal prompt.
+Generate the standardized question packet first:
 
 ```powershell
-uv run blocker-question-panel --workspace workspaces/<project>
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
-Ask from `workspaces/<project>/interns/reports/blocker_question_panel/current.json` or `current.md`
+(`blocker-question-panel` is deprecated; its default invocation now redirects to
+`prepare-kpi-blocker-panel`.) Ask from
+`workspaces/<project>/interns/reports/blocker_question_panel/current.json` or `current.md`
 only. If those files are missing, generate them before asking. This applies to direct mappings,
 source-of-truth choices, aliases, reusable workspace definitions, and derived-feature questions.
 Run `uv run validate-workspace-artifacts --workspace workspaces/<project>` after generating the
@@ -728,16 +731,12 @@ specialty, reject those candidates in the question and ask for a direct physical
 origin rule, dictionary entry, or accepted business definition instead.
 
 Derived-column blocker options must be JSON-backed. Prose-only options are invalid. If derived
-feature options exist, run:
+feature options exist, run the wrapper, which owns derived-feature markdown, panel generation, and
+validation in one pass (`derived-feature-markdown` and `blocker-question-panel` are deprecated and
+redirect here):
 
 ```powershell
-uv run derived-feature-markdown --workspace workspaces/<project>
-```
-
-Then run:
-
-```powershell
-uv run blocker-question-panel --workspace workspaces/<project>
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
 Then validate:
