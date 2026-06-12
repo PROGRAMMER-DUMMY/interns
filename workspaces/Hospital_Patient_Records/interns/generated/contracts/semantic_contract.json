@@ -1,0 +1,126 @@
+{
+  "columns": {
+    "NAME": {
+      "is_sensitive": true,
+      "category": "name"
+    },
+    "ADDRESS": {
+      "is_sensitive": true,
+      "category": "address"
+    },
+    "CITY": {
+      "is_sensitive": true,
+      "category": "address"
+    },
+    "ZIP": {
+      "is_sensitive": true,
+      "category": "address"
+    },
+    "BIRTHDATE": {
+      "is_sensitive": true,
+      "category": "date_of_birth"
+    },
+    "PHONE": {
+      "is_sensitive": true,
+      "category": "phone"
+    }
+  },
+  "workspace": "workspaces/Hospital_Patient_Records",
+  "kpi_count": 10,
+  "term_resolution_order": [
+    "kpi_registry",
+    "data_model_docs_or_diagrams",
+    "dataset_schema_profile_evidence",
+    "data_dictionary_or_metadata_files",
+    "catalog_metadata_if_connected",
+    "stakeholder_or_user_clarification"
+  ],
+  "rules": [
+    {
+      "id": "kpi_001",
+      "name": "How many total encounters occurred each year?",
+      "metric": "count(distinct Id)",
+      "grain_or_cuts": "year(START)",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_002",
+      "name": "For each year, what percentage of all encounters belonged to each encounter class (ambulatory, outpatient, wellness, urgent care, emergency, and inpatient)?",
+      "metric": "",
+      "grain_or_cuts": "year(START)",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_003",
+      "name": "What percentage of encounters were over 24 hours versus under 24 hours?",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_004",
+      "name": "How many encounters had zero payer coverage, and what percentage of total encounters does this represent?",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_005",
+      "name": "What are the top 10 most frequent procedures performed and the average base cost for each?",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_006",
+      "name": "What are the top 10 procedures with the highest average base cost and the number of times they were performed?",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_007",
+      "name": "What is the average total claim cost for encounters, broken down by payer?",
+      "metric": "avg(TOTAL_CLAIM_COST)",
+      "grain_or_cuts": "PAYER",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_008",
+      "name": "How many unique patients were admitted each quarter over time?",
+      "metric": "count(distinct Id)",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_009",
+      "name": "How many patients were readmitted within 30 days of a previous encounter?",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_010",
+      "name": "Which patients had the most readmissions?",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    }
+  ],
+  "guardrails": [
+    "preserve_kpi_semantics_before_runtime_optimization",
+    "record_assumptions_for_ambiguous_or_missing_fields",
+    "mark_unmapped_kpis_as_needs_review",
+    "ask_for_missing_dictionary_metadata_catalog_contract_or_sla_files_when_required"
+  ]
+}

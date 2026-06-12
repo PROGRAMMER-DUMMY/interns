@@ -1,0 +1,193 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hospital_Patient_Records\\organizations.csv",
+  "format": "csv",
+  "row_count": 1,
+  "file_count": 1,
+  "size_bytes": 163,
+  "schema": {
+    "Id": "String",
+    "NAME": "String",
+    "ADDRESS": "String",
+    "CITY": "String",
+    "STATE": "String",
+    "ZIP": "Int64",
+    "LAT": "Float64",
+    "LON": "Float64"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "d78e84ec-30aa-3bba-a33a-f29a3a454662"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "NAME",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "MASSACHUSETTS GENERAL HOSPITAL"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ADDRESS",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "55 FRUIT STREET"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "CITY",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "BOSTON"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "STATE",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "MA"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ZIP",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        2114
+      ],
+      "sample_min": 2114,
+      "sample_max": 2114,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "LAT",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        42.362813
+      ],
+      "sample_min": 42.362813,
+      "sample_max": 42.362813,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "LON",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        -71.069187
+      ],
+      "sample_min": -71.069187,
+      "sample_max": -71.069187,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "ZIP",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    },
+    {
+      "column": "LAT",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    },
+    {
+      "column": "LON",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}
