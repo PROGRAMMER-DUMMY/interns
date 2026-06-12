@@ -28,6 +28,7 @@ import unittest
 CURATED_MODULES: tuple[str, ...] = (
     "tests.test_parser_parity",
     "tests.test_engine_parity",
+    "tests.test_engine_parity_aggregate",
     "tests.test_kpi_definition_bulk",
     "tests.test_cli_deprecation_redirect",
     "tests.test_base_source_selector",

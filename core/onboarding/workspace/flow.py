@@ -25,7 +25,7 @@ from core.onboarding.data_model.data_understanding import (
 from core.onboarding.data_quality import DataQualityHarness, DuplicateDecisionRecorder, DuplicateReviewPanel
 from core.onboarding.harness.trajectory_recorder import record_trajectory_event_safe
 from core.onboarding.kpi.blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
-from core.onboarding.kpi.engine_parity import MAX_PARITY_ROWS, run_polars_parity
+from core.onboarding.kpi.engine_parity import PARITY_MODE_ROW, run_polars_parity
 from core.onboarding.kpi.execution_harness import KPIExecutionHarness
 from core.onboarding.kpi.generation_workflow import KPIGenerationWorkflow
 from core.onboarding.kpi.registry_loader import load_kpi_definitions, render_kpi_block
@@ -1182,6 +1182,13 @@ class WorkspaceFlow:
         check does not apply, else {column, sum, status} with status "ok" or
         "not_a_partition". Workspace- and domain-agnostic: driven only by the
         emitted result schema, never by column semantics from any one dataset.
+
+        Parity-mode independence: this check aggregates IN SQL over the result
+        view; it never consumes the materialized parity rows, so it works
+        identically whether engine parity ran in row_parity or
+        aggregate_parity mode. Any future check that NEEDS the materialized
+        rows must say so explicitly instead of silently passing when parity
+        runs in aggregate mode.
         """
         try:
             description = conn.execute(f'SELECT * FROM "{view}" LIMIT 0').description or []
@@ -1310,24 +1317,23 @@ class WorkspaceFlow:
                             ):
                                 parity = dict(cached.get("parity") or {})
                                 parity["cached"] = True
+                                # Cache entries written before aggregate mode
+                                # existed predate the `mode` key; a cached
+                                # match was necessarily a row-level compare.
+                                parity.setdefault("mode", PARITY_MODE_ROW)
                             else:
                                 try:
-                                    row_total = conn.execute(f'SELECT COUNT(*) FROM "{view}"').fetchone()[0]
-                                    if int(row_total) > MAX_PARITY_ROWS:
-                                        parity = {
-                                            "engine": "polars",
-                                            "kpi_id": kpi_id,
-                                            "status": "skipped",
-                                            "reason": f"result has {row_total} rows (> {MAX_PARITY_ROWS} parity cap)",
-                                        }
-                                    else:
-                                        cursor_all = conn.execute(f'SELECT * FROM "{view}"')
-                                        all_columns = [col[0] for col in cursor_all.description]
-                                        all_rows = cursor_all.fetchall()
-                                        parity = run_polars_parity(
-                                            self.repo_root, self.workspace_rel, kpi_id,
-                                            all_columns, all_rows,
-                                        )
+                                    # Above the parity row cap run_polars_parity
+                                    # switches to aggregate-signature mode
+                                    # instead of skipping, so every result keeps
+                                    # cross-engine protection.
+                                    cursor_all = conn.execute(f'SELECT * FROM "{view}"')
+                                    all_columns = [col[0] for col in cursor_all.description]
+                                    all_rows = cursor_all.fetchall()
+                                    parity = run_polars_parity(
+                                        self.repo_root, self.workspace_rel, kpi_id,
+                                        all_columns, all_rows,
+                                    )
                                 except Exception as exc:
                                     parity = {
                                         "engine": "polars",
@@ -1341,9 +1347,13 @@ class WorkspaceFlow:
                                 }
                             entry["engine_parity"] = parity
                             parity_marker = "[ok]" if parity.get("status") == "match" else "[~]"
+                            # Surface the assurance level (row_parity vs
+                            # aggregate_parity), not just pass/fail, so the
+                            # kpi-analyst review gate sees what it got.
+                            parity_mode = parity.get("mode") or "unknown_mode"
                             preview_md = (
                                 preview_md
-                                + f"\n\n{parity_marker} engine parity (polars vs sql): "
+                                + f"\n\n{parity_marker} engine parity (polars vs sql, {parity_mode}): "
                                 f"{parity.get('status')} - {parity.get('reason')}"
                             )
                         entry["preview_markdown"] = preview_md

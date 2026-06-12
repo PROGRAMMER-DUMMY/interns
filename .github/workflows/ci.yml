@@ -25,6 +25,8 @@ jobs:
         run: |
           python -m unittest -v \
             tests.test_parser_parity \
+            tests.test_engine_parity \
+            tests.test_engine_parity_aggregate \
             tests.test_cli_deprecation_redirect \
             tests.test_base_source_selector \
             tests.test_kpi_engine_generators \
