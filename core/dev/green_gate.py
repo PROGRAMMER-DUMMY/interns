@@ -68,6 +68,13 @@ CURATED_MODULES: tuple[str, ...] = (
     # Pipeline-SQL failure contracts: green again after the validator now rejects
     # empty pipeline SQL + raw dataset paths outside CATALOG BOOTSTRAP (2026-06-11).
     "tests.test_failure_contracts",
+    # Phase 2.2 hostile-workspace fixes: prose KPI ingestion (F2), blocked-KPI
+    # honesty invariant + validator dead-end errors (F1/F3), documented-join
+    # relationship evidence (F4a), collision-blocks-not-resolves (F4b).
+    "tests.test_prose_kpi_ingestion",
+    "tests.test_blocked_kpi_invariant",
+    "tests.test_documented_join_evidence",
+    "tests.test_collision_blocking",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
