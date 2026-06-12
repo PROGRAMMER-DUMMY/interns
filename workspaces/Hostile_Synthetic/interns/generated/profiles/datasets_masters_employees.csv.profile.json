@@ -1,0 +1,157 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
+  "format": "csv",
+  "row_count": 140,
+  "file_count": 1,
+  "size_bytes": 6507,
+  "schema": {
+    "emp_id": "String",
+    "Name": "String",
+    "role": "String",
+    "depot": "String",
+    "START": "String",
+    "END": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "emp_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "E573",
+        "E535",
+        "E542",
+        "E501",
+        "E528",
+        "E597",
+        "E629",
+        "E526"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Carmen Iqbal",
+        "Femi Fuentes",
+        "Katya Riva",
+        "Quinn Eriksen",
+        "Greta Kovacs",
+        "Aisha Tanaka",
+        "Greta Gallo",
+        "Hamid Adler"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "role",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "PLANNER",
+        "FITTER",
+        "SUPERVISOR",
+        "LOADER",
+        "CS_AGENT"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "depot",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "L-210",
+        "L-235",
+        "L-201",
+        "L-256",
+        "L-245",
+        "L-216",
+        "L-260",
+        "L-231"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "START",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2022-11-14",
+        "2023-07-08",
+        "2022-12-30",
+        "2019-05-23",
+        "2021-11-28",
+        "2019-06-12",
+        "2018-10-13",
+        "2019-01-12"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "END",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2026-01-13",
+        "2026-05-13",
+        "2025-11-10",
+        "2026-04-01",
+        "2025-12-30",
+        "2025-11-27",
+        "2026-02-19",
+        "2025-11-05"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

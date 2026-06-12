@@ -1,0 +1,114 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
+  "format": "csv",
+  "row_count": 6,
+  "file_count": 1,
+  "size_bytes": 187,
+  "schema": {
+    "svc_id": "String",
+    "Name": "String",
+    "sla_days": "Int64",
+    "premium_flag": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "svc_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SVC1",
+        "SVC4",
+        "SVC5",
+        "SVC6",
+        "SVC3",
+        "SVC2"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Standard Ground",
+        "Chilled Reefer",
+        "Express Next-Day",
+        "Priority 48",
+        "Economy Deferred",
+        "Pallet Freight"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "sla_days",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        7
+      ],
+      "sample_min": 1,
+      "sample_max": 7,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "premium_flag",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Y",
+        "N"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "sla_days",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    }
+  ]
+}

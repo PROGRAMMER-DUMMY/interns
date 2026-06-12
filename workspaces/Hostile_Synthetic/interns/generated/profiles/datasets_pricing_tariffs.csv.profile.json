@@ -1,0 +1,209 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
+  "format": "csv",
+  "row_count": 180,
+  "file_count": 1,
+  "size_bytes": 7789,
+  "schema": {
+    "tariff_id": "String",
+    "svc_id": "String",
+    "zone_from": "String",
+    "zone_to": "String",
+    "rate_per_kg": "Float64",
+    "min_charge": "Float64",
+    "effective": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "tariff_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "T0018",
+        "T0052",
+        "T0074",
+        "T0096",
+        "T0087",
+        "T0035",
+        "T0051",
+        "T0156"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "svc_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SVC2",
+        "SVC1",
+        "SVC4",
+        "SVC6",
+        "SVC5",
+        "SVC3"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "zone_from",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Z01",
+        "Z10",
+        "Z06",
+        "Z12",
+        "Z03",
+        "Z04",
+        "Z02",
+        "Z07"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "zone_to",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Z11",
+        "Z04",
+        "Z08",
+        "Z10",
+        "Z06",
+        "Z03",
+        "Z01",
+        "Z12"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "rate_per_kg",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        0.1,
+        0.11,
+        0.115,
+        0.118,
+        0.121,
+        0.124,
+        0.127,
+        0.131
+      ],
+      "sample_min": 0.1,
+      "sample_max": 0.899,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "min_charge",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        8.01,
+        8.07,
+        8.08,
+        8.26,
+        8.4,
+        8.59,
+        8.67,
+        8.78
+      ],
+      "sample_min": 8.01,
+      "sample_max": 29.94,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "effective",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2024-12-05",
+        "2024-01-12",
+        "2024-06-29",
+        "2024-09-05",
+        "2024-07-28",
+        "2024-07-23",
+        "2025-08-16",
+        "2025-06-13"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "rate_per_kg",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    },
+    {
+      "column": "min_charge",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

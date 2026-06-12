@@ -1,0 +1,102 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\wh_bins.csv",
+  "format": "csv",
+  "row_count": 200,
+  "file_count": 1,
+  "size_bytes": 3432,
+  "schema": {
+    "bin_id": "String",
+    "loc_nbr": "String",
+    "bin_capacity_m3": "Float64"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "bin_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "B0071",
+        "B0186",
+        "B0193",
+        "B0037",
+        "B0151",
+        "B0132",
+        "B0094",
+        "B0117"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "loc_nbr",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "L-221",
+        "L-220",
+        "L-231",
+        "L-241",
+        "L-210",
+        "L-236",
+        "L-240",
+        "L-255"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "bin_capacity_m3",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        0.5,
+        0.6,
+        0.7,
+        0.8,
+        0.9,
+        1.0,
+        1.1,
+        1.2
+      ],
+      "sample_min": 0.5,
+      "sample_max": 6.0,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "bin_capacity_m3",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

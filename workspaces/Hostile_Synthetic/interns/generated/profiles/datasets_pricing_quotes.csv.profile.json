@@ -1,0 +1,168 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\quotes.csv",
+  "format": "csv",
+  "row_count": 700,
+  "file_count": 1,
+  "size_bytes": 29376,
+  "schema": {
+    "Id": "String",
+    "cust_ref": "String",
+    "Date": "String",
+    "lane_id": "String",
+    "Amount": "Float64",
+    "accepted_flag": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Q80584",
+        "Q80141",
+        "Q80349",
+        "Q80274",
+        "Q80585",
+        "Q80224",
+        "Q80292",
+        "Q80466"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "cust_ref",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "P-1167",
+        "P-1171",
+        "P-1142",
+        "P-1220",
+        "P-1117",
+        "P-1193",
+        "P-1217",
+        "P-1033"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-03-11",
+        "2025-05-29",
+        "2025-06-22",
+        "2025-08-04",
+        "2026-01-10",
+        "2025-05-30",
+        "2025-12-14",
+        "2025-08-21"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "lane_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "LN0015",
+        "LN0145",
+        "LN0003",
+        "LN0049",
+        "LN0146",
+        "LN0001",
+        "LN0091",
+        "LN0030"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        15.86,
+        17.9,
+        17.97,
+        19.54,
+        21.79,
+        22.62,
+        22.68,
+        22.69
+      ],
+      "sample_min": 15.86,
+      "sample_max": 899.52,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "accepted_flag",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Y",
+        "N"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,169 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\contracts.csv",
+  "format": "csv",
+  "row_count": 95,
+  "file_count": 1,
+  "size_bytes": 5175,
+  "schema": {
+    "contract_no": "String",
+    "acct": "String",
+    "START": "String",
+    "END": "String",
+    "Status": "String",
+    "Amount": "Float64"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "contract_no",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "CTR0050",
+        "CTR0082",
+        "CTR0086",
+        "CTR0090",
+        "CTR0018",
+        "CTR0035",
+        "CTR0005",
+        "CTR0043"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "acct",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "P-1129",
+        "P-1205",
+        "P-1073",
+        "P-1103",
+        "P-1063",
+        "P-1035",
+        "P-1010",
+        "P-1009"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "START",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2024-09-24",
+        "2024-05-11",
+        "2024-10-13",
+        "2024-02-04",
+        "2024-07-23",
+        "2024-04-13",
+        "2024-07-27",
+        "2025-03-21"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "END",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-09-05",
+        "2026-08-26",
+        "2026-06-02",
+        "2026-05-06",
+        "2026-08-03",
+        "2025-10-29",
+        "2025-06-26",
+        "2025-08-18"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "DRAFT",
+        "LIVE",
+        "EXPIRED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        5666.81,
+        13792.43,
+        14884.5,
+        15753.56,
+        16571.58,
+        19505.66,
+        21459.51,
+        21811.12
+      ],
+      "sample_min": 5666.81,
+      "sample_max": 248385.91,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

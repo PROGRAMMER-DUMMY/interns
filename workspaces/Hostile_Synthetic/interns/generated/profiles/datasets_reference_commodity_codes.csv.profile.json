@@ -1,0 +1,82 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\commodity_codes.csv",
+  "format": "csv",
+  "row_count": 10,
+  "file_count": 1,
+  "size_bytes": 207,
+  "schema": {
+    "comm_cd": "String",
+    "Name": "String",
+    "hazmat_flag": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "comm_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "C005",
+        "C006",
+        "C007",
+        "C009",
+        "C001",
+        "C004",
+        "C003",
+        "C002"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Apparel",
+        "Batteries",
+        "Electronics",
+        "Print media",
+        "Furniture",
+        "Paints",
+        "Aerosols",
+        "Auto parts"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "hazmat_flag",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Y",
+        "N"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

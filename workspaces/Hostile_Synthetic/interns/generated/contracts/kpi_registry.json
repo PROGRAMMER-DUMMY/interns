@@ -1,0 +1,101 @@
+{
+  "artifact_type": "kpi_registry.json",
+  "version": 1,
+  "generated_by": "onboard-workspace",
+  "workspace": "workspaces/Hostile_Synthetic",
+  "source_registries": [
+    "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md"
+  ],
+  "kpis": [
+    {
+      "name": "KPI 1 - On-time delivery rate",
+      "description": "",
+      "cuts": "",
+      "metric": "",
+      "refinement_required": "",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "status": "needs_mapping"
+    },
+    {
+      "name": "KPI 2 - Monthly revenue per active account",
+      "description": "",
+      "cuts": "",
+      "metric": "",
+      "refinement_required": "",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "status": "needs_mapping"
+    },
+    {
+      "name": "KPI 3 - Average depot dwell hours",
+      "description": "",
+      "cuts": "",
+      "metric": "",
+      "refinement_required": "",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "status": "needs_mapping"
+    },
+    {
+      "name": "KPI 4 - Damage claim rate by carrier",
+      "description": "",
+      "cuts": "",
+      "metric": "",
+      "refinement_required": "",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "status": "needs_mapping"
+    },
+    {
+      "name": "KPI 5 - Share of shipments upgraded to premium after dispatch",
+      "description": "",
+      "cuts": "",
+      "metric": "",
+      "refinement_required": "",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "status": "needs_mapping"
+    },
+    {
+      "name": "KPI 6 - Fleet utilization",
+      "description": "",
+      "cuts": "",
+      "metric": "",
+      "refinement_required": "",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "status": "needs_mapping"
+    },
+    {
+      "name": "KPI 7 - Invoice dispute rate",
+      "description": "",
+      "cuts": "",
+      "metric": "",
+      "refinement_required": "",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "status": "needs_mapping"
+    },
+    {
+      "name": "KPI 8 - Average cost per kilogram by lane",
+      "description": "",
+      "cuts": "",
+      "metric": "",
+      "refinement_required": "",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "status": "needs_mapping"
+    },
+    {
+      "name": "KPI 9 - Quarterly account churn",
+      "description": "",
+      "cuts": "",
+      "metric": "",
+      "refinement_required": "",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "status": "needs_mapping"
+    },
+    {
+      "name": "KPI 10 - Perfect shipment rate",
+      "description": "",
+      "cuts": "",
+      "metric": "",
+      "refinement_required": "",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "status": "needs_mapping"
+    }
+  ]
+}

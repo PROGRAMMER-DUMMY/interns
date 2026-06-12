@@ -1,0 +1,141 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\edi_messages.csv",
+  "format": "csv",
+  "row_count": 800,
+  "file_count": 1,
+  "size_bytes": 36543,
+  "schema": {
+    "Id": "String",
+    "ship_ref": "String",
+    "msg_type": "Int64",
+    "ts": "String",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "EDI70682",
+        "EDI70784",
+        "EDI70238",
+        "EDI70025",
+        "EDI70114",
+        "EDI70462",
+        "EDI70545",
+        "EDI70308"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ship_ref",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SH101924",
+        "SH104135",
+        "SH102615",
+        "SH104071",
+        "SH100403",
+        "SH100498",
+        "SH104007",
+        "SH103745"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "msg_type",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        210,
+        214,
+        990,
+        997
+      ],
+      "sample_min": 210,
+      "sample_max": 997,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ts",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-06-27 21:42",
+        "2026-03-25 09:57",
+        "2025-02-01 14:00",
+        "2025-03-11 07:56",
+        "2025-03-08 21:11",
+        "2025-08-24 18:52",
+        "2025-12-07 09:39",
+        "2025-01-18 06:04"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "NACK",
+        "PENDING",
+        "ACK"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "msg_type",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    }
+  ]
+}

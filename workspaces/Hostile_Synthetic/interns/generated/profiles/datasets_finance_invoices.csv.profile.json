@@ -1,0 +1,268 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+  "format": "csv",
+  "row_count": 4809,
+  "file_count": 1,
+  "size_bytes": 356573,
+  "schema": {
+    "Id": "String",
+    "inv_no": "String",
+    "Date": "String",
+    "acct": "String",
+    "ship_no": "String",
+    "charge_type": "String",
+    "Amount": "Float64",
+    "ccy": "String",
+    "tax": "Float64",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "IL901188",
+        "IL901821",
+        "IL902113",
+        "IL900500",
+        "IL900572",
+        "IL900850",
+        "IL901430",
+        "IL901755"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "inv_no",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "INV-51862",
+        "INV-51323",
+        "INV-51432",
+        "INV-51069",
+        "INV-50684",
+        "INV-50461",
+        "INV-52343",
+        "INV-52839"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-07-19",
+        "2025-02-17",
+        "2026-02-17",
+        "2025-11-18",
+        "2025-10-20",
+        "2025-11-12",
+        "2025-01-07",
+        "2026-05-21"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "acct",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "P-1027",
+        "P-1146",
+        "P-1068",
+        "P-1019",
+        "P-1040",
+        "P-1029",
+        "P-1016",
+        "P-1237"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ship_no",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SH100673",
+        "SH101024",
+        "SH102216",
+        "SH100889",
+        "SH102888",
+        "SH103502",
+        "SH101096",
+        "SH103065"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "charge_type",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "FUEL",
+        "BASE",
+        "ACCESSORIAL"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        1.27,
+        1.83,
+        1.95,
+        2.35,
+        2.42,
+        2.79,
+        2.96,
+        3.06
+      ],
+      "sample_min": 1.27,
+      "sample_max": 1203.75,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ccy",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "GBP",
+        "EUR"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "tax",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        0.25,
+        0.37,
+        0.39,
+        0.47,
+        0.48,
+        0.56,
+        0.59,
+        0.61
+      ],
+      "sample_min": 0.25,
+      "sample_max": 240.75,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "OPEN",
+        "CREDITED",
+        "VOID",
+        "PAID"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    },
+    {
+      "column": "tax",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

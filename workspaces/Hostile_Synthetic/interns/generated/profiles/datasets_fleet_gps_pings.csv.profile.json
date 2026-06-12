@@ -1,0 +1,163 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\gps_pings.csv",
+  "format": "csv",
+  "row_count": 400,
+  "file_count": 1,
+  "size_bytes": 20332,
+  "schema": {
+    "Id": "String",
+    "vin": "String",
+    "ts": "String",
+    "lat": "Float64",
+    "lon": "Float64"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "GP00243",
+        "GP00368",
+        "GP00395",
+        "GP00391",
+        "GP00400",
+        "GP00189",
+        "GP00058",
+        "GP00132"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "vin",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "VIN164",
+        "VIN122",
+        "VIN193",
+        "VIN188",
+        "VIN144",
+        "VIN108",
+        "VIN149",
+        "VIN212"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ts",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-06-06 13:51",
+        "2025-05-25 15:20",
+        "2025-04-10 12:00",
+        "2025-08-24 12:13",
+        "2025-06-25 18:48",
+        "2026-02-04 09:55",
+        "2025-03-18 06:54",
+        "2025-07-17 10:07"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "lat",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        50.10805,
+        50.11623,
+        50.16944,
+        50.17165,
+        50.19587,
+        50.20818,
+        50.23872,
+        50.3098
+      ],
+      "sample_min": 50.10805,
+      "sample_max": 57.88642,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "lon",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        -5.49576,
+        -5.47963,
+        -5.4663,
+        -5.46246,
+        -5.45293,
+        -5.44166,
+        -5.43891,
+        -5.43585
+      ],
+      "sample_min": -5.49576,
+      "sample_max": 1.3861,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "lat",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    },
+    {
+      "column": "lon",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

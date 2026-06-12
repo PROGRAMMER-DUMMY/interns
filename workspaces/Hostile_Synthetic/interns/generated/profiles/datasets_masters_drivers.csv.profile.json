@@ -1,0 +1,127 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
+  "format": "csv",
+  "row_count": 120,
+  "file_count": 1,
+  "size_bytes": 4236,
+  "schema": {
+    "drv_id": "String",
+    "Name": "String",
+    "depot": "String",
+    "licence_class": "String",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "drv_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "D3033",
+        "D3015",
+        "D3045",
+        "D3080",
+        "D3065",
+        "D3105",
+        "D3103",
+        "D3108"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Stefan Hansen",
+        "Aisha Iqbal",
+        "Omar Brennan",
+        "Nadia Marek",
+        "Rosa Kovacs",
+        "Boris Quist",
+        "Nadia Tanaka",
+        "Quinn Dvorak"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "depot",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "L-220",
+        "L-210",
+        "L-215",
+        "L-226",
+        "L-201",
+        "L-206",
+        "L-245",
+        "L-216"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "licence_class",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "C1",
+        "CE",
+        "B",
+        "C"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "ACTIVE",
+        "LEFT",
+        "BANNED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

@@ -1,0 +1,201 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+  "format": "csv",
+  "row_count": 176,
+  "file_count": 1,
+  "size_bytes": 9700,
+  "schema": {
+    "Id": "String",
+    "ship_ref": "String",
+    "Date": "String",
+    "claim_type": "String",
+    "Amount": "Float64",
+    "Status": "String",
+    "settled_amount": "Float64"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "CLM5087",
+        "CLM5029",
+        "CLM5032",
+        "CLM5001",
+        "CLM5112",
+        "CLM5056",
+        "CLM5139",
+        "CLM5119"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ship_ref",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SH101955",
+        "SH103735",
+        "SH103399",
+        "SH103442",
+        "SH100868",
+        "SH101663",
+        "SH101836",
+        "SH102626"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-03-20",
+        "2025-02-28",
+        "2025-01-10",
+        "2025-04-07",
+        "2025-02-01",
+        "2026-03-02",
+        "2025-04-09",
+        "2025-10-20"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "claim_type",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "DELAY",
+        "DAMAGE",
+        "LOSS"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        33.49,
+        50.02,
+        60.74,
+        65.99,
+        79.31,
+        81.33,
+        92.81,
+        95.45
+      ],
+      "sample_min": 33.49,
+      "sample_max": 2385.91,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "DENIED",
+        "SETTLED",
+        "FILED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "settled_amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        15.32,
+        26.37,
+        31.51,
+        31.98,
+        34.97,
+        35.21,
+        38.87,
+        49.21
+      ],
+      "sample_min": 15.32,
+      "sample_max": 2248.81,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 77,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    },
+    {
+      "column": "settled_amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

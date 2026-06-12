@@ -1,0 +1,124 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\audit_log.csv",
+  "format": "csv",
+  "row_count": 300,
+  "file_count": 1,
+  "size_bytes": 14263,
+  "schema": {
+    "Id": "String",
+    "ts": "String",
+    "user": "String",
+    "action": "String",
+    "entity": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "AU00105",
+        "AU00139",
+        "AU00027",
+        "AU00040",
+        "AU00063",
+        "AU00074",
+        "AU00127",
+        "AU00209"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ts",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2026-03-13 12:17",
+        "2025-01-27 15:15",
+        "2025-05-06 12:42",
+        "2025-09-26 18:58",
+        "2025-07-31 12:14",
+        "2026-04-12 12:19",
+        "2025-01-29 13:55",
+        "2025-03-31 14:29"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "user",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "system",
+        "ops2",
+        "ops1",
+        "finance1"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "action",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "UPDATE",
+        "CREATE",
+        "EXPORT",
+        "VOID"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "entity",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "rate_card",
+        "shipment",
+        "invoice",
+        "party"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

@@ -1,0 +1,80 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\surcharge_types.csv",
+  "format": "csv",
+  "row_count": 6,
+  "file_count": 1,
+  "size_bytes": 218,
+  "schema": {
+    "sur_cd": "String",
+    "Name": "String",
+    "calc_method": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "sur_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "S-FUEL",
+        "S-WAIT",
+        "S-LIFT",
+        "S-REWT",
+        "S-RES",
+        "S-ADR"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Reweigh correction",
+        "Hazardous handling",
+        "Fuel surcharge",
+        "Tail-lift",
+        "Residential delivery",
+        "Waiting time"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "calc_method",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "PCT_OF_BASE",
+        "DELTA",
+        "FLAT",
+        "PER_15MIN"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

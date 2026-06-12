@@ -1,0 +1,80 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\holidays.csv",
+  "format": "csv",
+  "row_count": 8,
+  "file_count": 1,
+  "size_bytes": 224,
+  "schema": {
+    "Date": "String",
+    "Name": "String",
+    "country_cd": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-03-17",
+        "2025-12-25",
+        "2025-05-05",
+        "2025-01-01",
+        "2025-04-18",
+        "2026-01-01",
+        "2026-04-03",
+        "2025-12-26"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Good Friday",
+        "St Patrick",
+        "May Day",
+        "Boxing Day",
+        "New Year",
+        "Christmas"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "country_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "GB",
+        "IE"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

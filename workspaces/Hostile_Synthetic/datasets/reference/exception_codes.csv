@@ -1,0 +1,9 @@
+exc_cd,Name,severity
+X01,Address query,LOW
+X02,Weather hold,MED
+X03,Vehicle breakdown,HIGH
+X04,Customs hold,MED
+X05,Refused at door,HIGH
+X06,Missed linehaul,MED
+X07,Damaged in handling,HIGH
+X08,Label unreadable,LOW

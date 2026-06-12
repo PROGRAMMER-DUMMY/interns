@@ -1,0 +1,132 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\addr.csv",
+  "format": "csv",
+  "row_count": 380,
+  "file_count": 1,
+  "size_bytes": 13407,
+  "schema": {
+    "Id": "String",
+    "acct": "String",
+    "line1": "String",
+    "post_area": "String",
+    "country_cd": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "AD0282",
+        "AD0037",
+        "AD0075",
+        "AD0292",
+        "AD0293",
+        "AD0116",
+        "AD0324",
+        "AD0333"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "acct",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "P-1117",
+        "P-1220",
+        "P-1053",
+        "P-1066",
+        "P-1193",
+        "P-1094",
+        "P-1054",
+        "P-1240"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "line1",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "157 Orchard Way",
+        "129 Pinnacle Way",
+        "191 Alfa Way",
+        "166 Pinnacle Way",
+        "6 Mistral Way",
+        "142 Iron Way",
+        "111 Juno Way",
+        "164 Quartz Way"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "post_area",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "LS",
+        "CF",
+        "M",
+        "B",
+        "TR",
+        "EH",
+        "AB",
+        "G"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "country_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "FR",
+        "IE",
+        "NL",
+        "GB"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

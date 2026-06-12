@@ -1,0 +1,397 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+  "format": "csv",
+  "row_count": 4200,
+  "file_count": 1,
+  "size_bytes": 471280,
+  "schema": {
+    "Id": "String",
+    "Date": "String",
+    "cust_ref": "String",
+    "svc": "String",
+    "carrier_cd": "String",
+    "orig": "String",
+    "dest": "String",
+    "START": "String",
+    "END": "String",
+    "wgt": "Float64",
+    "wgt_uom": "String",
+    "pieces": "Int64",
+    "Amount": "Float64",
+    "ccy": "String",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SH101650",
+        "SH104153",
+        "SH100185",
+        "SH102108",
+        "SH100631",
+        "SH102361",
+        "SH103901",
+        "SH102064"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-03-26",
+        "2026-03-30",
+        "2025-11-18",
+        "2026-03-29",
+        "2025-12-29",
+        "2025-06-30",
+        "2026-02-04",
+        "2026-02-20"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "cust_ref",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "P-1046",
+        "P-1236",
+        "P-1190",
+        "P-1144",
+        "P-1065",
+        "P-1128",
+        "P-1123",
+        "P-1109"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "svc",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SVC1",
+        "SVC2",
+        "SVC6",
+        "SVC5",
+        "SVC4",
+        "SVC3"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "carrier_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "GRYP",
+        "FNCH",
+        "BLTC",
+        "CDRX",
+        "EGRT",
+        "DNUB",
+        "ARRW"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "orig",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "L-246",
+        "L-258",
+        "L-229",
+        "L-226",
+        "L-256",
+        "L-260",
+        "L-210",
+        "L-201"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "dest",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "L-256",
+        "L-246",
+        "L-202",
+        "L-251",
+        "L-209",
+        "L-242",
+        "L-260",
+        "L-233"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "START",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-04-14 10:34",
+        "2026-03-15 20:40",
+        "2025-05-02 10:36",
+        "2025-04-05 09:25",
+        "2025-09-20 15:49",
+        "2025-11-17 13:51",
+        "2025-12-24 08:30",
+        "2025-10-31 17:15"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "END",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-01-17 20:18",
+        "2026-03-15 08:14",
+        "2025-05-22 14:04",
+        "2026-02-18 12:00",
+        "2026-05-08 17:53",
+        "2025-03-12 07:32",
+        "2025-06-25 18:17",
+        "2025-02-22 11:03"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "wgt",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        2.9,
+        3.1,
+        3.8,
+        4.2,
+        4.3,
+        5.3,
+        5.5,
+        5.7
+      ],
+      "sample_min": 2.9,
+      "sample_max": 1399.8,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "wgt_uom",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "LB",
+        "KG"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "pieces",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "sample_min": 1,
+      "sample_max": 26,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        16.28,
+        17.33,
+        18.06,
+        18.07,
+        19.98,
+        20.06,
+        20.54,
+        20.57
+      ],
+      "sample_min": 16.28,
+      "sample_max": 974.91,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ccy",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "GBP",
+        "EUR"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "BOOKED",
+        "IN_TRANSIT",
+        "DELIVERED",
+        "CANCELLED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "wgt",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    },
+    {
+      "column": "pieces",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    },
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

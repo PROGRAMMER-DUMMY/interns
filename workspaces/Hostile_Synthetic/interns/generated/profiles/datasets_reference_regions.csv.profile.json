@@ -1,0 +1,60 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\regions.csv",
+  "format": "csv",
+  "row_count": 6,
+  "file_count": 1,
+  "size_bytes": 92,
+  "schema": {
+    "region_cd": "String",
+    "Name": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "region_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "R1",
+        "R5",
+        "R6",
+        "R4",
+        "R2",
+        "R3"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Scotland",
+        "Wales",
+        "North",
+        "South East",
+        "Midlands",
+        "South West"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}
