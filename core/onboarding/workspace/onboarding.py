@@ -718,12 +718,16 @@ class WorkspaceOnboarder:
         kpi_registries = [
             path
             for path, roles in classified
-            if "kpi_input" in roles and path.suffix.lower() in REGISTRY_SUFFIXES
+            if "kpi_input" in roles
+            and path.suffix.lower() in REGISTRY_SUFFIXES
+            and not self._is_platform_governance_note(path)
         ]
         data_models = [
             path
             for path, roles in classified
-            if "data_model_input" in roles and path.suffix.lower() in MODEL_SUFFIXES
+            if "data_model_input" in roles
+            and path.suffix.lower() in MODEL_SUFFIXES
+            and not self._is_platform_governance_note(path)
         ]
 
         return WorkspaceInputs(
@@ -732,6 +736,20 @@ class WorkspaceOnboarder:
             kpi_registries=[_rel(path, self.repo_root) for path in sorted(set(kpi_registries))],
             data_models=[_rel(path, self.repo_root) for path in sorted(set(data_models))],
         )
+
+    def _is_platform_governance_note(self, path: Path) -> bool:
+        """Whether a file is a platform-generated governance note, not input.
+
+        The workspace ``wiki/`` tree is written by the platform itself (feature
+        decisions, KPI notes). Re-ingesting those records as KPI/data-model
+        INPUTS is circular: a wiki feature note resurfaced as a phantom KPI on
+        re-onboarding. Generic location rule -- no filename vocabulary.
+        """
+        try:
+            relative = path.resolve().relative_to(self.workspace)
+        except ValueError:
+            return False
+        return bool(relative.parts) and relative.parts[0] == "wiki"
 
     def _classified_workspace_inputs(self) -> list[tuple[Path, set[str]]]:
         from tools.list_workspace_files import list_workspace_files

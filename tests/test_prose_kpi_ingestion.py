@@ -127,5 +127,43 @@ class TableIngestionRegressionTests(unittest.TestCase):
         self.assertIn("Share of invoices disputed", kpis[0].description)
 
 
+class WikiGovernanceNoteExclusionTests(unittest.TestCase):
+    """Platform-generated wiki notes are decision records, not KPI inputs.
+
+    Re-ingesting them creates phantom KPIs on re-onboarding (an RCM wiki
+    feature note resurfaced as a 4th 'ready' KPI)."""
+
+    def test_wiki_files_are_not_kpi_or_model_inputs(self) -> None:
+        from core.onboarding.workspace.onboarding import WorkspaceOnboarder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets").mkdir(parents=True)
+            (workspace / "wiki" / "features").mkdir(parents=True)
+            (workspace / "docs" / "kpi_wishlist.md").write_text(
+                "### KPI 1 - Revenue\nBilled revenue by month.\n", encoding="utf-8"
+            )
+            (workspace / "datasets" / "orders.csv").write_text(
+                "Id,Amount\nO1,10\n", encoding="utf-8"
+            )
+            (workspace / "wiki" / "features" / "intent_kpi_001_grain.md").write_text(
+                "# Feature: intent::kpi_001::grain\n\n- Accepted option_a\n",
+                encoding="utf-8",
+            )
+            inputs = WorkspaceOnboarder(root, "workspaces/demo").discover_inputs()
+            self.assertEqual(
+                inputs.kpi_registries, ["workspaces/demo/docs/kpi_wishlist.md"]
+            )
+            self.assertFalse(
+                any(
+                    "wiki" in path
+                    for path in inputs.kpi_registries + inputs.data_models
+                ),
+                f"wiki note leaked into inputs: {inputs}",
+            )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
