@@ -374,12 +374,24 @@ class CorporateThemeTests(unittest.TestCase):
         )
         self.assertEqual(fig.layout.xaxis.categoryorder, "total descending")
 
-    def test_log_scale_applied_to_measure_axis(self):
-        fig = _figure_from_spec(
+    def test_log_scale_ignored_on_bars_applied_on_lines(self):
+        # Bar length must stay proportional to value: a log_scale flag on any
+        # bar chart is ignored (axis stays linear). Lines may go log.
+        bar = _figure_from_spec(
             _spec({"chart_type": "bar", "x": "region", "y": "sum_amount", "log_scale": True, "title": "X"}),
             [{"region": "mega", "sum_amount": 1_000_000}, {"region": "tiny", "sum_amount": 500}],
         )
-        self.assertEqual(fig.layout.yaxis.type, "log")
+        self.assertNotEqual(bar.layout.yaxis.type, "log")
+        ranked = _figure_from_spec(
+            _spec({"chart_type": "ranked_bar", "x": "region", "y": "sum_amount", "log_scale": True, "title": "X"}),
+            [{"region": "mega", "sum_amount": 1_000_000}, {"region": "tiny", "sum_amount": 500}],
+        )
+        self.assertNotEqual(ranked.layout.xaxis.type, "log")
+        line = _figure_from_spec(
+            _spec({"chart_type": "line", "x": "month", "y": "sum_amount", "log_scale": True, "title": "X"}),
+            [{"month": "2024-01", "sum_amount": 1_000_000}, {"month": "2024-02", "sum_amount": 500}],
+        )
+        self.assertEqual(line.layout.yaxis.type, "log")
 
     def test_stacked_percent_uses_percent_suffix_0_100_not_double_scaled(self):
         # barnorm yields 0-100; the axis must use a '%' suffix on a 0-100 range,

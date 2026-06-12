@@ -222,9 +222,12 @@ def decide_panels(
             panel["chart_type"] = "bar"
         if is_share:
             panel["y_format"] = "percent"
-        # Adaptive scale: a share (bounded 0-100) is never log; otherwise log when
-        # the measure spans orders of magnitude across this dimension.
-        elif _should_log_scale(rows, d, measure):
+        # Adaptive scale: a share (bounded 0-100) is never log, and BAR charts
+        # are never log (bar length must stay proportional to value — the
+        # renderer also enforces this). Log remains for line panels only.
+        elif panel.get("chart_type") not in ("bar", "ranked_bar") and _should_log_scale(
+            rows, d, measure
+        ):
             panel["log_scale"] = True
         panels.append(panel)
 

@@ -79,8 +79,11 @@ class DecidePanelsTests(unittest.TestCase):
     def test_empty_rows_returns_empty(self):
         self.assertEqual(decide_panels([], {"metric": "x"}), [])
 
-    def test_log_scale_chosen_when_measure_spans_orders_of_magnitude(self):
-        # one huge category vs several tiny -> linear hides the small ones -> log
+    def test_log_scale_never_chosen_for_bar_panels(self):
+        # Categorical breakdowns render as bar/ranked_bar, and a log axis on a
+        # BAR makes bar length non-proportional to value (the kpi_001 payor
+        # chart incident) — so even an orders-of-magnitude spread must not
+        # set log_scale on a bar panel.
         rows = [
             {"region": "mega", "sum_amount": 1_000_000},
             {"region": "small1", "sum_amount": 500},
@@ -89,7 +92,8 @@ class DecidePanelsTests(unittest.TestCase):
         ]
         panels = decide_panels(rows, {"metric": "sum(amount)"})
         region = next(p for p in panels if p.get("x") == "region")
-        self.assertTrue(region.get("log_scale"))
+        self.assertIn(region.get("chart_type"), ("bar", "ranked_bar"))
+        self.assertFalse(region.get("log_scale"))
 
     def test_log_scale_not_chosen_for_even_distribution(self):
         rows = [

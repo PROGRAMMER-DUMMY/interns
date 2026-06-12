@@ -7,7 +7,6 @@ with the recovery commands from `compute_workflow_diff`.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 from contextlib import contextmanager
@@ -369,10 +368,16 @@ def _figure_from_spec(
             limit = int(config.get("limit") or 10)
             ordered = sorted(data, key=lambda r: r.get(y_col) or 0, reverse=True)[:limit]
             ordered = list(reversed(ordered))
+            # Rank entities can be numeric (age, year). Stringify + force a
+            # category axis, or Plotly places bars on a CONTINUOUS numeric
+            # axis — thin barcode lines at y=53, y=55, ... instead of ranked
+            # category bars.
+            ordered = [{**r, rank_col: str(r.get(rank_col))} for r in ordered]
             fig = px.bar(
                 ordered, x=y_col, y=rank_col, orientation="h", title=title,
                 color_discrete_sequence=seq,
             )
+            fig.update_yaxes(type="category")
         elif chart_type == "stacked_bar_percent":
             # V3: aggregate by (x, color) so each stack is a true 0-100%, and cap dense
             # categoricals (top-N x + top series, rest -> 'Other') so bars are readable.
@@ -411,14 +416,16 @@ def _figure_from_spec(
             fig.update_xaxes(ticksuffix="%")
         if chart_type == "stacked_bar_percent":
             fig.update_yaxes(range=[0, 100])
-    # Adaptive log scale (data-derived in profile.decide_panels): apply to the
-    # MEASURE axis — x for horizontal ranked_bar, y otherwise. Never combined with
-    # a percent axis (a 0-100 share is not log).
-    if config.get("log_scale") and not (y_is_percent or chart_type == "stacked_bar_percent"):
-        if chart_type == "ranked_bar":
-            fig.update_xaxes(type="log")
-        else:
-            fig.update_yaxes(type="log")
+    # Adaptive log scale (data-derived in profile.decide_panels): LINE charts
+    # only. A log axis on any BAR chart makes bar length non-proportional to
+    # value (and the bar base lands at the axis minimum, exaggerating spreads),
+    # so bars always stay linear-from-zero regardless of the spec flag.
+    if (
+        config.get("log_scale")
+        and chart_type == "line"
+        and not (y_is_percent or chart_type == "stacked_bar_percent")
+    ):
+        fig.update_yaxes(type="log")
     # Category ORDER (correctness): vertical-bar x-axis. Ordinal/banded categories
     # (age bands, numeric buckets) sort by their natural numeric value; plain nominal
     # categories sort by measure descending. ranked_bar already sorts by value; line
