@@ -192,11 +192,61 @@ def decide_panels(
 
     from core.dashboard.chart_knowledge import (
         choose_categorical_chart,
+        choose_distribution_chart,
+        choose_geo_chart,
         choose_trend_chart,
         choose_two_categorical_chart,
+        choose_two_numeric_chart,
+        detect_geo_columns,
         is_ordinal_categories,
         value_spread,
     )
+
+    # Family detection beyond measure+categorical (sensor/geo/raw workspaces):
+    # these shapes existed nowhere in the original KPI corpus but the knowledge
+    # base covers their data-to-viz families generically.
+    sample_values = {c: [r.get(c) for r in rows[:64]] for c in (rows[0] if rows else {})}
+    geo = detect_geo_columns(list(sample_values), sample_values)
+    if geo:
+        lat, lon = geo
+        choice = choose_geo_chart(point_count=len(rows))
+        panels.append({
+            **choice.spec_fields(),
+            "lat": lat, "lon": lon, "y": measure,
+            "title": f"{_humanize(measure)} by Location",
+        })
+        cat_dims = [d for d in cat_dims if d not in (lat, lon)]
+
+    # Second numeric measure -> relationship panel (scatter).
+    other_numeric = [
+        p.name for p in profiles.values()
+        if p.numeric and p.name != measure and not p.constant
+        and p.name not in (geo or ())
+        and p.distinct > max(8, p.n // 10)  # continuous, not a coded category
+    ]
+    if other_numeric:
+        second = other_numeric[0]
+        choice = choose_two_numeric_chart(row_count=len(rows))
+        panels.append({
+            **choice.spec_fields(),
+            "x": second, "y": measure,
+            "title": f"{_humanize(measure)} vs {_humanize(second)}",
+        })
+        cat_dims = [d for d in cat_dims if d != second]
+
+    # Row-level (unaggregated) values: every dimension is near-unique, so the
+    # measure's DISTRIBUTION is the story (impossible on GROUP BY results).
+    n_rows = len(rows)
+    row_level = bool(measure) and n_rows >= 30 and all(
+        profiles[d].distinct >= n_rows * 0.9 for d in dims
+    )
+    if row_level:
+        choice = choose_distribution_chart(row_count=n_rows)
+        panels.append({
+            **choice.spec_fields(),
+            "x": measure, "y": measure,
+            "title": f"Distribution of {_humanize(measure)}",
+        })
 
     # Trend panel: measure over time, optionally split by the smallest cat dim.
     if temporal_dims:

@@ -396,6 +396,33 @@ def _figure_from_spec(
                 data, x=x_col, y=y_col, color=color_col, barmode="group", title=title,
                 color_discrete_sequence=seq,
             )
+        elif chart_type == "scatter":
+            # Two numeric measures per row: relationship view.
+            fig = px.scatter(
+                rows, x=x_col, y=y_col, title=title,
+                color_discrete_sequence=[_ACTIVE.accent], opacity=0.55,
+            )
+        elif chart_type == "histogram":
+            # Row-level values: the distribution is the story.
+            fig = px.histogram(
+                rows, x=x_col, title=title,
+                color_discrete_sequence=[_ACTIVE.accent], nbins=30,
+            )
+        elif chart_type == "bubble_map":
+            lat_col = str(config.get("lat") or "lat")
+            lon_col = str(config.get("lon") or "lon")
+            # Bubble size must be non-negative (data-to-viz: map value to AREA);
+            # negative measures (e.g. temperatures) render as plain points.
+            sizable = all(
+                isinstance(r.get(y_col), (int, float)) and r.get(y_col) >= 0
+                for r in rows[:64]
+            ) and bool(rows)
+            fig = px.scatter_geo(
+                rows, lat=lat_col, lon=lon_col,
+                size=y_col if sizable else None,
+                title=title, color_discrete_sequence=[_ACTIVE.accent],
+            )
+            fig.update_geos(fitbounds="locations", bgcolor="rgba(0,0,0,0)")
         elif chart_type == "lollipop":
             # data-to-viz: many bars of SIMILAR height read better as
             # lollipops — the dot marks the value without redundant bar ink.

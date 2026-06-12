@@ -162,6 +162,57 @@ def choose_two_categorical_chart(
 
 
 _LEADING_NUM = __import__("re").compile(r"^\s*(\d+(?:\.\d+)?)")
+_GEO_LAT_RE = __import__("re").compile(r"^(lat|latitude)$", 2)  # re.IGNORECASE
+_GEO_LON_RE = __import__("re").compile(r"^(lon|lng|long|longitude)$", 2)
+
+
+def detect_geo_columns(
+    column_names: list[str], sample_values: dict[str, list[Any]]
+) -> tuple[str, str] | None:
+    """(lat_column, lon_column) when the data carries plottable coordinates.
+
+    Evidence-based per the repo's derive-don't-curate rule: the NAME must look
+    geographic AND the VALUES must sit in valid coordinate ranges — a column
+    merely named "lat" full of row ids must not unlock the map family.
+    """
+    def in_range(col: str, lo: float, hi: float) -> bool:
+        vals = [v for v in sample_values.get(col, []) if isinstance(v, (int, float))]
+        return bool(vals) and all(lo <= v <= hi for v in vals)
+
+    lat = next((c for c in column_names if _GEO_LAT_RE.match(c) and in_range(c, -90, 90)), "")
+    lon = next((c for c in column_names if _GEO_LON_RE.match(c) and in_range(c, -180, 180)), "")
+    return (lat, lon) if lat and lon else None
+
+
+def choose_geo_chart(*, point_count: int) -> ChartChoice:
+    """Geographic family (data-to-viz family 13): coordinates + a value."""
+    return ChartChoice(
+        "bubble_map",
+        "rows carry coordinate columns: a value at locations is the bubble-map "
+        "case (data-to-viz: map family, coordinate-based with value); "
+        f"{point_count} points",
+    )
+
+
+def choose_two_numeric_chart(*, row_count: int) -> ChartChoice:
+    """Two-numerics family (data-to-viz family 2): relationship between
+    measures."""
+    return ChartChoice(
+        "scatter",
+        "two numeric measures per row: the relationship question is a scatter "
+        "plot (data-to-viz: two numeric variables family)",
+    )
+
+
+def choose_distribution_chart(*, row_count: int) -> ChartChoice:
+    """One-numeric distribution family (data-to-viz family 1): row-level
+    values, not an aggregate."""
+    return ChartChoice(
+        "histogram",
+        "result rows are row-level readings (no grouping dimension collapses "
+        "them): the value's distribution is the chart (data-to-viz: one "
+        "numeric variable family; try different bin sizes caveat applies)",
+    )
 
 
 def is_ordinal_categories(values: list[Any]) -> bool:
@@ -195,8 +246,12 @@ __all__ = [
     "RANKED_CARDINALITY",
     "TREEMAP_CARDINALITY",
     "choose_categorical_chart",
+    "choose_distribution_chart",
+    "choose_geo_chart",
     "choose_trend_chart",
     "choose_two_categorical_chart",
+    "choose_two_numeric_chart",
+    "detect_geo_columns",
     "is_ordinal_categories",
     "value_spread",
 ]

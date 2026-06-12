@@ -77,6 +77,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Write static HTML to dashboard/exports/ and exit. Skips the live server.",
     )
     parser.add_argument(
+        "--screen",
+        action="store_true",
+        help=(
+            "Export, screenshot every page, run deterministic visual checks, "
+            "and write interns/reports/dashboard_screener/. Exits nonzero on findings."
+        ),
+    )
+    parser.add_argument(
         "--no-refresh",
         action="store_true",
         help="Skip the machine_defaults refresh. Use to render exactly what's on disk.",
@@ -98,6 +106,20 @@ def main(argv: list[str] | None = None) -> int:
     refresh_summary = None
     if not args.no_refresh:
         refresh_summary = refresh_workspace_dashboard(layout)
+
+    if args.screen:
+        from core.dashboard.screener import screen_dashboard
+
+        screen_summary = screen_dashboard(repo_root, args.workspace)
+        if args.json:
+            print(json.dumps({"action": "screen", **screen_summary}, indent=2))
+        else:
+            marker = "[ok]" if screen_summary["ok"] else "[x]"
+            print(f"{marker} screener: {screen_summary['page_count']} pages, "
+                  f"{screen_summary['error_count']} finding(s)")
+            print(f"report: {screen_summary['report_md']}")
+            print(f"screenshots (for agent vision review): {screen_summary['screenshot_dir']}")
+        return 0 if screen_summary["ok"] else 1
 
     if args.export:
         export_summary = export_static_html(repo_root, args.workspace)

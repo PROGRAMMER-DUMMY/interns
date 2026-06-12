@@ -155,6 +155,118 @@ class RendererCoverageTest(unittest.TestCase):
         self.assertGreaterEqual(len(fig.data), 2)
 
 
+class NewFamilyDetectionTest(unittest.TestCase):
+    """Sensor/geo/raw-shaped data unlocks the corresponding chart families."""
+
+    def test_geo_columns_detected_with_range_evidence(self) -> None:
+        from core.dashboard.chart_knowledge import detect_geo_columns
+
+        ok = detect_geo_columns(
+            ["lat", "lon", "v"],
+            {"lat": [12.9, 51.5], "lon": [77.6, -0.1], "v": [1, 2]},
+        )
+        self.assertEqual(ok, ("lat", "lon"))
+        # name matches but values out of range -> no geo family
+        bad = detect_geo_columns(["lat", "lon"], {"lat": [500, 600], "lon": [0, 1]})
+        self.assertIsNone(bad)
+
+    def test_geo_rows_emit_bubble_map_panel(self) -> None:
+        from core.dashboard.profile import decide_panels
+
+        rows = [
+            {"lat": 10.0 + i * 0.1, "lon": 70.0 + i * 0.1, "station": f"s{i}", "reading_value": 5.0 + i}
+            for i in range(40)
+        ]
+        panels = decide_panels(rows, {"metric": "avg(reading)"})
+        types = [p.get("chart_type") for p in panels]
+        self.assertIn("bubble_map", types)
+        bm = next(p for p in panels if p["chart_type"] == "bubble_map")
+        self.assertEqual((bm.get("lat"), bm.get("lon")), ("lat", "lon"))
+
+    def test_second_continuous_numeric_emits_scatter(self) -> None:
+        from core.dashboard.profile import decide_panels
+
+        rows = [
+            {"depth": float(i), "reading_value": 100.0 - i * 0.7, "site": f"x{i % 3}"}
+            for i in range(60)
+        ]
+        panels = decide_panels(rows, {"metric": "avg(reading)"})
+        self.assertIn("scatter", [p.get("chart_type") for p in panels])
+
+    def test_row_level_values_emit_histogram(self) -> None:
+        from core.dashboard.profile import decide_panels
+
+        rows = [
+            {"sensor_id": f"id_{i}", "reading_value": 20.0 + (i % 17) * 0.31}
+            for i in range(120)
+        ]
+        panels = decide_panels(rows, {"metric": "reading"})
+        self.assertIn("histogram", [p.get("chart_type") for p in panels])
+
+    def test_renderers_for_new_families(self) -> None:
+        from core.dashboard.renderer import _figure_from_spec
+        from core.dashboard.spec import DashboardSpec
+
+        def fig(config, rows):
+            return _figure_from_spec(
+                DashboardSpec(kpi_id="k", config=config, machine_defaults={},
+                              user_overrides={}, spec_path="x.json"),
+                rows,
+            )
+
+        scatter = fig(
+            {"chart_type": "scatter", "x": "depth", "y": "v", "title": "T"},
+            [{"depth": 1.0, "v": 2.0}, {"depth": 2.0, "v": 1.0}],
+        )
+        self.assertEqual(scatter.data[0].mode, "markers")
+        hist = fig(
+            {"chart_type": "histogram", "x": "v", "y": "v", "title": "T"},
+            [{"v": float(i % 7)} for i in range(50)],
+        )
+        self.assertEqual(hist.data[0].type, "histogram")
+        gmap = fig(
+            {"chart_type": "bubble_map", "lat": "lat", "lon": "lon", "y": "v", "title": "T"},
+            [{"lat": 10.0, "lon": 70.0, "v": 3.0}, {"lat": 11.0, "lon": 71.0, "v": 4.0}],
+        )
+        self.assertEqual(gmap.data[0].type, "scattergeo")
+
+
+class ScreenerChecksTest(unittest.TestCase):
+    def test_render_failure_annotation_detected(self) -> None:
+        from core.dashboard.screener import _check_html
+
+        finding = _check_html(
+            '<div>(chart render failed: KeyError &#x27;x&#x27;)</div>', "kpi_001.html", 2
+        )
+        self.assertFalse(finding.ok)
+
+    def test_zero_plots_against_spec_detected(self) -> None:
+        from core.dashboard.screener import _check_html
+
+        finding = _check_html("<html><body>no charts</body></html>", "kpi_002.html", 3)
+        self.assertFalse(finding.ok)
+
+    def test_clean_page_passes(self) -> None:
+        from core.dashboard.screener import _check_html
+
+        finding = _check_html(
+            '<div class="js-plotly-plot"></div><script src="https://cdn.plot.ly/x.js">',
+            "kpi_003.html",
+            1,
+        )
+        self.assertTrue(finding.ok)
+
+    def test_blank_png_heuristic(self) -> None:
+        from core.dashboard.screener import _looks_blank
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tiny = Path(tmp) / "x.png"
+            tiny.write_bytes(b"\x89PNG" + b"\x00" * 512)
+            self.assertTrue(_looks_blank(tiny, 1500, 1700))
+
+
 class DecidePanelsIntegrationTest(unittest.TestCase):
     def test_panels_carry_selection_provenance(self) -> None:
         from core.dashboard.profile import decide_panels
