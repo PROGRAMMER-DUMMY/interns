@@ -55,9 +55,9 @@ def _write_approval(
         "plan_path": str(plan_path.relative_to(repo_root).as_posix()),
         "gates": [v.to_dict() for v in verdicts],
         "next_step": (
-            "workspace_deployer (next slice) consumes this approval to perform "
-            "the Unity Catalog deployment described in the plan; no remote call "
-            "has been made yet"
+            "run `medallion deploy --workspace <ws>` (workspace_deployer) to "
+            "consume this approval and perform the Unity Catalog deployment "
+            "described in the plan; no remote call has been made yet"
         ),
     }
     out_dir = workspace / "interns" / "state" / "medallion"
