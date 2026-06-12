@@ -477,10 +477,13 @@ def _figure_from_spec(
                 for r in data
             }
             z = [[lookup.get((x, y)) for x in xs] for y in ys]
+            colorbar = {"thickness": 12, "outlinewidth": 0}
+            if y_is_percent:
+                colorbar["ticksuffix"] = "%"
             fig = go.Figure(go.Heatmap(
                 z=z, x=xs, y=ys,
                 colorscale=[[0, "#f6f1e7"], [1, _ACTIVE.accent]],
-                colorbar={"thickness": 12, "outlinewidth": 0},
+                colorbar=colorbar,
             ))
             fig.update_layout(title=title)
         elif chart_type == "stacked_area":
@@ -746,6 +749,7 @@ def _dash_index_string(t: DesignTokens) -> str:
         ".tile .t{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-soft);}"
         ".tile .h{font-family:var(--serif);font-weight:900;font-size:1.15rem;color:var(--accent);}"
         ".tile .n{font-size:.7rem;color:var(--ink-soft);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
+        ".tile .st{font-family:var(--mono);font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-deep);margin-top:.2rem;}"
         ".gsep{flex:0 0 auto;align-self:center;writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--mono);font-size:.58rem;letter-spacing:.18em;color:var(--accent-deep);padding:.2rem 0;border-left:2px solid var(--accent-deep);margin-left:.3rem;}"
         ".ctl{display:flex;gap:1rem;align-items:center;padding:.5rem 1.2rem;border-bottom:1px solid var(--rule-soft);flex:0 0 auto;flex-wrap:wrap;}"
         ".ctl .lab{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-soft);}"
@@ -832,6 +836,7 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
 
     # Overview strip: clickable tiles, grouped by `group` with inline separators so
     # nested KPIs stay organized while the strip remains one fit-to-viewport row.
+    tile_badges = load_kpi_statuses(workspace)
     strip_children: list[Any] = []
     last_group = None
     for kid in ready_ids:
@@ -839,10 +844,16 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         if g and g != last_group:
             strip_children.append(html.Div(g.upper(), className="gsep"))
         last_group = g
+        tile_children = [
+            html.Div(kid.replace("_", " ").upper(), className="t"),
+            html.Div(meta[kid]["headline"], className="h"),
+            html.Div(meta[kid]["title"], className="n", title=meta[kid]["title"]),
+        ]
+        badge = tile_badges.get(kid, "")
+        if badge:
+            tile_children.append(html.Div(badge, className="st"))
         strip_children.append(html.Div(
-            [html.Div(kid.replace("_", " ").upper(), className="t"),
-             html.Div(meta[kid]["headline"], className="h"),
-             html.Div(meta[kid]["title"], className="n", title=meta[kid]["title"])],
+            tile_children,
             id={"role": "kpi-tile", "kpi_id": kid},
             className="tile" + (" sel" if kid == first else ""),
             n_clicks=0,
@@ -1039,6 +1050,41 @@ def _panel_html(spec: DashboardSpec, panel: dict[str, Any], rows: list[dict[str,
     }
 
 
+def load_kpi_statuses(workspace: Path) -> dict[str, str]:
+    """Per-KPI status badge text from the execution-harness + parity evidence.
+
+    "[ok] parity" when the harness passed and engines matched, "[ok]" on a
+    pass without a parity record, "" when no evidence exists. Never raises —
+    badges are decoration, not a gate. Shared by the static export tiles and
+    the live app's tile strip.
+    """
+    import json as _json
+
+    badges: dict[str, str] = {}
+    evidence = workspace / "interns" / "generated" / "evidence"
+    try:
+        harness = _json.loads(
+            (evidence / "kpi_execution_harness.json").read_text(encoding="utf-8")
+        )
+        for record in harness.get("records") or []:
+            if record.get("status") == "passed":
+                badges[str(record.get("kpi_id") or "")] = "[ok]"
+    except (_json.JSONDecodeError, OSError):
+        pass
+    try:
+        parity = _json.loads(
+            (evidence / "engine_parity" / "current.json").read_text(encoding="utf-8")
+        )
+        for kpi_id, entry in (parity.get("kpis") or {}).items():
+            verdict = (entry or {}).get("parity") or {}
+            if verdict.get("status") == "match" and badges.get(kpi_id):
+                badges[kpi_id] = "[ok] parity"
+    except (_json.JSONDecodeError, OSError):
+        pass
+    badges.pop("", None)
+    return badges
+
+
 _DATA_VIEW_ROWS_LIVE = 200
 
 
@@ -1072,16 +1118,31 @@ def _data_view_component(workspace: Path, kpi_id: str, rows: list[dict[str, Any]
 
     note = (
         f"{len(shown)} of {len(rows)}{'+' if len(rows) > len(shown) else ''} rows"
-        " · PII display-redacted"
+        " · PII display-redacted · sortable · export = redacted view"
     )
-    table = html.Table(
-        [html.Thead(html.Tr([html.Th(c) for c in columns]))]
-        + [html.Tbody([html.Tr([html.Td(cell(r.get(c))) for c in columns]) for r in shown])],
-        className="dvtable",
+    records = [{c: cell(r.get(c)) for c in columns} for r in shown]
+    from dash import dash_table
+
+    table = dash_table.DataTable(
+        data=records,
+        columns=[{"name": c, "id": c} for c in columns],
+        sort_action="native",
+        export_format="csv",  # exports the redacted records above, never raw rows
+        page_size=25,
+        style_table={"maxHeight": "420px", "overflowY": "auto"},
+        style_cell={
+            "fontFamily": "var(--sans)", "fontSize": "0.78rem",
+            "textAlign": "left", "padding": "0.3rem 0.6rem",
+            "backgroundColor": "transparent",
+        },
+        style_header={
+            "fontFamily": "var(--mono)", "textTransform": "uppercase",
+            "fontSize": "0.62rem", "letterSpacing": "0.1em",
+            "backgroundColor": "transparent", "fontWeight": "600",
+        },
     )
     return html.Details(
-        [html.Summary("Data"), html.Div(note, className="dm"),
-         html.Div(table, style={"maxHeight": "420px", "overflow": "auto"})],
+        [html.Summary("Data"), html.Div(note, className="dm"), table],
         className="dataview",
     )
 

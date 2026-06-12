@@ -141,6 +141,7 @@ class WorkflowGuardHarness:
         findings.extend(self._check_repeated_commands())
         findings.extend(self._check_hand_edited_generated_artifacts())
         findings.extend(self._check_throwaway_reader_scripts())
+        findings.extend(self._check_vision_review_done())
         error_count = sum(1 for item in findings if item["severity"] == "error")
         warning_count = sum(1 for item in findings if item["severity"] == "warning")
         report = {
@@ -192,6 +193,34 @@ class WorkflowGuardHarness:
             return None
         path = Path(value)
         return (self.repo_root / path).resolve() if not path.is_absolute() else path.resolve()
+
+    def _check_vision_review_done(self) -> list[dict[str, Any]]:
+        """A screener run stages screenshots for the agent's vision review;
+        a report still pending means nobody (agent or human) actually looked
+        at the rendered dashboard — the visual gate silently didn't happen."""
+        from core.dashboard.screener import vision_review_pending
+
+        if not vision_review_pending(self.repo_root, self.workspace_rel):
+            return []
+        report_rel = (
+            f"{self.workspace_rel}/interns/reports/dashboard_screener/current.json"
+        )
+        return [
+            _finding(
+                "warning",
+                "dashboard_vision_review_pending",
+                "Dashboard screener ran but its staged screenshots were never "
+                "vision-reviewed; visual defects (misalignment, color mismatch) "
+                "may be unexamined.",
+                artifact=report_rel,
+                recommendation=(
+                    "Read the screenshots under interns/reports/dashboard_screener/shots/, "
+                    "then record the pass: uv run workspace-dashboard --workspace "
+                    f"{self.workspace_rel} --record-vision-review --reviewed-by <name> "
+                    "--notes <findings>"
+                ),
+            )
+        ]
 
     def _check_artifacts(self) -> list[dict[str, Any]]:
         findings = []

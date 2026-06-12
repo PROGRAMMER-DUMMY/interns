@@ -85,6 +85,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--record-vision-review",
+        action="store_true",
+        help=(
+            "Mark the latest screener report's vision review done (the agent/human "
+            "looked at the staged screenshots). Empty --reviewed-by records source: agent."
+        ),
+    )
+    parser.add_argument("--reviewed-by", default="", help="Reviewer name for --record-vision-review.")
+    parser.add_argument("--notes", default="", help="Vision-review findings/notes.")
+    parser.add_argument(
         "--no-refresh",
         action="store_true",
         help="Skip the machine_defaults refresh. Use to render exactly what's on disk.",
@@ -106,6 +116,23 @@ def main(argv: list[str] | None = None) -> int:
     refresh_summary = None
     if not args.no_refresh:
         refresh_summary = refresh_workspace_dashboard(layout)
+
+    if args.record_vision_review:
+        from core.dashboard.screener import record_vision_review
+
+        try:
+            review = record_vision_review(
+                repo_root, args.workspace,
+                reviewed_by=args.reviewed_by, notes=args.notes,
+            )
+        except FileNotFoundError as exc:
+            print(f"[x] {exc}", file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps({"action": "record_vision_review", **review}, indent=2))
+        else:
+            print(f"[ok] vision review recorded (source: {review['source']})")
+        return 0
 
     if args.screen:
         from core.dashboard.screener import screen_dashboard

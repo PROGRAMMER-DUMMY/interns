@@ -11,13 +11,16 @@ KPI completion behaves like the served dashboard without needing a server.
 """
 from __future__ import annotations
 
-import json
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 from core.dashboard.design_md import DesignTokens, load_design_tokens
-from core.dashboard.renderer import render_kpi_inline, set_active_design
+from core.dashboard.renderer import (
+    load_kpi_statuses as _load_kpi_statuses,
+    render_kpi_inline,
+    set_active_design,
+)
 from core.dashboard.spec import load_kpi_spec
 from core.onboarding.kpi.registry_loader import load_kpi_definitions
 from core.onboarding.workspace.flow import compute_workflow_diff
@@ -172,6 +175,11 @@ a { color: var(--accent-deep); }
   border-bottom: 2px solid var(--ink); }
 .dataview td { padding: 0.32rem 0.6rem; border-bottom: 1px solid var(--rule-soft); }
 .dataview tr:hover td { background: rgba(180,68,28,0.05); }
+.dataview th { cursor: pointer; }
+.dataview th.sorted-asc::after { content: " ▲"; font-size: 0.6em; }
+.dataview th.sorted-desc::after { content: " ▼"; font-size: 0.6em; }
+.dataview .dl { color: var(--accent-deep); }
+.dataview .dnote-hint { opacity: 0.7; }
 """.replace("GRAINURI", _GRAIN)
 
 # Detail-page-only overrides: charts grow to fill the viewport instead of
@@ -254,6 +262,10 @@ def _panels_html(card: dict[str, Any]) -> str:
 
 
 _DATA_VIEW_ROW_CAP = 200
+# The index embeds every KPI's table inline; a 50-KPI workspace at the full
+# cap would ship ~10k rows in one file. Inline sections stay light and link
+# to the standalone page for the full table.
+_DATA_VIEW_ROW_CAP_INLINE = 25
 
 
 def _data_view_html(
@@ -263,6 +275,8 @@ def _data_view_html(
     total_hint: str = "",
     *,
     open_default: bool = False,
+    max_rows: int = _DATA_VIEW_ROW_CAP,
+    full_table_link: str = "",
 ) -> str:
     """Collapsible table of the KPI's result rows — the data behind the charts.
 
@@ -287,7 +301,7 @@ def _data_view_html(
     patterns = DEFAULT_PII_COLUMN_PATTERNS + tuple(
         policy_redaction_patterns(load_workspace_data_policy(workspace))
     )
-    shown = redact_rows(rows[:_DATA_VIEW_ROW_CAP], patterns=patterns)
+    shown = redact_rows(rows[:max_rows], patterns=patterns)
     columns = list(shown[0].keys())
 
     def cell(value: Any) -> str:
@@ -300,51 +314,26 @@ def _data_view_html(
         "<tr>" + "".join(f"<td>{cell(r.get(c))}</td>" for c in columns) + "</tr>"
         for r in shown
     )
-    capped = len(rows) > _DATA_VIEW_ROW_CAP
+    capped = len(rows) > max_rows
+    full_ref = (
+        f'<a href="{full_table_link}">full table on the KPI page</a>'
+        if capped and full_table_link
+        else "full results in the workspace results packet"
+    )
     note = (
         f"{len(shown)} of {total_hint or len(rows)}{'+' if capped and not total_hint else ''} rows"
-        f"{' (capped)' if capped else ''} · PII display-redacted · full results in the "
-        f"workspace results packet"
+        f"{' (capped)' if capped else ''} · PII display-redacted · {full_ref}"
     )
     open_attr = " open" if open_default else ""
     return (
         f'<details class="dataview" id="data_{kpi_id}"{open_attr}><summary>Data</summary>'
-        f'<div class="dnote">{note}</div>'
-        f'<div class="dwrap"><table><thead><tr>{head}</tr></thead>'
+        f'<div class="dnote">{note} · <a href="#" class="dl" data-kpi="{kpi_id}">download CSV</a>'
+        f' <span class="dnote-hint">(click a column header to sort)</span></div>'
+        f'<div class="dwrap"><table data-kpi="{kpi_id}"><thead><tr>{head}</tr></thead>'
         f"<tbody>{body}</tbody></table></div></details>"
     )
 
 
-def _load_kpi_statuses(workspace: Path) -> dict[str, str]:
-    """Per-KPI status badge text from the execution-harness + parity evidence.
-
-    "[ok] parity" when the harness passed and engines matched, "[ok]" on a
-    pass without a parity record, "" when no evidence exists. Never raises —
-    badges are decoration, not a gate.
-    """
-    badges: dict[str, str] = {}
-    evidence = workspace / "interns" / "generated" / "evidence"
-    try:
-        harness = json.loads(
-            (evidence / "kpi_execution_harness.json").read_text(encoding="utf-8")
-        )
-        for record in harness.get("records") or []:
-            if record.get("status") == "passed":
-                badges[str(record.get("kpi_id") or "")] = "[ok]"
-    except (json.JSONDecodeError, OSError):
-        pass
-    try:
-        parity = json.loads(
-            (evidence / "engine_parity" / "current.json").read_text(encoding="utf-8")
-        )
-        for kpi_id, entry in (parity.get("kpis") or {}).items():
-            verdict = (entry or {}).get("parity") or {}
-            if verdict.get("status") == "match" and badges.get(kpi_id):
-                badges[kpi_id] = "[ok] parity"
-    except (json.JSONDecodeError, OSError):
-        pass
-    badges.pop("", None)
-    return badges
 
 
 def _tile_html(kpi_id: str, headline: str, title: str, badge: str, *, blocked: bool = False) -> str:
@@ -397,12 +386,40 @@ def _wrap_page(
     # to its container on a resize event — which never fires on a static load, so
     # charts overflow. Dispatch resize after load (twice, for late layout/fonts) to
     # force every chart to honor its cell. Verified by `dashboard-verify`.
+    # Data-viewer interactivity (CSV download builds from the RENDERED —
+    # already redacted — cells, never raw rows; header-click sorts, numeric-
+    # aware on stripped thousands separators).
     resize_js = (
         "<script>function abFit(){window.dispatchEvent(new Event('resize'));"
         "if(window.Plotly){document.querySelectorAll('.js-plotly-plot').forEach("
         "function(d){try{window.Plotly.Plots.resize(d);}catch(e){}});}}"
         "window.addEventListener('load',function(){setTimeout(abFit,120);"
-        "setTimeout(abFit,700);setTimeout(abFit,1600);});</script>"
+        "setTimeout(abFit,700);setTimeout(abFit,1600);});"
+        "function dvCsv(t){var esc=function(s){return /[\",\\n]/.test(s)?'\"'+s.replace(/\"/g,'\"\"')+'\"':s;};"
+        "var rows=[...t.querySelectorAll('tr')].map(function(tr){"
+        "return [...tr.querySelectorAll('th,td')].map(function(c){return esc(c.textContent.trim());}).join(',');});"
+        "return rows.join('\\n');}"
+        "document.querySelectorAll('.dataview .dl').forEach(function(a){"
+        "a.addEventListener('click',function(e){e.preventDefault();"
+        "var t=document.querySelector('.dataview table[data-kpi=\"'+a.dataset.kpi+'\"]');if(!t)return;"
+        "var b=new Blob([dvCsv(t)],{type:'text/csv'});var u=URL.createObjectURL(b);"
+        "var l=document.createElement('a');l.href=u;l.download=a.dataset.kpi+'_data.csv';"
+        "l.click();setTimeout(function(){URL.revokeObjectURL(u);},500);});});"
+        "document.querySelectorAll('.dataview th').forEach(function(th){"
+        "th.addEventListener('click',function(){"
+        "var table=th.closest('table');var tbody=table.querySelector('tbody');"
+        "var idx=[...th.parentNode.children].indexOf(th);"
+        "var asc=!th.classList.contains('sorted-asc');"
+        "table.querySelectorAll('th').forEach(function(h){h.classList.remove('sorted-asc','sorted-desc');});"
+        "th.classList.add(asc?'sorted-asc':'sorted-desc');"
+        "var rows=[...tbody.querySelectorAll('tr')];"
+        "rows.sort(function(r1,r2){"
+        "var a=r1.children[idx].textContent.trim(),b=r2.children[idx].textContent.trim();"
+        "var na=parseFloat(a.replace(/,/g,'')),nb=parseFloat(b.replace(/,/g,''));"
+        "var cmp=(!isNaN(na)&&!isNaN(nb))?na-nb:a.localeCompare(b);"
+        "return asc?cmp:-cmp;});"
+        "rows.forEach(function(r){tbody.appendChild(r);});});});"
+        "</script>"
     )
     return (
         f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -466,7 +483,11 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
             if sql_rel
             else []
         )
-        data_view = _data_view_html(workspace, kpi_id, data_rows)
+        data_view = _data_view_html(
+            workspace, kpi_id, data_rows,
+            max_rows=_DATA_VIEW_ROW_CAP_INLINE,
+            full_table_link=f"{kpi_id}.html",
+        )
         page_body = (
             f'<div class="kpi-card detail-page"><div class="head"><div>'
             f'<h2>{page_card["title"]}</h2><div class="metric">{page_card.get("metric") or ""}</div></div>'

@@ -260,6 +260,14 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
         "page_count": len(findings),
         "error_count": sum(len(f.errors) for f in findings) + len(palette_findings),
         "palette_findings": palette_findings,
+        # The subjective pass is the agent's job; it starts PENDING and is
+        # flipped by `workspace-dashboard --record-vision-review` with
+        # provenance (Human-Gate Provenance Rule: empty reviewer -> agent).
+        # The workflow guard flags completed workflows that never flipped it.
+        "vision_review": {
+            "status": "pending",
+            "shots": [f.screenshot for f in findings if f.screenshot],
+        },
         "pages": [
             {
                 "page": f.page,
@@ -319,4 +327,54 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
     }
 
 
-__all__ = ["screen_dashboard"]
+def record_vision_review(
+    repo_root: Path,
+    workspace_rel: str,
+    *,
+    reviewed_by: str = "",
+    notes: str = "",
+) -> dict[str, Any]:
+    """Flip the latest screener report's vision_review to done, with provenance.
+
+    Mirrors the repo's Human-Gate Provenance Rule: an empty ``reviewed_by``
+    records ``source: agent`` (the orchestrating agent looked at the shots);
+    a name records ``source: human``. Raises FileNotFoundError when no
+    screener report exists — you cannot review what was never screened.
+    """
+    repo_root = Path(repo_root).resolve()
+    report_path = (
+        repo_root / workspace_rel / "interns" / "reports" / "dashboard_screener" / "current.json"
+    )
+    if not report_path.exists():
+        raise FileNotFoundError(f"no screener report to review: {report_path}")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    review = report.get("vision_review") or {}
+    review.update(
+        {
+            "status": "done",
+            "reviewed_by": reviewed_by,
+            "source": "human" if reviewed_by else "agent",
+            "notes": notes,
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    report["vision_review"] = review
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return review
+
+
+def vision_review_pending(repo_root: Path, workspace_rel: str) -> bool:
+    """True when a screener report exists whose vision review never happened."""
+    report_path = (
+        Path(repo_root) / workspace_rel / "interns" / "reports" / "dashboard_screener" / "current.json"
+    )
+    if not report_path.exists():
+        return False
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    return (report.get("vision_review") or {}).get("status") == "pending"
+
+
+__all__ = ["record_vision_review", "screen_dashboard", "vision_review_pending"]

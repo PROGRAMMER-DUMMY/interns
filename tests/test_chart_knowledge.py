@@ -357,6 +357,84 @@ class DataViewerTest(unittest.TestCase):
 
         self.assertEqual(_data_view_html(Path("."), "kpi_x", []), "")
 
+    def test_inline_cap_links_to_full_table(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from core.dashboard.export import _data_view_html
+
+        rows = [{"dept": f"D{i}", "amount": float(i)} for i in range(60)]
+        with tempfile.TemporaryDirectory() as tmp:
+            html = _data_view_html(
+                Path(tmp), "kpi_x", rows, max_rows=25,
+                full_table_link="kpi_x.html",
+            )
+        self.assertEqual(html.count("<tr>"), 26)  # 25 rows + header
+        self.assertIn('href="kpi_x.html"', html)
+        self.assertIn("download CSV", html)
+
+
+class VisionReviewTest(unittest.TestCase):
+    def _workspace(self, tmp: str) -> None:
+        import json
+        from pathlib import Path
+
+        report_dir = Path(tmp) / "ws" / "interns" / "reports" / "dashboard_screener"
+        report_dir.mkdir(parents=True)
+        (report_dir / "current.json").write_text(
+            json.dumps({
+                "ok": True,
+                "vision_review": {"status": "pending", "shots": ["a.png"]},
+            }),
+            encoding="utf-8",
+        )
+
+    def test_pending_then_recorded(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from core.dashboard.screener import (
+            record_vision_review,
+            vision_review_pending,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._workspace(tmp)
+            root = Path(tmp)
+            self.assertTrue(vision_review_pending(root, "ws"))
+            review = record_vision_review(root, "ws", reviewed_by="", notes="clean")
+            self.assertEqual(review["source"], "agent")  # provenance rule
+            self.assertFalse(vision_review_pending(root, "ws"))
+            human = record_vision_review(root, "ws", reviewed_by="Shubham")
+            self.assertEqual(human["source"], "human")
+
+    def test_no_report_is_not_pending_and_record_raises(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from core.dashboard.screener import (
+            record_vision_review,
+            vision_review_pending,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(vision_review_pending(Path(tmp), "ws"))
+            with self.assertRaises(FileNotFoundError):
+                record_vision_review(Path(tmp), "ws")
+
+    def test_workflow_guard_flags_pending_review(self) -> None:
+        import tempfile
+
+        from core.onboarding.harness.workflow_guard_harness import WorkflowGuardHarness
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._workspace(tmp)
+            harness = WorkflowGuardHarness(tmp, "ws")
+            findings = harness._check_vision_review_done()
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0]["code"], "dashboard_vision_review_pending")
+            self.assertEqual(findings[0]["severity"], "warning")
+
 
 class DecidePanelsIntegrationTest(unittest.TestCase):
     def test_panels_carry_selection_provenance(self) -> None:
