@@ -1,0 +1,128 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+  "format": "csv",
+  "row_count": 120,
+  "file_count": 1,
+  "size_bytes": 4467,
+  "schema": {
+    "vin": "String",
+    "reg_no": "String",
+    "class_cd": "String",
+    "depot": "String",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "vin",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "VIN136",
+        "VIN206",
+        "VIN101",
+        "VIN168",
+        "VIN145",
+        "VIN118",
+        "VIN182",
+        "VIN200"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "reg_no",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "MD23 ACN",
+        "NV37 HLG",
+        "XY72 CPH",
+        "VX66 RYR",
+        "DM21 AMC",
+        "AD37 CWF",
+        "ED73 DAH",
+        "SF67 OLX"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "class_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "VC3",
+        "VC5",
+        "VC2",
+        "VC4",
+        "VC1"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "depot",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "L-255",
+        "L-250",
+        "L-220",
+        "L-236",
+        "L-251",
+        "L-226",
+        "L-241",
+        "L-205"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "IN_SERVICE",
+        "VOR",
+        "DISPOSED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

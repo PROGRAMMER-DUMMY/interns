@@ -1,0 +1,172 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\rate_cards.csv",
+  "format": "csv",
+  "row_count": 130,
+  "file_count": 1,
+  "size_bytes": 6090,
+  "schema": {
+    "rc_id": "String",
+    "acct": "String",
+    "svc_id": "String",
+    "discount_pct": "Float64",
+    "START": "String",
+    "END": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "rc_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "RC0063",
+        "RC0077",
+        "RC0123",
+        "RC0065",
+        "RC0064",
+        "RC0007",
+        "RC0066",
+        "RC0100"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "acct",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "P-1016",
+        "P-1171",
+        "P-1123",
+        "P-1132",
+        "P-1113",
+        "P-1157",
+        "P-1073",
+        "P-1052"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "svc_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SVC2",
+        "SVC1",
+        "SVC3",
+        "SVC6",
+        "SVC4",
+        "SVC5"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "discount_pct",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        0.2,
+        0.3,
+        0.7,
+        0.9,
+        1.1,
+        1.5,
+        1.7,
+        1.9
+      ],
+      "sample_min": 0.2,
+      "sample_max": 22.0,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "START",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2024-11-11",
+        "2024-12-11",
+        "2024-06-01",
+        "2025-03-19",
+        "2024-08-16",
+        "2024-08-10",
+        "2025-05-26",
+        "2024-08-06"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "END",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-03-04",
+        "2025-04-05",
+        "2027-08-07",
+        "2026-08-30",
+        "2026-11-14",
+        "2025-12-19",
+        "2027-07-03",
+        "2025-09-15"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "discount_pct",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

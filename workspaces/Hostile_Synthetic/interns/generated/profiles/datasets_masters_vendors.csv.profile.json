@@ -1,0 +1,105 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vendors.csv",
+  "format": "csv",
+  "row_count": 40,
+  "file_count": 1,
+  "size_bytes": 1712,
+  "schema": {
+    "vend_id": "String",
+    "Name": "String",
+    "category": "String",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "vend_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "V010",
+        "V038",
+        "V011",
+        "V004",
+        "V032",
+        "V014",
+        "V009",
+        "V015"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Orchard Marine Group",
+        "Quartz Motors & Co",
+        "North Marine & Co",
+        "Iron Print Holdings",
+        "Mistral Outdoors Holdings",
+        "Keystone Outdoors Group",
+        "Umbra Textiles Ltd",
+        "Mistral Print PLC"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "category",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "AGENCY",
+        "TYRES",
+        "FUEL",
+        "FACILITIES",
+        "PARTS",
+        "IT"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "TRIAL",
+        "APPROVED",
+        "BLOCKED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

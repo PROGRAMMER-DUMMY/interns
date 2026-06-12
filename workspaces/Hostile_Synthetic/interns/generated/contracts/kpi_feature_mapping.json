@@ -1,0 +1,166 @@
+{
+  "artifact_type": "kpi_feature_mapping.json",
+  "version": 2,
+  "generated_by": "resolve-kpi-features",
+  "workspace": "workspaces/Hostile_Synthetic",
+  "mode": "candidate_enriched",
+  "generated_at": "2026-06-12T04:06:30.208937+00:00",
+  "derived_feature_evidence_contract": {
+    "version": 1,
+    "required_fields": [
+      "derived_column_name",
+      "business_meaning",
+      "formula",
+      "input_columns",
+      "example",
+      "evidence_sources",
+      "derivation_reasoning",
+      "evidence_state",
+      "confidence",
+      "needs_user_confirmation"
+    ],
+    "rule": "Candidate derivations are not ground truth until proven or user-confirmed."
+  },
+  "states": [
+    "proven_direct",
+    "proven_alias",
+    "proven_join",
+    "proven_formula",
+    "proven_taxonomy",
+    "user_confirmed",
+    "blocked_missing_evidence",
+    "blocked_ambiguous",
+    "candidate_unconfirmed",
+    "candidate_pattern",
+    "rejected"
+  ],
+  "kpis": [
+    {
+      "kpi_id": "kpi_001",
+      "name": "KPI 1 - On-time delivery rate",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "metric": "",
+      "cuts": "",
+      "status": "blocked_questions_pending",
+      "features": [],
+      "function_context": [],
+      "join_candidates": [],
+      "open_questions": []
+    },
+    {
+      "kpi_id": "kpi_002",
+      "name": "KPI 2 - Monthly revenue per active account",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "metric": "",
+      "cuts": "",
+      "status": "blocked_questions_pending",
+      "features": [],
+      "function_context": [],
+      "join_candidates": [],
+      "open_questions": []
+    },
+    {
+      "kpi_id": "kpi_003",
+      "name": "KPI 3 - Average depot dwell hours",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "metric": "",
+      "cuts": "",
+      "status": "blocked_questions_pending",
+      "features": [],
+      "function_context": [],
+      "join_candidates": [],
+      "open_questions": []
+    },
+    {
+      "kpi_id": "kpi_004",
+      "name": "KPI 4 - Damage claim rate by carrier",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "metric": "",
+      "cuts": "",
+      "status": "blocked_questions_pending",
+      "features": [],
+      "function_context": [],
+      "join_candidates": [],
+      "open_questions": []
+    },
+    {
+      "kpi_id": "kpi_005",
+      "name": "KPI 5 - Share of shipments upgraded to premium after dispatch",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "metric": "",
+      "cuts": "",
+      "status": "blocked_questions_pending",
+      "features": [],
+      "function_context": [],
+      "join_candidates": [],
+      "open_questions": []
+    },
+    {
+      "kpi_id": "kpi_006",
+      "name": "KPI 6 - Fleet utilization",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "metric": "",
+      "cuts": "",
+      "status": "blocked_questions_pending",
+      "features": [],
+      "function_context": [],
+      "join_candidates": [],
+      "open_questions": []
+    },
+    {
+      "kpi_id": "kpi_007",
+      "name": "KPI 7 - Invoice dispute rate",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "metric": "",
+      "cuts": "",
+      "status": "blocked_questions_pending",
+      "features": [],
+      "function_context": [],
+      "join_candidates": [],
+      "open_questions": []
+    },
+    {
+      "kpi_id": "kpi_008",
+      "name": "KPI 8 - Average cost per kilogram by lane",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "metric": "",
+      "cuts": "",
+      "status": "blocked_questions_pending",
+      "features": [],
+      "function_context": [],
+      "join_candidates": [],
+      "open_questions": []
+    },
+    {
+      "kpi_id": "kpi_009",
+      "name": "KPI 9 - Quarterly account churn",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "metric": "",
+      "cuts": "",
+      "status": "blocked_questions_pending",
+      "features": [],
+      "function_context": [],
+      "join_candidates": [],
+      "open_questions": []
+    },
+    {
+      "kpi_id": "kpi_010",
+      "name": "KPI 10 - Perfect shipment rate",
+      "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+      "metric": "",
+      "cuts": "",
+      "status": "blocked_questions_pending",
+      "features": [],
+      "function_context": [],
+      "join_candidates": [],
+      "open_questions": []
+    }
+  ],
+  "blocker_clusters": [],
+  "summary": {
+    "kpi_count": 10,
+    "ready_kpi_count": 0,
+    "blocked_kpi_count": 10,
+    "unresolved_feature_count": 0
+  }
+}

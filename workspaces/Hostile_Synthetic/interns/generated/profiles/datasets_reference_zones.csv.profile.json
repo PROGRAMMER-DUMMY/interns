@@ -1,0 +1,86 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\zones.csv",
+  "format": "csv",
+  "row_count": 12,
+  "file_count": 1,
+  "size_bytes": 216,
+  "schema": {
+    "zone_cd": "String",
+    "Name": "String",
+    "region_cd": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "zone_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Z09",
+        "Z10",
+        "Z01",
+        "Z12",
+        "Z07",
+        "Z03",
+        "Z05",
+        "Z04"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Zone 01",
+        "Zone 08",
+        "Zone 09",
+        "Zone 04",
+        "Zone 10",
+        "Zone 05",
+        "Zone 11",
+        "Zone 12"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "region_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "R2",
+        "R4",
+        "R3",
+        "R1",
+        "R5",
+        "R6"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

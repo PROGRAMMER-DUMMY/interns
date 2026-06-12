@@ -1,0 +1,297 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
+  "format": "csv",
+  "row_count": 4830,
+  "file_count": 1,
+  "size_bytes": 438616,
+  "schema": {
+    "Id": "String",
+    "ship_ref": "String",
+    "seq": "Int64",
+    "from_loc": "String",
+    "to_loc": "String",
+    "veh": "String",
+    "drv": "String",
+    "START": "String",
+    "END": "String",
+    "Amount": "Float64",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "MV703060",
+        "MV701712",
+        "MV701323",
+        "MV703740",
+        "MV703894",
+        "MV702541",
+        "MV703758",
+        "MV703062"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ship_ref",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SH100810",
+        "SH101563",
+        "SH103875",
+        "SH100509",
+        "SH100146",
+        "SH101244",
+        "SH100180",
+        "SH104045"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "seq",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        1,
+        2,
+        3
+      ],
+      "sample_min": 1,
+      "sample_max": 3,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "from_loc",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "L-246",
+        "L-244",
+        "L-218",
+        "L-253",
+        "L-210",
+        "L-216",
+        "L-208",
+        "L-237"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "to_loc",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "L-237",
+        "L-220",
+        "L-219",
+        "L-216",
+        "L-206",
+        "L-241",
+        "L-228",
+        "L-253"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "veh",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "VIN107",
+        "VIN150",
+        "VIN149",
+        "VIN169",
+        "VIN205",
+        "VIN104",
+        "VIN108",
+        "VIN183"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "drv",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "D3098",
+        "D3067",
+        "D3005",
+        "D3020",
+        "D3066",
+        "D3094",
+        "D3060",
+        "D3077"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "START",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-11-23 15:35",
+        "2025-11-21 06:54",
+        "2025-12-14 07:07",
+        "2025-06-11 09:06",
+        "2025-12-28 10:03",
+        "2025-09-03 21:36",
+        "2026-05-03 07:20",
+        "2025-09-05 18:51"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "END",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2026-03-09 15:08",
+        "2025-10-25 19:03",
+        "2025-11-28 08:34",
+        "2025-08-17 19:52",
+        "2026-01-28 19:24",
+        "2025-06-03 18:54",
+        "2026-05-19 15:16",
+        "2025-07-10 17:55"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        28.03,
+        28.05,
+        28.11,
+        28.18,
+        28.2,
+        28.26,
+        28.39,
+        28.6
+      ],
+      "sample_min": 28.03,
+      "sample_max": 410.0,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "PLANNED",
+        "DONE",
+        "ABORTED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "seq",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    },
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,128 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\returns.csv",
+  "format": "csv",
+  "row_count": 190,
+  "file_count": 1,
+  "size_bytes": 7895,
+  "schema": {
+    "Id": "String",
+    "orig_ship": "String",
+    "Date": "String",
+    "reason_cd": "String",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "RT6172",
+        "RT6177",
+        "RT6178",
+        "RT6071",
+        "RT6011",
+        "RT6054",
+        "RT6059",
+        "RT6093"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "orig_ship",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SH102200",
+        "SH103994",
+        "SH100050",
+        "SH102754",
+        "SH100766",
+        "SH102737",
+        "SH100022",
+        "SH104149"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-11-01",
+        "2025-04-02",
+        "2025-12-07",
+        "2026-01-29",
+        "2025-10-08",
+        "2025-09-29",
+        "2025-12-29",
+        "2025-05-23"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "reason_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "RR2",
+        "RR3",
+        "RR1",
+        "RR4",
+        "RR5"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "RECEIVED",
+        "REFUSED",
+        "IN_TRANSIT"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

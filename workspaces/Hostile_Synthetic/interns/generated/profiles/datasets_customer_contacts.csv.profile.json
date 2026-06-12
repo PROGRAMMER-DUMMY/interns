@@ -1,0 +1,127 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\contacts.csv",
+  "format": "csv",
+  "row_count": 360,
+  "file_count": 1,
+  "size_bytes": 16644,
+  "schema": {
+    "Id": "String",
+    "acct": "String",
+    "Name": "String",
+    "role": "String",
+    "email_domain": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "CT0041",
+        "CT0064",
+        "CT0131",
+        "CT0140",
+        "CT0233",
+        "CT0245",
+        "CT0028",
+        "CT0251"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "acct",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "P-1153",
+        "P-1102",
+        "P-1122",
+        "P-1087",
+        "P-1094",
+        "P-1083",
+        "P-1024",
+        "P-1121"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Mei Riva",
+        "Quinn Marek",
+        "Mei Lindgren",
+        "Greta Quist",
+        "Femi Novak",
+        "Carmen Kovacs",
+        "Femi Kovacs",
+        "Quinn Lindgren"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "role",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "OPS",
+        "WAREHOUSE",
+        "BUYER",
+        "FINANCE"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "email_domain",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "corp.example",
+        "example.com",
+        "mail.test"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

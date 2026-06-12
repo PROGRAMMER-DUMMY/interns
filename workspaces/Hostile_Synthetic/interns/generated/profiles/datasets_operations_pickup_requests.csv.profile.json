@@ -1,0 +1,150 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pickup_requests.csv",
+  "format": "csv",
+  "row_count": 640,
+  "file_count": 1,
+  "size_bytes": 30792,
+  "schema": {
+    "Id": "String",
+    "cust_ref": "String",
+    "req_date": "String",
+    "window_start": "String",
+    "window_end": "String",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "PU50480",
+        "PU50275",
+        "PU50557",
+        "PU50246",
+        "PU50607",
+        "PU50621",
+        "PU50032",
+        "PU50604"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "cust_ref",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "P-1070",
+        "P-1138",
+        "P-1133",
+        "P-1201",
+        "P-1190",
+        "P-1215",
+        "P-1223",
+        "P-1010"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "req_date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-11-26",
+        "2025-02-02",
+        "2025-02-06",
+        "2025-08-12",
+        "2026-04-02",
+        "2025-11-25",
+        "2026-03-27",
+        "2025-03-10"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "window_start",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "10:00",
+        "07:00",
+        "08:00",
+        "09:00",
+        "11:00"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "window_end",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "17:00",
+        "16:00",
+        "14:00",
+        "13:00",
+        "15:00",
+        "18:00"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "CANCELLED",
+        "MISSED",
+        "FULFILLED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

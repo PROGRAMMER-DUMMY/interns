@@ -1,0 +1,126 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\lanes.csv",
+  "format": "csv",
+  "row_count": 160,
+  "file_count": 1,
+  "size_bytes": 3857,
+  "schema": {
+    "lane_id": "String",
+    "orig": "String",
+    "dest": "String",
+    "distance_km": "Int64"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "lane_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "LN0142",
+        "LN0016",
+        "LN0005",
+        "LN0129",
+        "LN0029",
+        "LN0045",
+        "LN0112",
+        "LN0004"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "orig",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "L-233",
+        "L-202",
+        "L-236",
+        "L-257",
+        "L-222",
+        "L-227",
+        "L-256",
+        "L-225"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "dest",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "L-215",
+        "L-254",
+        "L-206",
+        "L-211",
+        "L-248",
+        "L-239",
+        "L-256",
+        "L-236"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "distance_km",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        29,
+        45,
+        52,
+        53,
+        54,
+        58,
+        64,
+        71
+      ],
+      "sample_min": 29,
+      "sample_max": 938,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "distance_km",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    }
+  ]
+}

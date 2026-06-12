@@ -1,0 +1,26 @@
+{
+  "artifact_type": "relationship_contracts.json",
+  "version": 1,
+  "generated_by": "build-relationship-contracts",
+  "workspace": ".claude/worktrees/agent-a7fbdaa6b4533b799/workspaces/Hostile_Synthetic",
+  "generated_at": "2026-06-12T04:04:47.635733+00:00",
+  "evidence_order": [
+    "data_model_docs",
+    "profile_schema",
+    "user_confirmed_relationships"
+  ],
+  "executable_usage_policy": {
+    "required_for_multi_dataset_generation": true,
+    "allowed_states": [
+      "proven_data_model",
+      "user_confirmed"
+    ],
+    "candidate_policy": "candidate relationships are advisory and block trusted executable generation"
+  },
+  "relationships": [],
+  "summary": {
+    "relationship_count": 0,
+    "executable_relationship_count": 0,
+    "candidate_relationship_count": 0
+  }
+}

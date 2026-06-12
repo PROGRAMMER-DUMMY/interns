@@ -1,0 +1,144 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\people\\driver_infringements.csv",
+  "format": "csv",
+  "row_count": 120,
+  "file_count": 1,
+  "size_bytes": 4090,
+  "schema": {
+    "Id": "String",
+    "drv": "String",
+    "Date": "String",
+    "kind": "String",
+    "points": "Int64"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "DI0097",
+        "DI0024",
+        "DI0043",
+        "DI0076",
+        "DI0019",
+        "DI0075",
+        "DI0049",
+        "DI0063"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "drv",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "D3119",
+        "D3013",
+        "D3062",
+        "D3052",
+        "D3094",
+        "D3108",
+        "D3112",
+        "D3098"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-04-11",
+        "2025-04-24",
+        "2025-05-30",
+        "2025-04-06",
+        "2026-04-07",
+        "2025-10-29",
+        "2025-11-15",
+        "2025-01-16"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "kind",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "WALKAROUND",
+        "TACHO",
+        "SPEED",
+        "HOURS"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "points",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "sample_min": 1,
+      "sample_max": 6,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "points",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    }
+  ]
+}

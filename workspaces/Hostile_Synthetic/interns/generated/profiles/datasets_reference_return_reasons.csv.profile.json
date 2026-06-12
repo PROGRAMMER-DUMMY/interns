@@ -1,0 +1,58 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\return_reasons.csv",
+  "format": "csv",
+  "row_count": 5,
+  "file_count": 1,
+  "size_bytes": 131,
+  "schema": {
+    "reason_cd": "String",
+    "Name": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "reason_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "RR2",
+        "RR4",
+        "RR3",
+        "RR5",
+        "RR1"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Refused delivery",
+        "Duplicate shipment",
+        "Wrong item shipped",
+        "Damaged on arrival",
+        "Order cancelled"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

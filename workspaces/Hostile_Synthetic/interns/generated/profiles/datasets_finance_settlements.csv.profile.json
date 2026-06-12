@@ -1,0 +1,143 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+  "format": "csv",
+  "row_count": 84,
+  "file_count": 1,
+  "size_bytes": 3355,
+  "schema": {
+    "Id": "String",
+    "carrier_cd": "String",
+    "period": "String",
+    "Amount": "Float64",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "STL0045",
+        "STL0012",
+        "STL0074",
+        "STL0077",
+        "STL0026",
+        "STL0025",
+        "STL0031",
+        "STL0079"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "carrier_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "BLTC",
+        "CDRX",
+        "EGRT",
+        "DNUB",
+        "FNCH",
+        "GRYP",
+        "ARRW"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "period",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-09",
+        "2025-08",
+        "2025-03",
+        "2025-06",
+        "2025-04",
+        "2025-10",
+        "2025-02",
+        "2025-07"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        9081.23,
+        9720.7,
+        10198.92,
+        13753.12,
+        13889.12,
+        14265.03,
+        15219.32,
+        15787.03
+      ],
+      "sample_min": 9081.23,
+      "sample_max": 87557.41,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "APPROVED",
+        "QUERIED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

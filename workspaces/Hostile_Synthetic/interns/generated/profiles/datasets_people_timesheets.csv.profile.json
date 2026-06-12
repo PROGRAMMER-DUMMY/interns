@@ -1,0 +1,146 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+  "format": "csv",
+  "row_count": 1100,
+  "file_count": 1,
+  "size_bytes": 36604,
+  "schema": {
+    "Id": "String",
+    "emp_id": "String",
+    "Date": "String",
+    "shift_id": "String",
+    "hours": "Float64"
+  },
+  "sources_used": [
+    "sample_profile"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "TS00481",
+        "TS00375",
+        "TS00080",
+        "TS00865",
+        "TS00312",
+        "TS00046",
+        "TS00986",
+        "TS01021"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "emp_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "E562",
+        "E634",
+        "E598",
+        "E595",
+        "E549",
+        "E530",
+        "E546",
+        "E594"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2026-05-13",
+        "2025-10-03",
+        "2025-12-31",
+        "2025-10-27",
+        "2025-09-25",
+        "2026-02-16",
+        "2025-11-28",
+        "2025-02-07"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "shift_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SH4",
+        "SH3",
+        "SH1",
+        "SH2"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "hours",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        4.0,
+        4.1,
+        4.2,
+        4.3,
+        4.4,
+        4.5,
+        4.6,
+        4.7
+      ],
+      "sample_min": 4.0,
+      "sample_max": 12.0,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "hours",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}
