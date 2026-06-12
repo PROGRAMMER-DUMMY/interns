@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\incidents.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\incidents.csv",
   "format": "csv",
   "row_count": 70,
   "file_count": 1,
@@ -22,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "IN0035",
-        "IN0069",
-        "IN0044",
+        "IN0030",
+        "IN0024",
+        "IN0033",
         "IN0043",
-        "IN0021",
-        "IN0027",
-        "IN0034",
-        "IN0050"
+        "IN0038",
+        "IN0042",
+        "IN0048",
+        "IN0065"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -45,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-07-14",
-        "2025-04-07",
-        "2025-09-20",
         "2025-10-22",
-        "2025-05-29",
-        "2026-04-24",
-        "2026-04-23",
-        "2026-04-18"
+        "2025-03-17",
+        "2025-02-03",
+        "2026-01-31",
+        "2025-10-14",
+        "2025-10-13",
+        "2026-01-21",
+        "2025-07-28"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -68,14 +68,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "VIN179",
-        "VIN145",
-        "VIN186",
         "VIN177",
-        "VIN218",
-        "VIN194",
-        "VIN197",
-        "VIN198"
+        "VIN193",
+        "VIN165",
+        "VIN199",
+        "VIN143",
+        "VIN148",
+        "VIN212",
+        "VIN142"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -91,14 +91,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "D3044",
-        "D3091",
-        "D3056",
-        "D3048",
-        "D3067",
-        "D3037",
-        "D3022",
-        "D3012"
+        "D3049",
+        "D3046",
+        "D3092",
+        "D3072",
+        "D3054",
+        "D3109",
+        "D3047",
+        "D3037"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -114,9 +114,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "MINOR",
         "MAJOR",
-        "RIDDOR",
-        "MINOR"
+        "RIDDOR"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -132,10 +132,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "near miss",
+        "reversing scrape",
         "load shift",
         "RTC third party",
-        "reversing scrape",
+        "near miss",
         "slip at dock"
       ],
       "sample_min": null,

@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\commodity_codes.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\commodity_codes.csv",
   "format": "csv",
   "row_count": 10,
   "file_count": 1,
@@ -19,14 +19,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "C005",
-        "C006",
         "C007",
+        "C003",
+        "C006",
+        "C002",
         "C009",
         "C001",
-        "C004",
-        "C003",
-        "C002"
+        "C005",
+        "C008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -42,14 +42,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Apparel",
-        "Batteries",
-        "Electronics",
-        "Print media",
-        "Furniture",
-        "Paints",
         "Aerosols",
-        "Auto parts"
+        "Print media",
+        "Paints",
+        "Chilled food",
+        "Batteries",
+        "Apparel",
+        "Furniture",
+        "Dry food"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -65,8 +65,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Y",
-        "N"
+        "N",
+        "Y"
       ],
       "sample_min": null,
       "sample_max": null,

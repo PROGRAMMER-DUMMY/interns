@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vendors.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vendors.csv",
   "format": "csv",
   "row_count": 40,
   "file_count": 1,
@@ -20,14 +20,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "V010",
-        "V038",
-        "V011",
         "V004",
-        "V032",
+        "V038",
+        "V029",
+        "V011",
+        "V019",
+        "V027",
         "V014",
-        "V009",
-        "V015"
+        "V035"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -43,14 +43,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "Wexford Print Ltd",
         "Orchard Marine Group",
-        "Quartz Motors & Co",
-        "North Marine & Co",
-        "Iron Print Holdings",
-        "Mistral Outdoors Holdings",
         "Keystone Outdoors Group",
-        "Umbra Textiles Ltd",
-        "Mistral Print PLC"
+        "Delta Builders Trading",
+        "Pinnacle Electrics Group",
+        "Yarrow Pharma-Free PLC",
+        "Vector Packaging & Co",
+        "Lumen Packaging PLC"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,11 +67,11 @@
       "nullable": null,
       "sample_values": [
         "AGENCY",
-        "TYRES",
-        "FUEL",
         "FACILITIES",
         "PARTS",
-        "IT"
+        "TYRES",
+        "IT",
+        "FUEL"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -88,8 +88,8 @@
       "nullable": null,
       "sample_values": [
         "TRIAL",
-        "APPROVED",
-        "BLOCKED"
+        "BLOCKED",
+        "APPROVED"
       ],
       "sample_min": null,
       "sample_max": null,

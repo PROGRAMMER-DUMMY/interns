@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
   "format": "csv",
   "row_count": 120,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "VIN136",
-        "VIN206",
-        "VIN101",
-        "VIN168",
-        "VIN145",
-        "VIN118",
-        "VIN182",
-        "VIN200"
+        "VIN215",
+        "VIN111",
+        "VIN113",
+        "VIN129",
+        "VIN137",
+        "VIN201",
+        "VIN106",
+        "VIN217"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "MD23 ACN",
-        "NV37 HLG",
-        "XY72 CPH",
-        "VX66 RYR",
-        "DM21 AMC",
-        "AD37 CWF",
-        "ED73 DAH",
-        "SF67 OLX"
+        "UH36 WEP",
+        "LG71 XUP",
+        "HK39 KKG",
+        "EF15 GCE",
+        "KH28 KMM",
+        "UH54 HTT",
+        "AD55 VSB",
+        "HX11 LSL"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,11 +67,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "VC3",
         "VC5",
+        "VC1",
+        "VC3",
         "VC2",
-        "VC4",
-        "VC1"
+        "VC4"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -87,14 +87,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-255",
+        "L-211",
+        "L-241",
+        "L-210",
+        "L-225",
+        "L-240",
         "L-250",
         "L-220",
-        "L-236",
-        "L-251",
-        "L-226",
-        "L-241",
-        "L-205"
+        "L-255"
       ],
       "sample_min": null,
       "sample_max": null,

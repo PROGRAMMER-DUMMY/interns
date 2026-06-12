@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\regions.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\regions.csv",
   "format": "csv",
   "row_count": 6,
   "file_count": 1,
@@ -18,12 +18,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "R1",
-        "R5",
-        "R6",
-        "R4",
         "R2",
-        "R3"
+        "R1",
+        "R4",
+        "R3",
+        "R5",
+        "R6"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -39,12 +39,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Scotland",
         "Wales",
+        "South West",
+        "Scotland",
         "North",
-        "South East",
         "Midlands",
-        "South West"
+        "South East"
       ],
       "sample_min": null,
       "sample_max": null,

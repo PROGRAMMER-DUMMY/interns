@@ -5,7 +5,7 @@
   "workspace": "workspaces/Hostile_Synthetic",
   "profiles": [
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\addr.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\addr.csv",
       "format": "csv",
       "row_count": 380,
       "file_count": 1,
@@ -27,14 +27,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "AD0282",
-            "AD0037",
-            "AD0075",
-            "AD0292",
-            "AD0293",
             "AD0116",
-            "AD0324",
-            "AD0333"
+            "AD0223",
+            "AD0364",
+            "AD0201",
+            "AD0126",
+            "AD0308",
+            "AD0021",
+            "AD0275"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -50,14 +50,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "P-1117",
-            "P-1220",
-            "P-1053",
-            "P-1066",
-            "P-1193",
-            "P-1094",
-            "P-1054",
-            "P-1240"
+            "P-1083",
+            "P-1177",
+            "P-1068",
+            "P-1007",
+            "P-1032",
+            "P-1199",
+            "P-1152",
+            "P-1049"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -73,14 +73,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "157 Orchard Way",
-            "129 Pinnacle Way",
-            "191 Alfa Way",
-            "166 Pinnacle Way",
-            "6 Mistral Way",
-            "142 Iron Way",
-            "111 Juno Way",
-            "164 Quartz Way"
+            "214 Zenith Way",
+            "103 Harbor Way",
+            "232 North Way",
+            "116 Pinnacle Way",
+            "13 Tundra Way",
+            "72 Lumen Way",
+            "135 Pinnacle Way",
+            "174 Juno Way"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -96,14 +96,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "LS",
-            "CF",
+            "AB",
+            "EH",
             "M",
             "B",
-            "TR",
-            "EH",
-            "AB",
-            "G"
+            "NE",
+            "G",
+            "CF",
+            "SO"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -120,9 +120,9 @@
           "nullable": null,
           "sample_values": [
             "FR",
-            "IE",
+            "GB",
             "NL",
-            "GB"
+            "IE"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -142,7 +142,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\audit_log.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\audit_log.csv",
       "format": "csv",
       "row_count": 300,
       "file_count": 1,
@@ -164,14 +164,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "AU00105",
-            "AU00139",
-            "AU00027",
-            "AU00040",
-            "AU00063",
-            "AU00074",
-            "AU00127",
-            "AU00209"
+            "AU00224",
+            "AU00187",
+            "AU00109",
+            "AU00111",
+            "AU00116",
+            "AU00156",
+            "AU00177",
+            "AU00135"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -187,14 +187,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2026-03-13 12:17",
-            "2025-01-27 15:15",
-            "2025-05-06 12:42",
-            "2025-09-26 18:58",
-            "2025-07-31 12:14",
-            "2026-04-12 12:19",
-            "2025-01-29 13:55",
-            "2025-03-31 14:29"
+            "2025-09-27 20:10",
+            "2025-01-13 15:08",
+            "2025-03-21 14:58",
+            "2025-11-04 17:35",
+            "2026-01-11 16:31",
+            "2026-01-21 20:22",
+            "2025-10-06 06:50",
+            "2025-05-15 10:47"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -210,10 +210,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "system",
-            "ops2",
+            "finance1",
             "ops1",
-            "finance1"
+            "ops2",
+            "system"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -229,9 +229,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "UPDATE",
             "CREATE",
             "EXPORT",
+            "UPDATE",
             "VOID"
           ],
           "sample_min": null,
@@ -249,9 +249,9 @@
           "nullable": null,
           "sample_values": [
             "rate_card",
-            "shipment",
             "invoice",
-            "party"
+            "party",
+            "shipment"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -271,7 +271,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\complaints.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\complaints.csv",
       "format": "csv",
       "row_count": 260,
       "file_count": 1,
@@ -293,14 +293,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "CP0063",
-            "CP0145",
-            "CP0033",
-            "CP0027",
-            "CP0073",
-            "CP0232",
-            "CP0087",
-            "CP0244"
+            "CP0156",
+            "CP0174",
+            "CP0140",
+            "CP0094",
+            "CP0114",
+            "CP0053",
+            "CP0178",
+            "CP0226"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -316,14 +316,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "P-1208",
-            "P-1148",
-            "P-1039",
-            "P-1113",
-            "P-1198",
+            "P-1029",
+            "P-1177",
+            "P-1055",
+            "P-1072",
             "P-1108",
-            "P-1045",
-            "P-1041"
+            "P-1223",
+            "P-1156",
+            "P-1046"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -339,14 +339,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2026-05-02",
-            "2025-11-18",
-            "2025-01-21",
-            "2025-10-09",
-            "2025-11-26",
-            "2025-05-21",
-            "2026-01-21",
-            "2025-04-09"
+            "2025-12-26",
+            "2026-04-02",
+            "2025-03-28",
+            "2025-11-17",
+            "2026-05-15",
+            "2025-07-16",
+            "2026-05-30",
+            "2026-01-06"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -362,9 +362,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "EMAIL",
+            "PHONE",
             "PORTAL",
-            "PHONE"
+            "EMAIL"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -380,9 +380,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "WORKING",
+            "CLOSED",
             "NEW",
-            "CLOSED"
+            "WORKING"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -402,7 +402,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\contacts.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\contacts.csv",
       "format": "csv",
       "row_count": 360,
       "file_count": 1,
@@ -424,14 +424,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "CT0041",
-            "CT0064",
-            "CT0131",
-            "CT0140",
-            "CT0233",
-            "CT0245",
-            "CT0028",
-            "CT0251"
+            "CT0103",
+            "CT0187",
+            "CT0193",
+            "CT0232",
+            "CT0264",
+            "CT0148",
+            "CT0290",
+            "CT0058"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -447,14 +447,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "P-1153",
-            "P-1102",
-            "P-1122",
-            "P-1087",
-            "P-1094",
-            "P-1083",
-            "P-1024",
-            "P-1121"
+            "P-1074",
+            "P-1035",
+            "P-1154",
+            "P-1040",
+            "P-1009",
+            "P-1179",
+            "P-1155",
+            "P-1171"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -470,14 +470,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Mei Riva",
-            "Quinn Marek",
-            "Mei Lindgren",
-            "Greta Quist",
-            "Femi Novak",
-            "Carmen Kovacs",
-            "Femi Kovacs",
-            "Quinn Lindgren"
+            "Ines Brennan",
+            "Priya Costa",
+            "Tomas Kovacs",
+            "Dev Quist",
+            "Greta Gallo",
+            "Greta Hansen",
+            "Dev Riva",
+            "Elena Novak"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -494,8 +494,8 @@
           "nullable": null,
           "sample_values": [
             "OPS",
-            "WAREHOUSE",
             "BUYER",
+            "WAREHOUSE",
             "FINANCE"
           ],
           "sample_min": null,
@@ -534,7 +534,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\surveys.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\surveys.csv",
       "format": "csv",
       "row_count": 420,
       "file_count": 1,
@@ -555,14 +555,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SV0159",
-            "SV0041",
-            "SV0124",
-            "SV0171",
-            "SV0197",
-            "SV0295",
-            "SV0341",
-            "SV0262"
+            "SV0413",
+            "SV0129",
+            "SV0318",
+            "SV0021",
+            "SV0058",
+            "SV0142",
+            "SV0178",
+            "SV0220"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -578,14 +578,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "P-1191",
-            "P-1024",
-            "P-1141",
-            "P-1214",
-            "P-1147",
-            "P-1151",
-            "P-1226",
-            "P-1180"
+            "P-1058",
+            "P-1054",
+            "P-1142",
+            "P-1077",
+            "P-1050",
+            "P-1057",
+            "P-1088",
+            "P-1170"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -601,14 +601,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2026-03-29",
-            "2026-02-08",
-            "2026-02-07",
-            "2025-05-01",
-            "2026-04-18",
-            "2025-08-15",
-            "2026-03-19",
-            "2025-04-11"
+            "2026-05-06",
+            "2025-04-23",
+            "2026-03-03",
+            "2025-05-08",
+            "2025-10-14",
+            "2026-05-31",
+            "2025-10-15",
+            "2026-05-12"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -665,7 +665,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\accessorial_charges.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\accessorial_charges.csv",
       "format": "csv",
       "row_count": 340,
       "file_count": 1,
@@ -686,14 +686,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "AC9113",
-            "AC9130",
-            "AC9009",
-            "AC9024",
-            "AC9023",
-            "AC9305",
-            "AC9126",
-            "AC9022"
+            "AC9068",
+            "AC9120",
+            "AC9159",
+            "AC9069",
+            "AC9017",
+            "AC9048",
+            "AC9198",
+            "AC9181"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -709,14 +709,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH104139",
-            "SH103443",
-            "SH102345",
-            "SH101126",
-            "SH100738",
-            "SH102046",
-            "SH104149",
-            "SH103220"
+            "SH101187",
+            "SH100452",
+            "SH102465",
+            "SH101599",
+            "SH103308",
+            "SH103814",
+            "SH100490",
+            "SH104044"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -732,11 +732,11 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "S-LIFT",
-            "S-REWT",
             "S-WAIT",
-            "S-RES",
-            "S-ADR"
+            "S-ADR",
+            "S-REWT",
+            "S-LIFT",
+            "S-RES"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -793,7 +793,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\credit_notes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\credit_notes.csv",
       "format": "csv",
       "row_count": 180,
       "file_count": 1,
@@ -815,14 +815,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "CN7150",
-            "CN7130",
-            "CN7099",
-            "CN7121",
-            "CN7161",
-            "CN7018",
-            "CN7019",
-            "CN7175"
+            "CN7062",
+            "CN7071",
+            "CN7096",
+            "CN7133",
+            "CN7140",
+            "CN7166",
+            "CN7070",
+            "CN7078"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -838,14 +838,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "INV-52245",
-            "INV-50987",
-            "INV-50445",
-            "INV-52157",
-            "INV-50216",
-            "INV-51175",
-            "INV-52273",
-            "INV-52317"
+            "INV-52802",
+            "INV-53272",
+            "INV-51508",
+            "INV-52929",
+            "INV-51892",
+            "INV-50440",
+            "INV-52864",
+            "INV-50336"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -861,13 +861,13 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2026-02-27",
-            "2025-01-21",
-            "2025-09-14",
-            "2026-03-03",
-            "2025-07-20",
-            "2025-10-01",
-            "2025-08-28",
+            "2025-11-19",
+            "2025-05-21",
+            "2025-12-01",
+            "2025-04-03",
+            "2025-09-30",
+            "2025-03-20",
+            "2025-02-01",
             "2025-07-07"
           ],
           "sample_min": null,
@@ -907,10 +907,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "RR1",
             "RR4",
-            "RR3",
             "RR2",
+            "RR1",
+            "RR3",
             "RR5"
           ],
           "sample_min": null,
@@ -945,7 +945,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
       "format": "csv",
       "row_count": 260,
       "file_count": 1,
@@ -968,14 +968,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "DSP4161",
-            "DSP4243",
-            "DSP4138",
-            "DSP4113",
-            "DSP4005",
-            "DSP4153",
-            "DSP4020",
-            "DSP4225"
+            "DSP4197",
+            "DSP4054",
+            "DSP4181",
+            "DSP4128",
+            "DSP4146",
+            "DSP4223",
+            "DSP4224",
+            "DSP4034"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -991,14 +991,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "INV-52553",
-            "INV-51033",
-            "INV-51739",
-            "INV-51527",
-            "INV-50843",
-            "INV-52834",
-            "INV-52912",
-            "INV-52049"
+            "INV-50369",
+            "INV-52878",
+            "INV-52801",
+            "INV-50339",
+            "INV-52335",
+            "INV-52454",
+            "INV-52263",
+            "INV-52591"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1014,14 +1014,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-01-08",
-            "2025-01-27",
-            "2025-01-16",
-            "2026-03-05",
-            "2025-06-01",
-            "2026-02-06",
-            "2025-10-29",
-            "2026-04-10"
+            "2025-09-05",
+            "2026-01-22",
+            "2025-02-19",
+            "2025-01-11",
+            "2025-02-14",
+            "2025-09-18",
+            "2025-07-12",
+            "2026-02-06"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1037,8 +1037,8 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "REJECTED",
             "RESOLVED",
+            "REJECTED",
             "OPEN"
           ],
           "sample_min": null,
@@ -1055,9 +1055,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "X07",
             "RR1",
             "RR5",
-            "X07",
             "RR2"
           ],
           "sample_min": null,
@@ -1115,7 +1115,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
       "format": "csv",
       "row_count": 4809,
       "file_count": 1,
@@ -1142,14 +1142,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "IL901188",
-            "IL901821",
-            "IL902113",
-            "IL900500",
-            "IL900572",
-            "IL900850",
-            "IL901430",
-            "IL901755"
+            "IL901856",
+            "IL901588",
+            "IL904133",
+            "IL903508",
+            "IL902229",
+            "IL901465",
+            "IL900668",
+            "IL901256"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1165,14 +1165,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "INV-51862",
-            "INV-51323",
-            "INV-51432",
-            "INV-51069",
-            "INV-50684",
-            "INV-50461",
-            "INV-52343",
-            "INV-52839"
+            "INV-53393",
+            "INV-51507",
+            "INV-53255",
+            "INV-50813",
+            "INV-53106",
+            "INV-50086",
+            "INV-51982",
+            "INV-50277"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1188,14 +1188,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-07-19",
-            "2025-02-17",
-            "2026-02-17",
-            "2025-11-18",
-            "2025-10-20",
-            "2025-11-12",
-            "2025-01-07",
-            "2026-05-21"
+            "2025-12-23",
+            "2025-04-26",
+            "2025-07-03",
+            "2025-05-08",
+            "2025-09-02",
+            "2025-10-08",
+            "2025-06-04",
+            "2026-02-01"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1211,14 +1211,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "P-1027",
-            "P-1146",
+            "P-1005",
             "P-1068",
-            "P-1019",
-            "P-1040",
-            "P-1029",
-            "P-1016",
-            "P-1237"
+            "P-1137",
+            "P-1066",
+            "P-1185",
+            "P-1020",
+            "P-1217",
+            "P-1219"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1234,14 +1234,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH100673",
-            "SH101024",
-            "SH102216",
-            "SH100889",
-            "SH102888",
-            "SH103502",
-            "SH101096",
-            "SH103065"
+            "SH104125",
+            "SH104142",
+            "SH104055",
+            "SH102944",
+            "SH101285",
+            "SH101292",
+            "SH100115",
+            "SH102970"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1257,9 +1257,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "FUEL",
             "BASE",
-            "ACCESSORIAL"
+            "ACCESSORIAL",
+            "FUEL"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1298,8 +1298,8 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "GBP",
-            "EUR"
+            "EUR",
+            "GBP"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1338,10 +1338,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "OPEN",
+            "PAID",
             "CREDITED",
             "VOID",
-            "PAID"
+            "OPEN"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1388,7 +1388,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
       "format": "csv",
       "row_count": 2280,
       "file_count": 1,
@@ -1410,14 +1410,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "PMT61860",
-            "PMT60753",
-            "PMT62229",
-            "PMT61853",
-            "PMT62268",
-            "PMT61089",
-            "PMT61099",
-            "PMT62272"
+            "PMT61764",
+            "PMT60027",
+            "PMT60062",
+            "PMT60522",
+            "PMT60792",
+            "PMT60902",
+            "PMT61177",
+            "PMT61279"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1433,14 +1433,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "INV-50759",
-            "INV-50425",
-            "INV-51740",
-            "INV-52771",
-            "INV-52151",
-            "INV-50467",
-            "INV-52214",
-            "INV-52868"
+            "INV-50035",
+            "INV-50064",
+            "INV-50092",
+            "INV-53309",
+            "INV-51784",
+            "INV-50556",
+            "INV-50042",
+            "INV-51935"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1456,14 +1456,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-04-23",
-            "2026-01-10",
-            "2025-10-17",
-            "2025-09-10",
-            "2025-11-19",
-            "2025-10-20",
-            "2025-03-10",
-            "2026-04-01"
+            "2026-02-25",
+            "2025-07-29",
+            "2025-02-10",
+            "2025-01-25",
+            "2025-10-10",
+            "2025-06-09",
+            "2025-11-27",
+            "2025-06-26"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1502,10 +1502,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "DD",
-            "BACS",
             "CHEQUE",
-            "CARD"
+            "CARD",
+            "BACS",
+            "DD"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1539,7 +1539,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\purchase_orders.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\purchase_orders.csv",
       "format": "csv",
       "row_count": 220,
       "file_count": 1,
@@ -1561,14 +1561,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "PO30109",
-            "PO30163",
-            "PO30178",
+            "PO30164",
+            "PO30078",
+            "PO30053",
             "PO30183",
-            "PO30192",
-            "PO30198",
-            "PO30127",
-            "PO30132"
+            "PO30091",
+            "PO30035",
+            "PO30046",
+            "PO30008"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1584,14 +1584,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "V038",
-            "V009",
-            "V005",
-            "V037",
-            "V025",
+            "V002",
+            "V019",
+            "V012",
+            "V018",
+            "V001",
             "V017",
-            "V006",
-            "V010"
+            "V013",
+            "V027"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1607,14 +1607,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2026-02-11",
-            "2025-12-17",
-            "2025-07-22",
-            "2025-02-21",
-            "2026-02-18",
-            "2025-01-27",
-            "2025-06-29",
-            "2025-07-18"
+            "2026-03-18",
+            "2025-04-01",
+            "2026-03-26",
+            "2025-05-01",
+            "2025-07-13",
+            "2025-08-29",
+            "2025-11-03",
+            "2025-11-25"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1653,9 +1653,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "RECEIPTED",
             "OPEN",
-            "CANCELLED"
+            "CANCELLED",
+            "RECEIPTED"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1689,7 +1689,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
       "format": "csv",
       "row_count": 84,
       "file_count": 1,
@@ -1711,14 +1711,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "STL0045",
-            "STL0012",
-            "STL0074",
-            "STL0077",
-            "STL0026",
-            "STL0025",
+            "STL0001",
             "STL0031",
-            "STL0079"
+            "STL0044",
+            "STL0008",
+            "STL0027",
+            "STL0035",
+            "STL0061",
+            "STL0003"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1734,11 +1734,11 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "DNUB",
             "BLTC",
+            "FNCH",
             "CDRX",
             "EGRT",
-            "DNUB",
-            "FNCH",
             "GRYP",
             "ARRW"
           ],
@@ -1756,14 +1756,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-09",
-            "2025-08",
-            "2025-03",
-            "2025-06",
-            "2025-04",
             "2025-10",
+            "2025-03",
+            "2025-12",
+            "2025-04",
+            "2025-08",
             "2025-02",
-            "2025-07"
+            "2025-06",
+            "2025-09"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1837,7 +1837,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\fuel_logs.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\fuel_logs.csv",
       "format": "csv",
       "row_count": 900,
       "file_count": 1,
@@ -1859,14 +1859,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "FL00253",
-            "FL00437",
-            "FL00650",
-            "FL00338",
-            "FL00603",
-            "FL00774",
-            "FL00038",
-            "FL00745"
+            "FL00465",
+            "FL00135",
+            "FL00732",
+            "FL00894",
+            "FL00833",
+            "FL00872",
+            "FL00275",
+            "FL00889"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1882,14 +1882,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "VIN144",
-            "VIN141",
-            "VIN185",
-            "VIN147",
-            "VIN109",
-            "VIN171",
-            "VIN167",
-            "VIN206"
+            "VIN111",
+            "VIN176",
+            "VIN170",
+            "VIN194",
+            "VIN140",
+            "VIN218",
+            "VIN166",
+            "VIN193"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -1905,14 +1905,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-06-26",
-            "2025-12-21",
-            "2026-01-29",
-            "2025-04-22",
-            "2025-10-03",
-            "2026-04-11",
-            "2025-10-31",
-            "2025-02-28"
+            "2025-09-05",
+            "2026-04-29",
+            "2025-08-15",
+            "2025-06-25",
+            "2025-05-05",
+            "2026-01-25",
+            "2025-04-04",
+            "2025-09-28"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2005,7 +2005,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\gps_pings.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\gps_pings.csv",
       "format": "csv",
       "row_count": 400,
       "file_count": 1,
@@ -2027,14 +2027,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "GP00243",
-            "GP00368",
-            "GP00395",
-            "GP00391",
-            "GP00400",
-            "GP00189",
-            "GP00058",
-            "GP00132"
+            "GP00239",
+            "GP00038",
+            "GP00240",
+            "GP00298",
+            "GP00262",
+            "GP00190",
+            "GP00301",
+            "GP00122"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2050,14 +2050,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "VIN164",
-            "VIN122",
+            "VIN132",
+            "VIN178",
+            "VIN130",
+            "VIN194",
+            "VIN175",
+            "VIN198",
             "VIN193",
-            "VIN188",
-            "VIN144",
-            "VIN108",
-            "VIN149",
-            "VIN212"
+            "VIN111"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2073,14 +2073,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-06-06 13:51",
-            "2025-05-25 15:20",
-            "2025-04-10 12:00",
-            "2025-08-24 12:13",
-            "2025-06-25 18:48",
-            "2026-02-04 09:55",
-            "2025-03-18 06:54",
-            "2025-07-17 10:07"
+            "2025-01-24 06:55",
+            "2025-09-10 18:40",
+            "2025-08-08 08:59",
+            "2025-06-05 07:49",
+            "2025-09-30 09:48",
+            "2025-05-24 09:31",
+            "2025-01-22 18:39",
+            "2025-11-15 16:31"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2173,7 +2173,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\incidents.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\incidents.csv",
       "format": "csv",
       "row_count": 70,
       "file_count": 1,
@@ -2196,14 +2196,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "IN0035",
-            "IN0069",
-            "IN0044",
+            "IN0030",
+            "IN0024",
+            "IN0033",
             "IN0043",
-            "IN0021",
-            "IN0027",
-            "IN0034",
-            "IN0050"
+            "IN0038",
+            "IN0042",
+            "IN0048",
+            "IN0065"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2219,14 +2219,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-07-14",
-            "2025-04-07",
-            "2025-09-20",
             "2025-10-22",
-            "2025-05-29",
-            "2026-04-24",
-            "2026-04-23",
-            "2026-04-18"
+            "2025-03-17",
+            "2025-02-03",
+            "2026-01-31",
+            "2025-10-14",
+            "2025-10-13",
+            "2026-01-21",
+            "2025-07-28"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2242,14 +2242,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "VIN179",
-            "VIN145",
-            "VIN186",
             "VIN177",
-            "VIN218",
-            "VIN194",
-            "VIN197",
-            "VIN198"
+            "VIN193",
+            "VIN165",
+            "VIN199",
+            "VIN143",
+            "VIN148",
+            "VIN212",
+            "VIN142"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2265,14 +2265,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "D3044",
-            "D3091",
-            "D3056",
-            "D3048",
-            "D3067",
-            "D3037",
-            "D3022",
-            "D3012"
+            "D3049",
+            "D3046",
+            "D3092",
+            "D3072",
+            "D3054",
+            "D3109",
+            "D3047",
+            "D3037"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2288,9 +2288,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "MINOR",
             "MAJOR",
-            "RIDDOR",
-            "MINOR"
+            "RIDDOR"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2306,10 +2306,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "near miss",
+            "reversing scrape",
             "load shift",
             "RTC third party",
-            "reversing scrape",
+            "near miss",
             "slip at dock"
           ],
           "sample_min": null,
@@ -2330,7 +2330,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\maintenance.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\maintenance.csv",
       "format": "csv",
       "row_count": 280,
       "file_count": 1,
@@ -2353,14 +2353,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "MN0217",
-            "MN0061",
-            "MN0226",
-            "MN0205",
-            "MN0227",
-            "MN0214",
-            "MN0028",
-            "MN0049"
+            "MN0271",
+            "MN0157",
+            "MN0009",
+            "MN0067",
+            "MN0265",
+            "MN0266",
+            "MN0122",
+            "MN0211"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2376,14 +2376,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "VIN116",
-            "VIN212",
-            "VIN171",
-            "VIN130",
+            "VIN141",
+            "VIN211",
             "VIN189",
-            "VIN137",
-            "VIN106",
-            "VIN121"
+            "VIN191",
+            "VIN153",
+            "VIN139",
+            "VIN212",
+            "VIN107"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2399,14 +2399,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2026-03-30",
-            "2026-02-19",
-            "2025-10-23",
-            "2026-04-24",
-            "2025-06-29",
-            "2025-05-25",
-            "2026-01-08",
-            "2026-03-01"
+            "2026-04-04",
+            "2025-01-17",
+            "2025-02-03",
+            "2025-04-24",
+            "2025-03-10",
+            "2025-11-23",
+            "2026-02-13",
+            "2025-10-14"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2422,11 +2422,11 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "BRAKES",
             "BODYWORK",
-            "SERVICE",
+            "MOT",
+            "BRAKES",
             "TYRES",
-            "MOT"
+            "SERVICE"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2519,7 +2519,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\carriers.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\carriers.csv",
       "format": "csv",
       "row_count": 8,
       "file_count": 1,
@@ -2541,14 +2541,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "FNCH",
-            "ARRW",
-            "DNUB",
-            "BLTC",
-            "EGRT",
             "HLCY",
+            "ARRW",
+            "GRYP",
+            "EGRT",
+            "DNUB",
             "CDRX",
-            "GRYP"
+            "FNCH",
+            "BLTC"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2564,14 +2564,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Arrowline Haulage",
-            "Gryphon Air Cargo",
             "Cedar Express",
-            "Egret Couriers",
-            "Baltic Crossways",
+            "Gryphon Air Cargo",
             "Halcyon Logistics",
             "Finch Parcel Net",
-            "Danube Freight"
+            "Baltic Crossways",
+            "Arrowline Haulage",
+            "Danube Freight",
+            "Egret Couriers"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2587,9 +2587,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "AIR",
             "ROAD",
-            "RAIL",
-            "AIR"
+            "RAIL"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2663,7 +2663,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\customers_legacy.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\customers_legacy.csv",
       "format": "csv",
       "row_count": 168,
       "file_count": 1,
@@ -2684,14 +2684,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "CU2162",
-            "CU2047",
-            "CU2145",
-            "CU2133",
-            "CU2141",
-            "CU2130",
-            "CU2027",
-            "CU2117"
+            "CU2131",
+            "CU2003",
+            "CU2154",
+            "CU2155",
+            "CU2157",
+            "CU2044",
+            "CU2143",
+            "CU2015"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2707,14 +2707,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Rampart Textiles Group",
-            "Granite Paper Group",
-            "North Foods Trading",
-            "Mistral Foods Ltd",
-            "Crest Garden Holdings",
-            "Mistral Retail Holdings",
-            "Wexford Components Ltd",
-            "Mistral Electrics Group"
+            "Wexford Paper PLC",
+            "Umbra Builders Holdings",
+            "Keystone Marine Holdings",
+            "Iron Marine PLC",
+            "Umbra Builders PLC",
+            "Quartz Beverages Trading",
+            "Tundra Garden Holdings",
+            "Granite Paper Group"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2730,8 +2730,8 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "CLOSED",
-            "ACTIVE"
+            "ACTIVE",
+            "CLOSED"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2747,14 +2747,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2022-11-06",
-            "2025-12-30",
-            "2022-05-01",
-            "2024-08-11",
-            "2022-12-15",
-            "2023-03-25",
-            "2024-03-29",
-            "2025-04-04"
+            "2023-03-24",
+            "2024-11-11",
+            "2023-09-10",
+            "2025-07-22",
+            "2025-05-01",
+            "2022-08-30",
+            "2024-09-29",
+            "2023-02-01"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2774,7 +2774,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\dock_doors.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\dock_doors.csv",
       "format": "csv",
       "row_count": 90,
       "file_count": 1,
@@ -2794,14 +2794,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "DD017",
-            "DD032",
-            "DD079",
+            "DD012",
+            "DD031",
+            "DD073",
+            "DD036",
+            "DD014",
             "DD080",
-            "DD084",
-            "DD087",
-            "DD071",
-            "DD012"
+            "DD043",
+            "DD059"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2818,13 +2818,13 @@
           "nullable": null,
           "sample_values": [
             "L-260",
-            "L-225",
-            "L-246",
-            "L-231",
+            "L-201",
             "L-250",
-            "L-211",
+            "L-225",
             "L-205",
-            "L-255"
+            "L-251",
+            "L-245",
+            "L-230"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2840,9 +2840,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "RAISED",
             "LEVEL",
-            "RAMP",
-            "RAISED"
+            "RAMP"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2862,7 +2862,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
       "format": "csv",
       "row_count": 120,
       "file_count": 1,
@@ -2884,14 +2884,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "D3033",
+            "D3053",
+            "D3022",
             "D3015",
-            "D3045",
+            "D3007",
+            "D3066",
+            "D3117",
             "D3080",
-            "D3065",
-            "D3105",
-            "D3103",
-            "D3108"
+            "D3098"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2907,14 +2907,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Stefan Hansen",
-            "Aisha Iqbal",
-            "Omar Brennan",
-            "Nadia Marek",
-            "Rosa Kovacs",
-            "Boris Quist",
-            "Nadia Tanaka",
-            "Quinn Dvorak"
+            "Stefan Gallo",
+            "Quinn Lindgren",
+            "Tomas Dvorak",
+            "Femi Kovacs",
+            "Nadia Fuentes",
+            "Katya Petrov",
+            "Boris Petrov",
+            "Nadia Lindgren"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2930,14 +2930,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "L-235",
+            "L-260",
             "L-220",
-            "L-210",
-            "L-215",
-            "L-226",
-            "L-201",
-            "L-206",
-            "L-245",
-            "L-216"
+            "L-251",
+            "L-241",
+            "L-240",
+            "L-236",
+            "L-215"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2953,10 +2953,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "C1",
             "CE",
-            "B",
-            "C"
+            "C1",
+            "C",
+            "B"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2972,9 +2972,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "ACTIVE",
             "LEFT",
-            "BANNED"
+            "BANNED",
+            "ACTIVE"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -2994,7 +2994,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
       "format": "csv",
       "row_count": 140,
       "file_count": 1,
@@ -3017,14 +3017,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "E573",
-            "E535",
+            "E514",
+            "E513",
+            "E626",
+            "E525",
             "E542",
-            "E501",
-            "E528",
-            "E597",
-            "E629",
-            "E526"
+            "E595",
+            "E634",
+            "E588"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3040,14 +3040,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Carmen Iqbal",
-            "Femi Fuentes",
-            "Katya Riva",
-            "Quinn Eriksen",
-            "Greta Kovacs",
-            "Aisha Tanaka",
-            "Greta Gallo",
-            "Hamid Adler"
+            "Quinn Dvorak",
+            "Hamid Tanaka",
+            "Tomas Jensen",
+            "Aisha Jensen",
+            "Omar Kovacs",
+            "Nadia Gallo",
+            "Elena Novak",
+            "Ines Marek"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3063,11 +3063,11 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "CS_AGENT",
+            "LOADER",
             "PLANNER",
             "FITTER",
-            "SUPERVISOR",
-            "LOADER",
-            "CS_AGENT"
+            "SUPERVISOR"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3083,14 +3083,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "L-210",
-            "L-235",
+            "L-211",
+            "L-225",
+            "L-206",
+            "L-221",
+            "L-250",
+            "L-230",
             "L-201",
-            "L-256",
-            "L-245",
-            "L-216",
-            "L-260",
-            "L-231"
+            "L-256"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3106,14 +3106,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2022-11-14",
-            "2023-07-08",
-            "2022-12-30",
-            "2019-05-23",
-            "2021-11-28",
-            "2019-06-12",
-            "2018-10-13",
-            "2019-01-12"
+            "2019-01-12",
+            "2024-03-11",
+            "2024-12-23",
+            "2021-04-01",
+            "2020-12-18",
+            "2024-07-17",
+            "2024-12-07",
+            "2023-05-28"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3129,14 +3129,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2026-01-13",
-            "2026-05-13",
-            "2025-11-10",
+            "2026-01-25",
+            "2026-02-21",
+            "2026-05-29",
             "2026-04-01",
-            "2025-12-30",
-            "2025-11-27",
-            "2026-02-19",
-            "2025-11-05"
+            "2026-05-23",
+            "2026-03-06",
+            "2025-11-05",
+            "2026-05-13"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3156,7 +3156,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\lanes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\lanes.csv",
       "format": "csv",
       "row_count": 160,
       "file_count": 1,
@@ -3177,14 +3177,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "LN0142",
-            "LN0016",
-            "LN0005",
+            "LN0051",
+            "LN0097",
+            "LN0023",
+            "LN0032",
             "LN0129",
-            "LN0029",
-            "LN0045",
-            "LN0112",
-            "LN0004"
+            "LN0149",
+            "LN0019",
+            "LN0106"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3200,14 +3200,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "L-233",
-            "L-202",
-            "L-236",
-            "L-257",
-            "L-222",
-            "L-227",
-            "L-256",
-            "L-225"
+            "L-237",
+            "L-205",
+            "L-215",
+            "L-234",
+            "L-212",
+            "L-255",
+            "L-203",
+            "L-257"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3223,13 +3223,13 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "L-214",
             "L-215",
-            "L-254",
-            "L-206",
-            "L-211",
-            "L-248",
-            "L-239",
-            "L-256",
+            "L-255",
+            "L-228",
+            "L-219",
+            "L-210",
+            "L-259",
             "L-236"
           ],
           "sample_min": null,
@@ -3287,7 +3287,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\locs.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\locs.csv",
       "format": "csv",
       "row_count": 60,
       "file_count": 1,
@@ -3311,14 +3311,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "L-243",
-            "L-258",
-            "L-259",
+            "L-237",
+            "L-215",
             "L-236",
-            "L-247",
-            "L-256",
-            "L-251",
-            "L-234"
+            "L-210",
+            "L-214",
+            "L-206",
+            "L-222",
+            "L-248"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3334,14 +3334,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Quartz Railhead 13",
-            "Iron Hub 46",
-            "Umbra Customer_Dock 4",
-            "Bravo Hub 6",
-            "Delta Railhead 8",
-            "Tundra Railhead 48",
-            "Keystone Customer_Dock 59",
-            "Lumen Port 47"
+            "Vector Depot 55",
+            "Lumen Customer_Dock 14",
+            "Solstice Customer_Dock 19",
+            "Yarrow Depot 35",
+            "Crest Port 22",
+            "North Railhead 28",
+            "Pinnacle Railhead 58",
+            "Orchard Railhead 18"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3358,10 +3358,10 @@
           "nullable": null,
           "sample_values": [
             "PORT",
-            "RAILHEAD",
+            "DEPOT",
             "HUB",
             "CUSTOMER_DOCK",
-            "DEPOT"
+            "RAILHEAD"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3377,14 +3377,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Z11",
-            "Z07",
-            "Z10",
-            "Z08",
-            "Z09",
-            "Z03",
             "Z02",
-            "Z04"
+            "Z06",
+            "Z11",
+            "Z04",
+            "Z12",
+            "Z05",
+            "Z08",
+            "Z10"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3400,10 +3400,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "05:00",
             "06:00",
             "08:00",
-            "07:00"
+            "07:00",
+            "05:00"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3419,9 +3419,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "18:00",
             "23:00",
             "20:00",
-            "18:00",
             "22:00"
           ],
           "sample_min": null,
@@ -3459,7 +3459,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
       "format": "csv",
       "row_count": 240,
       "file_count": 1,
@@ -3483,14 +3483,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "P-1043",
-            "P-1141",
-            "P-1081",
-            "P-1174",
-            "P-1089",
-            "P-1026",
-            "P-1038",
-            "P-1065"
+            "P-1064",
+            "P-1012",
+            "P-1117",
+            "P-1219",
+            "P-1015",
+            "P-1196",
+            "P-1025",
+            "P-1192"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3506,14 +3506,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "CRM61426",
-            "CRM89897",
-            "CRM81573",
-            "CRM78906",
-            "CRM95566",
-            "CRM79129",
-            "CRM93796",
-            "CRM86435"
+            "CRM56698",
+            "CRM70144",
+            "CRM63812",
+            "CRM87771",
+            "CRM70208",
+            "CRM59490",
+            "CRM50862",
+            "CRM92762"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3529,14 +3529,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Orchard Electrics PLC",
-            "Orchard Textiles Holdings",
-            "Iron Marine PLC",
-            "Harbor Components PLC",
-            "Alfa Marine Holdings",
-            "Crest Beverages Group",
-            "Harbor Garden Holdings",
-            "Bravo Electrics & Co"
+            "Granite Builders Ltd",
+            "Quartz Foods Ltd",
+            "Orchard Electrics Holdings",
+            "Ember Components PLC",
+            "Lumen Electrics Trading",
+            "Tundra Print PLC",
+            "Solstice Outdoors Group",
+            "Vector Pharma-Free & Co"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3553,8 +3553,8 @@
           "nullable": null,
           "sample_values": [
             "C",
-            "A",
-            "S"
+            "S",
+            "A"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3570,14 +3570,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2023-08-31",
-            "2025-04-02",
-            "2024-04-11",
-            "2023-10-14",
-            "2022-12-10",
             "2025-11-20",
-            "2025-09-22",
-            "2024-01-04"
+            "2023-08-20",
+            "2024-12-19",
+            "2024-01-22",
+            "2023-01-10",
+            "2023-10-23",
+            "2025-10-03",
+            "2022-04-25"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3593,8 +3593,8 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SME",
             "RESELLER",
+            "SME",
             "PUBLIC",
             "ENTERPRISE"
           ],
@@ -3612,12 +3612,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "R6",
-            "R5",
             "R4",
             "R3",
+            "R5",
+            "R1",
             "R2",
-            "R1"
+            "R6"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3637,7 +3637,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
       "format": "csv",
       "row_count": 6,
       "file_count": 1,
@@ -3658,12 +3658,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SVC1",
             "SVC4",
+            "SVC2",
             "SVC5",
             "SVC6",
             "SVC3",
-            "SVC2"
+            "SVC1"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3679,12 +3679,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Standard Ground",
-            "Chilled Reefer",
-            "Express Next-Day",
-            "Priority 48",
             "Economy Deferred",
-            "Pallet Freight"
+            "Chilled Reefer",
+            "Priority 48",
+            "Standard Ground",
+            "Pallet Freight",
+            "Express Next-Day"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3756,7 +3756,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
       "format": "csv",
       "row_count": 120,
       "file_count": 1,
@@ -3778,14 +3778,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "VIN136",
-            "VIN206",
-            "VIN101",
-            "VIN168",
-            "VIN145",
-            "VIN118",
-            "VIN182",
-            "VIN200"
+            "VIN215",
+            "VIN111",
+            "VIN113",
+            "VIN129",
+            "VIN137",
+            "VIN201",
+            "VIN106",
+            "VIN217"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3801,14 +3801,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "MD23 ACN",
-            "NV37 HLG",
-            "XY72 CPH",
-            "VX66 RYR",
-            "DM21 AMC",
-            "AD37 CWF",
-            "ED73 DAH",
-            "SF67 OLX"
+            "UH36 WEP",
+            "LG71 XUP",
+            "HK39 KKG",
+            "EF15 GCE",
+            "KH28 KMM",
+            "UH54 HTT",
+            "AD55 VSB",
+            "HX11 LSL"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3824,11 +3824,11 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "VC3",
             "VC5",
+            "VC1",
+            "VC3",
             "VC2",
-            "VC4",
-            "VC1"
+            "VC4"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3844,14 +3844,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "L-255",
+            "L-211",
+            "L-241",
+            "L-210",
+            "L-225",
+            "L-240",
             "L-250",
             "L-220",
-            "L-236",
-            "L-251",
-            "L-226",
-            "L-241",
-            "L-205"
+            "L-255"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3889,7 +3889,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vendors.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vendors.csv",
       "format": "csv",
       "row_count": 40,
       "file_count": 1,
@@ -3910,14 +3910,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "V010",
-            "V038",
-            "V011",
             "V004",
-            "V032",
+            "V038",
+            "V029",
+            "V011",
+            "V019",
+            "V027",
             "V014",
-            "V009",
-            "V015"
+            "V035"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3933,14 +3933,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "Wexford Print Ltd",
             "Orchard Marine Group",
-            "Quartz Motors & Co",
-            "North Marine & Co",
-            "Iron Print Holdings",
-            "Mistral Outdoors Holdings",
             "Keystone Outdoors Group",
-            "Umbra Textiles Ltd",
-            "Mistral Print PLC"
+            "Delta Builders Trading",
+            "Pinnacle Electrics Group",
+            "Yarrow Pharma-Free PLC",
+            "Vector Packaging & Co",
+            "Lumen Packaging PLC"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3957,11 +3957,11 @@
           "nullable": null,
           "sample_values": [
             "AGENCY",
-            "TYRES",
-            "FUEL",
             "FACILITIES",
             "PARTS",
-            "IT"
+            "TYRES",
+            "IT",
+            "FUEL"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3978,8 +3978,8 @@
           "nullable": null,
           "sample_values": [
             "TRIAL",
-            "APPROVED",
-            "BLOCKED"
+            "BLOCKED",
+            "APPROVED"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -3999,7 +3999,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\wh_bins.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\wh_bins.csv",
       "format": "csv",
       "row_count": 200,
       "file_count": 1,
@@ -4019,14 +4019,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "B0071",
-            "B0186",
-            "B0193",
-            "B0037",
-            "B0151",
-            "B0132",
-            "B0094",
-            "B0117"
+            "B0038",
+            "B0069",
+            "B0170",
+            "B0074",
+            "B0145",
+            "B0177",
+            "B0188",
+            "B0189"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4043,13 +4043,13 @@
           "nullable": null,
           "sample_values": [
             "L-221",
-            "L-220",
-            "L-231",
-            "L-241",
-            "L-210",
-            "L-236",
+            "L-260",
+            "L-230",
+            "L-235",
+            "L-201",
             "L-240",
-            "L-255"
+            "L-206",
+            "L-231"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4106,7 +4106,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
       "format": "csv",
       "row_count": 176,
       "file_count": 1,
@@ -4130,14 +4130,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "CLM5087",
-            "CLM5029",
+            "CLM5025",
+            "CLM5102",
             "CLM5032",
+            "CLM5129",
+            "CLM5155",
             "CLM5001",
-            "CLM5112",
-            "CLM5056",
-            "CLM5139",
-            "CLM5119"
+            "CLM5036",
+            "CLM5089"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4153,14 +4153,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH101955",
-            "SH103735",
-            "SH103399",
-            "SH103442",
-            "SH100868",
-            "SH101663",
-            "SH101836",
-            "SH102626"
+            "SH103720",
+            "SH100604",
+            "SH103947",
+            "SH102221",
+            "SH103838",
+            "SH100554",
+            "SH100575",
+            "SH102452"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4176,14 +4176,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-03-20",
-            "2025-02-28",
-            "2025-01-10",
-            "2025-04-07",
-            "2025-02-01",
-            "2026-03-02",
-            "2025-04-09",
-            "2025-10-20"
+            "2026-02-08",
+            "2025-08-23",
+            "2025-04-22",
+            "2025-06-07",
+            "2026-04-29",
+            "2025-03-24",
+            "2026-02-06",
+            "2026-03-09"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4240,8 +4240,8 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "DENIED",
             "SETTLED",
+            "DENIED",
             "FILED"
           ],
           "sample_min": null,
@@ -4312,7 +4312,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\edi_messages.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\edi_messages.csv",
       "format": "csv",
       "row_count": 800,
       "file_count": 1,
@@ -4334,14 +4334,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "EDI70682",
-            "EDI70784",
-            "EDI70238",
-            "EDI70025",
-            "EDI70114",
-            "EDI70462",
-            "EDI70545",
-            "EDI70308"
+            "EDI70325",
+            "EDI70503",
+            "EDI70192",
+            "EDI70430",
+            "EDI70696",
+            "EDI70402",
+            "EDI70798",
+            "EDI70343"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4357,14 +4357,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH101924",
-            "SH104135",
-            "SH102615",
-            "SH104071",
-            "SH100403",
-            "SH100498",
-            "SH104007",
-            "SH103745"
+            "SH102516",
+            "SH102490",
+            "SH100362",
+            "SH102921",
+            "SH104147",
+            "SH102470",
+            "SH101096",
+            "SH102956"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4399,14 +4399,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-06-27 21:42",
-            "2026-03-25 09:57",
-            "2025-02-01 14:00",
-            "2025-03-11 07:56",
-            "2025-03-08 21:11",
-            "2025-08-24 18:52",
-            "2025-12-07 09:39",
-            "2025-01-18 06:04"
+            "2025-03-06 11:37",
+            "2026-04-06 14:42",
+            "2026-05-08 11:50",
+            "2025-11-19 13:20",
+            "2025-02-21 08:37",
+            "2025-10-16 13:32",
+            "2025-11-03 11:09",
+            "2026-04-14 12:08"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4422,9 +4422,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "NACK",
+            "ACK",
             "PENDING",
-            "ACK"
+            "NACK"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4458,7 +4458,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\exceptions.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\exceptions.csv",
       "format": "csv",
       "row_count": 520,
       "file_count": 1,
@@ -4480,14 +4480,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "EX20484",
-            "EX20244",
-            "EX20058",
-            "EX20166",
-            "EX20075",
-            "EX20311",
-            "EX20378",
-            "EX20363"
+            "EX20054",
+            "EX20124",
+            "EX20332",
+            "EX20486",
+            "EX20178",
+            "EX20186",
+            "EX20433",
+            "EX20434"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4503,14 +4503,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH100230",
-            "SH102123",
-            "SH103163",
-            "SH103478",
-            "SH102420",
-            "SH101586",
-            "SH103527",
-            "SH103301"
+            "SH102592",
+            "SH103684",
+            "SH103510",
+            "SH103711",
+            "SH102220",
+            "SH104025",
+            "SH103941",
+            "SH100055"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4526,14 +4526,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-05-18",
-            "2025-06-17",
-            "2025-06-03",
-            "2025-07-31",
-            "2025-03-02",
-            "2025-10-14",
-            "2025-04-21",
-            "2025-12-15"
+            "2026-02-19",
+            "2026-04-08",
+            "2025-03-10",
+            "2025-04-26",
+            "2025-10-27",
+            "2025-07-15",
+            "2025-01-16",
+            "2025-05-07"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4550,13 +4550,13 @@
           "nullable": null,
           "sample_values": [
             "X02",
-            "X01",
-            "X03",
             "X04",
-            "X08",
+            "X01",
             "X06",
-            "X05",
-            "X07"
+            "X07",
+            "X08",
+            "X03",
+            "X05"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4594,7 +4594,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
       "format": "csv",
       "row_count": 4830,
       "file_count": 1,
@@ -4622,14 +4622,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "MV703060",
-            "MV701712",
-            "MV701323",
-            "MV703740",
-            "MV703894",
-            "MV702541",
-            "MV703758",
-            "MV703062"
+            "MV701737",
+            "MV700394",
+            "MV701024",
+            "MV703508",
+            "MV704682",
+            "MV702114",
+            "MV700526",
+            "MV700437"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4645,14 +4645,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH100810",
-            "SH101563",
-            "SH103875",
-            "SH100509",
-            "SH100146",
-            "SH101244",
-            "SH100180",
-            "SH104045"
+            "SH102594",
+            "SH102747",
+            "SH100533",
+            "SH101893",
+            "SH103433",
+            "SH103339",
+            "SH103873",
+            "SH101181"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4686,14 +4686,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "L-246",
-            "L-244",
-            "L-218",
-            "L-253",
-            "L-210",
-            "L-216",
-            "L-208",
-            "L-237"
+            "L-221",
+            "L-241",
+            "L-212",
+            "L-214",
+            "L-245",
+            "L-205",
+            "L-222",
+            "L-247"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4709,14 +4709,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "L-237",
-            "L-220",
-            "L-219",
+            "L-207",
+            "L-227",
             "L-216",
-            "L-206",
-            "L-241",
-            "L-228",
-            "L-253"
+            "L-232",
+            "L-249",
+            "L-212",
+            "L-254",
+            "L-238"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4732,14 +4732,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "VIN138",
+            "VIN171",
+            "VIN199",
+            "VIN174",
             "VIN107",
-            "VIN150",
+            "VIN161",
             "VIN149",
-            "VIN169",
-            "VIN205",
-            "VIN104",
-            "VIN108",
-            "VIN183"
+            "VIN177"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4755,14 +4755,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "D3098",
-            "D3067",
-            "D3005",
-            "D3020",
-            "D3066",
-            "D3094",
-            "D3060",
-            "D3077"
+            "D3106",
+            "D3008",
+            "D3052",
+            "D3087",
+            "D3028",
+            "D3092",
+            "D3021",
+            "D3042"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4778,14 +4778,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-11-23 15:35",
-            "2025-11-21 06:54",
-            "2025-12-14 07:07",
-            "2025-06-11 09:06",
-            "2025-12-28 10:03",
-            "2025-09-03 21:36",
-            "2026-05-03 07:20",
-            "2025-09-05 18:51"
+            "2025-09-08 13:48",
+            "2025-03-08 11:39",
+            "2025-11-19 17:23",
+            "2025-02-07 10:51",
+            "2025-05-14 13:40",
+            "2026-01-22 10:23",
+            "2025-04-10 15:24",
+            "2025-08-04 19:20"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4801,14 +4801,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2026-03-09 15:08",
-            "2025-10-25 19:03",
-            "2025-11-28 08:34",
-            "2025-08-17 19:52",
-            "2026-01-28 19:24",
-            "2025-06-03 18:54",
-            "2026-05-19 15:16",
-            "2025-07-10 17:55"
+            "2025-04-12 16:02",
+            "2025-11-12 13:51",
+            "2025-12-25 16:04",
+            "2025-01-21 06:23",
+            "2025-04-30 18:57",
+            "2025-11-01 08:48",
+            "2026-04-26 14:58",
+            "2025-07-05 07:34"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4896,7 +4896,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pickup_requests.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pickup_requests.csv",
       "format": "csv",
       "row_count": 640,
       "file_count": 1,
@@ -4919,14 +4919,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "PU50480",
-            "PU50275",
-            "PU50557",
-            "PU50246",
-            "PU50607",
-            "PU50621",
-            "PU50032",
-            "PU50604"
+            "PU50466",
+            "PU50130",
+            "PU50153",
+            "PU50329",
+            "PU50533",
+            "PU50223",
+            "PU50044",
+            "PU50248"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4942,14 +4942,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "P-1070",
-            "P-1138",
-            "P-1133",
-            "P-1201",
-            "P-1190",
-            "P-1215",
+            "P-1076",
+            "P-1055",
+            "P-1001",
+            "P-1164",
+            "P-1155",
             "P-1223",
-            "P-1010"
+            "P-1204",
+            "P-1177"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4965,14 +4965,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-11-26",
-            "2025-02-02",
-            "2025-02-06",
-            "2025-08-12",
-            "2026-04-02",
-            "2025-11-25",
-            "2026-03-27",
-            "2025-03-10"
+            "2025-05-16",
+            "2025-10-01",
+            "2025-09-11",
+            "2025-01-29",
+            "2025-12-22",
+            "2025-04-29",
+            "2025-11-08",
+            "2025-02-02"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -4988,11 +4988,11 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "11:00",
             "10:00",
-            "07:00",
             "08:00",
-            "09:00",
-            "11:00"
+            "07:00",
+            "09:00"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5008,12 +5008,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "17:00",
             "16:00",
-            "14:00",
             "13:00",
+            "18:00",
+            "17:00",
             "15:00",
-            "18:00"
+            "14:00"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5029,9 +5029,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "FULFILLED",
             "CANCELLED",
-            "MISSED",
-            "FULFILLED"
+            "MISSED"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5051,7 +5051,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pod_scans.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pod_scans.csv",
       "format": "csv",
       "row_count": 3427,
       "file_count": 1,
@@ -5073,14 +5073,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "POD41570",
-            "POD41684",
-            "POD41662",
-            "POD41228",
-            "POD41670",
-            "POD41610",
-            "POD42166",
-            "POD42493"
+            "POD42182",
+            "POD42847",
+            "POD42138",
+            "POD41619",
+            "POD42465",
+            "POD43243",
+            "POD43263",
+            "POD42644"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5096,14 +5096,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH103223",
-            "SH101590",
-            "SH101538",
-            "SH101887",
-            "SH102616",
-            "SH102768",
-            "SH100174",
-            "SH102827"
+            "SH100562",
+            "SH102111",
+            "SH103383",
+            "SH103509",
+            "SH100832",
+            "SH103618",
+            "SH103843",
+            "SH103713"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5119,14 +5119,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-04-13 20:13",
-            "2025-03-18 11:59",
-            "2026-02-22 18:48",
-            "2025-05-13 08:36",
-            "2026-05-20 19:29",
-            "2025-07-19 18:13",
-            "2025-05-16 19:02",
-            "2025-05-03 16:38"
+            "2025-06-20 12:18",
+            "2026-01-29 09:19",
+            "2025-05-07 09:48",
+            "2025-06-21 18:22",
+            "2026-03-17 14:00",
+            "2025-02-04 15:34",
+            "2025-02-14 16:31",
+            "2026-04-08 13:19"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5142,14 +5142,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "L-204",
-            "L-233",
+            "L-217",
             "L-234",
+            "L-231",
+            "L-241",
+            "L-215",
+            "L-214",
             "L-246",
-            "L-251",
-            "L-259",
-            "L-229",
-            "L-206"
+            "L-244"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5165,14 +5165,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Ines Riva",
-            "Katya Petrov",
-            "Carmen Riva",
-            "Elena Fuentes",
-            "Aisha Eriksen",
-            "Rosa Dvorak",
-            "Lars Kovacs",
-            "Elena Adler"
+            "Omar Costa",
+            "Nadia Fuentes",
+            "Hamid Marek",
+            "Boris Gallo",
+            "Stefan Gallo",
+            "Tomas Iqbal",
+            "Boris Kovacs",
+            "Rosa Okafor"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5192,7 +5192,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\returns.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\returns.csv",
       "format": "csv",
       "row_count": 190,
       "file_count": 1,
@@ -5214,14 +5214,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "RT6172",
-            "RT6177",
-            "RT6178",
-            "RT6071",
-            "RT6011",
-            "RT6054",
-            "RT6059",
-            "RT6093"
+            "RT6121",
+            "RT6163",
+            "RT6053",
+            "RT6044",
+            "RT6116",
+            "RT6086",
+            "RT6136",
+            "RT6031"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5237,14 +5237,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH102200",
-            "SH103994",
-            "SH100050",
-            "SH102754",
+            "SH101219",
             "SH100766",
-            "SH102737",
-            "SH100022",
-            "SH104149"
+            "SH100057",
+            "SH102426",
+            "SH103179",
+            "SH103224",
+            "SH102365",
+            "SH101197"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5260,14 +5260,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-11-01",
-            "2025-04-02",
-            "2025-12-07",
-            "2026-01-29",
+            "2026-02-24",
             "2025-10-08",
-            "2025-09-29",
-            "2025-12-29",
-            "2025-05-23"
+            "2025-08-04",
+            "2026-01-05",
+            "2025-03-07",
+            "2025-05-05",
+            "2025-05-15",
+            "2026-03-09"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5283,11 +5283,11 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "RR5",
+            "RR4",
             "RR2",
             "RR3",
-            "RR1",
-            "RR4",
-            "RR5"
+            "RR1"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5303,9 +5303,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "RECEIVED",
             "REFUSED",
-            "IN_TRANSIT"
+            "IN_TRANSIT",
+            "RECEIVED"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5325,7 +5325,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
       "format": "csv",
       "row_count": 4200,
       "file_count": 1,
@@ -5357,14 +5357,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH101650",
-            "SH104153",
-            "SH100185",
-            "SH102108",
-            "SH100631",
-            "SH102361",
-            "SH103901",
-            "SH102064"
+            "SH103750",
+            "SH104016",
+            "SH103405",
+            "SH102329",
+            "SH104005",
+            "SH104025",
+            "SH101016",
+            "SH103372"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5380,14 +5380,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-03-26",
-            "2026-03-30",
-            "2025-11-18",
-            "2026-03-29",
-            "2025-12-29",
-            "2025-06-30",
-            "2026-02-04",
-            "2026-02-20"
+            "2025-05-30",
+            "2026-01-18",
+            "2025-09-24",
+            "2026-01-16",
+            "2025-09-19",
+            "2025-07-19",
+            "2025-03-21",
+            "2025-07-20"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5403,14 +5403,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "P-1046",
-            "P-1236",
-            "P-1190",
-            "P-1144",
-            "P-1065",
-            "P-1128",
-            "P-1123",
-            "P-1109"
+            "P-1130",
+            "P-1139",
+            "P-1034",
+            "P-1134",
+            "P-1044",
+            "P-1119",
+            "P-1184",
+            "P-1020"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5427,9 +5427,9 @@
           "nullable": null,
           "sample_values": [
             "SVC1",
-            "SVC2",
             "SVC6",
             "SVC5",
+            "SVC2",
             "SVC4",
             "SVC3"
           ],
@@ -5447,13 +5447,13 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "GRYP",
-            "FNCH",
-            "BLTC",
             "CDRX",
-            "EGRT",
+            "ARRW",
+            "BLTC",
             "DNUB",
-            "ARRW"
+            "EGRT",
+            "FNCH",
+            "GRYP"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5469,14 +5469,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "L-246",
-            "L-258",
-            "L-229",
-            "L-226",
-            "L-256",
-            "L-260",
-            "L-210",
-            "L-201"
+            "L-209",
+            "L-251",
+            "L-240",
+            "L-227",
+            "L-249",
+            "L-202",
+            "L-216",
+            "L-203"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5492,14 +5492,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "L-256",
-            "L-246",
-            "L-202",
-            "L-251",
-            "L-209",
-            "L-242",
-            "L-260",
-            "L-233"
+            "L-215",
+            "L-214",
+            "L-222",
+            "L-226",
+            "L-253",
+            "L-255",
+            "L-203",
+            "L-212"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5515,14 +5515,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-04-14 10:34",
+            "2026-01-22 11:24",
             "2026-03-15 20:40",
-            "2025-05-02 10:36",
-            "2025-04-05 09:25",
-            "2025-09-20 15:49",
-            "2025-11-17 13:51",
-            "2025-12-24 08:30",
-            "2025-10-31 17:15"
+            "2025-04-10 15:52",
+            "2025-04-28 09:56",
+            "2025-03-22 14:32",
+            "2025-12-23 18:25",
+            "2025-12-15 11:45",
+            "2026-04-08 13:55"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5538,14 +5538,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-01-17 20:18",
-            "2026-03-15 08:14",
-            "2025-05-22 14:04",
-            "2026-02-18 12:00",
-            "2026-05-08 17:53",
-            "2025-03-12 07:32",
-            "2025-06-25 18:17",
-            "2025-02-22 11:03"
+            "2026-04-18 20:44",
+            "2025-06-24 21:10",
+            "2025-03-31 06:24",
+            "2025-10-16 17:57",
+            "2025-04-01 09:52",
+            "2025-01-25 17:08",
+            "2025-01-10 18:00",
+            "2025-08-15 06:23"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5584,8 +5584,8 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "LB",
-            "KG"
+            "KG",
+            "LB"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5664,9 +5664,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "BOOKED",
-            "IN_TRANSIT",
             "DELIVERED",
+            "IN_TRANSIT",
+            "BOOKED",
             "CANCELLED"
           ],
           "sample_min": null,
@@ -5727,7 +5727,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\temperature_logs.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\temperature_logs.csv",
       "format": "csv",
       "row_count": 260,
       "file_count": 1,
@@ -5748,14 +5748,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "TL00135",
-            "TL00230",
-            "TL00014",
-            "TL00071",
-            "TL00218",
-            "TL00214",
-            "TL00097",
-            "TL00233"
+            "TL00205",
+            "TL00165",
+            "TL00106",
+            "TL00207",
+            "TL00220",
+            "TL00042",
+            "TL00256",
+            "TL00085"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5771,14 +5771,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH100149",
-            "SH102332",
-            "SH100575",
-            "SH102376",
-            "SH100380",
-            "SH102948",
-            "SH102087",
-            "SH103416"
+            "SH102514",
+            "SH101178",
+            "SH100852",
+            "SH102661",
+            "SH102375",
+            "SH103020",
+            "SH103274",
+            "SH101566"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5794,14 +5794,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-01-05 06:42",
-            "2025-09-10 16:02",
-            "2025-03-06 13:06",
-            "2025-03-28 13:47",
-            "2026-05-18 06:02",
-            "2025-04-30 17:04",
+            "2025-09-17 11:35",
+            "2025-01-17 13:33",
+            "2025-05-08 19:14",
             "2025-03-24 12:56",
-            "2025-12-17 20:57"
+            "2026-01-27 13:39",
+            "2025-03-31 10:28",
+            "2026-01-23 11:35",
+            "2026-03-14 20:25"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5858,7 +5858,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\people\\driver_infringements.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\driver_infringements.csv",
       "format": "csv",
       "row_count": 120,
       "file_count": 1,
@@ -5880,14 +5880,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "DI0097",
-            "DI0024",
-            "DI0043",
-            "DI0076",
-            "DI0019",
-            "DI0075",
-            "DI0049",
-            "DI0063"
+            "DI0081",
+            "DI0088",
+            "DI0021",
+            "DI0038",
+            "DI0095",
+            "DI0014",
+            "DI0120",
+            "DI0048"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5903,14 +5903,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "D3119",
-            "D3013",
-            "D3062",
-            "D3052",
-            "D3094",
-            "D3108",
+            "D3097",
+            "D3007",
+            "D3079",
             "D3112",
-            "D3098"
+            "D3004",
+            "D3014",
+            "D3053",
+            "D3043"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5926,14 +5926,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-04-11",
-            "2025-04-24",
-            "2025-05-30",
-            "2025-04-06",
+            "2025-10-18",
             "2026-04-07",
-            "2025-10-29",
-            "2025-11-15",
-            "2025-01-16"
+            "2026-01-02",
+            "2025-09-01",
+            "2025-04-19",
+            "2026-03-23",
+            "2025-04-25",
+            "2026-05-28"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -5949,9 +5949,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "SPEED",
             "WALKAROUND",
             "TACHO",
-            "SPEED",
             "HOURS"
           ],
           "sample_min": null,
@@ -6007,7 +6007,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
       "format": "csv",
       "row_count": 1100,
       "file_count": 1,
@@ -6029,14 +6029,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "TS00481",
-            "TS00375",
-            "TS00080",
-            "TS00865",
-            "TS00312",
-            "TS00046",
-            "TS00986",
-            "TS01021"
+            "TS01026",
+            "TS00460",
+            "TS00619",
+            "TS00942",
+            "TS00030",
+            "TS00110",
+            "TS00658",
+            "TS00395"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6052,14 +6052,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "E562",
-            "E634",
-            "E598",
-            "E595",
-            "E549",
-            "E530",
-            "E546",
-            "E594"
+            "E535",
+            "E589",
+            "E551",
+            "E557",
+            "E592",
+            "E501",
+            "E512",
+            "E588"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6075,14 +6075,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2026-05-13",
-            "2025-10-03",
-            "2025-12-31",
-            "2025-10-27",
-            "2025-09-25",
-            "2026-02-16",
-            "2025-11-28",
-            "2025-02-07"
+            "2025-11-13",
+            "2025-03-01",
+            "2026-04-12",
+            "2025-01-03",
+            "2026-01-19",
+            "2026-03-11",
+            "2025-12-27",
+            "2025-04-11"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6098,10 +6098,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH4",
-            "SH3",
+            "SH2",
             "SH1",
-            "SH2"
+            "SH4",
+            "SH3"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6158,7 +6158,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\contracts.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\contracts.csv",
       "format": "csv",
       "row_count": 95,
       "file_count": 1,
@@ -6181,14 +6181,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "CTR0050",
-            "CTR0082",
-            "CTR0086",
-            "CTR0090",
-            "CTR0018",
-            "CTR0035",
-            "CTR0005",
-            "CTR0043"
+            "CTR0051",
+            "CTR0044",
+            "CTR0065",
+            "CTR0059",
+            "CTR0063",
+            "CTR0029",
+            "CTR0022",
+            "CTR0083"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6204,14 +6204,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "P-1129",
-            "P-1205",
-            "P-1073",
+            "P-1176",
+            "P-1092",
+            "P-1175",
+            "P-1152",
             "P-1103",
-            "P-1063",
             "P-1035",
-            "P-1010",
-            "P-1009"
+            "P-1100",
+            "P-1153"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6227,14 +6227,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2024-09-24",
-            "2024-05-11",
-            "2024-10-13",
-            "2024-02-04",
-            "2024-07-23",
-            "2024-04-13",
-            "2024-07-27",
-            "2025-03-21"
+            "2024-07-20",
+            "2024-04-09",
+            "2024-06-15",
+            "2025-04-26",
+            "2024-06-21",
+            "2025-02-05",
+            "2024-09-16",
+            "2024-10-13"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6250,14 +6250,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-09-05",
-            "2026-08-26",
+            "2025-06-23",
+            "2025-01-04",
+            "2025-09-24",
+            "2025-03-28",
             "2026-06-02",
-            "2026-05-06",
-            "2026-08-03",
-            "2025-10-29",
-            "2025-06-26",
-            "2025-08-18"
+            "2025-05-21",
+            "2025-07-25",
+            "2025-05-26"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6273,8 +6273,8 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "DRAFT",
             "LIVE",
+            "DRAFT",
             "EXPIRED"
           ],
           "sample_min": null,
@@ -6332,7 +6332,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\fuel_prices.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\fuel_prices.csv",
       "format": "csv",
       "row_count": 74,
       "file_count": 1,
@@ -6351,14 +6351,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-02-12",
-            "2026-01-14",
-            "2026-01-21",
-            "2025-04-23",
+            "2026-05-06",
+            "2025-03-05",
+            "2025-11-05",
+            "2025-11-12",
             "2025-12-03",
-            "2025-12-24",
-            "2025-02-19",
-            "2025-02-26"
+            "2026-03-25",
+            "2025-02-12",
+            "2026-05-13"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6415,7 +6415,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\quotes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\quotes.csv",
       "format": "csv",
       "row_count": 700,
       "file_count": 1,
@@ -6438,14 +6438,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Q80584",
-            "Q80141",
-            "Q80349",
-            "Q80274",
-            "Q80585",
-            "Q80224",
-            "Q80292",
-            "Q80466"
+            "Q80433",
+            "Q80511",
+            "Q80313",
+            "Q80661",
+            "Q80291",
+            "Q80017",
+            "Q80300",
+            "Q80381"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6461,14 +6461,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "P-1167",
-            "P-1171",
-            "P-1142",
-            "P-1220",
-            "P-1117",
-            "P-1193",
-            "P-1217",
-            "P-1033"
+            "P-1141",
+            "P-1022",
+            "P-1162",
+            "P-1206",
+            "P-1010",
+            "P-1111",
+            "P-1229",
+            "P-1115"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6484,14 +6484,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-03-11",
-            "2025-05-29",
-            "2025-06-22",
-            "2025-08-04",
-            "2026-01-10",
-            "2025-05-30",
-            "2025-12-14",
-            "2025-08-21"
+            "2025-09-17",
+            "2026-05-16",
+            "2026-02-02",
+            "2026-04-12",
+            "2025-09-18",
+            "2026-01-12",
+            "2025-03-29",
+            "2026-03-27"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6507,14 +6507,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "LN0015",
-            "LN0145",
-            "LN0003",
-            "LN0049",
-            "LN0146",
-            "LN0001",
-            "LN0091",
-            "LN0030"
+            "LN0020",
+            "LN0105",
+            "LN0047",
+            "LN0067",
+            "LN0134",
+            "LN0130",
+            "LN0006",
+            "LN0069"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6588,7 +6588,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\rate_cards.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\rate_cards.csv",
       "format": "csv",
       "row_count": 130,
       "file_count": 1,
@@ -6611,14 +6611,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "RC0063",
-            "RC0077",
-            "RC0123",
-            "RC0065",
-            "RC0064",
-            "RC0007",
-            "RC0066",
-            "RC0100"
+            "RC0084",
+            "RC0068",
+            "RC0060",
+            "RC0038",
+            "RC0014",
+            "RC0109",
+            "RC0074",
+            "RC0049"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6634,14 +6634,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "P-1016",
-            "P-1171",
-            "P-1123",
-            "P-1132",
-            "P-1113",
-            "P-1157",
-            "P-1073",
-            "P-1052"
+            "P-1037",
+            "P-1098",
+            "P-1088",
+            "P-1028",
+            "P-1164",
+            "P-1114",
+            "P-1204",
+            "P-1004"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6657,12 +6657,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SVC2",
-            "SVC1",
-            "SVC3",
-            "SVC6",
             "SVC4",
-            "SVC5"
+            "SVC6",
+            "SVC1",
+            "SVC5",
+            "SVC2",
+            "SVC3"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6701,14 +6701,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2024-11-11",
-            "2024-12-11",
-            "2024-06-01",
-            "2025-03-19",
-            "2024-08-16",
-            "2024-08-10",
-            "2025-05-26",
-            "2024-08-06"
+            "2024-09-18",
+            "2024-09-17",
+            "2025-09-16",
+            "2025-05-01",
+            "2025-06-18",
+            "2025-01-25",
+            "2025-11-23",
+            "2025-10-23"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6724,14 +6724,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2025-03-04",
+            "2027-06-22",
+            "2025-10-14",
+            "2026-01-18",
             "2025-04-05",
-            "2027-08-07",
-            "2026-08-30",
-            "2026-11-14",
-            "2025-12-19",
+            "2027-09-14",
+            "2025-06-12",
             "2027-07-03",
-            "2025-09-15"
+            "2027-06-21"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6765,7 +6765,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
       "format": "csv",
       "row_count": 180,
       "file_count": 1,
@@ -6789,14 +6789,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "T0018",
-            "T0052",
-            "T0074",
-            "T0096",
-            "T0087",
-            "T0035",
-            "T0051",
-            "T0156"
+            "T0173",
+            "T0012",
+            "T0036",
+            "T0061",
+            "T0027",
+            "T0053",
+            "T0165",
+            "T0146"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6812,12 +6812,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SVC2",
-            "SVC1",
             "SVC4",
             "SVC6",
+            "SVC2",
             "SVC5",
-            "SVC3"
+            "SVC3",
+            "SVC1"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6833,14 +6833,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Z01",
-            "Z10",
-            "Z06",
             "Z12",
-            "Z03",
-            "Z04",
-            "Z02",
-            "Z07"
+            "Z07",
+            "Z08",
+            "Z05",
+            "Z06",
+            "Z01",
+            "Z11",
+            "Z02"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6857,13 +6857,13 @@
           "nullable": null,
           "sample_values": [
             "Z11",
+            "Z07",
+            "Z09",
+            "Z12",
             "Z04",
-            "Z08",
+            "Z05",
             "Z10",
-            "Z06",
-            "Z03",
-            "Z01",
-            "Z12"
+            "Z01"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6925,14 +6925,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "2024-12-05",
-            "2024-01-12",
-            "2024-06-29",
-            "2024-09-05",
-            "2024-07-28",
-            "2024-07-23",
-            "2025-08-16",
-            "2025-06-13"
+            "2024-08-16",
+            "2024-03-19",
+            "2024-01-23",
+            "2025-05-14",
+            "2024-06-01",
+            "2025-02-03",
+            "2024-10-04",
+            "2025-12-25"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -6979,7 +6979,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\commodity_codes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\commodity_codes.csv",
       "format": "csv",
       "row_count": 10,
       "file_count": 1,
@@ -6999,14 +6999,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "C005",
-            "C006",
             "C007",
+            "C003",
+            "C006",
+            "C002",
             "C009",
             "C001",
-            "C004",
-            "C003",
-            "C002"
+            "C005",
+            "C008"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7022,14 +7022,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Apparel",
-            "Batteries",
-            "Electronics",
-            "Print media",
-            "Furniture",
-            "Paints",
             "Aerosols",
-            "Auto parts"
+            "Print media",
+            "Paints",
+            "Chilled food",
+            "Batteries",
+            "Apparel",
+            "Furniture",
+            "Dry food"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7045,8 +7045,8 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Y",
-            "N"
+            "N",
+            "Y"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7066,7 +7066,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\countries.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\countries.csv",
       "format": "csv",
       "row_count": 6,
       "file_count": 1,
@@ -7085,12 +7085,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "DE",
-            "NL",
+            "GB",
             "FR",
+            "NL",
+            "DE",
             "BE",
-            "IE",
-            "GB"
+            "IE"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7106,12 +7106,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "France",
-            "Belgium",
-            "Germany",
-            "Netherlands",
             "United Kingdom",
-            "Ireland"
+            "Ireland",
+            "France",
+            "Netherlands",
+            "Germany",
+            "Belgium"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7131,7 +7131,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\currencies.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\currencies.csv",
       "format": "csv",
       "row_count": 3,
       "file_count": 1,
@@ -7150,9 +7150,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "EUR",
             "GBP",
-            "USD"
+            "USD",
+            "EUR"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7168,9 +7168,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "Pound Sterling",
             "US Dollar",
-            "Euro",
-            "Pound Sterling"
+            "Euro"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7190,7 +7190,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\exception_codes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\exception_codes.csv",
       "format": "csv",
       "row_count": 8,
       "file_count": 1,
@@ -7210,14 +7210,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "X05",
-            "X02",
-            "X01",
-            "X04",
             "X03",
-            "X06",
             "X07",
-            "X08"
+            "X02",
+            "X08",
+            "X04",
+            "X06",
+            "X01",
+            "X05"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7233,13 +7233,13 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Customs hold",
-            "Damaged in handling",
-            "Vehicle breakdown",
-            "Refused at door",
             "Address query",
+            "Damaged in handling",
             "Label unreadable",
             "Missed linehaul",
+            "Refused at door",
+            "Customs hold",
+            "Vehicle breakdown",
             "Weather hold"
           ],
           "sample_min": null,
@@ -7256,9 +7256,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "MED",
+            "LOW",
             "HIGH",
-            "LOW"
+            "MED"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7278,7 +7278,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
       "format": "csv",
       "row_count": 148,
       "file_count": 1,
@@ -7299,13 +7299,13 @@
           "nullable": null,
           "sample_values": [
             "2026-02-04",
-            "2025-05-28",
-            "2026-03-04",
-            "2025-07-23",
-            "2025-06-11",
+            "2025-11-05",
+            "2026-04-15",
+            "2026-03-25",
+            "2025-01-01",
+            "2025-02-19",
             "2025-06-18",
-            "2026-05-20",
-            "2026-04-01"
+            "2025-10-01"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7321,8 +7321,8 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "EUR",
-            "USD"
+            "USD",
+            "EUR"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7379,7 +7379,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\holidays.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\holidays.csv",
       "format": "csv",
       "row_count": 8,
       "file_count": 1,
@@ -7400,13 +7400,13 @@
           "nullable": null,
           "sample_values": [
             "2025-03-17",
-            "2025-12-25",
-            "2025-05-05",
             "2025-01-01",
+            "2025-12-26",
+            "2025-05-05",
+            "2025-12-25",
             "2025-04-18",
             "2026-01-01",
-            "2026-04-03",
-            "2025-12-26"
+            "2026-04-03"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7422,12 +7422,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Good Friday",
-            "St Patrick",
             "May Day",
-            "Boxing Day",
+            "Christmas",
             "New Year",
-            "Christmas"
+            "Good Friday",
+            "Boxing Day",
+            "St Patrick"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7443,8 +7443,8 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "GB",
-            "IE"
+            "IE",
+            "GB"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7464,7 +7464,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\packaging_types.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\packaging_types.csv",
       "format": "csv",
       "row_count": 6,
       "file_count": 1,
@@ -7484,12 +7484,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "PKG2",
-            "PKG1",
-            "PKG6",
-            "PKG5",
             "PKG4",
-            "PKG3"
+            "PKG6",
+            "PKG1",
+            "PKG2",
+            "PKG3",
+            "PKG5"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7505,12 +7505,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Crate",
             "Drum",
-            "Roll cage",
             "Carton",
-            "Euro pallet",
-            "Half pallet"
+            "Half pallet",
+            "Crate",
+            "Roll cage",
+            "Euro pallet"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7565,7 +7565,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\regions.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\regions.csv",
       "format": "csv",
       "row_count": 6,
       "file_count": 1,
@@ -7584,12 +7584,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "R1",
-            "R5",
-            "R6",
-            "R4",
             "R2",
-            "R3"
+            "R1",
+            "R4",
+            "R3",
+            "R5",
+            "R6"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7605,12 +7605,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Scotland",
             "Wales",
+            "South West",
+            "Scotland",
             "North",
-            "South East",
             "Midlands",
-            "South West"
+            "South East"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7630,7 +7630,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\return_reasons.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\return_reasons.csv",
       "format": "csv",
       "row_count": 5,
       "file_count": 1,
@@ -7651,9 +7651,9 @@
           "sample_values": [
             "RR2",
             "RR4",
-            "RR3",
             "RR5",
-            "RR1"
+            "RR1",
+            "RR3"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7669,9 +7669,9 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "Wrong item shipped",
             "Refused delivery",
             "Duplicate shipment",
-            "Wrong item shipped",
             "Damaged on arrival",
             "Order cancelled"
           ],
@@ -7693,7 +7693,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
       "format": "csv",
       "row_count": 4,
       "file_count": 1,
@@ -7714,10 +7714,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "SH2",
-            "SH1",
             "SH3",
-            "SH4"
+            "SH4",
+            "SH2",
+            "SH1"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7733,10 +7733,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Night trunk",
             "Weekend",
-            "Early",
-            "Late"
+            "Night trunk",
+            "Late",
+            "Early"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7752,10 +7752,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "06:00",
-            "14:00",
             "08:00",
-            "22:00"
+            "22:00",
+            "14:00",
+            "06:00"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7772,9 +7772,9 @@
           "nullable": null,
           "sample_values": [
             "22:00",
-            "18:00",
             "06:00",
-            "14:00"
+            "14:00",
+            "18:00"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7794,7 +7794,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\surcharge_types.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\surcharge_types.csv",
       "format": "csv",
       "row_count": 6,
       "file_count": 1,
@@ -7814,12 +7814,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "S-FUEL",
-            "S-WAIT",
-            "S-LIFT",
             "S-REWT",
+            "S-FUEL",
             "S-RES",
-            "S-ADR"
+            "S-ADR",
+            "S-LIFT",
+            "S-WAIT"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7835,12 +7835,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Reweigh correction",
-            "Hazardous handling",
-            "Fuel surcharge",
-            "Tail-lift",
             "Residential delivery",
-            "Waiting time"
+            "Fuel surcharge",
+            "Waiting time",
+            "Tail-lift",
+            "Reweigh correction",
+            "Hazardous handling"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7856,10 +7856,10 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "PCT_OF_BASE",
-            "DELTA",
             "FLAT",
-            "PER_15MIN"
+            "PCT_OF_BASE",
+            "PER_15MIN",
+            "DELTA"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7879,7 +7879,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\vehicle_classes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\vehicle_classes.csv",
       "format": "csv",
       "row_count": 5,
       "file_count": 1,
@@ -7899,11 +7899,11 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
+            "VC5",
             "VC3",
             "VC4",
-            "VC2",
             "VC1",
-            "VC5"
+            "VC2"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7919,11 +7919,11 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Luton van",
             "7.5t rigid",
+            "Luton van",
+            "Small van",
             "18t rigid",
-            "Artic 44t",
-            "Small van"
+            "Artic 44t"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -7977,7 +7977,7 @@
       "resource_expensive_checks": true
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\zones.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\zones.csv",
       "format": "csv",
       "row_count": 12,
       "file_count": 1,
@@ -7997,14 +7997,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Z09",
-            "Z10",
-            "Z01",
-            "Z12",
+            "Z11",
+            "Z02",
+            "Z04",
+            "Z06",
             "Z07",
-            "Z03",
-            "Z05",
-            "Z04"
+            "Z08",
+            "Z09",
+            "Z10"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -8020,14 +8020,14 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "Zone 01",
-            "Zone 08",
+            "Zone 07",
+            "Zone 02",
+            "Zone 03",
             "Zone 09",
-            "Zone 04",
-            "Zone 10",
+            "Zone 12",
             "Zone 05",
-            "Zone 11",
-            "Zone 12"
+            "Zone 01",
+            "Zone 08"
           ],
           "sample_min": null,
           "sample_max": null,
@@ -8043,12 +8043,12 @@
           "dtype": "String",
           "nullable": null,
           "sample_values": [
-            "R2",
             "R4",
+            "R2",
             "R3",
+            "R6",
             "R1",
-            "R5",
-            "R6"
+            "R5"
           ],
           "sample_min": null,
           "sample_max": null,

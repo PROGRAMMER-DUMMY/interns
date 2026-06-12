@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\complaints.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\complaints.csv",
   "format": "csv",
   "row_count": 260,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CP0063",
-        "CP0145",
-        "CP0033",
-        "CP0027",
-        "CP0073",
-        "CP0232",
-        "CP0087",
-        "CP0244"
+        "CP0156",
+        "CP0174",
+        "CP0140",
+        "CP0094",
+        "CP0114",
+        "CP0053",
+        "CP0178",
+        "CP0226"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1208",
-        "P-1148",
-        "P-1039",
-        "P-1113",
-        "P-1198",
+        "P-1029",
+        "P-1177",
+        "P-1055",
+        "P-1072",
         "P-1108",
-        "P-1045",
-        "P-1041"
+        "P-1223",
+        "P-1156",
+        "P-1046"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-05-02",
-        "2025-11-18",
-        "2025-01-21",
-        "2025-10-09",
-        "2025-11-26",
-        "2025-05-21",
-        "2026-01-21",
-        "2025-04-09"
+        "2025-12-26",
+        "2026-04-02",
+        "2025-03-28",
+        "2025-11-17",
+        "2026-05-15",
+        "2025-07-16",
+        "2026-05-30",
+        "2026-01-06"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -90,9 +90,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "EMAIL",
+        "PHONE",
         "PORTAL",
-        "PHONE"
+        "EMAIL"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -108,9 +108,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "WORKING",
+        "CLOSED",
         "NEW",
-        "CLOSED"
+        "WORKING"
       ],
       "sample_min": null,
       "sample_max": null,

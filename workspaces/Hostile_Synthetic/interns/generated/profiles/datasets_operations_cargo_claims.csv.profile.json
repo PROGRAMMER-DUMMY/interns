@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
   "format": "csv",
   "row_count": 176,
   "file_count": 1,
@@ -23,14 +23,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CLM5087",
-        "CLM5029",
+        "CLM5025",
+        "CLM5102",
         "CLM5032",
+        "CLM5129",
+        "CLM5155",
         "CLM5001",
-        "CLM5112",
-        "CLM5056",
-        "CLM5139",
-        "CLM5119"
+        "CLM5036",
+        "CLM5089"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -46,14 +46,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH101955",
-        "SH103735",
-        "SH103399",
-        "SH103442",
-        "SH100868",
-        "SH101663",
-        "SH101836",
-        "SH102626"
+        "SH103720",
+        "SH100604",
+        "SH103947",
+        "SH102221",
+        "SH103838",
+        "SH100554",
+        "SH100575",
+        "SH102452"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -69,14 +69,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-03-20",
-        "2025-02-28",
-        "2025-01-10",
-        "2025-04-07",
-        "2025-02-01",
-        "2026-03-02",
-        "2025-04-09",
-        "2025-10-20"
+        "2026-02-08",
+        "2025-08-23",
+        "2025-04-22",
+        "2025-06-07",
+        "2026-04-29",
+        "2025-03-24",
+        "2026-02-06",
+        "2026-03-09"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -133,8 +133,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "DENIED",
         "SETTLED",
+        "DENIED",
         "FILED"
       ],
       "sample_min": null,

@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\surcharge_types.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\surcharge_types.csv",
   "format": "csv",
   "row_count": 6,
   "file_count": 1,
@@ -19,12 +19,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "S-FUEL",
-        "S-WAIT",
-        "S-LIFT",
         "S-REWT",
+        "S-FUEL",
         "S-RES",
-        "S-ADR"
+        "S-ADR",
+        "S-LIFT",
+        "S-WAIT"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -40,12 +40,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Reweigh correction",
-        "Hazardous handling",
-        "Fuel surcharge",
-        "Tail-lift",
         "Residential delivery",
-        "Waiting time"
+        "Fuel surcharge",
+        "Waiting time",
+        "Tail-lift",
+        "Reweigh correction",
+        "Hazardous handling"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -61,10 +61,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "PCT_OF_BASE",
-        "DELTA",
         "FLAT",
-        "PER_15MIN"
+        "PCT_OF_BASE",
+        "PER_15MIN",
+        "DELTA"
       ],
       "sample_min": null,
       "sample_max": null,

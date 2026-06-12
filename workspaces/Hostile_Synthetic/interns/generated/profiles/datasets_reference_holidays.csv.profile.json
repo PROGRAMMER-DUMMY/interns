@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\holidays.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\holidays.csv",
   "format": "csv",
   "row_count": 8,
   "file_count": 1,
@@ -20,13 +20,13 @@
       "nullable": null,
       "sample_values": [
         "2025-03-17",
-        "2025-12-25",
-        "2025-05-05",
         "2025-01-01",
+        "2025-12-26",
+        "2025-05-05",
+        "2025-12-25",
         "2025-04-18",
         "2026-01-01",
-        "2026-04-03",
-        "2025-12-26"
+        "2026-04-03"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -42,12 +42,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Good Friday",
-        "St Patrick",
         "May Day",
-        "Boxing Day",
+        "Christmas",
         "New Year",
-        "Christmas"
+        "Good Friday",
+        "Boxing Day",
+        "St Patrick"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -63,8 +63,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "GB",
-        "IE"
+        "IE",
+        "GB"
       ],
       "sample_min": null,
       "sample_max": null,

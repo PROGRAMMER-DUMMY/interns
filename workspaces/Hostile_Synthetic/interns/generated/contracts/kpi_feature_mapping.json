@@ -4,7 +4,7 @@
   "generated_by": "resolve-kpi-features",
   "workspace": "workspaces/Hostile_Synthetic",
   "mode": "candidate_enriched",
-  "generated_at": "2026-06-12T04:06:30.208937+00:00",
+  "generated_at": "2026-06-12T09:03:55.743828+00:00",
   "derived_feature_evidence_contract": {
     "version": 1,
     "required_fields": [
@@ -42,10 +42,150 @@
       "metric": "",
       "cuts": "",
       "status": "blocked_questions_pending",
-      "features": [],
+      "features": [
+        {
+          "feature": "KPI definition",
+          "state": "blocked_missing_evidence",
+          "resolution_type": "kpi_definition_required",
+          "source_columns": [],
+          "grain": "undefined",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "kpi_registry_placeholder",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "refinement_required": ""
+            },
+            {
+              "type": "kpi_prose",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "excerpt": "Marco: \"Simple one. Of everything we delivered, what share got there on time. On time means\nwithin the service promise the customer bought - express is next day, and so on down the tiers.\nMonthly, and split it by carrier so I can beat up the bad ones.\"\n\n(Sandra's note: not sure if \"on time\" is counted from when the job was booked or from when we\nactually picked it up. Marco waved his hand at this question.)"
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
+              "column": "sla_days",
+              "matched_terms": [
+                "day",
+                "delivery"
+              ],
+              "dictionary_description": "Promised delivery window in days from pickup",
+              "score": 7.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+              "column": "Id",
+              "matched_terms": [
+                "not",
+                "on",
+                "thi",
+                "this"
+              ],
+              "dictionary_description": "Legacy CRM identifier - do not join on this",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
+              "column": "premium_flag",
+              "matched_terms": [
+                "is",
+                "service",
+                "when"
+              ],
+              "dictionary_description": "Y when the service is sold as premium",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "Date",
+              "matched_terms": [
+                "booked",
+                "job",
+                "was"
+              ],
+              "dictionary_description": "Date the job was booked into the TMS",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
+              "column": "END",
+              "matched_terms": [
+                "day",
+                "of",
+                "time"
+              ],
+              "dictionary_description": "Shift end time of day",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
+              "column": "START",
+              "matched_terms": [
+                "day",
+                "of",
+                "time"
+              ],
+              "dictionary_description": "Shift start time of day",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+              "column": "carrier_cd",
+              "matched_terms": [
+                "carrier"
+              ],
+              "dictionary_description": "Executing carrier SCAC; joins to carriers.scac",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\customers_legacy.csv",
+              "column": "customer_name",
+              "matched_terms": [
+                "customer"
+              ],
+              "dictionary_description": "",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "carrier_cd",
+              "matched_terms": [
+                "carrier"
+              ],
+              "dictionary_description": "Executing carrier SCAC; joins to carriers.scac",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
+              "column": "rate_to_gbp",
+              "matched_terms": [
+                "rate"
+              ],
+              "dictionary_description": "",
+              "score": 5.0
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [],
+          "question": "Define the metric and grain for `KPI 1 - On-time delivery rate`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+        }
+      ],
       "function_context": [],
       "join_candidates": [],
-      "open_questions": []
+      "open_questions": [
+        "Define the metric and grain for `KPI 1 - On-time delivery rate`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+      ]
     },
     {
       "kpi_id": "kpi_002",
@@ -54,34 +194,894 @@
       "metric": "",
       "cuts": "",
       "status": "blocked_questions_pending",
-      "features": [],
+      "features": [
+        {
+          "feature": "KPI definition",
+          "state": "blocked_missing_evidence",
+          "resolution_type": "kpi_definition_required",
+          "source_columns": [],
+          "grain": "undefined",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "kpi_registry_placeholder",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "refinement_required": ""
+            },
+            {
+              "type": "kpi_prose",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "excerpt": "\"Take what we actually billed - not the quoted numbers the sales lads put in, billed - and give\nme revenue per active account, by month. Active means they're trading with us, you know what I\nmean.\"\n\n(He did not define trading-with-us. Finance say an account is active if it has an invoice in the\nperiod; CRM say it's the account status flag. These disagree.)"
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "Status",
+              "matched_terms": [
+                "invoice",
+                "statu",
+                "status"
+              ],
+              "dictionary_description": "Line payment status: OPEN / PAID / VOID / CREDITED",
+              "score": 12.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+              "column": "Status",
+              "matched_terms": [
+                "account",
+                "active",
+                "statu",
+                "status"
+              ],
+              "dictionary_description": "Account status: ACTIVE or CLOSED",
+              "score": 12.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "Status",
+              "matched_terms": [
+                "in",
+                "statu",
+                "status"
+              ],
+              "dictionary_description": "Lifecycle status: BOOKED / IN_TRANSIT / DELIVERED / CANCELLED",
+              "score": 12.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
+              "column": "Status",
+              "matched_terms": [
+                "statu",
+                "status"
+              ],
+              "dictionary_description": "Leg status: PLANNED / DONE / ABORTED",
+              "score": 10.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "inv_no",
+              "matched_terms": [
+                "has",
+                "invoice",
+                "number"
+              ],
+              "dictionary_description": "Invoice document number (one invoice has many lines)",
+              "score": 8.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "column": "Status",
+              "matched_terms": [
+                "in",
+                "statu",
+                "status"
+              ],
+              "dictionary_description": "IN_SERVICE / VOR / DISPOSED",
+              "score": 8.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\complaints.csv",
+              "column": "Status",
+              "matched_terms": [
+                "statu",
+                "status"
+              ],
+              "dictionary_description": "",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "column": "Status",
+              "matched_terms": [
+                "statu",
+                "status"
+              ],
+              "dictionary_description": "OPEN / RESOLVED / REJECTED",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "acct",
+              "matched_terms": [
+                "account",
+                "billed",
+                "invoice"
+              ],
+              "dictionary_description": "Billed account; joins to party.party_key",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\purchase_orders.csv",
+              "column": "Status",
+              "matched_terms": [
+                "statu",
+                "status"
+              ],
+              "dictionary_description": "",
+              "score": 6.0
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [],
+          "question": "Define the metric and grain for `KPI 2 - Monthly revenue per active account`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+        }
+      ],
       "function_context": [],
       "join_candidates": [],
-      "open_questions": []
+      "open_questions": [
+        "Define the metric and grain for `KPI 2 - Monthly revenue per active account`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+      ]
     },
     {
       "kpi_id": "kpi_003",
       "name": "KPI 3 - Average depot dwell hours",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-      "metric": "",
+      "metric": "avg(hours)",
       "cuts": "",
       "status": "blocked_questions_pending",
-      "features": [],
-      "function_context": [],
+      "features": [
+        {
+          "feature": "hours",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+              "column": "hours",
+              "dtype": "Float64",
+              "row_count": 1100,
+              "score": null,
+              "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_people_timesheets.csv.profile.json",
+              "observed_values": [
+                4.0,
+                4.1,
+                4.2,
+                4.3,
+                4.4,
+                4.5,
+                4.6,
+                4.7
+              ],
+              "value_profile": {
+                "sample_values": [
+                  4.0,
+                  4.1,
+                  4.2,
+                  4.3,
+                  4.4,
+                  4.5,
+                  4.6,
+                  4.7
+                ],
+                "sample_min": 4.0,
+                "sample_max": 12.0,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": 0,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_people_timesheets.csv.profile.json",
+                  "field": "hours",
+                  "meaning": "Column `hours` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`hours` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_people_timesheets.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+                  "column": "hours",
+                  "dtype": "Float64",
+                  "row_count": 1100,
+                  "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_people_timesheets.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      4.0,
+                      4.1,
+                      4.2,
+                      4.3,
+                      4.4,
+                      4.5,
+                      4.6,
+                      4.7
+                    ],
+                    "sample_min": 4.0,
+                    "sample_max": 12.0,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": 0,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"hours\" AS \"hours\" FROM \"timesheets\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "hours": 4.0
+                  },
+                  {
+                    "hours": 4.1
+                  },
+                  {
+                    "hours": 4.2
+                  },
+                  {
+                    "hours": 4.3
+                  },
+                  {
+                    "hours": 4.4
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+              "column": "hours"
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "kpi_003 derived metric",
+          "state": "candidate_unconfirmed",
+          "resolution_type": "derived_metric_unconfirmed",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+              "column": "hours",
+              "dtype": "Float64",
+              "row_count": 1100,
+              "score": null,
+              "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_people_timesheets.csv.profile.json",
+              "observed_values": [
+                4.0,
+                4.1,
+                4.2,
+                4.3,
+                4.4,
+                4.5,
+                4.6,
+                4.7
+              ],
+              "value_profile": {
+                "sample_values": [
+                  4.0,
+                  4.1,
+                  4.2,
+                  4.3,
+                  4.4,
+                  4.5,
+                  4.6,
+                  4.7
+                ],
+                "sample_min": 4.0,
+                "sample_max": 12.0,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": 0,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_people_timesheets.csv.profile.json",
+                  "field": "hours",
+                  "meaning": "Column `hours` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "profile_backed",
+                "claim": "`hours` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_people_timesheets.csv.profile.json"
+                ],
+                "dictionary_evidence": null,
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+                  "column": "hours",
+                  "dtype": "Float64",
+                  "row_count": 1100,
+                  "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_people_timesheets.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      4.0,
+                      4.1,
+                      4.2,
+                      4.3,
+                      4.4,
+                      4.5,
+                      4.6,
+                      4.7
+                    ],
+                    "sample_min": 4.0,
+                    "sample_max": 12.0,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": 0,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"hours\" AS \"hours\" FROM \"timesheets\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "hours": 4.0
+                  },
+                  {
+                    "hours": 4.1
+                  },
+                  {
+                    "hours": 4.2
+                  },
+                  {
+                    "hours": 4.3
+                  },
+                  {
+                    "hours": 4.4
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "needs_user_confirmation",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "derived_metric_provenance",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "metric": "avg(hours)",
+              "provenance": "derived_from_question",
+              "note": "Onboarding derived this metric from the KPI question text and profiled columns. It is a machine guess, not an authored or user-confirmed definition; column-name similarity alone is low-confidence evidence."
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+              "column": "hours",
+              "matched_terms": [
+                "hour",
+                "hours"
+              ],
+              "dictionary_description": "",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
+              "column": "depot",
+              "matched_terms": [
+                "depot"
+              ],
+              "dictionary_description": "Home depot; joins to locs.loc_nbr",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
+              "column": "depot",
+              "matched_terms": [
+                "depot"
+              ],
+              "dictionary_description": "Home depot; joins to locs.loc_nbr",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "column": "depot",
+              "matched_terms": [
+                "depot"
+              ],
+              "dictionary_description": "Home depot; joins to locs.loc_nbr",
+              "score": 5.0
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [
+            {
+              "state": "candidate_unconfirmed",
+              "column": "hours",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+              "reason": "Column matched the machine-derived metric by name; needs human confirmation."
+            }
+          ],
+          "question": "Onboarding derived metric `avg(hours)` for `KPI 3 - Average depot dwell hours` from the question text (provenance: derived_from_question). Confirm the metric and its column binding, or provide the correct definition via apply-kpi-definition."
+        }
+      ],
+      "function_context": [
+        {
+          "function": "avg",
+          "arguments": [
+            "hours"
+          ]
+        }
+      ],
       "join_candidates": [],
-      "open_questions": []
+      "open_questions": [
+        "Onboarding derived metric `avg(hours)` for `KPI 3 - Average depot dwell hours` from the question text (provenance: derived_from_question). Confirm the metric and its column binding, or provide the correct definition via apply-kpi-definition."
+      ]
     },
     {
       "kpi_id": "kpi_004",
       "name": "KPI 4 - Damage claim rate by carrier",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
       "metric": "",
-      "cuts": "",
+      "cuts": "carrier_cd",
       "status": "blocked_questions_pending",
-      "features": [],
+      "features": [
+        {
+          "feature": "carrier_cd",
+          "state": "proven_direct",
+          "resolution_type": "direct_column",
+          "source_columns": [
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+              "column": "carrier_cd",
+              "dtype": "String",
+              "row_count": 84,
+              "score": null,
+              "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_settlements.csv.profile.json",
+              "observed_values": [
+                "DNUB",
+                "BLTC",
+                "FNCH",
+                "CDRX",
+                "EGRT",
+                "GRYP",
+                "ARRW"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "DNUB",
+                  "BLTC",
+                  "FNCH",
+                  "CDRX",
+                  "EGRT",
+                  "GRYP",
+                  "ARRW"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_settlements.csv.profile.json",
+                  "field": "carrier_cd",
+                  "meaning": "Column `carrier_cd` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                },
+                {
+                  "file": "workspaces/Hostile_Synthetic/docs/data_dictionary.csv",
+                  "table": "shipments",
+                  "field": "carrier_cd",
+                  "meaning": "Executing carrier SCAC; joins to carriers.scac",
+                  "evidence_state": "data_dictionary"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "dictionary_and_profile_backed",
+                "claim": "`carrier_cd` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_settlements.csv.profile.json",
+                  "workspaces/Hostile_Synthetic/docs/data_dictionary.csv"
+                ],
+                "dictionary_evidence": {
+                  "table": "shipments",
+                  "field": "carrier_cd",
+                  "description": "Executing carrier SCAC; joins to carriers.scac",
+                  "file": "workspaces/Hostile_Synthetic/docs/data_dictionary.csv"
+                },
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+                  "column": "carrier_cd",
+                  "dtype": "String",
+                  "row_count": 84,
+                  "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_settlements.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "DNUB",
+                      "BLTC",
+                      "FNCH",
+                      "CDRX",
+                      "EGRT",
+                      "GRYP",
+                      "ARRW"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"carrier_cd\" AS \"carriercd\" FROM \"settlements\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "carriercd": "DNUB"
+                  },
+                  {
+                    "carriercd": "BLTC"
+                  },
+                  {
+                    "carriercd": "FNCH"
+                  },
+                  {
+                    "carriercd": "CDRX"
+                  },
+                  {
+                    "carriercd": "EGRT"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            },
+            {
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "carrier_cd",
+              "dtype": "String",
+              "row_count": 4200,
+              "score": null,
+              "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+              "observed_values": [
+                "CDRX",
+                "ARRW",
+                "BLTC",
+                "DNUB",
+                "EGRT",
+                "FNCH",
+                "GRYP"
+              ],
+              "value_profile": {
+                "sample_values": [
+                  "CDRX",
+                  "ARRW",
+                  "BLTC",
+                  "DNUB",
+                  "EGRT",
+                  "FNCH",
+                  "GRYP"
+                ],
+                "sample_min": null,
+                "sample_max": null,
+                "exact_min": null,
+                "exact_max": null,
+                "metadata_min": null,
+                "metadata_max": null,
+                "null_count": null,
+                "profile_source": "sample_profile",
+                "note": "Values come from bounded profile evidence, not a full raw-data dump."
+              },
+              "semantic_meaning_sources": [
+                {
+                  "file": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+                  "field": "carrier_cd",
+                  "meaning": "Column `carrier_cd` is bound to required derivation input `physical_column_candidate` by schema/profile name matching.",
+                  "evidence_state": "schema_profile_inferred"
+                },
+                {
+                  "file": "workspaces/Hostile_Synthetic/docs/data_dictionary.csv",
+                  "table": "shipments",
+                  "field": "carrier_cd",
+                  "meaning": "Executing carrier SCAC; joins to carriers.scac",
+                  "evidence_state": "data_dictionary"
+                }
+              ],
+              "mapping_proof": {
+                "proof_state": "dictionary_and_profile_backed",
+                "claim": "`carrier_cd` is a candidate physical mapping for the KPI feature.",
+                "match_reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias.",
+                "score": null,
+                "source_files": [
+                  "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+                  "workspaces/Hostile_Synthetic/docs/data_dictionary.csv"
+                ],
+                "dictionary_evidence": {
+                  "table": "shipments",
+                  "field": "carrier_cd",
+                  "description": "Executing carrier SCAC; joins to carriers.scac",
+                  "file": "workspaces/Hostile_Synthetic/docs/data_dictionary.csv"
+                },
+                "profile_evidence": {
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+                  "column": "carrier_cd",
+                  "dtype": "String",
+                  "row_count": 4200,
+                  "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+                  "value_profile": {
+                    "sample_values": [
+                      "CDRX",
+                      "ARRW",
+                      "BLTC",
+                      "DNUB",
+                      "EGRT",
+                      "FNCH",
+                      "GRYP"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": "sample_profile",
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  }
+                },
+                "sample_query": "SELECT \"carrier_cd\" AS \"carriercd\" FROM \"shipments\" LIMIT 5;",
+                "sample_output": [
+                  {
+                    "carriercd": "CDRX"
+                  },
+                  {
+                    "carriercd": "ARRW"
+                  },
+                  {
+                    "carriercd": "BLTC"
+                  },
+                  {
+                    "carriercd": "DNUB"
+                  },
+                  {
+                    "carriercd": "EGRT"
+                  }
+                ],
+                "remaining_risk": "Physical column, dictionary, and profile evidence support the mapping, but business owners can still override if the intended grain differs."
+              },
+              "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
+            }
+          ],
+          "grain": "physical_column",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+              "column": "carrier_cd"
+            },
+            {
+              "type": "schema_profile",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "carrier_cd"
+            },
+            {
+              "type": "relationship_unification",
+              "source": "interns/generated/contracts/relationship_contracts.json",
+              "note": "The colliding columns are endpoints of join-worthy relationship contracts and form one logical field."
+            }
+          ],
+          "candidate_patterns": [],
+          "candidates": [],
+          "question": null
+        },
+        {
+          "feature": "KPI definition",
+          "state": "blocked_missing_evidence",
+          "resolution_type": "kpi_definition_required",
+          "source_columns": [],
+          "grain": "undefined",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "kpi_registry_placeholder",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "refinement_required": ""
+            },
+            {
+              "type": "kpi_prose",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "excerpt": "\"Out of the jobs each carrier delivered, how many ended up with a damage claim against them.\nPercentage, by carrier. Cedar Express feel high to me.\"\n\n(Marco said \"damage\" - unclear if he'd count loss and delay claims too, that's most of what\nthe claims desk logs.)"
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "column": "claim_type",
+              "matched_terms": [
+                "claim",
+                "claims",
+                "damage",
+                "delay",
+                "los",
+                "loss"
+              ],
+              "dictionary_description": "DAMAGE / LOSS / DELAY",
+              "score": 13.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "column": "ship_ref",
+              "matched_terms": [
+                "against",
+                "claim",
+                "claims",
+                "to"
+              ],
+              "dictionary_description": "Shipment the claim is raised against; joins to shipments.Id",
+              "score": 10.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
+              "column": "rate_to_gbp",
+              "matched_terms": [
+                "rate",
+                "to"
+              ],
+              "dictionary_description": "",
+              "score": 8.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+              "column": "carrier_cd",
+              "matched_terms": [
+                "carrier",
+                "to"
+              ],
+              "dictionary_description": "Executing carrier SCAC; joins to carriers.scac",
+              "score": 7.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "carrier_cd",
+              "matched_terms": [
+                "carrier",
+                "to"
+              ],
+              "dictionary_description": "Executing carrier SCAC; joins to carriers.scac",
+              "score": 7.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "column": "Amount",
+              "matched_terms": [
+                "by",
+                "claim",
+                "claims"
+              ],
+              "dictionary_description": "Amount claimed by the customer",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "column": "Id",
+              "matched_terms": [
+                "claim",
+                "claims"
+              ],
+              "dictionary_description": "Claim reference",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\rate_cards.csv",
+              "column": "acct",
+              "matched_terms": [
+                "rate",
+                "to"
+              ],
+              "dictionary_description": "Account the rate card belongs to; joins to party.party_key",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
+              "column": "to_loc",
+              "matched_terms": [
+                "to"
+              ],
+              "dictionary_description": "Leg destination facility; joins to locs.loc_nbr",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\fuel_logs.csv",
+              "column": "Amount",
+              "matched_terms": [
+                "log",
+                "logs"
+              ],
+              "dictionary_description": "",
+              "score": 4.0
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [],
+          "question": "Define the metric and grain for `KPI 4 - Damage claim rate by carrier`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+        }
+      ],
       "function_context": [],
       "join_candidates": [],
-      "open_questions": []
+      "open_questions": [
+        "Define the metric and grain for `KPI 4 - Damage claim rate by carrier`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+      ]
     },
     {
       "kpi_id": "kpi_005",
@@ -90,10 +1090,159 @@
       "metric": "",
       "cuts": "",
       "status": "blocked_questions_pending",
-      "features": [],
+      "features": [
+        {
+          "feature": "KPI definition",
+          "state": "blocked_missing_evidence",
+          "resolution_type": "kpi_definition_required",
+          "source_columns": [],
+          "grain": "undefined",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "kpi_registry_placeholder",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "refinement_required": ""
+            },
+            {
+              "type": "kpi_prose",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "excerpt": "\"The CS team keep upgrading jobs to premium service after they've already left the dock to make\nthe SLA look better. I want the percentage of shipments that got upgraded to a premium service\nafter dispatch, by month, so I can stamp it out.\"\n\n(Sandra's note: I asked the TMS admin and he'd never heard of post-dispatch upgrades, but Marco\nwas adamant this happens.)"
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "Date",
+              "matched_terms": [
+                "job",
+                "shipment",
+                "shipments",
+                "tms",
+                "was"
+              ],
+              "dictionary_description": "Date the job was booked into the TMS",
+              "score": 10.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "Id",
+              "matched_terms": [
+                "shipment",
+                "shipments",
+                "tms"
+              ],
+              "dictionary_description": "Shipment number (TMS primary key)",
+              "score": 8.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "svc",
+              "matched_terms": [
+                "service",
+                "shipment",
+                "shipments",
+                "to"
+              ],
+              "dictionary_description": "Service code purchased; joins to svc_catalog.svc_id",
+              "score": 8.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
+              "column": "premium_flag",
+              "matched_terms": [
+                "premium",
+                "service"
+              ],
+              "dictionary_description": "Y when the service is sold as premium",
+              "score": 7.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "ship_no",
+              "matched_terms": [
+                "shipment",
+                "shipments",
+                "to"
+              ],
+              "dictionary_description": "Shipment the line bills for; joins to shipments.Id",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "column": "ship_ref",
+              "matched_terms": [
+                "shipment",
+                "shipments",
+                "to"
+              ],
+              "dictionary_description": "Shipment the claim is raised against; joins to shipments.Id",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
+              "column": "ship_ref",
+              "matched_terms": [
+                "shipment",
+                "shipments",
+                "to"
+              ],
+              "dictionary_description": "Parent shipment number; joins to shipments.Id",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "Amount",
+              "matched_terms": [
+                "shipment",
+                "shipments"
+              ],
+              "dictionary_description": "Final invoiced revenue for the shipment in GBP",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "carrier_cd",
+              "matched_terms": [
+                "shipment",
+                "shipments",
+                "to"
+              ],
+              "dictionary_description": "Executing carrier SCAC; joins to carriers.scac",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "cust_ref",
+              "matched_terms": [
+                "shipment",
+                "shipments",
+                "to"
+              ],
+              "dictionary_description": "Customer account reference; joins to party.party_key",
+              "score": 6.0
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [],
+          "question": "Define the metric and grain for `KPI 5 - Share of shipments upgraded to premium after dispatch`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+        }
+      ],
       "function_context": [],
       "join_candidates": [],
-      "open_questions": []
+      "open_questions": [
+        "Define the metric and grain for `KPI 5 - Share of shipments upgraded to premium after dispatch`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+      ]
     },
     {
       "kpi_id": "kpi_006",
@@ -102,10 +1251,117 @@
       "metric": "",
       "cuts": "",
       "status": "blocked_questions_pending",
-      "features": [],
+      "features": [
+        {
+          "feature": "KPI definition",
+          "state": "blocked_missing_evidence",
+          "resolution_type": "kpi_definition_required",
+          "source_columns": [],
+          "grain": "undefined",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "kpi_registry_placeholder",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "refinement_required": ""
+            },
+            {
+              "type": "kpi_prose",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "excerpt": "\"What share of our own fleet is actually working. Utilization, weekly. You know - of the\nvehicles we own, how many are out doing legs versus sat in the yard or in the workshop.\"\n\n(Does \"fleet\" include disposed vehicles? Vehicles off-road (VOR)? He didn't say.)"
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "column": "Status",
+              "matched_terms": [
+                "disposed",
+                "in",
+                "vehicle",
+                "vehicles",
+                "vor"
+              ],
+              "dictionary_description": "IN_SERVICE / VOR / DISPOSED",
+              "score": 10.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "column": "class_cd",
+              "matched_terms": [
+                "vehicle",
+                "vehicles"
+              ],
+              "dictionary_description": "Vehicle class; joins to vehicle_classes.class_cd",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "column": "vin",
+              "matched_terms": [
+                "vehicle",
+                "vehicles"
+              ],
+              "dictionary_description": "Vehicle identification number (primary key)",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "column": "depot",
+              "matched_terms": [
+                "vehicle",
+                "vehicles"
+              ],
+              "dictionary_description": "Home depot; joins to locs.loc_nbr",
+              "score": 4.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "column": "reg_no",
+              "matched_terms": [
+                "vehicle",
+                "vehicles"
+              ],
+              "dictionary_description": "",
+              "score": 4.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
+              "column": "Amount",
+              "matched_terms": [
+                "in",
+                "leg"
+              ],
+              "dictionary_description": "Internal cost allocated to the leg in GBP",
+              "score": 4.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\vehicle_classes.csv",
+              "column": "class_cd",
+              "matched_terms": [
+                "vehicle"
+              ],
+              "dictionary_description": "Vehicle class; joins to vehicle_classes.class_cd",
+              "score": 4.0
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [],
+          "question": "Define the metric and grain for `KPI 6 - Fleet utilization`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+        }
+      ],
       "function_context": [],
       "join_candidates": [],
-      "open_questions": []
+      "open_questions": [
+        "Define the metric and grain for `KPI 6 - Fleet utilization`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+      ]
     },
     {
       "kpi_id": "kpi_007",
@@ -114,10 +1370,159 @@
       "metric": "",
       "cuts": "",
       "status": "blocked_questions_pending",
-      "features": [],
+      "features": [
+        {
+          "feature": "KPI definition",
+          "state": "blocked_missing_evidence",
+          "resolution_type": "kpi_definition_required",
+          "source_columns": [],
+          "grain": "undefined",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "kpi_registry_placeholder",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "refinement_required": ""
+            },
+            {
+              "type": "kpi_prose",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "excerpt": "\"How much of our billing ends up disputed. Percentage of invoices that get a dispute raised,\nmonthly. Finance will tell you it's tiny, the CS inbox says otherwise.\"\n\n(Per-invoice or per-invoice-line? The billing extract is line level, disputes are raised against\nthe invoice number.)"
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "column": "inv_no",
+              "matched_terms": [
+                "dispute",
+                "disputed",
+                "disputes",
+                "invoice",
+                "invoices",
+                "number"
+              ],
+              "dictionary_description": "Disputed invoice document number; joins to invoices.inv_no",
+              "score": 10.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "inv_no",
+              "matched_terms": [
+                "invoice",
+                "invoices",
+                "line",
+                "number"
+              ],
+              "dictionary_description": "Invoice document number (one invoice has many lines)",
+              "score": 10.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "column": "opened",
+              "matched_terms": [
+                "dispute",
+                "disputes",
+                "raised"
+              ],
+              "dictionary_description": "Date the dispute was raised",
+              "score": 8.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "Amount",
+              "matched_terms": [
+                "invoice",
+                "invoices",
+                "line",
+                "of"
+              ],
+              "dictionary_description": "Billed amount for the line (net of tax)",
+              "score": 8.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "Id",
+              "matched_terms": [
+                "invoice",
+                "invoices",
+                "line"
+              ],
+              "dictionary_description": "Invoice line identifier",
+              "score": 8.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
+              "column": "END",
+              "matched_terms": [
+                "end",
+                "of"
+              ],
+              "dictionary_description": "Shift end time of day",
+              "score": 7.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "column": "Amount",
+              "matched_terms": [
+                "dispute",
+                "disputes"
+              ],
+              "dictionary_description": "Amount under dispute",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "column": "Id",
+              "matched_terms": [
+                "dispute",
+                "disputes"
+              ],
+              "dictionary_description": "Dispute reference",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "Date",
+              "matched_terms": [
+                "invoice",
+                "invoices"
+              ],
+              "dictionary_description": "Invoice issue date",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "Status",
+              "matched_terms": [
+                "invoice",
+                "invoices",
+                "line"
+              ],
+              "dictionary_description": "Line payment status: OPEN / PAID / VOID / CREDITED",
+              "score": 6.0
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [],
+          "question": "Define the metric and grain for `KPI 7 - Invoice dispute rate`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+        }
+      ],
       "function_context": [],
       "join_candidates": [],
-      "open_questions": []
+      "open_questions": [
+        "Define the metric and grain for `KPI 7 - Invoice dispute rate`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+      ]
     },
     {
       "kpi_id": "kpi_008",
@@ -126,10 +1531,139 @@
       "metric": "",
       "cuts": "",
       "status": "blocked_questions_pending",
-      "features": [],
+      "features": [
+        {
+          "feature": "KPI definition",
+          "state": "blocked_missing_evidence",
+          "resolution_type": "kpi_definition_required",
+          "source_columns": [],
+          "grain": "undefined",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "kpi_registry_placeholder",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "refinement_required": ""
+            },
+            {
+              "type": "kpi_prose",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "excerpt": "\"Take the freight charge and divide by the weight, lane by lane, so I can see which corridors\nare bleeding us. Watch the weights - half the legacy depots still key imperial.\""
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "charge_type",
+              "matched_terms": [
+                "charge"
+              ],
+              "dictionary_description": "Line charge class: BASE / FUEL / ACCESSORIAL",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
+              "column": "depot",
+              "matched_terms": [
+                "depot"
+              ],
+              "dictionary_description": "Home depot; joins to locs.loc_nbr",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
+              "column": "depot",
+              "matched_terms": [
+                "depot"
+              ],
+              "dictionary_description": "Home depot; joins to locs.loc_nbr",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\lanes.csv",
+              "column": "lane_id",
+              "matched_terms": [
+                "lane"
+              ],
+              "dictionary_description": "",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "column": "depot",
+              "matched_terms": [
+                "depot"
+              ],
+              "dictionary_description": "Home depot; joins to locs.loc_nbr",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "wgt",
+              "matched_terms": [
+                "kilogram",
+                "weight"
+              ],
+              "dictionary_description": "Chargeable weight in kilograms",
+              "score": 4.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\fuel_prices.csv",
+              "column": "pence_per_litre",
+              "matched_terms": [
+                "per"
+              ],
+              "dictionary_description": "",
+              "score": 3.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\quotes.csv",
+              "column": "lane_id",
+              "matched_terms": [
+                "lane"
+              ],
+              "dictionary_description": "",
+              "score": 3.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
+              "column": "min_charge",
+              "matched_terms": [
+                "charge"
+              ],
+              "dictionary_description": "",
+              "score": 3.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
+              "column": "rate_per_kg",
+              "matched_terms": [
+                "per"
+              ],
+              "dictionary_description": "",
+              "score": 3.0
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [],
+          "question": "Define the metric and grain for `KPI 8 - Average cost per kilogram by lane`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+        }
+      ],
       "function_context": [],
       "join_candidates": [],
-      "open_questions": []
+      "open_questions": [
+        "Define the metric and grain for `KPI 8 - Average cost per kilogram by lane`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+      ]
     },
     {
       "kpi_id": "kpi_009",
@@ -138,10 +1672,61 @@
       "metric": "",
       "cuts": "",
       "status": "blocked_questions_pending",
-      "features": [],
+      "features": [
+        {
+          "feature": "KPI definition",
+          "state": "blocked_missing_evidence",
+          "resolution_type": "kpi_definition_required",
+          "source_columns": [],
+          "grain": "undefined",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "kpi_registry_placeholder",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "refinement_required": ""
+            },
+            {
+              "type": "kpi_prose",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "excerpt": "\"How many accounts we lose a quarter. Churn. Every logistics business counts this differently,\npick something sensible and tell me what you picked.\""
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+              "column": "party_key",
+              "matched_terms": [
+                "account",
+                "thi",
+                "this"
+              ],
+              "dictionary_description": "Master account key (use this for joins)",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+              "column": "Id",
+              "matched_terms": [
+                "thi",
+                "this"
+              ],
+              "dictionary_description": "Legacy CRM identifier - do not join on this",
+              "score": 4.0
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [],
+          "question": "Define the metric and grain for `KPI 9 - Quarterly account churn`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+        }
+      ],
       "function_context": [],
       "join_candidates": [],
-      "open_questions": []
+      "open_questions": [
+        "Define the metric and grain for `KPI 9 - Quarterly account churn`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+      ]
     },
     {
       "kpi_id": "kpi_010",
@@ -150,17 +1735,177 @@
       "metric": "",
       "cuts": "",
       "status": "blocked_questions_pending",
-      "features": [],
+      "features": [
+        {
+          "feature": "KPI definition",
+          "state": "blocked_missing_evidence",
+          "resolution_type": "kpi_definition_required",
+          "source_columns": [],
+          "grain": "undefined",
+          "conflicts": [],
+          "decision_history": [],
+          "evidence": [
+            {
+              "type": "kpi_registry_placeholder",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "refinement_required": ""
+            },
+            {
+              "type": "kpi_prose",
+              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
+              "excerpt": "\"The holy grail one: delivered on time, no damage claim, no billing dispute. What share of jobs\nclears all three. That's the number for the board.\""
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "column": "inv_no",
+              "matched_terms": [
+                "dispute",
+                "no",
+                "number"
+              ],
+              "dictionary_description": "Disputed invoice document number; joins to invoices.inv_no",
+              "score": 9.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "inv_no",
+              "matched_terms": [
+                "no",
+                "number",
+                "one"
+              ],
+              "dictionary_description": "Invoice document number (one invoice has many lines)",
+              "score": 7.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
+              "column": "inv_no",
+              "matched_terms": [
+                "no",
+                "number"
+              ],
+              "dictionary_description": "Paid invoice number; joins to invoices.inv_no",
+              "score": 7.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "column": "claim_type",
+              "matched_terms": [
+                "claim",
+                "damage"
+              ],
+              "dictionary_description": "DAMAGE / LOSS / DELAY",
+              "score": 7.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "column": "ship_ref",
+              "matched_terms": [
+                "claim",
+                "shipment"
+              ],
+              "dictionary_description": "Shipment the claim is raised against; joins to shipments.Id",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "column": "Id",
+              "matched_terms": [
+                "number",
+                "shipment"
+              ],
+              "dictionary_description": "Shipment number (TMS primary key)",
+              "score": 6.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "column": "ship_no",
+              "matched_terms": [
+                "no",
+                "shipment"
+              ],
+              "dictionary_description": "Shipment the line bills for; joins to shipments.Id",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
+              "column": "rate_to_gbp",
+              "matched_terms": [
+                "rate"
+              ],
+              "dictionary_description": "",
+              "score": 5.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "column": "Amount",
+              "matched_terms": [
+                "dispute"
+              ],
+              "dictionary_description": "Amount under dispute",
+              "score": 4.0
+            },
+            {
+              "type": "prose_term_match",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "column": "Id",
+              "matched_terms": [
+                "dispute"
+              ],
+              "dictionary_description": "Dispute reference",
+              "score": 4.0
+            }
+          ],
+          "candidate_patterns": [],
+          "derived_feature_options": [],
+          "candidates": [],
+          "question": "Define the metric and grain for `KPI 10 - Perfect shipment rate`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+        }
+      ],
       "function_context": [],
       "join_candidates": [],
-      "open_questions": []
+      "open_questions": [
+        "Define the metric and grain for `KPI 10 - Perfect shipment rate`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+      ]
     }
   ],
-  "blocker_clusters": [],
+  "blocker_clusters": [
+    {
+      "feature": "KPI definition",
+      "count": 9,
+      "risk": "business_semantics",
+      "priority_score": 209,
+      "example_kpis": [
+        "kpi_001",
+        "kpi_002",
+        "kpi_004"
+      ],
+      "recommended_question": "What source, formula, or accepted rule should define `KPI definition`?"
+    },
+    {
+      "feature": "kpi_003 derived metric",
+      "count": 1,
+      "risk": "business_semantics",
+      "priority_score": 201,
+      "example_kpis": [
+        "kpi_003"
+      ],
+      "recommended_question": "What source, formula, or accepted rule should define `kpi_003 derived metric`?"
+    }
+  ],
   "summary": {
     "kpi_count": 10,
     "ready_kpi_count": 0,
     "blocked_kpi_count": 10,
-    "unresolved_feature_count": 0
+    "unresolved_feature_count": 10
   }
 }

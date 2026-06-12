@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\packaging_types.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\packaging_types.csv",
   "format": "csv",
   "row_count": 6,
   "file_count": 1,
@@ -19,12 +19,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "PKG2",
-        "PKG1",
-        "PKG6",
-        "PKG5",
         "PKG4",
-        "PKG3"
+        "PKG6",
+        "PKG1",
+        "PKG2",
+        "PKG3",
+        "PKG5"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -40,12 +40,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Crate",
         "Drum",
-        "Roll cage",
         "Carton",
-        "Euro pallet",
-        "Half pallet"
+        "Half pallet",
+        "Crate",
+        "Roll cage",
+        "Euro pallet"
       ],
       "sample_min": null,
       "sample_max": null,

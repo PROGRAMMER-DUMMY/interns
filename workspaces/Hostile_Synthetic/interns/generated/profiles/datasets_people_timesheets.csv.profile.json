@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
   "format": "csv",
   "row_count": 1100,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "TS00481",
-        "TS00375",
-        "TS00080",
-        "TS00865",
-        "TS00312",
-        "TS00046",
-        "TS00986",
-        "TS01021"
+        "TS01026",
+        "TS00460",
+        "TS00619",
+        "TS00942",
+        "TS00030",
+        "TS00110",
+        "TS00658",
+        "TS00395"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "E562",
-        "E634",
-        "E598",
-        "E595",
-        "E549",
-        "E530",
-        "E546",
-        "E594"
+        "E535",
+        "E589",
+        "E551",
+        "E557",
+        "E592",
+        "E501",
+        "E512",
+        "E588"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-05-13",
-        "2025-10-03",
-        "2025-12-31",
-        "2025-10-27",
-        "2025-09-25",
-        "2026-02-16",
-        "2025-11-28",
-        "2025-02-07"
+        "2025-11-13",
+        "2025-03-01",
+        "2026-04-12",
+        "2025-01-03",
+        "2026-01-19",
+        "2026-03-11",
+        "2025-12-27",
+        "2025-04-11"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -90,10 +90,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH4",
-        "SH3",
+        "SH2",
         "SH1",
-        "SH2"
+        "SH4",
+        "SH3"
       ],
       "sample_min": null,
       "sample_max": null,

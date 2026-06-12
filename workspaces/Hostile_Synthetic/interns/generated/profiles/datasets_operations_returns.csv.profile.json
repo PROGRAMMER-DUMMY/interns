@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\returns.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\returns.csv",
   "format": "csv",
   "row_count": 190,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "RT6172",
-        "RT6177",
-        "RT6178",
-        "RT6071",
-        "RT6011",
-        "RT6054",
-        "RT6059",
-        "RT6093"
+        "RT6121",
+        "RT6163",
+        "RT6053",
+        "RT6044",
+        "RT6116",
+        "RT6086",
+        "RT6136",
+        "RT6031"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH102200",
-        "SH103994",
-        "SH100050",
-        "SH102754",
+        "SH101219",
         "SH100766",
-        "SH102737",
-        "SH100022",
-        "SH104149"
+        "SH100057",
+        "SH102426",
+        "SH103179",
+        "SH103224",
+        "SH102365",
+        "SH101197"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-11-01",
-        "2025-04-02",
-        "2025-12-07",
-        "2026-01-29",
+        "2026-02-24",
         "2025-10-08",
-        "2025-09-29",
-        "2025-12-29",
-        "2025-05-23"
+        "2025-08-04",
+        "2026-01-05",
+        "2025-03-07",
+        "2025-05-05",
+        "2025-05-15",
+        "2026-03-09"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -90,11 +90,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "RR5",
+        "RR4",
         "RR2",
         "RR3",
-        "RR1",
-        "RR4",
-        "RR5"
+        "RR1"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -110,9 +110,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "RECEIVED",
         "REFUSED",
-        "IN_TRANSIT"
+        "IN_TRANSIT",
+        "RECEIVED"
       ],
       "sample_min": null,
       "sample_max": null,

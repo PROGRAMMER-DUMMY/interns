@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
   "format": "csv",
   "row_count": 4200,
   "file_count": 1,
@@ -31,14 +31,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH101650",
-        "SH104153",
-        "SH100185",
-        "SH102108",
-        "SH100631",
-        "SH102361",
-        "SH103901",
-        "SH102064"
+        "SH103750",
+        "SH104016",
+        "SH103405",
+        "SH102329",
+        "SH104005",
+        "SH104025",
+        "SH101016",
+        "SH103372"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -54,14 +54,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-03-26",
-        "2026-03-30",
-        "2025-11-18",
-        "2026-03-29",
-        "2025-12-29",
-        "2025-06-30",
-        "2026-02-04",
-        "2026-02-20"
+        "2025-05-30",
+        "2026-01-18",
+        "2025-09-24",
+        "2026-01-16",
+        "2025-09-19",
+        "2025-07-19",
+        "2025-03-21",
+        "2025-07-20"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -77,14 +77,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1046",
-        "P-1236",
-        "P-1190",
-        "P-1144",
-        "P-1065",
-        "P-1128",
-        "P-1123",
-        "P-1109"
+        "P-1130",
+        "P-1139",
+        "P-1034",
+        "P-1134",
+        "P-1044",
+        "P-1119",
+        "P-1184",
+        "P-1020"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -101,9 +101,9 @@
       "nullable": null,
       "sample_values": [
         "SVC1",
-        "SVC2",
         "SVC6",
         "SVC5",
+        "SVC2",
         "SVC4",
         "SVC3"
       ],
@@ -121,13 +121,13 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "GRYP",
-        "FNCH",
-        "BLTC",
         "CDRX",
-        "EGRT",
+        "ARRW",
+        "BLTC",
         "DNUB",
-        "ARRW"
+        "EGRT",
+        "FNCH",
+        "GRYP"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -143,14 +143,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-246",
-        "L-258",
-        "L-229",
-        "L-226",
-        "L-256",
-        "L-260",
-        "L-210",
-        "L-201"
+        "L-209",
+        "L-251",
+        "L-240",
+        "L-227",
+        "L-249",
+        "L-202",
+        "L-216",
+        "L-203"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -166,14 +166,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-256",
-        "L-246",
-        "L-202",
-        "L-251",
-        "L-209",
-        "L-242",
-        "L-260",
-        "L-233"
+        "L-215",
+        "L-214",
+        "L-222",
+        "L-226",
+        "L-253",
+        "L-255",
+        "L-203",
+        "L-212"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -189,14 +189,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-04-14 10:34",
+        "2026-01-22 11:24",
         "2026-03-15 20:40",
-        "2025-05-02 10:36",
-        "2025-04-05 09:25",
-        "2025-09-20 15:49",
-        "2025-11-17 13:51",
-        "2025-12-24 08:30",
-        "2025-10-31 17:15"
+        "2025-04-10 15:52",
+        "2025-04-28 09:56",
+        "2025-03-22 14:32",
+        "2025-12-23 18:25",
+        "2025-12-15 11:45",
+        "2026-04-08 13:55"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -212,14 +212,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-01-17 20:18",
-        "2026-03-15 08:14",
-        "2025-05-22 14:04",
-        "2026-02-18 12:00",
-        "2026-05-08 17:53",
-        "2025-03-12 07:32",
-        "2025-06-25 18:17",
-        "2025-02-22 11:03"
+        "2026-04-18 20:44",
+        "2025-06-24 21:10",
+        "2025-03-31 06:24",
+        "2025-10-16 17:57",
+        "2025-04-01 09:52",
+        "2025-01-25 17:08",
+        "2025-01-10 18:00",
+        "2025-08-15 06:23"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -258,8 +258,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "LB",
-        "KG"
+        "KG",
+        "LB"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -338,9 +338,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "BOOKED",
-        "IN_TRANSIT",
         "DELIVERED",
+        "IN_TRANSIT",
+        "BOOKED",
         "CANCELLED"
       ],
       "sample_min": null,

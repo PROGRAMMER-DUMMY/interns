@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\contracts.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\contracts.csv",
   "format": "csv",
   "row_count": 95,
   "file_count": 1,
@@ -22,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CTR0050",
-        "CTR0082",
-        "CTR0086",
-        "CTR0090",
-        "CTR0018",
-        "CTR0035",
-        "CTR0005",
-        "CTR0043"
+        "CTR0051",
+        "CTR0044",
+        "CTR0065",
+        "CTR0059",
+        "CTR0063",
+        "CTR0029",
+        "CTR0022",
+        "CTR0083"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -45,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1129",
-        "P-1205",
-        "P-1073",
+        "P-1176",
+        "P-1092",
+        "P-1175",
+        "P-1152",
         "P-1103",
-        "P-1063",
         "P-1035",
-        "P-1010",
-        "P-1009"
+        "P-1100",
+        "P-1153"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -68,14 +68,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2024-09-24",
-        "2024-05-11",
-        "2024-10-13",
-        "2024-02-04",
-        "2024-07-23",
-        "2024-04-13",
-        "2024-07-27",
-        "2025-03-21"
+        "2024-07-20",
+        "2024-04-09",
+        "2024-06-15",
+        "2025-04-26",
+        "2024-06-21",
+        "2025-02-05",
+        "2024-09-16",
+        "2024-10-13"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -91,14 +91,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-09-05",
-        "2026-08-26",
+        "2025-06-23",
+        "2025-01-04",
+        "2025-09-24",
+        "2025-03-28",
         "2026-06-02",
-        "2026-05-06",
-        "2026-08-03",
-        "2025-10-29",
-        "2025-06-26",
-        "2025-08-18"
+        "2025-05-21",
+        "2025-07-25",
+        "2025-05-26"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -114,8 +114,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "DRAFT",
         "LIVE",
+        "DRAFT",
         "EXPIRED"
       ],
       "sample_min": null,

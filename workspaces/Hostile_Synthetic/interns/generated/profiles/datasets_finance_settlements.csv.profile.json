@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
   "format": "csv",
   "row_count": 84,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "STL0045",
-        "STL0012",
-        "STL0074",
-        "STL0077",
-        "STL0026",
-        "STL0025",
+        "STL0001",
         "STL0031",
-        "STL0079"
+        "STL0044",
+        "STL0008",
+        "STL0027",
+        "STL0035",
+        "STL0061",
+        "STL0003"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,11 +44,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "DNUB",
         "BLTC",
+        "FNCH",
         "CDRX",
         "EGRT",
-        "DNUB",
-        "FNCH",
         "GRYP",
         "ARRW"
       ],
@@ -66,14 +66,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-09",
-        "2025-08",
-        "2025-03",
-        "2025-06",
-        "2025-04",
         "2025-10",
+        "2025-03",
+        "2025-12",
+        "2025-04",
+        "2025-08",
         "2025-02",
-        "2025-07"
+        "2025-06",
+        "2025-09"
       ],
       "sample_min": null,
       "sample_max": null,

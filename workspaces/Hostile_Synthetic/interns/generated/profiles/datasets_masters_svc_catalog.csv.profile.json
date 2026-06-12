@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
   "format": "csv",
   "row_count": 6,
   "file_count": 1,
@@ -20,12 +20,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SVC1",
         "SVC4",
+        "SVC2",
         "SVC5",
         "SVC6",
         "SVC3",
-        "SVC2"
+        "SVC1"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -41,12 +41,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Standard Ground",
-        "Chilled Reefer",
-        "Express Next-Day",
-        "Priority 48",
         "Economy Deferred",
-        "Pallet Freight"
+        "Chilled Reefer",
+        "Priority 48",
+        "Standard Ground",
+        "Pallet Freight",
+        "Express Next-Day"
       ],
       "sample_min": null,
       "sample_max": null,

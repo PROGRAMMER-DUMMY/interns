@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\fuel_prices.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\fuel_prices.csv",
   "format": "csv",
   "row_count": 74,
   "file_count": 1,
@@ -18,14 +18,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-02-12",
-        "2026-01-14",
-        "2026-01-21",
-        "2025-04-23",
+        "2026-05-06",
+        "2025-03-05",
+        "2025-11-05",
+        "2025-11-12",
         "2025-12-03",
-        "2025-12-24",
-        "2025-02-19",
-        "2025-02-26"
+        "2026-03-25",
+        "2025-02-12",
+        "2026-05-13"
       ],
       "sample_min": null,
       "sample_max": null,

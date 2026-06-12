@@ -9,93 +9,113 @@
   "kpis": [
     {
       "name": "KPI 1 - On-time delivery rate",
-      "description": "",
+      "description": "Marco: \"Simple one. Of everything we delivered, what share got there on time. On time means\nwithin the service promise the customer bought - express is next day, and so on down the tiers.\nMonthly, and split it by carrier so I can beat up the bad ones.\"\n\n(Sandra's note: not sure if \"on time\" is counted from when the job was booked or from when we\nactually picked it up. Marco waved his hand at this question.)",
       "cuts": "",
       "metric": "",
       "refinement_required": "",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-      "status": "needs_mapping"
+      "status": "needs_mapping",
+      "metric_provenance": "authored",
+      "cuts_provenance": "authored"
     },
     {
       "name": "KPI 2 - Monthly revenue per active account",
-      "description": "",
+      "description": "\"Take what we actually billed - not the quoted numbers the sales lads put in, billed - and give\nme revenue per active account, by month. Active means they're trading with us, you know what I\nmean.\"\n\n(He did not define trading-with-us. Finance say an account is active if it has an invoice in the\nperiod; CRM say it's the account status flag. These disagree.)",
       "cuts": "",
       "metric": "",
       "refinement_required": "",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-      "status": "needs_mapping"
+      "status": "needs_mapping",
+      "metric_provenance": "authored",
+      "cuts_provenance": "authored"
     },
     {
       "name": "KPI 3 - Average depot dwell hours",
-      "description": "",
+      "description": "\"When a trailer hits one of our depots, how long does the freight sit before it moves out again.\nAverage hours, by depot. The Carlisle lot swear it's under four hours, I don't believe them.\"",
       "cuts": "",
-      "metric": "",
+      "metric": "avg(hours)",
       "refinement_required": "",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-      "status": "needs_mapping"
+      "status": "needs_mapping",
+      "metric_provenance": "derived_from_question",
+      "cuts_provenance": "authored"
     },
     {
       "name": "KPI 4 - Damage claim rate by carrier",
-      "description": "",
-      "cuts": "",
+      "description": "\"Out of the jobs each carrier delivered, how many ended up with a damage claim against them.\nPercentage, by carrier. Cedar Express feel high to me.\"\n\n(Marco said \"damage\" - unclear if he'd count loss and delay claims too, that's most of what\nthe claims desk logs.)",
+      "cuts": "carrier_cd",
       "metric": "",
       "refinement_required": "",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-      "status": "needs_mapping"
+      "status": "needs_mapping",
+      "metric_provenance": "authored",
+      "cuts_provenance": "derived_from_question"
     },
     {
       "name": "KPI 5 - Share of shipments upgraded to premium after dispatch",
-      "description": "",
+      "description": "\"The CS team keep upgrading jobs to premium service after they've already left the dock to make\nthe SLA look better. I want the percentage of shipments that got upgraded to a premium service\nafter dispatch, by month, so I can stamp it out.\"\n\n(Sandra's note: I asked the TMS admin and he'd never heard of post-dispatch upgrades, but Marco\nwas adamant this happens.)",
       "cuts": "",
       "metric": "",
       "refinement_required": "",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-      "status": "needs_mapping"
+      "status": "needs_mapping",
+      "metric_provenance": "authored",
+      "cuts_provenance": "authored"
     },
     {
       "name": "KPI 6 - Fleet utilization",
-      "description": "",
+      "description": "\"What share of our own fleet is actually working. Utilization, weekly. You know - of the\nvehicles we own, how many are out doing legs versus sat in the yard or in the workshop.\"\n\n(Does \"fleet\" include disposed vehicles? Vehicles off-road (VOR)? He didn't say.)",
       "cuts": "",
       "metric": "",
       "refinement_required": "",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-      "status": "needs_mapping"
+      "status": "needs_mapping",
+      "metric_provenance": "authored",
+      "cuts_provenance": "authored"
     },
     {
       "name": "KPI 7 - Invoice dispute rate",
-      "description": "",
+      "description": "\"How much of our billing ends up disputed. Percentage of invoices that get a dispute raised,\nmonthly. Finance will tell you it's tiny, the CS inbox says otherwise.\"\n\n(Per-invoice or per-invoice-line? The billing extract is line level, disputes are raised against\nthe invoice number.)",
       "cuts": "",
       "metric": "",
       "refinement_required": "",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-      "status": "needs_mapping"
+      "status": "needs_mapping",
+      "metric_provenance": "authored",
+      "cuts_provenance": "authored"
     },
     {
       "name": "KPI 8 - Average cost per kilogram by lane",
-      "description": "",
+      "description": "\"Take the freight charge and divide by the weight, lane by lane, so I can see which corridors\nare bleeding us. Watch the weights - half the legacy depots still key imperial.\"",
       "cuts": "",
       "metric": "",
       "refinement_required": "",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-      "status": "needs_mapping"
+      "status": "needs_mapping",
+      "metric_provenance": "authored",
+      "cuts_provenance": "authored"
     },
     {
       "name": "KPI 9 - Quarterly account churn",
-      "description": "",
+      "description": "\"How many accounts we lose a quarter. Churn. Every logistics business counts this differently,\npick something sensible and tell me what you picked.\"",
       "cuts": "",
       "metric": "",
       "refinement_required": "",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-      "status": "needs_mapping"
+      "status": "needs_mapping",
+      "metric_provenance": "authored",
+      "cuts_provenance": "authored"
     },
     {
       "name": "KPI 10 - Perfect shipment rate",
-      "description": "",
+      "description": "\"The holy grail one: delivered on time, no damage claim, no billing dispute. What share of jobs\nclears all three. That's the number for the board.\"",
       "cuts": "",
       "metric": "",
       "refinement_required": "",
       "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-      "status": "needs_mapping"
+      "status": "needs_mapping",
+      "metric_provenance": "authored",
+      "cuts_provenance": "authored"
     }
   ]
 }

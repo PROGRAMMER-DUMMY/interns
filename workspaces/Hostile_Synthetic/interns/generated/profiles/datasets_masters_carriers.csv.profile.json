@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\carriers.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\carriers.csv",
   "format": "csv",
   "row_count": 8,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "FNCH",
-        "ARRW",
-        "DNUB",
-        "BLTC",
-        "EGRT",
         "HLCY",
+        "ARRW",
+        "GRYP",
+        "EGRT",
+        "DNUB",
         "CDRX",
-        "GRYP"
+        "FNCH",
+        "BLTC"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Arrowline Haulage",
-        "Gryphon Air Cargo",
         "Cedar Express",
-        "Egret Couriers",
-        "Baltic Crossways",
+        "Gryphon Air Cargo",
         "Halcyon Logistics",
         "Finch Parcel Net",
-        "Danube Freight"
+        "Baltic Crossways",
+        "Arrowline Haulage",
+        "Danube Freight",
+        "Egret Couriers"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,9 +67,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "AIR",
         "ROAD",
-        "RAIL",
-        "AIR"
+        "RAIL"
       ],
       "sample_min": null,
       "sample_max": null,

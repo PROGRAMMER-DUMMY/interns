@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\customers_legacy.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\customers_legacy.csv",
   "format": "csv",
   "row_count": 168,
   "file_count": 1,
@@ -20,14 +20,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CU2162",
-        "CU2047",
-        "CU2145",
-        "CU2133",
-        "CU2141",
-        "CU2130",
-        "CU2027",
-        "CU2117"
+        "CU2131",
+        "CU2003",
+        "CU2154",
+        "CU2155",
+        "CU2157",
+        "CU2044",
+        "CU2143",
+        "CU2015"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -43,14 +43,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Rampart Textiles Group",
-        "Granite Paper Group",
-        "North Foods Trading",
-        "Mistral Foods Ltd",
-        "Crest Garden Holdings",
-        "Mistral Retail Holdings",
-        "Wexford Components Ltd",
-        "Mistral Electrics Group"
+        "Wexford Paper PLC",
+        "Umbra Builders Holdings",
+        "Keystone Marine Holdings",
+        "Iron Marine PLC",
+        "Umbra Builders PLC",
+        "Quartz Beverages Trading",
+        "Tundra Garden Holdings",
+        "Granite Paper Group"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -66,8 +66,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CLOSED",
-        "ACTIVE"
+        "ACTIVE",
+        "CLOSED"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -83,14 +83,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2022-11-06",
-        "2025-12-30",
-        "2022-05-01",
-        "2024-08-11",
-        "2022-12-15",
-        "2023-03-25",
-        "2024-03-29",
-        "2025-04-04"
+        "2023-03-24",
+        "2024-11-11",
+        "2023-09-10",
+        "2025-07-22",
+        "2025-05-01",
+        "2022-08-30",
+        "2024-09-29",
+        "2023-02-01"
       ],
       "sample_min": null,
       "sample_max": null,

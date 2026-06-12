@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\locs.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\locs.csv",
   "format": "csv",
   "row_count": 60,
   "file_count": 1,
@@ -23,14 +23,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-243",
-        "L-258",
-        "L-259",
+        "L-237",
+        "L-215",
         "L-236",
-        "L-247",
-        "L-256",
-        "L-251",
-        "L-234"
+        "L-210",
+        "L-214",
+        "L-206",
+        "L-222",
+        "L-248"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -46,14 +46,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Quartz Railhead 13",
-        "Iron Hub 46",
-        "Umbra Customer_Dock 4",
-        "Bravo Hub 6",
-        "Delta Railhead 8",
-        "Tundra Railhead 48",
-        "Keystone Customer_Dock 59",
-        "Lumen Port 47"
+        "Vector Depot 55",
+        "Lumen Customer_Dock 14",
+        "Solstice Customer_Dock 19",
+        "Yarrow Depot 35",
+        "Crest Port 22",
+        "North Railhead 28",
+        "Pinnacle Railhead 58",
+        "Orchard Railhead 18"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -70,10 +70,10 @@
       "nullable": null,
       "sample_values": [
         "PORT",
-        "RAILHEAD",
+        "DEPOT",
         "HUB",
         "CUSTOMER_DOCK",
-        "DEPOT"
+        "RAILHEAD"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -89,14 +89,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Z11",
-        "Z07",
-        "Z10",
-        "Z08",
-        "Z09",
-        "Z03",
         "Z02",
-        "Z04"
+        "Z06",
+        "Z11",
+        "Z04",
+        "Z12",
+        "Z05",
+        "Z08",
+        "Z10"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -112,10 +112,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "05:00",
         "06:00",
         "08:00",
-        "07:00"
+        "07:00",
+        "05:00"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -131,9 +131,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "18:00",
         "23:00",
         "20:00",
-        "18:00",
         "22:00"
       ],
       "sample_min": null,

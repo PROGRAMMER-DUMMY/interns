@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\exception_codes.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\exception_codes.csv",
   "format": "csv",
   "row_count": 8,
   "file_count": 1,
@@ -19,14 +19,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "X05",
-        "X02",
-        "X01",
-        "X04",
         "X03",
-        "X06",
         "X07",
-        "X08"
+        "X02",
+        "X08",
+        "X04",
+        "X06",
+        "X01",
+        "X05"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -42,13 +42,13 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Customs hold",
-        "Damaged in handling",
-        "Vehicle breakdown",
-        "Refused at door",
         "Address query",
+        "Damaged in handling",
         "Label unreadable",
         "Missed linehaul",
+        "Refused at door",
+        "Customs hold",
+        "Vehicle breakdown",
         "Weather hold"
       ],
       "sample_min": null,
@@ -65,9 +65,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "MED",
+        "LOW",
         "HIGH",
-        "LOW"
+        "MED"
       ],
       "sample_min": null,
       "sample_max": null,

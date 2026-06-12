@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
   "format": "csv",
   "row_count": 2280,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "PMT61860",
-        "PMT60753",
-        "PMT62229",
-        "PMT61853",
-        "PMT62268",
-        "PMT61089",
-        "PMT61099",
-        "PMT62272"
+        "PMT61764",
+        "PMT60027",
+        "PMT60062",
+        "PMT60522",
+        "PMT60792",
+        "PMT60902",
+        "PMT61177",
+        "PMT61279"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "INV-50759",
-        "INV-50425",
-        "INV-51740",
-        "INV-52771",
-        "INV-52151",
-        "INV-50467",
-        "INV-52214",
-        "INV-52868"
+        "INV-50035",
+        "INV-50064",
+        "INV-50092",
+        "INV-53309",
+        "INV-51784",
+        "INV-50556",
+        "INV-50042",
+        "INV-51935"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-04-23",
-        "2026-01-10",
-        "2025-10-17",
-        "2025-09-10",
-        "2025-11-19",
-        "2025-10-20",
-        "2025-03-10",
-        "2026-04-01"
+        "2026-02-25",
+        "2025-07-29",
+        "2025-02-10",
+        "2025-01-25",
+        "2025-10-10",
+        "2025-06-09",
+        "2025-11-27",
+        "2025-06-26"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -113,10 +113,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "DD",
-        "BACS",
         "CHEQUE",
-        "CARD"
+        "CARD",
+        "BACS",
+        "DD"
       ],
       "sample_min": null,
       "sample_max": null,

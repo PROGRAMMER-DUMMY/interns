@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\edi_messages.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\edi_messages.csv",
   "format": "csv",
   "row_count": 800,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "EDI70682",
-        "EDI70784",
-        "EDI70238",
-        "EDI70025",
-        "EDI70114",
-        "EDI70462",
-        "EDI70545",
-        "EDI70308"
+        "EDI70325",
+        "EDI70503",
+        "EDI70192",
+        "EDI70430",
+        "EDI70696",
+        "EDI70402",
+        "EDI70798",
+        "EDI70343"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH101924",
-        "SH104135",
-        "SH102615",
-        "SH104071",
-        "SH100403",
-        "SH100498",
-        "SH104007",
-        "SH103745"
+        "SH102516",
+        "SH102490",
+        "SH100362",
+        "SH102921",
+        "SH104147",
+        "SH102470",
+        "SH101096",
+        "SH102956"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -86,14 +86,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-06-27 21:42",
-        "2026-03-25 09:57",
-        "2025-02-01 14:00",
-        "2025-03-11 07:56",
-        "2025-03-08 21:11",
-        "2025-08-24 18:52",
-        "2025-12-07 09:39",
-        "2025-01-18 06:04"
+        "2025-03-06 11:37",
+        "2026-04-06 14:42",
+        "2026-05-08 11:50",
+        "2025-11-19 13:20",
+        "2025-02-21 08:37",
+        "2025-10-16 13:32",
+        "2025-11-03 11:09",
+        "2026-04-14 12:08"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -109,9 +109,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "NACK",
+        "ACK",
         "PENDING",
-        "ACK"
+        "NACK"
       ],
       "sample_min": null,
       "sample_max": null,

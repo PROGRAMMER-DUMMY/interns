@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
   "format": "csv",
   "row_count": 260,
   "file_count": 1,
@@ -22,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "DSP4161",
-        "DSP4243",
-        "DSP4138",
-        "DSP4113",
-        "DSP4005",
-        "DSP4153",
-        "DSP4020",
-        "DSP4225"
+        "DSP4197",
+        "DSP4054",
+        "DSP4181",
+        "DSP4128",
+        "DSP4146",
+        "DSP4223",
+        "DSP4224",
+        "DSP4034"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -45,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "INV-52553",
-        "INV-51033",
-        "INV-51739",
-        "INV-51527",
-        "INV-50843",
-        "INV-52834",
-        "INV-52912",
-        "INV-52049"
+        "INV-50369",
+        "INV-52878",
+        "INV-52801",
+        "INV-50339",
+        "INV-52335",
+        "INV-52454",
+        "INV-52263",
+        "INV-52591"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -68,14 +68,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-01-08",
-        "2025-01-27",
-        "2025-01-16",
-        "2026-03-05",
-        "2025-06-01",
-        "2026-02-06",
-        "2025-10-29",
-        "2026-04-10"
+        "2025-09-05",
+        "2026-01-22",
+        "2025-02-19",
+        "2025-01-11",
+        "2025-02-14",
+        "2025-09-18",
+        "2025-07-12",
+        "2026-02-06"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -91,8 +91,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "REJECTED",
         "RESOLVED",
+        "REJECTED",
         "OPEN"
       ],
       "sample_min": null,
@@ -109,9 +109,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "X07",
         "RR1",
         "RR5",
-        "X07",
         "RR2"
       ],
       "sample_min": null,

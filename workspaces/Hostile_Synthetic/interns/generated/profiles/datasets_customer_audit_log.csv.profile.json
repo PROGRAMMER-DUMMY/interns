@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\audit_log.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\audit_log.csv",
   "format": "csv",
   "row_count": 300,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "AU00105",
-        "AU00139",
-        "AU00027",
-        "AU00040",
-        "AU00063",
-        "AU00074",
-        "AU00127",
-        "AU00209"
+        "AU00224",
+        "AU00187",
+        "AU00109",
+        "AU00111",
+        "AU00116",
+        "AU00156",
+        "AU00177",
+        "AU00135"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-03-13 12:17",
-        "2025-01-27 15:15",
-        "2025-05-06 12:42",
-        "2025-09-26 18:58",
-        "2025-07-31 12:14",
-        "2026-04-12 12:19",
-        "2025-01-29 13:55",
-        "2025-03-31 14:29"
+        "2025-09-27 20:10",
+        "2025-01-13 15:08",
+        "2025-03-21 14:58",
+        "2025-11-04 17:35",
+        "2026-01-11 16:31",
+        "2026-01-21 20:22",
+        "2025-10-06 06:50",
+        "2025-05-15 10:47"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,10 +67,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "system",
-        "ops2",
+        "finance1",
         "ops1",
-        "finance1"
+        "ops2",
+        "system"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -86,9 +86,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "UPDATE",
         "CREATE",
         "EXPORT",
+        "UPDATE",
         "VOID"
       ],
       "sample_min": null,
@@ -106,9 +106,9 @@
       "nullable": null,
       "sample_values": [
         "rate_card",
-        "shipment",
         "invoice",
-        "party"
+        "party",
+        "shipment"
       ],
       "sample_min": null,
       "sample_max": null,

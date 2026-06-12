@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\contacts.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\contacts.csv",
   "format": "csv",
   "row_count": 360,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CT0041",
-        "CT0064",
-        "CT0131",
-        "CT0140",
-        "CT0233",
-        "CT0245",
-        "CT0028",
-        "CT0251"
+        "CT0103",
+        "CT0187",
+        "CT0193",
+        "CT0232",
+        "CT0264",
+        "CT0148",
+        "CT0290",
+        "CT0058"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1153",
-        "P-1102",
-        "P-1122",
-        "P-1087",
-        "P-1094",
-        "P-1083",
-        "P-1024",
-        "P-1121"
+        "P-1074",
+        "P-1035",
+        "P-1154",
+        "P-1040",
+        "P-1009",
+        "P-1179",
+        "P-1155",
+        "P-1171"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Mei Riva",
-        "Quinn Marek",
-        "Mei Lindgren",
-        "Greta Quist",
-        "Femi Novak",
-        "Carmen Kovacs",
-        "Femi Kovacs",
-        "Quinn Lindgren"
+        "Ines Brennan",
+        "Priya Costa",
+        "Tomas Kovacs",
+        "Dev Quist",
+        "Greta Gallo",
+        "Greta Hansen",
+        "Dev Riva",
+        "Elena Novak"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -91,8 +91,8 @@
       "nullable": null,
       "sample_values": [
         "OPS",
-        "WAREHOUSE",
         "BUYER",
+        "WAREHOUSE",
         "FINANCE"
       ],
       "sample_min": null,

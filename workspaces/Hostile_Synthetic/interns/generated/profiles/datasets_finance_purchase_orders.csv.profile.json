@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\purchase_orders.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\purchase_orders.csv",
   "format": "csv",
   "row_count": 220,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "PO30109",
-        "PO30163",
-        "PO30178",
+        "PO30164",
+        "PO30078",
+        "PO30053",
         "PO30183",
-        "PO30192",
-        "PO30198",
-        "PO30127",
-        "PO30132"
+        "PO30091",
+        "PO30035",
+        "PO30046",
+        "PO30008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "V038",
-        "V009",
-        "V005",
-        "V037",
-        "V025",
+        "V002",
+        "V019",
+        "V012",
+        "V018",
+        "V001",
         "V017",
-        "V006",
-        "V010"
+        "V013",
+        "V027"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-02-11",
-        "2025-12-17",
-        "2025-07-22",
-        "2025-02-21",
-        "2026-02-18",
-        "2025-01-27",
-        "2025-06-29",
-        "2025-07-18"
+        "2026-03-18",
+        "2025-04-01",
+        "2026-03-26",
+        "2025-05-01",
+        "2025-07-13",
+        "2025-08-29",
+        "2025-11-03",
+        "2025-11-25"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -113,9 +113,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "RECEIPTED",
         "OPEN",
-        "CANCELLED"
+        "CANCELLED",
+        "RECEIPTED"
       ],
       "sample_min": null,
       "sample_max": null,

@@ -9,7 +9,7 @@
   ],
   "datasets": [
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\addr.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\addr.csv",
       "format": "csv",
       "row_count": 380,
       "schema": {
@@ -22,7 +22,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_customer_addr.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\audit_log.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\audit_log.csv",
       "format": "csv",
       "row_count": 300,
       "schema": {
@@ -35,7 +35,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_customer_audit_log.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\complaints.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\complaints.csv",
       "format": "csv",
       "row_count": 260,
       "schema": {
@@ -48,7 +48,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_customer_complaints.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\contacts.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\contacts.csv",
       "format": "csv",
       "row_count": 360,
       "schema": {
@@ -61,7 +61,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_customer_contacts.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\surveys.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\surveys.csv",
       "format": "csv",
       "row_count": 420,
       "schema": {
@@ -73,7 +73,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_customer_surveys.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\accessorial_charges.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\accessorial_charges.csv",
       "format": "csv",
       "row_count": 340,
       "schema": {
@@ -85,7 +85,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_accessorial_charges.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\credit_notes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\credit_notes.csv",
       "format": "csv",
       "row_count": 180,
       "schema": {
@@ -98,7 +98,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_credit_notes.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
       "format": "csv",
       "row_count": 260,
       "schema": {
@@ -112,7 +112,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_disputes.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
       "format": "csv",
       "row_count": 4809,
       "schema": {
@@ -130,7 +130,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_invoices.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
       "format": "csv",
       "row_count": 2280,
       "schema": {
@@ -143,7 +143,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_payments.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\purchase_orders.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\purchase_orders.csv",
       "format": "csv",
       "row_count": 220,
       "schema": {
@@ -156,7 +156,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_purchase_orders.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
       "format": "csv",
       "row_count": 84,
       "schema": {
@@ -169,7 +169,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_settlements.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\fuel_logs.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\fuel_logs.csv",
       "format": "csv",
       "row_count": 900,
       "schema": {
@@ -182,7 +182,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_fleet_fuel_logs.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\gps_pings.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\gps_pings.csv",
       "format": "csv",
       "row_count": 400,
       "schema": {
@@ -195,7 +195,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_fleet_gps_pings.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\incidents.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\incidents.csv",
       "format": "csv",
       "row_count": 70,
       "schema": {
@@ -209,7 +209,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_fleet_incidents.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\maintenance.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\maintenance.csv",
       "format": "csv",
       "row_count": 280,
       "schema": {
@@ -223,7 +223,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_fleet_maintenance.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\carriers.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\carriers.csv",
       "format": "csv",
       "row_count": 8,
       "schema": {
@@ -236,7 +236,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_carriers.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\customers_legacy.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\customers_legacy.csv",
       "format": "csv",
       "row_count": 168,
       "schema": {
@@ -248,7 +248,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_customers_legacy.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\dock_doors.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\dock_doors.csv",
       "format": "csv",
       "row_count": 90,
       "schema": {
@@ -259,7 +259,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_dock_doors.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
       "format": "csv",
       "row_count": 120,
       "schema": {
@@ -272,7 +272,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_drivers.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
       "format": "csv",
       "row_count": 140,
       "schema": {
@@ -286,7 +286,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_employees.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\lanes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\lanes.csv",
       "format": "csv",
       "row_count": 160,
       "schema": {
@@ -298,7 +298,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_lanes.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\locs.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\locs.csv",
       "format": "csv",
       "row_count": 60,
       "schema": {
@@ -313,7 +313,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_locs.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
       "format": "csv",
       "row_count": 240,
       "schema": {
@@ -328,7 +328,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_party.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
       "format": "csv",
       "row_count": 6,
       "schema": {
@@ -340,7 +340,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_svc_catalog.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
       "format": "csv",
       "row_count": 120,
       "schema": {
@@ -353,7 +353,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_vehicles.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vendors.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vendors.csv",
       "format": "csv",
       "row_count": 40,
       "schema": {
@@ -365,7 +365,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_vendors.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\wh_bins.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\wh_bins.csv",
       "format": "csv",
       "row_count": 200,
       "schema": {
@@ -376,7 +376,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_wh_bins.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
       "format": "csv",
       "row_count": 176,
       "schema": {
@@ -391,7 +391,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_cargo_claims.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\edi_messages.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\edi_messages.csv",
       "format": "csv",
       "row_count": 800,
       "schema": {
@@ -404,7 +404,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_edi_messages.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\exceptions.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\exceptions.csv",
       "format": "csv",
       "row_count": 520,
       "schema": {
@@ -417,7 +417,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_exceptions.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
       "format": "csv",
       "row_count": 4830,
       "schema": {
@@ -436,7 +436,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_movements.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pickup_requests.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pickup_requests.csv",
       "format": "csv",
       "row_count": 640,
       "schema": {
@@ -450,7 +450,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_pickup_requests.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pod_scans.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pod_scans.csv",
       "format": "csv",
       "row_count": 3427,
       "schema": {
@@ -463,7 +463,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_pod_scans.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\returns.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\returns.csv",
       "format": "csv",
       "row_count": 190,
       "schema": {
@@ -476,7 +476,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_returns.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
       "format": "csv",
       "row_count": 4200,
       "schema": {
@@ -499,7 +499,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\operations\\temperature_logs.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\temperature_logs.csv",
       "format": "csv",
       "row_count": 260,
       "schema": {
@@ -511,7 +511,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_temperature_logs.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\people\\driver_infringements.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\driver_infringements.csv",
       "format": "csv",
       "row_count": 120,
       "schema": {
@@ -524,7 +524,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_people_driver_infringements.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
       "format": "csv",
       "row_count": 1100,
       "schema": {
@@ -537,7 +537,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_people_timesheets.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\contracts.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\contracts.csv",
       "format": "csv",
       "row_count": 95,
       "schema": {
@@ -551,7 +551,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_pricing_contracts.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\fuel_prices.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\fuel_prices.csv",
       "format": "csv",
       "row_count": 74,
       "schema": {
@@ -561,7 +561,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_pricing_fuel_prices.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\quotes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\quotes.csv",
       "format": "csv",
       "row_count": 700,
       "schema": {
@@ -575,7 +575,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_pricing_quotes.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\rate_cards.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\rate_cards.csv",
       "format": "csv",
       "row_count": 130,
       "schema": {
@@ -589,7 +589,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_pricing_rate_cards.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
       "format": "csv",
       "row_count": 180,
       "schema": {
@@ -604,7 +604,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_pricing_tariffs.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\commodity_codes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\commodity_codes.csv",
       "format": "csv",
       "row_count": 10,
       "schema": {
@@ -615,7 +615,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_commodity_codes.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\countries.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\countries.csv",
       "format": "csv",
       "row_count": 6,
       "schema": {
@@ -625,7 +625,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_countries.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\currencies.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\currencies.csv",
       "format": "csv",
       "row_count": 3,
       "schema": {
@@ -635,7 +635,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_currencies.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\exception_codes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\exception_codes.csv",
       "format": "csv",
       "row_count": 8,
       "schema": {
@@ -646,7 +646,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_exception_codes.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
       "format": "csv",
       "row_count": 148,
       "schema": {
@@ -657,7 +657,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_fx_rates.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\holidays.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\holidays.csv",
       "format": "csv",
       "row_count": 8,
       "schema": {
@@ -668,7 +668,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_holidays.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\packaging_types.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\packaging_types.csv",
       "format": "csv",
       "row_count": 6,
       "schema": {
@@ -679,7 +679,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_packaging_types.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\regions.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\regions.csv",
       "format": "csv",
       "row_count": 6,
       "schema": {
@@ -689,7 +689,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_regions.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\return_reasons.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\return_reasons.csv",
       "format": "csv",
       "row_count": 5,
       "schema": {
@@ -699,7 +699,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_return_reasons.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
       "format": "csv",
       "row_count": 4,
       "schema": {
@@ -711,7 +711,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_shifts.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\surcharge_types.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\surcharge_types.csv",
       "format": "csv",
       "row_count": 6,
       "schema": {
@@ -722,7 +722,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_surcharge_types.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\vehicle_classes.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\vehicle_classes.csv",
       "format": "csv",
       "row_count": 5,
       "schema": {
@@ -733,7 +733,7 @@
       "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_reference_vehicle_classes.csv.profile.json"
     },
     {
-      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\zones.csv",
+      "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\zones.csv",
       "format": "csv",
       "row_count": 12,
       "schema": {

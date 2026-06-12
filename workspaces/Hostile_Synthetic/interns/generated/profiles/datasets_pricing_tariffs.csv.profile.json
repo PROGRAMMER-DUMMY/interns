@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
   "format": "csv",
   "row_count": 180,
   "file_count": 1,
@@ -23,14 +23,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "T0018",
-        "T0052",
-        "T0074",
-        "T0096",
-        "T0087",
-        "T0035",
-        "T0051",
-        "T0156"
+        "T0173",
+        "T0012",
+        "T0036",
+        "T0061",
+        "T0027",
+        "T0053",
+        "T0165",
+        "T0146"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -46,12 +46,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SVC2",
-        "SVC1",
         "SVC4",
         "SVC6",
+        "SVC2",
         "SVC5",
-        "SVC3"
+        "SVC3",
+        "SVC1"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Z01",
-        "Z10",
-        "Z06",
         "Z12",
-        "Z03",
-        "Z04",
-        "Z02",
-        "Z07"
+        "Z07",
+        "Z08",
+        "Z05",
+        "Z06",
+        "Z01",
+        "Z11",
+        "Z02"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -91,13 +91,13 @@
       "nullable": null,
       "sample_values": [
         "Z11",
+        "Z07",
+        "Z09",
+        "Z12",
         "Z04",
-        "Z08",
+        "Z05",
         "Z10",
-        "Z06",
-        "Z03",
-        "Z01",
-        "Z12"
+        "Z01"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -159,14 +159,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2024-12-05",
-        "2024-01-12",
-        "2024-06-29",
-        "2024-09-05",
-        "2024-07-28",
-        "2024-07-23",
-        "2025-08-16",
-        "2025-06-13"
+        "2024-08-16",
+        "2024-03-19",
+        "2024-01-23",
+        "2025-05-14",
+        "2024-06-01",
+        "2025-02-03",
+        "2024-10-04",
+        "2025-12-25"
       ],
       "sample_min": null,
       "sample_max": null,

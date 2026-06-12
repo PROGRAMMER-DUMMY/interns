@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
   "format": "csv",
   "row_count": 140,
   "file_count": 1,
@@ -22,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "E573",
-        "E535",
+        "E514",
+        "E513",
+        "E626",
+        "E525",
         "E542",
-        "E501",
-        "E528",
-        "E597",
-        "E629",
-        "E526"
+        "E595",
+        "E634",
+        "E588"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -45,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Carmen Iqbal",
-        "Femi Fuentes",
-        "Katya Riva",
-        "Quinn Eriksen",
-        "Greta Kovacs",
-        "Aisha Tanaka",
-        "Greta Gallo",
-        "Hamid Adler"
+        "Quinn Dvorak",
+        "Hamid Tanaka",
+        "Tomas Jensen",
+        "Aisha Jensen",
+        "Omar Kovacs",
+        "Nadia Gallo",
+        "Elena Novak",
+        "Ines Marek"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -68,11 +68,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "CS_AGENT",
+        "LOADER",
         "PLANNER",
         "FITTER",
-        "SUPERVISOR",
-        "LOADER",
-        "CS_AGENT"
+        "SUPERVISOR"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -88,14 +88,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-210",
-        "L-235",
+        "L-211",
+        "L-225",
+        "L-206",
+        "L-221",
+        "L-250",
+        "L-230",
         "L-201",
-        "L-256",
-        "L-245",
-        "L-216",
-        "L-260",
-        "L-231"
+        "L-256"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -111,14 +111,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2022-11-14",
-        "2023-07-08",
-        "2022-12-30",
-        "2019-05-23",
-        "2021-11-28",
-        "2019-06-12",
-        "2018-10-13",
-        "2019-01-12"
+        "2019-01-12",
+        "2024-03-11",
+        "2024-12-23",
+        "2021-04-01",
+        "2020-12-18",
+        "2024-07-17",
+        "2024-12-07",
+        "2023-05-28"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -134,14 +134,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-01-13",
-        "2026-05-13",
-        "2025-11-10",
+        "2026-01-25",
+        "2026-02-21",
+        "2026-05-29",
         "2026-04-01",
-        "2025-12-30",
-        "2025-11-27",
-        "2026-02-19",
-        "2025-11-05"
+        "2026-05-23",
+        "2026-03-06",
+        "2025-11-05",
+        "2026-05-13"
       ],
       "sample_min": null,
       "sample_max": null,

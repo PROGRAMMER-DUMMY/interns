@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\customer\\addr.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\addr.csv",
   "format": "csv",
   "row_count": 380,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "AD0282",
-        "AD0037",
-        "AD0075",
-        "AD0292",
-        "AD0293",
         "AD0116",
-        "AD0324",
-        "AD0333"
+        "AD0223",
+        "AD0364",
+        "AD0201",
+        "AD0126",
+        "AD0308",
+        "AD0021",
+        "AD0275"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1117",
-        "P-1220",
-        "P-1053",
-        "P-1066",
-        "P-1193",
-        "P-1094",
-        "P-1054",
-        "P-1240"
+        "P-1083",
+        "P-1177",
+        "P-1068",
+        "P-1007",
+        "P-1032",
+        "P-1199",
+        "P-1152",
+        "P-1049"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "157 Orchard Way",
-        "129 Pinnacle Way",
-        "191 Alfa Way",
-        "166 Pinnacle Way",
-        "6 Mistral Way",
-        "142 Iron Way",
-        "111 Juno Way",
-        "164 Quartz Way"
+        "214 Zenith Way",
+        "103 Harbor Way",
+        "232 North Way",
+        "116 Pinnacle Way",
+        "13 Tundra Way",
+        "72 Lumen Way",
+        "135 Pinnacle Way",
+        "174 Juno Way"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -90,14 +90,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "LS",
-        "CF",
+        "AB",
+        "EH",
         "M",
         "B",
-        "TR",
-        "EH",
-        "AB",
-        "G"
+        "NE",
+        "G",
+        "CF",
+        "SO"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -114,9 +114,9 @@
       "nullable": null,
       "sample_values": [
         "FR",
-        "IE",
+        "GB",
         "NL",
-        "GB"
+        "IE"
       ],
       "sample_min": null,
       "sample_max": null,

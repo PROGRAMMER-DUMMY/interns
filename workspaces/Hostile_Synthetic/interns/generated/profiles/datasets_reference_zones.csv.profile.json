@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\zones.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\zones.csv",
   "format": "csv",
   "row_count": 12,
   "file_count": 1,
@@ -19,14 +19,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Z09",
-        "Z10",
-        "Z01",
-        "Z12",
+        "Z11",
+        "Z02",
+        "Z04",
+        "Z06",
         "Z07",
-        "Z03",
-        "Z05",
-        "Z04"
+        "Z08",
+        "Z09",
+        "Z10"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -42,14 +42,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Zone 01",
-        "Zone 08",
+        "Zone 07",
+        "Zone 02",
+        "Zone 03",
         "Zone 09",
-        "Zone 04",
-        "Zone 10",
+        "Zone 12",
         "Zone 05",
-        "Zone 11",
-        "Zone 12"
+        "Zone 01",
+        "Zone 08"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -65,12 +65,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "R2",
         "R4",
+        "R2",
         "R3",
+        "R6",
         "R1",
-        "R5",
-        "R6"
+        "R5"
       ],
       "sample_min": null,
       "sample_max": null,

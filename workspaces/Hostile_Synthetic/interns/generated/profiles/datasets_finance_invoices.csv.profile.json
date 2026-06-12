@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
   "format": "csv",
   "row_count": 4809,
   "file_count": 1,
@@ -26,14 +26,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "IL901188",
-        "IL901821",
-        "IL902113",
-        "IL900500",
-        "IL900572",
-        "IL900850",
-        "IL901430",
-        "IL901755"
+        "IL901856",
+        "IL901588",
+        "IL904133",
+        "IL903508",
+        "IL902229",
+        "IL901465",
+        "IL900668",
+        "IL901256"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -49,14 +49,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "INV-51862",
-        "INV-51323",
-        "INV-51432",
-        "INV-51069",
-        "INV-50684",
-        "INV-50461",
-        "INV-52343",
-        "INV-52839"
+        "INV-53393",
+        "INV-51507",
+        "INV-53255",
+        "INV-50813",
+        "INV-53106",
+        "INV-50086",
+        "INV-51982",
+        "INV-50277"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -72,14 +72,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-07-19",
-        "2025-02-17",
-        "2026-02-17",
-        "2025-11-18",
-        "2025-10-20",
-        "2025-11-12",
-        "2025-01-07",
-        "2026-05-21"
+        "2025-12-23",
+        "2025-04-26",
+        "2025-07-03",
+        "2025-05-08",
+        "2025-09-02",
+        "2025-10-08",
+        "2025-06-04",
+        "2026-02-01"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -95,14 +95,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1027",
-        "P-1146",
+        "P-1005",
         "P-1068",
-        "P-1019",
-        "P-1040",
-        "P-1029",
-        "P-1016",
-        "P-1237"
+        "P-1137",
+        "P-1066",
+        "P-1185",
+        "P-1020",
+        "P-1217",
+        "P-1219"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -118,14 +118,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH100673",
-        "SH101024",
-        "SH102216",
-        "SH100889",
-        "SH102888",
-        "SH103502",
-        "SH101096",
-        "SH103065"
+        "SH104125",
+        "SH104142",
+        "SH104055",
+        "SH102944",
+        "SH101285",
+        "SH101292",
+        "SH100115",
+        "SH102970"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -141,9 +141,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "FUEL",
         "BASE",
-        "ACCESSORIAL"
+        "ACCESSORIAL",
+        "FUEL"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -182,8 +182,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "GBP",
-        "EUR"
+        "EUR",
+        "GBP"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -222,10 +222,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "OPEN",
+        "PAID",
         "CREDITED",
         "VOID",
-        "PAID"
+        "OPEN"
       ],
       "sample_min": null,
       "sample_max": null,

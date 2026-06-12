@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\currencies.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\currencies.csv",
   "format": "csv",
   "row_count": 3,
   "file_count": 1,
@@ -18,9 +18,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "EUR",
         "GBP",
-        "USD"
+        "USD",
+        "EUR"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -36,9 +36,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "Pound Sterling",
         "US Dollar",
-        "Euro",
-        "Pound Sterling"
+        "Euro"
       ],
       "sample_min": null,
       "sample_max": null,

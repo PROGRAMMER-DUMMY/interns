@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
   "format": "csv",
   "row_count": 240,
   "file_count": 1,
@@ -23,14 +23,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1043",
-        "P-1141",
-        "P-1081",
-        "P-1174",
-        "P-1089",
-        "P-1026",
-        "P-1038",
-        "P-1065"
+        "P-1064",
+        "P-1012",
+        "P-1117",
+        "P-1219",
+        "P-1015",
+        "P-1196",
+        "P-1025",
+        "P-1192"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -46,14 +46,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CRM61426",
-        "CRM89897",
-        "CRM81573",
-        "CRM78906",
-        "CRM95566",
-        "CRM79129",
-        "CRM93796",
-        "CRM86435"
+        "CRM56698",
+        "CRM70144",
+        "CRM63812",
+        "CRM87771",
+        "CRM70208",
+        "CRM59490",
+        "CRM50862",
+        "CRM92762"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -69,14 +69,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Orchard Electrics PLC",
-        "Orchard Textiles Holdings",
-        "Iron Marine PLC",
-        "Harbor Components PLC",
-        "Alfa Marine Holdings",
-        "Crest Beverages Group",
-        "Harbor Garden Holdings",
-        "Bravo Electrics & Co"
+        "Granite Builders Ltd",
+        "Quartz Foods Ltd",
+        "Orchard Electrics Holdings",
+        "Ember Components PLC",
+        "Lumen Electrics Trading",
+        "Tundra Print PLC",
+        "Solstice Outdoors Group",
+        "Vector Pharma-Free & Co"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -93,8 +93,8 @@
       "nullable": null,
       "sample_values": [
         "C",
-        "A",
-        "S"
+        "S",
+        "A"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -110,14 +110,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2023-08-31",
-        "2025-04-02",
-        "2024-04-11",
-        "2023-10-14",
-        "2022-12-10",
         "2025-11-20",
-        "2025-09-22",
-        "2024-01-04"
+        "2023-08-20",
+        "2024-12-19",
+        "2024-01-22",
+        "2023-01-10",
+        "2023-10-23",
+        "2025-10-03",
+        "2022-04-25"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -133,8 +133,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SME",
         "RESELLER",
+        "SME",
         "PUBLIC",
         "ENTERPRISE"
       ],
@@ -152,12 +152,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "R6",
-        "R5",
         "R4",
         "R3",
+        "R5",
+        "R1",
         "R2",
-        "R1"
+        "R6"
       ],
       "sample_min": null,
       "sample_max": null,

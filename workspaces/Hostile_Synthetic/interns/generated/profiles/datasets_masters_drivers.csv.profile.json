@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
   "format": "csv",
   "row_count": 120,
   "file_count": 1,
@@ -21,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "D3033",
+        "D3053",
+        "D3022",
         "D3015",
-        "D3045",
+        "D3007",
+        "D3066",
+        "D3117",
         "D3080",
-        "D3065",
-        "D3105",
-        "D3103",
-        "D3108"
+        "D3098"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Stefan Hansen",
-        "Aisha Iqbal",
-        "Omar Brennan",
-        "Nadia Marek",
-        "Rosa Kovacs",
-        "Boris Quist",
-        "Nadia Tanaka",
-        "Quinn Dvorak"
+        "Stefan Gallo",
+        "Quinn Lindgren",
+        "Tomas Dvorak",
+        "Femi Kovacs",
+        "Nadia Fuentes",
+        "Katya Petrov",
+        "Boris Petrov",
+        "Nadia Lindgren"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "L-235",
+        "L-260",
         "L-220",
-        "L-210",
-        "L-215",
-        "L-226",
-        "L-201",
-        "L-206",
-        "L-245",
-        "L-216"
+        "L-251",
+        "L-241",
+        "L-240",
+        "L-236",
+        "L-215"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -90,10 +90,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "C1",
         "CE",
-        "B",
-        "C"
+        "C1",
+        "C",
+        "B"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -109,9 +109,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "ACTIVE",
         "LEFT",
-        "BANNED"
+        "BANNED",
+        "ACTIVE"
       ],
       "sample_min": null,
       "sample_max": null,

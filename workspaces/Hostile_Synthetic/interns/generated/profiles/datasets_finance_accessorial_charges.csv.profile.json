@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\finance\\accessorial_charges.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\accessorial_charges.csv",
   "format": "csv",
   "row_count": 340,
   "file_count": 1,
@@ -20,14 +20,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "AC9113",
-        "AC9130",
-        "AC9009",
-        "AC9024",
-        "AC9023",
-        "AC9305",
-        "AC9126",
-        "AC9022"
+        "AC9068",
+        "AC9120",
+        "AC9159",
+        "AC9069",
+        "AC9017",
+        "AC9048",
+        "AC9198",
+        "AC9181"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -43,14 +43,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH104139",
-        "SH103443",
-        "SH102345",
-        "SH101126",
-        "SH100738",
-        "SH102046",
-        "SH104149",
-        "SH103220"
+        "SH101187",
+        "SH100452",
+        "SH102465",
+        "SH101599",
+        "SH103308",
+        "SH103814",
+        "SH100490",
+        "SH104044"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -66,11 +66,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "S-LIFT",
-        "S-REWT",
         "S-WAIT",
-        "S-RES",
-        "S-ADR"
+        "S-ADR",
+        "S-REWT",
+        "S-LIFT",
+        "S-RES"
       ],
       "sample_min": null,
       "sample_max": null,

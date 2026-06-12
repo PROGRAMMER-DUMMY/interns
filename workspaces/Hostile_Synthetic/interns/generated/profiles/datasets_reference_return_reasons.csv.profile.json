@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a7fbdaa6b4533b799\\workspaces\\Hostile_Synthetic\\datasets\\reference\\return_reasons.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\return_reasons.csv",
   "format": "csv",
   "row_count": 5,
   "file_count": 1,
@@ -20,9 +20,9 @@
       "sample_values": [
         "RR2",
         "RR4",
-        "RR3",
         "RR5",
-        "RR1"
+        "RR1",
+        "RR3"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -38,9 +38,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "Wrong item shipped",
         "Refused delivery",
         "Duplicate shipment",
-        "Wrong item shipped",
         "Damaged on arrival",
         "Order cancelled"
       ],
