@@ -781,17 +781,42 @@ class WorkspaceFlow:
             )
           else:
             # Export static HTML and show it: KPI completion ends with the
-            # dashboard in front of the user, not just files on disk.
-            dash_index_path = ""
-            try:
-                from core.dashboard.export import export_static_html
+            # dashboard in front of the user, not just files on disk. Outside
+            # test runs the SCREENER wraps the export: every page is
+            # screenshotted and checked (render failures, blank pages, missing
+            # data viewer, redaction, palette) and its findings ride into the
+            # step record as warnings — visualization defects surface at
+            # completion instead of waiting for a manual look. Opt out with
+            # AUTORESEARCH_SCREEN_DASHBOARD=0.
+            import sys as _sys
 
-                export_summary = export_static_html(self.repo_root, self.workspace_rel)
-                dash_index_path = (
-                    f"{self.workspace_rel}/{export_summary['export_dir']}/index.html"
-                )
-                dash_summary = {**dash_summary, "export": export_summary,
-                                "dashboard_index": dash_index_path}
+            dash_index_path = ""
+            _screen_ok = (
+                _os.environ.get("AUTORESEARCH_SCREEN_DASHBOARD", "") != "0"
+                and "unittest" not in _sys.modules
+                and "pytest" not in _sys.modules
+            )
+            try:
+                if _screen_ok:
+                    from core.dashboard.screener import screen_dashboard
+
+                    screen_summary = screen_dashboard(self.repo_root, self.workspace_rel)
+                    dash_summary = {**dash_summary, "screener": screen_summary}
+                    if not screen_summary.get("ok"):
+                        dash_summary["screener_warning"] = (
+                            f"{screen_summary.get('error_count')} visual finding(s); "
+                            f"see {screen_summary.get('report_md')} and review the "
+                            "staged screenshots"
+                        )
+                    export_dir = "dashboard/exports"
+                else:
+                    from core.dashboard.export import export_static_html
+
+                    export_summary = export_static_html(self.repo_root, self.workspace_rel)
+                    dash_summary = {**dash_summary, "export": export_summary}
+                    export_dir = export_summary["export_dir"]
+                dash_index_path = f"{self.workspace_rel}/{export_dir}/index.html"
+                dash_summary = {**dash_summary, "dashboard_index": dash_index_path}
             except Exception as exc:
                 dash_summary = {**dash_summary, "export_error": str(exc)}
             self._record_step(

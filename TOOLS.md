@@ -1515,6 +1515,42 @@ Only relationships with executable-approved states such as `proven_data_model` o
 may be used by trusted executable generation. Profile-only relationships remain advisory
 `profile_validated` candidates and should trigger blocker grilling before SQL/code generation.
 
+### workspace-dashboard
+
+Commands:
+
+```powershell
+uv run workspace-dashboard --workspace workspaces/<project>            # live Dash app (127.0.0.1:8060)
+uv run workspace-dashboard --workspace workspaces/<project> --export  # static HTML to dashboard/exports/
+uv run workspace-dashboard --workspace workspaces/<project> --screen  # export + screenshot + visual checks
+```
+
+The per-workspace BI dashboard: clickable KPI tile strip with status badges,
+per-panel view toggles, charts chosen by the data-to-viz knowledge base
+(`core/dashboard/chart_knowledge.py`; every panel spec records
+`selection_reason`/`selection_source`), and a display-redacted Data table per
+KPI. KPI completion exports and opens it automatically.
+
+`--screen` is the visual screener: exports, screenshots every page (headless
+Edge/Chrome), runs deterministic checks (render failures, blank pages, missing
+or unredacted data viewer, palette delta-E / contrast), writes
+`interns/reports/dashboard_screener/current.{json,md}`, and stages the
+screenshots under `.../dashboard_screener/shots/` for the agent's vision
+review (misalignment, color mismatch, visual defects). Exits nonzero on
+findings. KPI completion runs it automatically (skip with
+`AUTORESEARCH_SCREEN_DASHBOARD=0`).
+
+### dashboard-verify
+
+```powershell
+uv run dashboard-verify <url-or-file> --screenshot out.png
+```
+
+Single-page DOM gate via agent-browser: chart render counts, container
+overflow, legend presence, perceptual color-clash (delta-E) and contrast
+checks. The screener supersedes it for whole-board sweeps; keep it for
+one-page debugging.
+
 ### apply-relationship-answer
 
 Command:

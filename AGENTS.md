@@ -575,6 +575,7 @@ the matching `### <command>` section of `TOOLS.md` for the one command you are a
 | Generation + execution | `run-kpi-pipeline`, `workspace-flow`, `generate-kpi-sql`, `generate-kpi-engines`, `kpi-proof-packet` |
 | Validation + QA | `validate-workspace-artifacts`, `validate-project-harness`, `harness reliability`, `harness workflow-guardrails`, `harness data-quality`, `prepare-duplicate-review-panel`, `apply-duplicate-review-answer`, `harness layered-pipeline`, `harness pipeline-execution`, `validate-git-hygiene`, `validate-memory-health` |
 | Evidence + reporting | `record-workspace-trajectory`, `build-workspace-evidence-graph`, `export-kpi-registry-excel`, `export-workspace-presentation`, `prepare-wiki-memory`, `prepare-workspace-bug-report`, `record-engine-evolution` |
+| Dashboard | `workspace-dashboard` (serve / `--export` / `--screen` visual screener), `dashboard-verify` (single-page DOM/color gate) |
 | Context + budget | `context-router`, `resource-preflight`, `cleanup-workspace-references` |
 | Dev + harness | `prepare-agent-benchmark`, `harness ai-app`, `harness ai-cli`, `prepare-workspace-workflow`, `profiler.py`, `optimizer_finder.py`, `methodology_parser.py`, `generate-skill-adapters`, Databricks tools |
 

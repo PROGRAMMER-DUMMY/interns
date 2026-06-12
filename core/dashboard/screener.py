@@ -104,7 +104,14 @@ class PageFinding:
         return not self.errors
 
 
-def _check_html(html: str, page: str, spec_panel_count: int | None) -> PageFinding:
+def _check_html(
+    html: str,
+    page: str,
+    spec_panel_count: int | None,
+    *,
+    expects_data_view: bool = False,
+    redaction_patterns: tuple[str, ...] = (),
+) -> PageFinding:
     finding = PageFinding(page=page)
     if "chart render failed" in html:
         failures = re.findall(r"chart render failed: ([^\"<]{0,120})", html)
@@ -118,6 +125,43 @@ def _check_html(html: str, page: str, spec_panel_count: int | None) -> PageFindi
         )
     if "plotly" in html and "cdn.plot.ly" not in html and "Plotly" not in html:
         finding.warnings.append("plotly assets not referenced; charts may be empty")
+    if expects_data_view:
+        finding = _check_data_view(html, finding, redaction_patterns)
+    return finding
+
+
+def _check_data_view(
+    html: str, finding: PageFinding, redaction_patterns: tuple[str, ...]
+) -> PageFinding:
+    """The data viewer is the newest rendered surface — guard it explicitly.
+
+    A ready KPI page must carry a Data section; its row-count note must be
+    self-consistent; and when a table column matches a redaction pattern
+    (default PII or the workspace data policy), the body must actually show
+    the redaction placeholder, never raw values.
+    """
+    if 'class="dataview"' not in html:
+        finding.errors.append("ready KPI page has no Data section (dataview)")
+        return finding
+    note = re.search(r"(\d+) of ([\d,]+)\+? rows", html)
+    if note:
+        shown, total = int(note.group(1)), int(note.group(2).replace(",", ""))
+        if shown > total:
+            finding.errors.append(
+                f"data viewer note inconsistent: shows {shown} of {total} rows"
+            )
+    else:
+        finding.warnings.append("data viewer present but row-count note not found")
+    headers = re.findall(r"<th>([^<]{1,80})</th>", html)
+    sensitive_headers = [
+        h for h in headers
+        if any(re.match(p, h, re.IGNORECASE) for p in redaction_patterns)
+    ]
+    if sensitive_headers and "&lt;redacted-pii&gt;" not in html:
+        finding.errors.append(
+            "data viewer shows sensitive column(s) "
+            f"{sensitive_headers[:3]} without redaction placeholders"
+        )
     return finding
 
 
@@ -136,6 +180,16 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
     shots_dir = report_dir / "shots"
     shots_dir.mkdir(parents=True, exist_ok=True)
 
+    from core.governance.data_policy import (
+        load_workspace_data_policy,
+        policy_redaction_patterns,
+    )
+    from core.onboarding.kpi.pii_redaction import DEFAULT_PII_COLUMN_PATTERNS
+
+    redaction_patterns = DEFAULT_PII_COLUMN_PATTERNS + tuple(
+        policy_redaction_patterns(load_workspace_data_policy(workspace))
+    )
+
     findings: list[PageFinding] = []
     pages = [p for p in export.get("files") or [] if p.endswith(".html")]
     for rel in pages:
@@ -151,7 +205,13 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
             finding = PageFinding(page=rel, errors=[f"unreadable page: {exc}"])
             findings.append(finding)
             continue
-        finding = _check_html(html, rel, panel_count)
+        finding = _check_html(
+            html,
+            rel,
+            panel_count,
+            expects_data_view=bool(kpi_spec and kpi_spec.config.get("sql_path")),
+            redaction_patterns=redaction_patterns,
+        )
 
         shot = shots_dir / f"{name}.png"
         err = _screenshot(page_path.resolve().as_uri(), shot)

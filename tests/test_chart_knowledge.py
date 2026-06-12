@@ -260,6 +260,47 @@ class ScreenerChecksTest(unittest.TestCase):
         )
         self.assertTrue(finding.ok)
 
+    def test_missing_data_view_on_ready_page_is_an_error(self) -> None:
+        from core.dashboard.screener import _check_html
+
+        finding = _check_html(
+            '<div class="js-plotly-plot"></div>', "kpi_001.html", 2,
+            expects_data_view=True,
+        )
+        self.assertFalse(finding.ok)
+        self.assertTrue(any("Data section" in e for e in finding.errors))
+
+    def test_sensitive_header_without_redaction_is_an_error(self) -> None:
+        from core.dashboard.screener import _check_html
+
+        html = (
+            '<div class="js-plotly-plot"></div><details class="dataview">'
+            "<summary>Data</summary><div>10 of 10 rows</div>"
+            "<table><thead><tr><th>ssn</th></tr></thead>"
+            "<tbody><tr><td>123-45-6789</td></tr></tbody></table></details>"
+        )
+        finding = _check_html(
+            html, "kpi_001.html", 1,
+            expects_data_view=True, redaction_patterns=(r"^ssn$",),
+        )
+        self.assertFalse(finding.ok)
+        self.assertTrue(any("without redaction" in e for e in finding.errors))
+
+    def test_redacted_data_view_passes(self) -> None:
+        from core.dashboard.screener import _check_html
+
+        html = (
+            '<div class="js-plotly-plot"></div><details class="dataview">'
+            "<summary>Data</summary><div>10 of 10 rows</div>"
+            "<table><thead><tr><th>ssn</th></tr></thead>"
+            "<tbody><tr><td>&lt;redacted-pii&gt;</td></tr></tbody></table></details>"
+        )
+        finding = _check_html(
+            html, "kpi_001.html", 1,
+            expects_data_view=True, redaction_patterns=(r"^ssn$",),
+        )
+        self.assertTrue(finding.ok)
+
     def test_blank_png_heuristic(self) -> None:
         from core.dashboard.screener import _looks_blank
         import tempfile

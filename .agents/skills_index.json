@@ -1327,6 +1327,24 @@
         ]
       },
       {
+        "name": "workspace-dashboard",
+        "command": "uv run workspace-dashboard --workspace <workspace> --screen",
+        "use_when": [
+          "user wants to view or verify the workspace BI dashboard",
+          "KPI completion dashboard needs a visual screening pass"
+        ],
+        "outputs": [
+          "dashboard/exports/index.html",
+          "interns/reports/dashboard_screener/current.json",
+          "interns/reports/dashboard_screener/current.md",
+          "interns/reports/dashboard_screener/shots (agent vision review)"
+        ],
+        "safety": "local_safe",
+        "required_skills": [
+          "workspace-governance"
+        ]
+      },
+      {
         "name": "validate-workspace-artifacts",
         "command": "uv run validate-workspace-artifacts --workspace <workspace>",
         "use_when": [

@@ -546,6 +546,13 @@
       ]
     },
     {
+      "tool": "workspace-dashboard",
+      "command": "uv run workspace-dashboard --workspace <workspace> --screen",
+      "required_skills": [
+        "workspace-governance"
+      ]
+    },
+    {
       "tool": "validate-workspace-artifacts",
       "command": "uv run validate-workspace-artifacts --workspace <workspace>",
       "required_skills": [

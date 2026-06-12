@@ -389,6 +389,12 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Outputs: interns/reports/blocker_question_panel/current.json; interns/reports/blocker_question_panel/current.md; interns/reports/blocker_question_panel/index.json
   - Safety: local_safe
   - Required skills: grill-requirements; workspace-kpi-query-optimizer
+- `workspace-dashboard`
+  - Command: `uv run workspace-dashboard --workspace <workspace> --screen`
+  - Use when: user wants to view or verify the workspace BI dashboard; KPI completion dashboard needs a visual screening pass
+  - Outputs: dashboard/exports/index.html; interns/reports/dashboard_screener/current.json; interns/reports/dashboard_screener/current.md; interns/reports/dashboard_screener/shots (agent vision review)
+  - Safety: local_safe
+  - Required skills: workspace-governance
 - `validate-workspace-artifacts`
   - Command: `uv run validate-workspace-artifacts --workspace <workspace>`
   - Use when: generated workspace artifacts need schema checks; agent is about to rely on KPI registry, feature mapping, derived reviews, or blocker panel; detect manual edits to generated contracts
