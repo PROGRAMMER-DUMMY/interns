@@ -15,15 +15,28 @@ Statuses:
 - ``match``     rows and columns agree after normalization.
 - ``mismatch``  structural or value difference (reason says which).
 - ``skipped``   parity not applicable here (runtime missing, KPI pattern not
-                yet supported by the Polars renderer, result too large).
+                yet supported by the Polars renderer).
 - ``error``     the generated script failed to run or its output was unreadable.
+
+Modes (every verdict carries ``mode``):
+- ``row_parity``        results at or under the row cap are compared
+                        row-for-row after normalization (strongest guarantee).
+- ``aggregate_parity``  results over the row cap are compared via per-engine
+                        aggregate signatures (row count, per-column null
+                        counts, tolerance-aware numeric sum/min/max, distinct
+                        counts of non-numeric grouping columns, and an
+                        order-insensitive content checksum over normalized
+                        rows). Reordering still matches; any value drift fails.
 
 PySpark is intentionally not executed here: it needs a JDK 8/11/17 JVM and is
 covered by the env-gated CI parity test instead.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import os
 import subprocess
 import sys
 from datetime import date, datetime
@@ -36,9 +49,39 @@ from core.storage.workspace_layout import WorkspaceLayout
 # comparison (the SQL side typically emits ROUND(x, 2) aggregates).
 _FLOAT_TOLERANCE_DP = 2
 
-# Above this row count the full-row comparison is skipped rather than pulling
-# the entire result into memory twice.
+# Above this row count parity switches from the row-for-row comparison to
+# aggregate-signature mode rather than sorting/holding two normalized copies
+# of the entire result in memory.
 MAX_PARITY_ROWS = 100_000
+
+# Mode labels reported in every parity verdict.
+PARITY_MODE_ROW = "row_parity"
+PARITY_MODE_AGGREGATE = "aggregate_parity"
+
+# The signature names compared in aggregate mode, in report order.
+AGGREGATE_SIGNATURE_NAMES = (
+    "row_count",
+    "null_counts",
+    "numeric_stats",
+    "distinct_counts",
+    "content_checksum",
+)
+
+
+def parity_row_cap() -> int:
+    """Row count above which parity runs in aggregate-signature mode.
+
+    Defaults to ``MAX_PARITY_ROWS``; override with the ``KPI_PARITY_ROW_CAP``
+    environment variable (same env-knob style as ``KPI_ENGINE_PARITY``) so
+    tests can force aggregate mode on small fixtures. Invalid or non-positive
+    values fall back to the default.
+    """
+    raw = os.environ.get("KPI_PARITY_ROW_CAP", "")
+    try:
+        value = int(raw)
+    except ValueError:
+        return MAX_PARITY_ROWS
+    return value if value > 0 else MAX_PARITY_ROWS
 
 
 def polars_runtime_available() -> bool:
@@ -85,6 +128,186 @@ def _normalize_rows(
     return [cols[i] for i in order], normalized
 
 
+def _aggregate_signature(
+    columns: Sequence[str], rows: Sequence[Sequence[Any]]
+) -> dict[str, Any]:
+    """One-pass aggregate signature over the SAME canonicalized cells row
+    parity uses (``_normalize_cell``: UTC/ISO dates, floats rounded) — no
+    second normalization path.
+
+    Per column (keyed by lowercased name, sorted): null count; for numeric
+    cells (floats after normalization, which also covers ints) count/sum/
+    min/max; for non-numeric cells a distinct count (grouping columns).
+    Plus an order-insensitive content checksum: sum of stable per-row SHA-256
+    hashes of the normalized row, mod 2**64 — reordering cannot change it,
+    any value drift does.
+    """
+    cols = [str(col).lower() for col in columns]
+    order = sorted(range(len(cols)), key=lambda i: cols[i])
+    sorted_cols = [cols[i] for i in order]
+    null_counts: dict[str, int] = {col: 0 for col in sorted_cols}
+    numeric_stats: dict[str, dict[str, Any] | None] = {col: None for col in sorted_cols}
+    distinct: dict[str, set[Any]] = {col: set() for col in sorted_cols}
+    checksum = 0
+    row_count = 0
+    for row in rows:
+        cells = [_normalize_cell(row[i]) for i in order]
+        row_count += 1
+        digest = hashlib.sha256(
+            json.dumps(cells, separators=(",", ":")).encode("utf-8")
+        ).digest()
+        checksum = (checksum + int.from_bytes(digest[:8], "big")) % (1 << 64)
+        for col, cell in zip(sorted_cols, cells):
+            if cell is None:
+                null_counts[col] += 1
+            elif isinstance(cell, float):  # bools are NOT floats: they group
+                stats = numeric_stats[col]
+                if stats is None:
+                    numeric_stats[col] = {"count": 1, "sum": cell, "min": cell, "max": cell}
+                else:
+                    stats["count"] += 1
+                    stats["sum"] += cell
+                    if cell < stats["min"]:
+                        stats["min"] = cell
+                    if cell > stats["max"]:
+                        stats["max"] = cell
+            else:
+                distinct[col].add(cell)
+    return {
+        "columns": sorted_cols,
+        "row_count": row_count,
+        "null_counts": null_counts,
+        "numeric_stats": numeric_stats,
+        "distinct_counts": {col: len(values) for col, values in distinct.items()},
+        "content_checksum": f"{checksum:016x}",
+    }
+
+
+def _numeric_stats_match(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
+    """Tolerance-aware numeric comparison mirroring the row-level rounding."""
+    if a is None or b is None:
+        return a is None and b is None
+    if a["count"] != b["count"]:
+        return False
+    tol = 10 ** -_FLOAT_TOLERANCE_DP
+    return all(
+        math.isclose(a[key], b[key], rel_tol=1e-9, abs_tol=tol)
+        for key in ("sum", "min", "max")
+    )
+
+
+def evaluate_parity(
+    canonical_columns: Sequence[str],
+    canonical_rows: Sequence[Sequence[Any]],
+    engine_columns: Sequence[str],
+    engine_rows: Sequence[Sequence[Any]],
+    *,
+    row_cap: int | None = None,
+) -> dict[str, Any]:
+    """Pure cross-engine comparison; returns {status, reason, mode[, signatures]}.
+
+    Mode selection: ``row_parity`` (row-for-row) at or under ``row_cap``
+    canonical rows, ``aggregate_parity`` (signature comparison) above it.
+    ``row_cap`` defaults to ``parity_row_cap()`` (env-overridable).
+    """
+    cap = parity_row_cap() if row_cap is None else row_cap
+    mode = PARITY_MODE_AGGREGATE if len(canonical_rows) > cap else PARITY_MODE_ROW
+    verdict: dict[str, Any] = {"mode": mode}
+
+    if mode == PARITY_MODE_ROW:
+        engine_cols, engine_norm = _normalize_rows(engine_columns, engine_rows)
+        sql_cols, sql_norm = _normalize_rows(canonical_columns, canonical_rows)
+        if engine_cols != sql_cols:
+            verdict.update(
+                status="mismatch",
+                reason=f"column sets differ: sql={sql_cols} polars={engine_cols}",
+            )
+            return verdict
+        if len(engine_norm) != len(sql_norm):
+            verdict.update(
+                status="mismatch",
+                reason=f"row counts differ: sql={len(sql_norm)} polars={len(engine_norm)}",
+            )
+            return verdict
+        if engine_norm != sql_norm:
+            differing = sum(1 for a, b in zip(sql_norm, engine_norm) if a != b)
+            verdict.update(
+                status="mismatch",
+                reason=f"{differing} of {len(sql_norm)} rows differ after normalization",
+            )
+            return verdict
+        verdict.update(
+            status="match", reason=f"{len(sql_norm)} rows x {len(sql_cols)} columns agree"
+        )
+        return verdict
+
+    sql_sig = _aggregate_signature(canonical_columns, canonical_rows)
+    engine_sig = _aggregate_signature(engine_columns, engine_rows)
+    if sql_sig["columns"] != engine_sig["columns"]:
+        verdict.update(
+            status="mismatch",
+            reason=(
+                f"column sets differ: sql={sql_sig['columns']} "
+                f"polars={engine_sig['columns']}"
+            ),
+        )
+        return verdict
+    signatures: dict[str, dict[str, Any]] = {
+        "row_count": {
+            "sql": sql_sig["row_count"],
+            "engine": engine_sig["row_count"],
+            "match": sql_sig["row_count"] == engine_sig["row_count"],
+        },
+        "null_counts": {
+            "mismatched_columns": [
+                col
+                for col in sql_sig["columns"]
+                if sql_sig["null_counts"][col] != engine_sig["null_counts"][col]
+            ],
+        },
+        "numeric_stats": {
+            "mismatched_columns": [
+                col
+                for col in sql_sig["columns"]
+                if not _numeric_stats_match(
+                    sql_sig["numeric_stats"][col], engine_sig["numeric_stats"][col]
+                )
+            ],
+        },
+        "distinct_counts": {
+            "mismatched_columns": [
+                col
+                for col in sql_sig["columns"]
+                if sql_sig["distinct_counts"][col] != engine_sig["distinct_counts"][col]
+            ],
+        },
+        "content_checksum": {
+            "sql": sql_sig["content_checksum"],
+            "engine": engine_sig["content_checksum"],
+            "match": sql_sig["content_checksum"] == engine_sig["content_checksum"],
+        },
+    }
+    for name in ("null_counts", "numeric_stats", "distinct_counts"):
+        signatures[name]["match"] = not signatures[name]["mismatched_columns"]
+    verdict["signatures"] = signatures
+    failed = [name for name in AGGREGATE_SIGNATURE_NAMES if not signatures[name]["match"]]
+    if failed:
+        verdict.update(
+            status="mismatch",
+            reason="aggregate signatures differ: " + ", ".join(failed),
+        )
+        return verdict
+    verdict.update(
+        status="match",
+        reason=(
+            f"aggregate signatures agree over {sql_sig['row_count']} rows x "
+            f"{len(sql_sig['columns'])} columns "
+            f"({', '.join(AGGREGATE_SIGNATURE_NAMES)})"
+        ),
+    )
+    return verdict
+
+
 def run_polars_parity(
     repo_root: str | Path,
     workspace_rel: str,
@@ -100,14 +323,17 @@ def run_polars_parity(
     executor just produced (the source of truth being checked against).
     """
     repo_root = Path(repo_root).resolve()
-    result: dict[str, Any] = {"engine": "polars", "kpi_id": kpi_id, "status": "", "reason": ""}
+    cap = parity_row_cap()
+    result: dict[str, Any] = {
+        "engine": "polars",
+        "kpi_id": kpi_id,
+        "status": "",
+        "reason": "",
+        # Reported even on skipped/error so downstream gates always see what
+        # level of assurance this result would carry.
+        "mode": PARITY_MODE_AGGREGATE if len(canonical_rows) > cap else PARITY_MODE_ROW,
+    }
 
-    if len(canonical_rows) > MAX_PARITY_ROWS:
-        result.update(
-            status="skipped",
-            reason=f"result has {len(canonical_rows)} rows (> {MAX_PARITY_ROWS} parity cap)",
-        )
-        return result
     if not polars_runtime_available():
         result.update(status="skipped", reason="polars/deltalake not installed in this runtime")
         return result
@@ -158,30 +384,22 @@ def run_polars_parity(
         result.update(status="error", reason=f"gold read ({gold_dir.name}): {exc}")
         return result
 
-    # 4. Compare normalized forms.
-    polars_cols, polars_rows = _normalize_rows(frame.columns, frame.rows())
-    sql_cols, sql_rows = _normalize_rows(canonical_columns, canonical_rows)
-    if polars_cols != sql_cols:
-        result.update(
-            status="mismatch",
-            reason=f"column sets differ: sql={sql_cols} polars={polars_cols}",
+    # 4. Compare: row-for-row at or under the cap, aggregate signatures above.
+    result.update(
+        evaluate_parity(
+            canonical_columns, canonical_rows, frame.columns, frame.rows(), row_cap=cap
         )
-        return result
-    if len(polars_rows) != len(sql_rows):
-        result.update(
-            status="mismatch",
-            reason=f"row counts differ: sql={len(sql_rows)} polars={len(polars_rows)}",
-        )
-        return result
-    if polars_rows != sql_rows:
-        differing = sum(1 for a, b in zip(sql_rows, polars_rows) if a != b)
-        result.update(
-            status="mismatch",
-            reason=f"{differing} of {len(sql_rows)} rows differ after normalization",
-        )
-        return result
-    result.update(status="match", reason=f"{len(sql_rows)} rows x {len(sql_cols)} columns agree")
+    )
     return result
 
 
-__all__ = ["MAX_PARITY_ROWS", "polars_runtime_available", "run_polars_parity"]
+__all__ = [
+    "AGGREGATE_SIGNATURE_NAMES",
+    "MAX_PARITY_ROWS",
+    "PARITY_MODE_AGGREGATE",
+    "PARITY_MODE_ROW",
+    "evaluate_parity",
+    "parity_row_cap",
+    "polars_runtime_available",
+    "run_polars_parity",
+]

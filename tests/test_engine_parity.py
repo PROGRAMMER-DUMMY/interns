@@ -72,11 +72,16 @@ class TestNormalizeRows(unittest.TestCase):
 
 
 class TestRunPolarsParityShortCircuits(unittest.TestCase):
-    def test_row_cap_skips_before_any_generation(self):
+    def test_row_cap_selects_aggregate_mode_instead_of_skipping(self):
+        # Above the cap parity is no longer skipped: it runs in
+        # aggregate-signature mode (Phase 3 track B). The nonexistent
+        # workspace still degrades to skipped/error at generation, but the
+        # reported mode shows the assurance level that would apply.
         oversized = [[0]] * (MAX_PARITY_ROWS + 1)
         result = run_polars_parity(".", "workspaces/nonexistent", "kpi_001", ["x"], oversized)
-        self.assertEqual(result["status"], "skipped")
-        self.assertIn("parity cap", result["reason"])
+        self.assertEqual(result["mode"], "aggregate_parity")
+        self.assertIn(result["status"], {"skipped", "error"})
+        self.assertNotIn("parity cap", result["reason"])
 
     def test_missing_workspace_degrades_to_skipped_not_raise(self):
         # Generation against a workspace with no mappings must record a
