@@ -79,6 +79,8 @@ CURATED_MODULES: tuple[str, ...] = (
     # Phase 3 track A: incremental onboarding fingerprints + DuckDB pushdown profiling.
     "tests.test_onboarding_incremental",
     "tests.test_profile_pushdown",
+    # Phase 3 track C: incremental medallion refresh + deploy-plan schema.
+    "tests.test_medallion_incremental",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
