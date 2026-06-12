@@ -271,6 +271,52 @@ class ScreenerChecksTest(unittest.TestCase):
             self.assertTrue(_looks_blank(tiny, 1500, 1700))
 
 
+class DataViewerTest(unittest.TestCase):
+    def test_rows_render_redacted_escaped_and_capped(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from core.dashboard.export import _DATA_VIEW_ROW_CAP, _data_view_html
+
+        rows = [
+            {"ssn": f"00{i}-11", "dept": f"<b>D{i}</b>", "amount": 10.5 + i}
+            for i in range(_DATA_VIEW_ROW_CAP + 50)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            html = _data_view_html(Path(tmp), "kpi_x", rows)
+        # ssn values hidden (placeholder is itself HTML-escaped on render)
+        self.assertIn("&lt;redacted-pii&gt;", html)
+        self.assertNotIn("003-11", html)
+        self.assertIn("&lt;b&gt;", html)               # markup escaped, not rendered
+        self.assertNotIn("<b>D1</b>", html)
+        self.assertEqual(html.count("<tr>"), _DATA_VIEW_ROW_CAP + 1)  # cap + header
+        self.assertIn("capped", html)
+
+    def test_workspace_policy_widens_data_view_redaction(self) -> None:
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from core.dashboard.export import _data_view_html
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "data_policy.json").write_text(
+                json.dumps({"sensitive_columns": ["LoyaltyCode"]}), encoding="utf-8"
+            )
+            html = _data_view_html(
+                Path(tmp), "kpi_x", [{"LoyaltyCode": "LX-9", "amount": 5}]
+            )
+        self.assertIn("&lt;redacted-pii&gt;", html)
+        self.assertNotIn("LX-9", html)
+
+    def test_empty_rows_render_nothing(self) -> None:
+        from pathlib import Path
+
+        from core.dashboard.export import _data_view_html
+
+        self.assertEqual(_data_view_html(Path("."), "kpi_x", []), "")
+
+
 class DecidePanelsIntegrationTest(unittest.TestCase):
     def test_panels_carry_selection_provenance(self) -> None:
         from core.dashboard.profile import decide_panels

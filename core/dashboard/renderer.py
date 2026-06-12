@@ -891,6 +891,7 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             html.H2(m["title"], className="dh"),
             html.Div((m["metric"] + ("  ·  cuts: " + m["cuts"] if m["cuts"] else "")) or "", className="dm"),
             html.Div(cells, className="dgrid"),
+            _data_view_component(workspace, kpi_id, m["rows"]),
         ]
 
     if ready_ids:
@@ -1036,6 +1037,53 @@ def _panel_html(spec: DashboardSpec, panel: dict[str, Any], rows: list[dict[str,
         "sub_title": str(panel.get("title") or ""),
         "chart_type": str(panel.get("chart_type") or ""),
     }
+
+
+_DATA_VIEW_ROWS_LIVE = 200
+
+
+def _data_view_component(workspace: Path, kpi_id: str, rows: list[dict[str, Any]]):
+    """Collapsible Data table for the live app's detail region.
+
+    Rendered surface -> display redaction applies (default PII patterns
+    widened by the workspace's data_policy.json), rows capped.
+    """
+    if not rows:
+        return html.Div()
+    from core.governance.data_policy import (
+        load_workspace_data_policy,
+        policy_redaction_patterns,
+    )
+    from core.onboarding.kpi.pii_redaction import (
+        DEFAULT_PII_COLUMN_PATTERNS,
+        redact_rows,
+    )
+
+    patterns = DEFAULT_PII_COLUMN_PATTERNS + tuple(
+        policy_redaction_patterns(load_workspace_data_policy(workspace))
+    )
+    shown = redact_rows(rows[:_DATA_VIEW_ROWS_LIVE], patterns=patterns)
+    columns = list(shown[0].keys())
+
+    def cell(value: Any) -> str:
+        if isinstance(value, float):
+            return f"{value:,.2f}"
+        return "" if value is None else str(value)
+
+    note = (
+        f"{len(shown)} of {len(rows)}{'+' if len(rows) > len(shown) else ''} rows"
+        " · PII display-redacted"
+    )
+    table = html.Table(
+        [html.Thead(html.Tr([html.Th(c) for c in columns]))]
+        + [html.Tbody([html.Tr([html.Td(cell(r.get(c))) for c in columns]) for r in shown])],
+        className="dvtable",
+    )
+    return html.Details(
+        [html.Summary("Data"), html.Div(note, className="dm"),
+         html.Div(table, style={"maxHeight": "420px", "overflow": "auto"})],
+        className="dataview",
+    )
 
 
 def render_kpi_inline(

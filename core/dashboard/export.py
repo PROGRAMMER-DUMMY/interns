@@ -155,6 +155,23 @@ a { color: var(--accent-deep); }
 .kdetail { display: none; }
 .kdetail.on { display: block; }
 .kdetail .pane.hid { display: none; }
+
+/* Data viewer: the rows behind the charts (display-redacted) */
+.dataview { margin-top: 1.1rem; border-top: 1px solid var(--rule-soft); padding-top: 0.7rem; }
+.dataview summary { font-family: var(--mono); font-size: 0.7rem; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-deep);
+  cursor: pointer; user-select: none; }
+.dataview .dnote { font-family: var(--mono); font-size: 0.68rem; color: var(--ink-soft);
+  margin: 0.4rem 0; }
+.dataview .dwrap { max-height: 420px; overflow: auto; border: 1px solid var(--rule); }
+.dataview table { border-collapse: collapse; width: 100%; font-size: 0.78rem;
+  font-variant-numeric: tabular-nums; background: var(--card); }
+.dataview th { position: sticky; top: 0; background: var(--paper); text-align: left;
+  font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--accent-deep); padding: 0.45rem 0.6rem;
+  border-bottom: 2px solid var(--ink); }
+.dataview td { padding: 0.32rem 0.6rem; border-bottom: 1px solid var(--rule-soft); }
+.dataview tr:hover td { background: rgba(180,68,28,0.05); }
 """.replace("GRAINURI", _GRAIN)
 
 # Detail-page-only overrides: charts grow to fill the viewport instead of
@@ -234,6 +251,68 @@ def _panels_html(card: dict[str, Any]) -> str:
             f'{title}<div class="chart">{p.get("chart_html") or ""}</div></div>'
         )
     return f'<div class="panel-grid">{"".join(cells)}</div>'
+
+
+_DATA_VIEW_ROW_CAP = 200
+
+
+def _data_view_html(
+    workspace: Path,
+    kpi_id: str,
+    rows: list[dict[str, Any]],
+    total_hint: str = "",
+    *,
+    open_default: bool = False,
+) -> str:
+    """Collapsible table of the KPI's result rows — the data behind the charts.
+
+    A RENDERED surface: every value passes display redaction (default PII
+    patterns widened by the workspace's data_policy.json) and HTML escaping.
+    Capped at _DATA_VIEW_ROW_CAP rows with an explicit note; the full result
+    set stays in the results packet/evidence, not the dashboard.
+    """
+    import html as _html
+
+    if not rows:
+        return ""
+    from core.governance.data_policy import (
+        load_workspace_data_policy,
+        policy_redaction_patterns,
+    )
+    from core.onboarding.kpi.pii_redaction import (
+        DEFAULT_PII_COLUMN_PATTERNS,
+        redact_rows,
+    )
+
+    patterns = DEFAULT_PII_COLUMN_PATTERNS + tuple(
+        policy_redaction_patterns(load_workspace_data_policy(workspace))
+    )
+    shown = redact_rows(rows[:_DATA_VIEW_ROW_CAP], patterns=patterns)
+    columns = list(shown[0].keys())
+
+    def cell(value: Any) -> str:
+        if isinstance(value, float):
+            value = f"{value:,.2f}"
+        return _html.escape("" if value is None else str(value))
+
+    head = "".join(f"<th>{_html.escape(c)}</th>" for c in columns)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{cell(r.get(c))}</td>" for c in columns) + "</tr>"
+        for r in shown
+    )
+    capped = len(rows) > _DATA_VIEW_ROW_CAP
+    note = (
+        f"{len(shown)} of {total_hint or len(rows)}{'+' if capped and not total_hint else ''} rows"
+        f"{' (capped)' if capped else ''} · PII display-redacted · full results in the "
+        f"workspace results packet"
+    )
+    open_attr = " open" if open_default else ""
+    return (
+        f'<details class="dataview" id="data_{kpi_id}"{open_attr}><summary>Data</summary>'
+        f'<div class="dnote">{note}</div>'
+        f'<div class="dwrap"><table><thead><tr>{head}</tr></thead>'
+        f"<tbody>{body}</tbody></table></div></details>"
+    )
 
 
 def _load_kpi_statuses(workspace: Path) -> dict[str, str]:
@@ -378,11 +457,22 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
         # mostly dead space) — worth the second local SQL execution.
         card = render_kpi_inline(repo_root, layout, spec, height=360)
         page_card = render_kpi_inline(repo_root, layout, spec, height=560)
+        # Data viewer: the rows behind the charts (display-redacted, capped).
+        from core.dashboard.profile import execute_result_view
+
+        sql_rel = str(spec.config.get("sql_path") or "")
+        data_rows = (
+            execute_result_view(repo_root, repo_root / sql_rel, kpi_id)
+            if sql_rel
+            else []
+        )
+        data_view = _data_view_html(workspace, kpi_id, data_rows)
         page_body = (
             f'<div class="kpi-card detail-page"><div class="head"><div>'
             f'<h2>{page_card["title"]}</h2><div class="metric">{page_card.get("metric") or ""}</div></div>'
             f'<div class="headline">{page_card.get("headline") or ""}</div></div>'
             f'{_panels_html(page_card)}'
+            f"{_data_view_html(workspace, kpi_id, data_rows, open_default=True)}"
             f'<div class="foot"><a href="index.html#{kpi_id}">← back to board</a></div></div>'
         )
         page_path = exports_dir / f"{kpi_id}.html"
@@ -413,6 +503,7 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
             f'<div class="metric">{card.get("metric") or ""}</div></div>'
             f'<div class="headline">{card.get("headline") or ""}</div></div>'
             f"{_panels_html(card)}"
+            f"{data_view}"
             f'<div class="foot"><span class="badge">{badges.get(kpi_id, "")}</span>'
             f'<a href="{kpi_id}.html">open full page →</a></div></div></section>'
         )
