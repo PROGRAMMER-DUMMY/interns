@@ -331,6 +331,7 @@ def apply_definition_to_feature(item: dict[str, Any], definition: dict[str, Any]
 
 def recompute_mapping_status(mapping: dict[str, Any]) -> None:
     for kpi in mapping.get("kpis", []):
+        _drop_stale_no_evidence_blocker(kpi)
         blocked = [
             feature
             for feature in kpi.get("features", [])
@@ -345,6 +346,37 @@ def recompute_mapping_status(mapping: dict[str, Any]) -> None:
         kpi["join_candidates"] = infer_join_candidates(kpi.get("features", []))
     mapping["summary"] = summarize_mapping(mapping)
     mapping["blocker_clusters"] = prioritize_blockers(mapping)
+
+
+def _drop_stale_no_evidence_blocker(kpi: dict[str, Any]) -> None:
+    """Retire a ``no_supporting_evidence`` blocker once real evidence exists.
+
+    The label's premise is that NO feature of the KPI anchors to workspace
+    evidence. A later user decision or workspace definition that confirms a
+    real feature breaks that premise, so the still-blocked synthetic feature
+    (and the KPI-level label) must not keep the KPI blocked. A synthetic
+    feature the user answered directly is in a READY state and is kept as the
+    record of that answer.
+    """
+    features = kpi.get("features") or []
+    anchored = any(
+        feature.get("state") in READY_STATES
+        for feature in features
+        if feature.get("resolution_type") != "no_supporting_evidence"
+    )
+    if not anchored:
+        return
+    kept = [
+        feature
+        for feature in features
+        if feature.get("resolution_type") != "no_supporting_evidence"
+        or feature.get("state") in READY_STATES
+    ]
+    if len(kept) == len(features):
+        return
+    kpi["features"] = kept
+    if kpi.get("blocker_label") == "no_supporting_evidence":
+        kpi.pop("blocker_label", None)
 
 
 def summarize_mapping(mapping: dict[str, Any]) -> dict[str, int]:

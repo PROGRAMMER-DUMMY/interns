@@ -375,6 +375,52 @@ class NoSupportingEvidenceLabelTests(unittest.TestCase):
             self.assertEqual(len(features), 1)
             self.assertEqual(features[0]["state"], "user_confirmed")
 
+    def test_confirming_a_real_feature_retires_the_label(self) -> None:
+        """A later workspace definition that confirms a real feature breaks the
+        zero-anchors premise: the synthetic blocker and the KPI label must go,
+        and the KPI must become ready (BUG: enterprise definition-apply test)."""
+        from core.onboarding.kpi.feature_resolver import apply_workspace_definition
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = _write_workspace(
+                root,
+                kpis=[
+                    _kpi(
+                        "Where are flux uplifts trending?",
+                        description="Needs the flux uplift figure, weekly.",
+                        metric="sum(flux_uplift)",
+                    )
+                ],
+                profiles={"orders": {"OrderId": "String", "Region": "String"}},
+            )
+            mapping = _resolve(root)
+            kpi = mapping["kpis"][0]
+            self.assertEqual(kpi.get("blocker_label"), "no_supporting_evidence")
+            summary = apply_workspace_definition(
+                root,
+                "workspaces/demo",
+                feature="flux_uplift",
+                state="user_confirmed",
+                resolution_type="user_confirmed_formula",
+                definition="Flux uplift is derived upstream; excluded here.",
+                evidence_note="User confirmed the definition.",
+            )
+            self.assertEqual(summary["ready_kpi_count"], 1)
+            mapping = json.loads(
+                (
+                    workspace
+                    / "interns"
+                    / "generated"
+                    / "contracts"
+                    / "kpi_feature_mapping.json"
+                ).read_text(encoding="utf-8")
+            )
+            kpi = mapping["kpis"][0]
+            self.assertEqual(kpi["status"], "ready_for_sql")
+            self.assertNotIn("blocker_label", kpi)
+            self.assertEqual(_no_evidence_features(kpi), [])
+
     def test_validator_accepts_labeled_artifacts(self) -> None:
         """The labeled mapping + panel raise none of the dead-end errors and no
         errors about the mapping or panel shape."""
