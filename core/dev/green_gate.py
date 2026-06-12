@@ -87,6 +87,9 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_chart_knowledge",
     # Databricks deployment gates (PRD section 7) + apply-deploy boundary.
     "tests.test_deploy_gates",
+    # Slice 3 hostile refinement 1c: no_supporting_evidence blocker labeling
+    # (zero prose-term anchors -> confirm-missing-data-or-point-at-source ask).
+    "tests.test_no_supporting_evidence",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
