@@ -1,4 +1,23 @@
-"""Dry-run and guarded deployment for Databricks workspace specs."""
+"""Dry-run and guarded deployment for Databricks workspace specs.
+
+Two deployment paths live here:
+
+1. Genie workspace-spec deployment (``main`` / ``run_deployment``): folders,
+   workspace files, and evidence tables from a Genie workspace spec.
+2. Medallion Unity Catalog deployment (``medallion_deploy_main`` /
+   ``deploy_medallion_from_approval``): the slice after the
+   ``medallion apply-deploy`` approval boundary (PRD
+   docs/prd/databricks_deployment.md section 9). It consumes
+   ``interns/state/medallion/deploy_approval.json``, REFUSES to run without a
+   fresh approval (re-verifying gate G4 plan freshness and gate G5 remote
+   approval at execution time), and performs the Unity Catalog deployment
+   described in the approved ``deploy_plan.json``.
+
+Both paths keep every live Databricks call behind
+``AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1`` (human-set only; this module only
+VERIFIES the variable, never sets it). Without it the deployer runs in
+dry-run / plan-echo mode and says so.
+"""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +34,12 @@ from typing import Any, Protocol
 from core.config import load as load_config
 from core.execution.databricks_client import DatabricksClient
 from core.failures import WorkflowBlockedError
+from core.onboarding.databricks.deploy_gates import (
+    GATE_NAMES,
+    REMOTE_ENV,
+    check_plan_freshness,
+    check_remote_approval,
+)
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -115,6 +140,10 @@ class DatabricksWorkspaceApi:
 
     def ensure_schema(self, catalog: str, schema: str) -> None:
         self.db_client.ensure_delta_schema(catalog, schema)
+
+    def upload_volume_file(self, source: Path, volume_path: str) -> None:
+        with source.open("rb") as fh:
+            self.client.files.upload(volume_path, fh, overwrite=True)
 
     def execute_sql(self, statement: str) -> None:
         warehouse_id = self.db_client._extract_warehouse_id()
@@ -693,6 +722,571 @@ def _read_json(path: Path, *, default: dict[str, Any]) -> dict[str, Any]:
     except json.JSONDecodeError:
         return dict(default)
     return payload if isinstance(payload, dict) else dict(default)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Medallion Unity Catalog deployment — the slice after the apply-deploy
+# approval boundary (docs/prd/databricks_deployment.md section 9).
+#
+# Refusal contract (the refusal IS the feature):
+#   - no approval artifact                -> refuse (nothing was approved)
+#   - consumed / agent-asserted approval  -> refuse
+#   - approval gates not all recorded ok  -> refuse
+#   - approval-plan hash binding broken   -> refuse
+#   - G4 re-verified at EXECUTION time (plan hash vs manifest on disk) ->
+#     refuse on stale plan
+#   - live mutation additionally re-verifies G5 (AUTORESEARCH_ALLOW_REMOTE_
+#     EXECUTION=1, human-set) plus --confirm-remote-mutation; when live is not
+#     fully authorized the deployer either refuses (--apply requested) or runs
+#     in dry-run / plan-echo mode and says so. This code NEVER sets the env var.
+# ─────────────────────────────────────────────────────────────────────────────
+
+MEDALLION_APPROVAL_TYPE = "medallion/deploy_approval.json"
+MEDALLION_APPROVAL_REL = Path("interns") / "state" / "medallion" / "deploy_approval.json"
+MEDALLION_PLAN_REL = Path("interns") / "generated" / "medallion" / "deploy_plan.json"
+EXECUTION_STATE_JSON = "deploy_execution.json"
+EXECUTION_STATE_MD = "deploy_execution.md"
+
+_SCHEMA_LAYER_ORDER = ("bronze", "silver", "gold", "ops")
+
+# Source formats Databricks `read_files` can ingest directly; anything else is
+# deferred to the medallion refresh job (orchestration slice).
+_READ_FILES_FORMATS = {
+    ".csv": "csv",
+    ".json": "json",
+    ".parquet": "parquet",
+    ".avro": "avro",
+    ".orc": "orc",
+    ".txt": "text",
+    ".xml": "xml",
+}
+
+
+class UnityCatalogDeploymentApi(Protocol):
+    """The two remote primitives the medallion deployer needs. Tests inject a
+    fake; the live path uses :class:`DatabricksWorkspaceApi`."""
+
+    def execute_sql(self, statement: str) -> None: ...
+    def upload_volume_file(self, source: Path, volume_path: str) -> None: ...
+
+
+@dataclass(frozen=True)
+class UnityCatalogAction:
+    seq: int
+    action: str
+    target: str
+    execute: bool                 # executed on live apply; False = deferred
+    kind: str = "sql"             # "sql" | "upload" | "deferred"
+    statement: str = ""
+    source_file: str = ""
+    volume_path: str = ""
+    reason: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "seq": self.seq,
+            "action": self.action,
+            "target": self.target,
+            "execute": self.execute,
+            "kind": self.kind,
+            "statement": self.statement,
+            "source_file": self.source_file,
+            "volume_path": self.volume_path,
+            "reason": self.reason,
+        }
+
+
+@dataclass
+class MedallionDeploymentOutcome:
+    mode: str  # "refused" | "dry_run" | "applied"
+    refusal_reasons: list[str] = field(default_factory=list)
+    actions: list[dict[str, Any]] = field(default_factory=list)
+    executed_count: int = 0
+    deferred_count: int = 0
+    failed_count: int = 0
+    note: str = ""
+    state_json_path: str = ""
+    state_md_path: str = ""
+
+    @property
+    def refused(self) -> bool:
+        return self.mode == "refused"
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "refusal_reasons": self.refusal_reasons,
+            "action_count": len(self.actions),
+            "executed_count": self.executed_count,
+            "deferred_count": self.deferred_count,
+            "failed_count": self.failed_count,
+            "note": self.note,
+            "state_json_path": self.state_json_path,
+            "state_md_path": self.state_md_path,
+        }
+
+
+def _load_json_dict(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _sql_quote(value: str) -> str:
+    return value.replace("'", "''")
+
+
+def verify_deploy_approval(
+    repo_root: Path, workspace: Path
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, list[str]]:
+    """Verify the approval artifact is fresh and binding. Returns
+    ``(approval, plan, refusal_reasons)``; any nonempty reasons list means the
+    deployer must refuse (both dry-run echo and live apply)."""
+    reasons: list[str] = []
+    approval_path = workspace / MEDALLION_APPROVAL_REL
+    approval = _load_json_dict(approval_path)
+    if approval is None:
+        return None, None, [
+            f"no deployment approval artifact at {_rel(approval_path, repo_root)}; "
+            "run `medallion apply-deploy --workspace <ws> --confirmed-by <name>` first "
+            "(the refusal IS the feature)"
+        ]
+
+    if approval.get("artifact_type") != MEDALLION_APPROVAL_TYPE:
+        reasons.append(
+            f"approval artifact_type is {approval.get('artifact_type')!r}, "
+            f"expected {MEDALLION_APPROVAL_TYPE!r}"
+        )
+    try:
+        version = int(approval.get("version") or 0)
+    except (TypeError, ValueError):
+        version = 0
+    if version != 1:
+        reasons.append(f"unsupported approval version: {approval.get('version')!r}")
+    if approval.get("consumed_at"):
+        reasons.append(
+            f"approval was already consumed at {approval.get('consumed_at')}; "
+            "re-run `medallion apply-deploy` for a fresh approval"
+        )
+    if approval.get("source") != "human" or not str(approval.get("confirmed_by") or "").strip():
+        reasons.append(
+            "approval is not human-attributed: source must be `human` with a "
+            "nonempty confirmed_by (Human-Gate Provenance Rule)"
+        )
+    recorded = {
+        str(g.get("gate")): bool(g.get("ok"))
+        for g in (approval.get("gates") or [])
+        if isinstance(g, dict)
+    }
+    missing_gates = [name for name in GATE_NAMES if name not in recorded]
+    failed_gates = sorted(name for name, ok in recorded.items() if not ok)
+    if missing_gates:
+        reasons.append(f"approval lacks recorded verdicts for gates: {missing_gates}")
+    if failed_gates:
+        reasons.append(f"approval records failing gates: {failed_gates}")
+
+    plan_rel = str(approval.get("plan_path") or "")
+    plan = _load_json_dict(repo_root / plan_rel) if plan_rel else None
+    if plan is None:
+        reasons.append(
+            f"approval references a deploy plan that cannot be read: {plan_rel or '<missing plan_path>'}"
+        )
+        return approval, None, reasons
+
+    canonical = (workspace / MEDALLION_PLAN_REL).resolve()
+    if (repo_root / plan_rel).resolve() != canonical:
+        reasons.append(
+            f"approval plan_path {plan_rel!r} is not the canonical "
+            f"{_rel(canonical, repo_root)!r}"
+        )
+    validation = plan.get("validation") or {}
+    if not validation.get("valid"):
+        reasons.append(f"deploy plan is not valid: {validation.get('errors')}")
+    plan_hash = str((plan.get("source_manifest") or {}).get("inputs_hash") or "")
+    if str(approval.get("plan_inputs_hash") or "") != plan_hash:
+        reasons.append(
+            "approval plan_inputs_hash does not match the plan on disk "
+            "(approval-plan binding broken); regenerate the plan and re-approve"
+        )
+
+    # G4 re-verified at execution time: the plan's recorded manifest hash must
+    # still match a re-hash of the manifest on disk RIGHT NOW.
+    g4 = check_plan_freshness(workspace, repo_root)
+    if not g4.ok:
+        reasons.append(f"G4 re-check failed at execution time: {g4.blocking_reason}")
+    return approval, plan, reasons
+
+
+def build_unity_catalog_actions(plan: dict[str, Any]) -> list[UnityCatalogAction]:
+    """Deterministic, ordered UC action sequence from a validated deploy plan:
+    catalog -> schemas (bronze/silver/gold/ops) -> volumes -> raw uploads ->
+    tables (plan order) -> ops refresh-manifest table."""
+    uc = plan.get("unity_catalog") or {}
+    catalog = str(uc.get("catalog") or "")
+    schemas = uc.get("schemas") or {}
+    actions: list[UnityCatalogAction] = []
+
+    def _add(action: str, target: str, **kwargs: Any) -> None:
+        actions.append(UnityCatalogAction(seq=len(actions) + 1, action=action, target=target, **kwargs))
+
+    _add(
+        "ensure_catalog", catalog,
+        execute=True,
+        statement=f"CREATE CATALOG IF NOT EXISTS {catalog}",
+        reason="Catalog from the approved plan (deployment parameter, never hardcoded).",
+    )
+    for layer in _SCHEMA_LAYER_ORDER:
+        schema = schemas.get(layer)
+        if not schema:
+            continue
+        _add(
+            "ensure_schema", f"{catalog}.{schema}",
+            execute=True,
+            statement=f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}",
+            reason=f"{layer} layer schema from the approved plan.",
+        )
+
+    upload_targets: dict[str, str] = {}
+    for volume in uc.get("volumes") or []:
+        vschema = str(volume.get("schema") or schemas.get("bronze") or "bronze")
+        vname = str(volume.get("name") or "raw_sources")
+        _add(
+            "ensure_volume", f"{catalog}.{vschema}.{vname}",
+            execute=True,
+            statement=f"CREATE VOLUME IF NOT EXISTS {catalog}.{vschema}.{vname}",
+            reason="UC volume for raw source files (append-only; rollback never deletes).",
+        )
+        for upload in volume.get("uploads") or []:
+            source_file = str(upload.get("source_file") or "")
+            target_path = str(upload.get("target_path") or "")
+            if not source_file or not target_path:
+                continue
+            upload_targets[source_file] = target_path
+            _add(
+                "upload_raw_source", target_path,
+                execute=True,
+                kind="upload",
+                source_file=source_file,
+                volume_path=target_path,
+                reason="Raw source upload into the bronze volume (repo-relative source).",
+            )
+
+    for table in uc.get("tables") or []:
+        layer = str(table.get("layer") or "")
+        fqn = str(table.get("fqn") or "")
+        if layer == "bronze":
+            source_file = str(table.get("source_file") or "")
+            volume_target = upload_targets.get(source_file, "")
+            fmt = _READ_FILES_FORMATS.get(Path(source_file).suffix.lower(), "")
+            if volume_target and fmt:
+                statement = (
+                    f"CREATE TABLE IF NOT EXISTS {fqn} AS\n"
+                    "SELECT\n"
+                    "  *,\n"
+                    f"  '{_sql_quote(source_file)}' AS _source_file,\n"
+                    "  current_timestamp() AS _load_ts\n"
+                    f"FROM read_files('{_sql_quote(volume_target)}', format => '{fmt}')"
+                )
+                _add(
+                    "create_bronze_table", fqn,
+                    execute=True,
+                    statement=statement,
+                    source_file=source_file,
+                    reason="Bronze ingest from the uploaded raw volume file.",
+                )
+            else:
+                _add(
+                    "create_bronze_table", fqn,
+                    execute=False,
+                    kind="deferred",
+                    source_file=source_file,
+                    reason=(
+                        f"source format {Path(source_file).suffix or '<none>'} is not "
+                        "ingestible via read_files; the medallion refresh job "
+                        "(orchestration slice) materializes this table"
+                        if volume_target
+                        else "no volume upload recorded for the bronze source file"
+                    ),
+                )
+        else:
+            _add(
+                f"materialize_{layer}_table", fqn,
+                execute=False,
+                kind="deferred",
+                reason=(
+                    "transform SQL is emitted locally in DuckDB dialect; the table is "
+                    "materialized by the medallion refresh job (orchestration slice). "
+                    "Its schema exists after this deployment."
+                ),
+            )
+
+    manifest_table = str(
+        ((plan.get("orchestration") or {}).get("incremental") or {}).get("remote_manifest_table") or ""
+    )
+    if manifest_table:
+        _add(
+            "ensure_ops_manifest_table", manifest_table,
+            execute=True,
+            statement=(
+                f"CREATE TABLE IF NOT EXISTS {manifest_table} (\n"
+                "  table_key STRING,\n"
+                "  fingerprint STRING,\n"
+                "  run_id STRING,\n"
+                "  updated_at TIMESTAMP\n"
+                ") USING DELTA"
+            ),
+            reason="Remote mirror of the local refresh manifest (incremental skip semantics).",
+        )
+    return actions
+
+
+def _execute_uc_actions(
+    actions: list[UnityCatalogAction],
+    api: UnityCatalogDeploymentApi,
+    repo_root: Path,
+) -> tuple[list[dict[str, Any]], int]:
+    results: list[dict[str, Any]] = []
+    failed = 0
+    for action in actions:
+        record = action.as_dict()
+        if not action.execute:
+            record["result"] = "deferred"
+        else:
+            try:
+                if action.kind == "upload":
+                    source = repo_root / action.source_file
+                    if not source.exists():
+                        raise FileNotFoundError(f"missing raw source: {action.source_file}")
+                    api.upload_volume_file(source, action.volume_path)
+                else:
+                    api.execute_sql(action.statement)
+                record["result"] = "applied"
+            except Exception as exc:
+                record["result"] = "failed"
+                record["error"] = str(exc)
+                failed += 1
+        results.append(record)
+    return results, failed
+
+
+def _build_live_medallion_api(workspace: Path) -> DatabricksWorkspaceApi:
+    """Live-path construction only: PHI/PCI gate, then client health check.
+    Never reached unless --apply, --confirm-remote-mutation, and the human-set
+    AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1 all hold."""
+    cfg = load_config()
+    from core.governance.phi_gate import enforce_remote_sensitive_gate
+
+    layout = WorkspaceLayout(project_root=workspace)
+    phi_failure = enforce_remote_sensitive_gate(layout, cfg, operation="medallion_uc_deploy")
+    if phi_failure is not None:
+        raise WorkflowBlockedError(phi_failure)
+    db_client = DatabricksClient(cfg.databricks)
+    ok, msg = db_client.health_check()
+    if not ok:
+        raise RuntimeError(f"Databricks unavailable: {msg}")
+    return DatabricksWorkspaceApi(db_client)
+
+
+def _stamp_approval_consumed(workspace: Path) -> None:
+    path = workspace / MEDALLION_APPROVAL_REL
+    approval = _load_json_dict(path)
+    if approval is None:
+        return
+    approval["consumed_at"] = datetime.now(timezone.utc).isoformat()
+    approval["consumed_by"] = "core.onboarding.databricks.workspace_deployer"
+    path.write_text(json.dumps(approval, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_execution_state(
+    workspace: Path,
+    repo_root: Path,
+    outcome: MedallionDeploymentOutcome,
+    approval: dict[str, Any],
+) -> None:
+    out_dir = workspace / "interns" / "state" / "medallion"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "artifact_type": "medallion/deploy_execution.json",
+        "version": 1,
+        "mode": outcome.mode,
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+        "confirmed_by": approval.get("confirmed_by"),
+        "plan_inputs_hash": approval.get("plan_inputs_hash"),
+        "executed_count": outcome.executed_count,
+        "deferred_count": outcome.deferred_count,
+        "failed_count": outcome.failed_count,
+        "note": outcome.note,
+        "actions": outcome.actions,
+    }
+    json_path = out_dir / EXECUTION_STATE_JSON
+    md_path = out_dir / EXECUTION_STATE_MD
+    json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+
+    marker = {"applied": "[ok]", "planned": "[~]", "deferred": "[~]", "failed": "[x]"}
+    lines = [
+        "# Medallion Unity Catalog Deployment "
+        + ("Apply Report" if outcome.mode == "applied" else "Dry Run (plan echo)"),
+        "",
+        f"- Mode: **{outcome.mode}**",
+        f"- Confirmed by: {approval.get('confirmed_by') or '(none)'}",
+        f"- Plan hash: `{approval.get('plan_inputs_hash')}`",
+        f"- Executed: {outcome.executed_count}  Deferred: {outcome.deferred_count}  "
+        f"Failed: {outcome.failed_count}",
+        "",
+        "## Actions",
+        "",
+    ]
+    for record in outcome.actions:
+        mark = marker.get(str(record.get("result")), "[~]")
+        lines.append(
+            f"- {mark} `{record['seq']:03d}` {record['action']} -> `{record['target']}` "
+            f"({record.get('result')})"
+        )
+    lines += ["", "## Remote Mutation", "", outcome.note]
+    md_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    outcome.state_json_path = _rel(json_path, repo_root)
+    outcome.state_md_path = _rel(md_path, repo_root)
+
+
+def deploy_medallion_from_approval(
+    repo_root: str | Path,
+    workspace: str | Path,
+    *,
+    apply: bool = False,
+    confirm_remote_mutation: bool = False,
+    api: UnityCatalogDeploymentApi | None = None,
+) -> MedallionDeploymentOutcome:
+    """Consume the apply-deploy approval artifact and perform (or echo) the UC
+    deployment. ``api`` is the test seam — injecting it skips client
+    construction but NEVER skips the refusal gates."""
+    repo_root = Path(repo_root).resolve()
+    workspace_path = (repo_root / workspace).resolve()
+
+    approval, plan, reasons = verify_deploy_approval(repo_root, workspace_path)
+
+    if apply and not reasons:
+        # G5 re-verified at execution time (PRD section 7 gate 5 + section 9
+        # seam). The check only VERIFIES the env var; nothing here sets it.
+        if not confirm_remote_mutation:
+            reasons.append(
+                "live apply refused: --apply requires --confirm-remote-mutation"
+            )
+        g5 = check_remote_approval()
+        if not g5.ok:
+            reasons.append(
+                f"G5 re-check failed at execution time: {g5.blocking_reason}; "
+                "drop --apply to run the dry-run plan echo instead"
+            )
+
+    if reasons:
+        return MedallionDeploymentOutcome(mode="refused", refusal_reasons=reasons)
+
+    assert approval is not None and plan is not None  # guaranteed by empty reasons
+    actions = build_unity_catalog_actions(plan)
+
+    if not apply:
+        note = (
+            "[dry-run] no Databricks call was made. Live apply requires --apply "
+            f"--confirm-remote-mutation and {REMOTE_ENV}=1 set by a human in the "
+            "executing shell (agents must never set it)."
+        )
+        outcome = MedallionDeploymentOutcome(
+            mode="dry_run",
+            actions=[
+                {**a.as_dict(), "result": "planned" if a.execute else "deferred"}
+                for a in actions
+            ],
+            executed_count=0,
+            deferred_count=sum(1 for a in actions if not a.execute),
+            note=note,
+        )
+        _write_execution_state(workspace_path, repo_root, outcome, approval)
+        return outcome
+
+    if api is None:
+        try:
+            api = _build_live_medallion_api(workspace_path)
+        except Exception as exc:
+            return MedallionDeploymentOutcome(
+                mode="refused",
+                refusal_reasons=[f"live apply blocked: {exc}"],
+            )
+
+    results, failed = _execute_uc_actions(actions, api, repo_root)
+    outcome = MedallionDeploymentOutcome(
+        mode="applied",
+        actions=results,
+        executed_count=sum(1 for r in results if r.get("result") == "applied"),
+        deferred_count=sum(1 for r in results if r.get("result") == "deferred"),
+        failed_count=failed,
+        note=(
+            "applied via the approved plan; deferred actions are materialized by "
+            "the medallion refresh job (orchestration slice)."
+            if failed == 0
+            else "apply finished with failures; the approval was NOT consumed - fix and re-run."
+        ),
+    )
+    if failed == 0:
+        # Consume-once: a successful apply uses up the approval; the next
+        # deployment needs a fresh `medallion apply-deploy` run.
+        _stamp_approval_consumed(workspace_path)
+    _write_execution_state(workspace_path, repo_root, outcome, approval)
+    return outcome
+
+
+def medallion_deploy_main(argv: list[str] | None = None) -> int:
+    """CLI: `medallion deploy` — execute the approved UC deployment (dry-run
+    plan echo unless --apply --confirm-remote-mutation + human-set env)."""
+    from core.paths import PROJECT_ROOT
+
+    parser = argparse.ArgumentParser(
+        prog="medallion deploy",
+        description=(
+            "Consume interns/state/medallion/deploy_approval.json and perform the "
+            "Unity Catalog deployment from the approved deploy_plan.json. Refuses "
+            "without a fresh approval (G4 + G5 re-verified at execution time). "
+            "Dry-run plan echo unless --apply --confirm-remote-mutation and "
+            f"{REMOTE_ENV}=1 (human-set) all hold."
+        ),
+    )
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
+    parser.add_argument("--apply", action="store_true", help="Request live remote mutation.")
+    parser.add_argument(
+        "--confirm-remote-mutation", action="store_true",
+        help="Required with --apply to confirm remote Databricks mutation.",
+    )
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+
+    outcome = deploy_medallion_from_approval(
+        args.repo_root,
+        args.workspace,
+        apply=args.apply,
+        confirm_remote_mutation=args.confirm_remote_mutation,
+    )
+
+    if args.json:
+        print(json.dumps(outcome.summary(), indent=2, default=str))
+    elif outcome.refused:
+        print("[x] medallion deploy refused:")
+        for reason in outcome.refusal_reasons:
+            print(f"  [x] {reason}")
+    else:
+        for record in outcome.actions:
+            mark = "[ok]" if record.get("result") == "applied" else (
+                "[x]" if record.get("result") == "failed" else "[~]"
+            )
+            print(f"{mark} {record['seq']:03d} {record['action']:<26} {record['target']} "
+                  f"({record.get('result')})")
+        print(f"\n{outcome.note}")
+        if outcome.state_json_path:
+            print(f"[ok] execution state: {outcome.state_json_path}")
+    if outcome.refused:
+        return 2
+    return 1 if outcome.failed_count else 0
 
 
 def main(argv: list[str] | None = None) -> int:

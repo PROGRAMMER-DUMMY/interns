@@ -91,6 +91,8 @@ CURATED_MODULES: tuple[str, ...] = (
     # self-deadlock (prepare-kpi-blocker-panel --force-onboard regression);
     # cross-thread/cross-process exclusion unchanged.
     "tests.test_workspace_lock_reentrancy",
+    # Medallion UC deployer: approval consumption, G4/G5 re-checks, dry-run seam.
+    "tests.test_workspace_deployer",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
