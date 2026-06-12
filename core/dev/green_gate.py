@@ -93,6 +93,9 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_workspace_lock_reentrancy",
     # Medallion UC deployer: approval consumption, G4/G5 re-checks, dry-run seam.
     "tests.test_workspace_deployer",
+    # Slice 3 hostile refinement 1c: no_supporting_evidence blocker labeling
+    # (zero prose-term anchors -> confirm-missing-data-or-point-at-source ask).
+    "tests.test_no_supporting_evidence",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

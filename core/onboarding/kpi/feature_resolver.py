@@ -34,6 +34,7 @@ from core.onboarding.relationships.schema_alias_matching import (
 from core.onboarding.lexicon import load_workspace_lexicon
 from core.onboarding.memory.workspace_definitions import (
     READY_STATES,
+    apply_definition_to_feature,
     apply_workspace_definition as apply_workspace_feature_definition,
     apply_workspace_definitions_to_mapping,
     load_workspace_definitions,
@@ -58,6 +59,17 @@ GENERATOR_VERSION = 2
 
 register_contract("kpi_feature_mapping.json", current_version=GENERATOR_VERSION)
 DERIVED_FEATURE_EVIDENCE_VERSION = 1
+NO_SUPPORTING_EVIDENCE_LABEL = "no_supporting_evidence"
+# Evidence entry types that only restate the KPI itself (its prose, its seed
+# placeholder, its machine-derived metric). Every OTHER evidence type anchors
+# to something the workspace actually contains (a profiled column, a dataset,
+# a dictionary entry, a relationship, an accepted definition, ...).
+_SELF_REFERENTIAL_EVIDENCE_TYPES = {
+    "kpi_registry_placeholder",
+    "kpi_prose",
+    "derived_metric_provenance",
+    "no_supporting_evidence_scan",
+}
 PLACEHOLDER_KPI_TERMS = {"confirm", "metric", "grain", "dimension", "dimensions"}
 PLACEHOLDER_KPI_PHRASES = (
     "confirm metric",
@@ -167,6 +179,7 @@ class KPIFeatureResolver:
         definitions = load_workspace_definitions(self.layout)
         if definitions.get("definitions"):
             apply_workspace_definitions_to_mapping(mapping, definitions)
+        _label_kpis_without_supporting_evidence(mapping, kpis, schema_index, definitions)
         mapping["blocker_clusters"] = prioritize_blockers(mapping)
         summary = summarize_mapping(mapping)
         mapping["summary"] = summary
@@ -215,6 +228,9 @@ class KPIFeatureResolver:
                 "source": kpi.get("source", ""),
                 "metric": metric,
                 "cuts": cuts,
+                # A seed/placeholder KPI is undefined rather than presupposing
+                # missing data; the no-supporting-evidence labeling pass skips it.
+                "placeholder_seed": True,
                 "status": "blocked_questions_pending",
                 "features": [feature],
                 "function_context": extracted.functions,
@@ -1379,6 +1395,158 @@ def _prose_anchor_evidence(
             )
     scored.sort(key=lambda item: (-item[0], str(item[1]["source"]), str(item[1]["column"])))
     return [item for _, item in scored[:limit]]
+
+
+def _kpi_supporting_evidence_present(features: list[dict[str, Any]]) -> bool:
+    """True when ANY feature of a KPI anchors to workspace evidence.
+
+    Anchors are: a feature in a READY state, any source column, any candidate
+    (alias/contextual/pattern/derived option), or any evidence entry whose type
+    is not purely self-referential (the KPI's own prose, seed placeholder, or
+    machine-derived-metric note). Generic: no domain vocabulary, no per-KPI
+    rules — only the shape of the evidence the workspace produced.
+    """
+    for feature in features:
+        if not isinstance(feature, dict):
+            continue
+        if feature.get("state") in READY_STATES:
+            return True
+        if (
+            feature.get("source_columns")
+            or feature.get("candidates")
+            or feature.get("candidate_patterns")
+            or feature.get("derived_feature_options")
+        ):
+            return True
+        for evidence in feature.get("evidence") or []:
+            if not isinstance(evidence, dict):
+                continue
+            if str(evidence.get("type") or "") not in _SELF_REFERENTIAL_EVIDENCE_TYPES:
+                return True
+    return False
+
+
+def _label_kpis_without_supporting_evidence(
+    mapping: dict[str, Any],
+    kpis: list[dict[str, Any]],
+    schema_index: dict[str, list[dict[str, Any]]],
+    definitions: dict[str, Any] | None = None,
+) -> None:
+    """Label blocked KPIs whose prose anchors to NOTHING in the workspace.
+
+    This is the stronger condition than a generic block: no term in the KPI
+    prose maps to any profiled column, dataset name, data-dictionary
+    description, or accepted workspace definition, and no resolved feature
+    carries workspace-anchored evidence or candidates. Such a KPI may
+    presuppose data the workspace does not contain, so the blocker is labeled
+    ``no_supporting_evidence`` and carries a question asking the user to
+    confirm the absence or point at the source. Detection is evidence-shape
+    only (zero anchors); it is never keyed to any KPI's wording or domain.
+    """
+    entries = mapping.get("kpis") or []
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("status") != "blocked_questions_pending":
+            continue
+        if entry.get("placeholder_seed"):
+            continue
+        features = list(entry.get("features") or [])
+        if _kpi_supporting_evidence_present(features):
+            continue
+        kpi = kpis[idx] if idx < len(kpis) and isinstance(kpis[idx], dict) else {}
+        if _prose_anchor_evidence(kpi, schema_index):
+            # At least one prose term anchors to workspace evidence even though
+            # no feature captured it; the stronger condition does not hold.
+            continue
+        kpi_id = str(entry.get("kpi_id") or "")
+        feature = _no_supporting_evidence_feature(entry, kpi)
+        # A previously accepted answer for this blocker is saved as a workspace
+        # definition. The feature is appended AFTER the definitions pass ran
+        # over the mapping, so matching records must be re-applied here or the
+        # user's answer would stop resolving the blocker on every re-run.
+        for definition in (definitions or {}).get("definitions") or []:
+            if not isinstance(definition, dict):
+                continue
+            if normalize_blocker(str(definition.get("feature") or "")) != normalize_blocker(
+                str(feature.get("feature") or "")
+            ):
+                continue
+            applies_to = set(definition.get("applies_to_kpis") or [])
+            if applies_to and kpi_id not in applies_to:
+                continue
+            if kpi_id in set(definition.get("exceptions") or []):
+                continue
+            apply_definition_to_feature(feature, definition, kpi_id)
+        features.append(feature)
+        entry["features"] = features
+        if feature.get("state") in READY_STATES:
+            # A saved workspace definition already answered this blocker.
+            continue
+        entry["blocker_label"] = NO_SUPPORTING_EVIDENCE_LABEL
+        open_questions = list(entry.get("open_questions") or [])
+        question = feature.get("question")
+        if question and question not in open_questions:
+            open_questions.append(question)
+        entry["open_questions"] = open_questions
+
+
+def _no_supporting_evidence_feature(
+    kpi_entry: dict[str, Any],
+    kpi: dict[str, Any],
+) -> dict[str, Any]:
+    """Machine-readable blocker for a KPI with zero workspace evidence anchors.
+
+    The question tells the user the KPI may presuppose data the workspace
+    lacks and asks them to confirm that or point at the source. The feature is
+    answerable through the normal blocker panel / apply-kpi-panel-answer path.
+    """
+    name = str(kpi.get("name") or kpi_entry.get("name") or "").strip() or str(
+        kpi_entry.get("kpi_id") or "this KPI"
+    )
+    source = str(kpi.get("source") or kpi_entry.get("source") or "")
+    description = str(kpi.get("description") or "").strip()
+    evidence: list[dict[str, Any]] = [
+        {
+            "type": "no_supporting_evidence_scan",
+            "source": source,
+            "note": (
+                "No term in this KPI's prose matched any profiled column, "
+                "dataset name, data-dictionary description, or accepted "
+                "workspace definition, and no feature carries workspace-"
+                "anchored evidence or candidates."
+            ),
+        }
+    ]
+    if description:
+        evidence.append(
+            {
+                "type": "kpi_prose",
+                "source": source,
+                "excerpt": description[:600],
+            }
+        )
+    return {
+        "feature": "KPI supporting evidence",
+        "state": "blocked_missing_evidence",
+        "resolution_type": "no_supporting_evidence",
+        "blocker_label": NO_SUPPORTING_EVIDENCE_LABEL,
+        "source_columns": [],
+        "grain": "unknown",
+        "conflicts": [],
+        "decision_history": [],
+        "evidence": evidence,
+        "candidate_patterns": [],
+        "derived_feature_options": [],
+        "candidates": [],
+        "question": (
+            f"No workspace evidence supports `{name}`: no term in the KPI prose "
+            "matches any column, dataset, dictionary entry, or accepted "
+            "definition in this workspace. The KPI may presuppose data the "
+            "workspace does not contain. Confirm that the data does not exist "
+            "here, or point to the source dataset, column, or file that holds it."
+        ),
+    }
 
 
 def _kpi_definition_feature(

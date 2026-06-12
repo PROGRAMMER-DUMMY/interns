@@ -284,11 +284,16 @@ def _feature_items(
     for kpi in mapping.get("kpis", []):
         # Partial-completion: skip deferred (undefined) KPIs so their unresolved
         # feature tokens do not become feature-blocker questions. Defined KPIs
-        # still surface their own blockers normally.
-        if str(kpi.get("kpi_id") or "") in deferred:
-            continue
+        # still surface their own blockers normally. Exception: a
+        # `no_supporting_evidence` blocker is about the KPI itself (its prose
+        # matched nothing in the workspace), not a sibling feature token — the
+        # user must be asked to confirm the missing data or point at the
+        # source, so it survives deferral.
+        kpi_deferred = str(kpi.get("kpi_id") or "") in deferred
         for feature in kpi.get("features", []):
             if feature.get("state") in READY_STATES:
+                continue
+            if kpi_deferred and feature.get("resolution_type") != "no_supporting_evidence":
                 continue
             name = str(feature.get("feature") or "")
             items.setdefault(_norm(name), []).append({"kpi": kpi, "feature": feature})
@@ -378,6 +383,94 @@ def _question_for_cluster(
     prior = _prior_wiki_decision(workspace, repo_root, feature)
     if prior:
         base["prior_decision_wiki"] = prior
+    no_evidence_items = [
+        item
+        for item in items
+        if item["feature"].get("resolution_type") == "no_supporting_evidence"
+    ]
+    if no_evidence_items:
+        kpi_labels = ", ".join(
+            str(item["kpi"].get("kpi_id") or "") for item in no_evidence_items
+        )
+        feature_question = next(
+            (
+                str(item["feature"].get("question") or "")
+                for item in no_evidence_items
+                if item["feature"].get("question")
+            ),
+            "",
+        )
+        return {
+            **base,
+            "blocker_label": "no_supporting_evidence",
+            "blocker": (
+                f"No workspace evidence supports KPI(s) {kpi_labels}: no term in "
+                "the KPI prose matches any profiled column, dataset name, "
+                "data-dictionary entry, or accepted workspace definition. The "
+                "KPI may presuppose data this workspace does not contain."
+            ),
+            "question": feature_question
+            or (
+                "Does this KPI presuppose data that does not exist in this "
+                "workspace? Confirm that, or point to the source dataset, "
+                "column, or file that holds the data."
+            ),
+            "answer_type": "no_supporting_evidence",
+            # option_a/option_b carry expected_answer_shape placeholders the
+            # user must fill in, so neither is appliable as-recommended;
+            # `custom` is the only recommendation the validator accepts here.
+            "recommended_option_id": "custom",
+            "recommended_answer": (
+                "Confirm the workspace does not contain the presupposed data, "
+                "or point to the source that holds it. No mapping will be "
+                "fabricated from zero evidence."
+            ),
+            "why": (
+                "Every prose term of this KPI was scanned against the "
+                "workspace's profiled columns, dataset names, dictionary "
+                "descriptions, and accepted definitions, and nothing matched. "
+                "Mapping it anyway would fabricate evidence; the honest options "
+                "are to confirm the data is absent or to supply the missing "
+                "source."
+            ),
+            "options": [
+                {
+                    "option_id": "option_a",
+                    "label": "Confirm the data does not exist in this workspace",
+                    "business_summary": (
+                        "Record that this KPI presupposes data the workspace "
+                        "does not contain. The KPI stays blocked as not "
+                        "computable from this workspace until a source is "
+                        "supplied."
+                    ),
+                    "expected_answer_shape": {
+                        "confirmation": "data_not_in_workspace",
+                        "reason": "",
+                        "confirmed_by": "",
+                        "applies_to_kpis": applies_to,
+                    },
+                    "json_backed": False,
+                },
+                {
+                    "option_id": "option_b",
+                    "label": "Point to the source that holds this data",
+                    "business_summary": (
+                        "Name the dataset, column(s), file, or upstream system "
+                        "that contains the data this KPI needs, so it can be "
+                        "onboarded and profiled as evidence."
+                    ),
+                    "expected_answer_shape": {
+                        "source_dataset_or_file": "",
+                        "columns": [],
+                        "owner_or_system": "",
+                        "reason": "",
+                        "applies_to_kpis": applies_to,
+                    },
+                    "json_backed": False,
+                },
+                _custom_rule_option(feature),
+            ],
+        }
     if any(item["feature"].get("resolution_type") == "kpi_definition_required" for item in items):
         definition_items = [
             item
