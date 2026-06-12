@@ -18,6 +18,12 @@ from core.contracts.versioning import register_contract
 
 EXECUTABLE_RELATIONSHIP_STATES = {"proven_data_model", "user_confirmed"}
 USER_DECIDED_RELATIONSHIP_STATES = {"user_confirmed", "rejected"}
+# A join the workspace's own documentation declares (data-model doc table row,
+# dictionary "joins to table.column" gloss) but that has not yet been proven
+# against observed key values. First-class evidence -- ranked above raw profile
+# name-overlap, below proven -- and NEVER executable until the profile
+# key-overlap check promotes it to proven_data_model.
+DOCUMENTED_RELATIONSHIP_STATE = "documented_data_model"
 RELATIONSHIP_VERSION = 1
 
 # A diagram-declared join proven only by referential integrity against a very
@@ -76,6 +82,14 @@ class RelationshipContractBuilder:
             self.repo_root,
         )
         doc_relationships = _parse_relationships_from_docs(data_model_docs, profiles)
+        doc_relationships.extend(
+            _parse_documented_table_relationships(data_model_docs, profiles)
+        )
+        # Documented-but-unproven joins are promoted to proven_data_model only
+        # when observed key values prove them (profile key-overlap check).
+        doc_relationships = _promote_documented_relationships(
+            doc_relationships, profiles, self.repo_root
+        )
         diagram_relationships = _relationships_from_diagram_sidecars(
             self.layout,
             profiles,
@@ -435,6 +449,54 @@ def _parse_foreign_key_dictionary_rows(
         if not left_column:
             continue
         description = " ".join(row[2:])
+        # Explicit qualified target ("joins to party.party_key", "FK to
+        # carriers.scac"): the documented column wins over name-derived
+        # fallbacks. Emitted as documented-but-unproven; the key-overlap
+        # promotion pass decides whether it becomes proven_data_model.
+        qualified = re.search(
+            r"(?:joins?|joined|fk|foreign\s+key)\s*(?:to|with|on|against)?\s*"
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+            description,
+            flags=re.I,
+        )
+        if qualified:
+            right_dataset = _resolve_dataset(qualified.group(1), dataset_lookup)
+            right_column = (
+                _resolve_column(qualified.group(2), profiles[right_dataset])
+                if right_dataset
+                else ""
+            )
+            if right_dataset and right_dataset != left_dataset and right_column:
+                relationships.append(
+                    _relationship(
+                        left_dataset=left_dataset,
+                        left_column=left_column,
+                        right_dataset=right_dataset,
+                        right_column=right_column,
+                        state=DOCUMENTED_RELATIONSHIP_STATE,
+                        confidence=0.75,
+                        evidence_sources=[
+                            {
+                                "type": "documented_join",
+                                "path": doc["path"],
+                                "source_table": row[0],
+                                "source_column": row[1],
+                                "description": description,
+                            },
+                            {
+                                "type": "profile_schema",
+                                "path": profiles[left_dataset].get("profile_path", ""),
+                                "column": left_column,
+                            },
+                            {
+                                "type": "profile_schema",
+                                "path": profiles[right_dataset].get("profile_path", ""),
+                                "column": right_column,
+                            },
+                        ],
+                    )
+                )
+                continue
         match = re.search(r"foreign\s+key\s+to\s+the\s+([A-Za-z0-9_ -]+)", description, flags=re.I)
         if not match:
             match = re.search(r"foreign\s+key\s+to\s+([A-Za-z0-9_ -]+)", description, flags=re.I)
@@ -484,6 +546,182 @@ def _parse_foreign_key_dictionary_rows(
             )
         )
     return relationships
+
+
+def _qualified_column_refs(text: str) -> list[tuple[str, str]]:
+    """``table.column`` references in a documentation line, slash-expanded.
+
+    ``shipments.orig`/`dest`` documents two columns of the same table; the
+    slash suffix expands to ``(shipments, orig)`` and ``(shipments, dest)``.
+    Backticks are stripped before matching. Non-resolving refs (for example a
+    file suffix like ``party.csv``) are filtered by the caller against
+    profiles, so this stays a pure text scan.
+    """
+    cleaned = text.replace("`", "")
+    refs: list[tuple[str, str]] = []
+    for match in re.finditer(
+        r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)"
+        r"((?:\s*/\s*[A-Za-z_][A-Za-z0-9_]*)*)",
+        cleaned,
+    ):
+        table, column, extra = match.group(1), match.group(2), match.group(3)
+        refs.append((table, column))
+        for alternative in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", extra or ""):
+            refs.append((table, alternative))
+    return refs
+
+
+def _parse_documented_table_relationships(
+    docs: list[dict[str, str]],
+    profiles: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Documented joins from data-model doc tables (F4, lineage evidence).
+
+    A markdown master-data row like ``| masters/party.csv | party_key |
+    shipments.cust_ref, invoices.acct |`` documents every join into that key.
+    The row's resolvable dataset + key column is the dimension ("one") side;
+    each qualified ``table.column`` reference resolving to ANOTHER profiled
+    dataset is a fact-side foreign key. Emitted as documented-but-unproven
+    (``documented_data_model``); the key-overlap promotion pass upgrades an
+    edge to ``proven_data_model`` only when observed values prove it.
+    Generic: no table, column, or domain name is special-cased.
+    """
+    relationships: list[dict[str, Any]] = []
+    dataset_lookup = _dataset_lookup(profiles)
+    for doc in docs:
+        if doc["path"].lower().endswith(".csv"):
+            continue  # dictionary CSVs are handled row-wise with table context
+        for line in doc["text"].splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("|"):
+                continue
+            if stripped.startswith("|---") or stripped.startswith("| :"):
+                continue
+            cells = [cell.strip(" `*") for cell in stripped.strip("|").split("|")]
+            if len(cells) < 2:
+                continue
+            home_dataset = ""
+            for cell in cells:
+                resolved = _resolve_dataset(cell, dataset_lookup)
+                if resolved:
+                    home_dataset = resolved
+                    break
+            if not home_dataset:
+                continue
+            key_column = ""
+            for cell in cells:
+                candidate = _resolve_column(cell, profiles[home_dataset])
+                if candidate:
+                    key_column = candidate
+                    break
+            if not key_column:
+                continue
+            for table, column in _qualified_column_refs(stripped):
+                left_dataset = _resolve_dataset(table, dataset_lookup)
+                if not left_dataset or left_dataset == home_dataset:
+                    continue
+                left_column = _resolve_column(column, profiles[left_dataset])
+                if not left_column:
+                    continue
+                relationships.append(
+                    _relationship(
+                        left_dataset=left_dataset,
+                        left_column=left_column,
+                        right_dataset=home_dataset,
+                        right_column=key_column,
+                        state=DOCUMENTED_RELATIONSHIP_STATE,
+                        confidence=0.75,
+                        evidence_sources=[
+                            {
+                                "type": "documented_join",
+                                "path": doc["path"],
+                                "excerpt": " ".join(stripped.split())[:280],
+                            },
+                            {
+                                "type": "profile_schema",
+                                "path": profiles[left_dataset].get("profile_path", ""),
+                                "column": left_column,
+                            },
+                            {
+                                "type": "profile_schema",
+                                "path": profiles[home_dataset].get("profile_path", ""),
+                                "column": key_column,
+                            },
+                        ],
+                    )
+                )
+    return relationships
+
+
+def _promote_documented_relationships(
+    relationships: list[dict[str, Any]],
+    profiles: dict[str, dict[str, Any]],
+    repo_root: Path | None,
+) -> list[dict[str, Any]]:
+    """Promote documented joins that observed key values prove.
+
+    For each ``documented_data_model`` edge, the dimension-side key uniqueness
+    and the left->right key-overlap ratio are computed from profile stats /
+    bounded dataset reads (the same data path as profile relationship
+    validation). A documented edge whose keys actually resolve becomes
+    ``proven_data_model``; an unprovable or failing edge STAYS documented and
+    non-executable, with the measured evidence attached so the panel can show
+    why.
+    """
+    promoted: list[dict[str, Any]] = []
+    for relationship in relationships:
+        if relationship.get("state") != DOCUMENTED_RELATIONSHIP_STATE:
+            promoted.append(relationship)
+            continue
+        left = str(relationship.get("left_dataset") or "")
+        right = str(relationship.get("right_dataset") or "")
+        left_column = str(relationship.get("left_column") or "")
+        right_column = str(relationship.get("right_column") or "")
+        right_uniqueness = _column_uniqueness(profiles.get(right, {}), right_column, repo_root)
+        ri_ratio = _left_key_resolution_ratio(
+            profiles.get(left, {}), left_column, profiles.get(right, {}), right_column, repo_root
+        )
+        if _is_unique_ratio(right_uniqueness):
+            dimension_key_unique: bool | None = True
+        elif right_uniqueness is None:
+            dimension_key_unique = None
+        else:
+            dimension_key_unique = False
+        overlap_evidence = {
+            "type": "profile_key_overlap",
+            "left_key_resolution_ratio": ri_ratio,
+            "right_uniqueness_ratio": right_uniqueness,
+            "note": (
+                "Documented join checked against observed key values "
+                "(left FK -> right key overlap)."
+            ),
+        }
+        proven = (
+            ri_ratio is not None
+            and ri_ratio >= _REFERENTIAL_INTEGRITY_THRESHOLD
+            and dimension_key_unique is True
+        )
+        promoted.append(
+            _relationship(
+                left_dataset=left,
+                left_column=left_column,
+                right_dataset=right,
+                right_column=right_column,
+                state="proven_data_model" if proven else DOCUMENTED_RELATIONSHIP_STATE,
+                confidence=0.9 if proven else (
+                    0.4
+                    if ri_ratio is not None and ri_ratio < _REFERENTIAL_INTEGRITY_THRESHOLD
+                    else 0.75
+                ),
+                evidence_sources=[
+                    *relationship.get("evidence_sources", []),
+                    overlap_evidence,
+                ],
+                dimension_key_unique=dimension_key_unique,
+                referential_integrity_ratio=ri_ratio,
+            )
+        )
+    return promoted
 
 
 def _dataset_from_fk_column(column: str, dataset_lookup: dict[str, str]) -> str:
@@ -1606,8 +1844,9 @@ def _state_rank(state: str) -> int:
     return {
         "candidate_needs_review": 1,
         "profile_validated": 2,
-        "proven_data_model": 3,
-        "user_confirmed": 4,
+        DOCUMENTED_RELATIONSHIP_STATE: 3,
+        "proven_data_model": 4,
+        "user_confirmed": 5,
     }.get(state, 0)
 
 
