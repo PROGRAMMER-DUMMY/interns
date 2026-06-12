@@ -3,15 +3,21 @@
 Generic. Writes one HTML page per KPI plus an index.html under
 `dashboard/exports/`. Uses the same renderer as the live Dash app so the
 spec → chart pipeline is identical.
+
+The index mirrors the live app's interaction model with vanilla JS only:
+a clickable KPI tile strip (headline + status badge per tile), per-panel
+view toggles, and an inline detail region — so the file that auto-opens at
+KPI completion behaves like the served dashboard without needing a server.
 """
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 from core.dashboard.design_md import DesignTokens, load_design_tokens
-from core.dashboard.renderer import render_kpi_html, render_kpi_inline, set_active_design
+from core.dashboard.renderer import render_kpi_inline, set_active_design
 from core.dashboard.spec import load_kpi_spec
 from core.onboarding.kpi.registry_loader import load_kpi_definitions
 from core.onboarding.workspace.flow import compute_workflow_diff
@@ -116,36 +122,161 @@ body { font-family: var(--sans); margin: 0; color: var(--ink); background: var(-
   padding: 0.5rem; margin: 0.25rem 0; font-size: 0.74rem; white-space: pre-wrap; }
 a { color: var(--accent-deep); }
 .empty { color: var(--ink-soft); padding: 3rem 0; font-family: var(--mono); }
+
+/* Tile strip — the live app's clickable KPI buttons, in static form. */
+.strip { display: flex; gap: 0.7rem; flex-wrap: wrap; margin: 0 0 1rem; }
+.tile { background: var(--card); border: 1px solid var(--rule); padding: 0.65rem 0.9rem 0.55rem;
+  cursor: pointer; min-width: 200px; flex: 0 1 auto; user-select: none;
+  transition: border-color .25s, transform .25s, box-shadow .25s; }
+.tile:hover { transform: translateY(-2px); border-color: var(--ink); }
+.tile.sel { border-color: var(--accent); box-shadow: -4px 6px 0 rgba(180,68,28,0.12); }
+.tile .t { font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.18em;
+  color: var(--ink-soft); text-transform: uppercase; }
+.tile .h { font-family: var(--serif); font-weight: 900; font-size: 1.25rem; color: var(--accent);
+  line-height: 1.15; font-variant-numeric: tabular-nums; }
+.tile .n { font-size: 0.72rem; color: var(--ink-soft); max-width: 30ch; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.tile .st { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--accent-deep); margin-top: 0.25rem; }
+.tile.blockedt { opacity: 0.75; }
+.tile.blockedt .h { color: var(--ink-soft); }
+
+/* View toggles row */
+.ctl { display: flex; gap: 0.9rem; align-items: center; flex-wrap: wrap;
+  border-top: 1px solid var(--rule-soft); border-bottom: 1px solid var(--rule-soft);
+  padding: 0.55rem 0.2rem; margin-bottom: 1.1rem; }
+.ctl .lab { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--ink-soft); }
+.ctl label { font-size: 0.8rem; display: inline-flex; gap: 0.3rem; align-items: center;
+  cursor: pointer; }
+.ctl input { accent-color: var(--accent); }
+
+/* Inline detail sections (one per KPI; selected one visible) */
+.kdetail { display: none; }
+.kdetail.on { display: block; }
+.kdetail .pane.hid { display: none; }
 """.replace("GRAINURI", _GRAIN)
+
+# Detail-page-only overrides: charts grow to fill the viewport instead of
+# leaving dead space (the #1 screenshot-review finding).
+_DETAIL_CSS = """
+.detail-page .panel-grid { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 1.2rem; }
+.detail-page .panel { padding-top: 0.8rem; }
+"""
+
+# Index interactivity: tile click selects a KPI (hash-addressable), view
+# checkboxes toggle panels. Plotly charts rendered inside display:none
+# sections refit on reveal via the abFit() helper _wrap_page already ships.
+_INDEX_JS = """
+<script>
+function pick(kid){
+  document.querySelectorAll('.kdetail').forEach(function(s){
+    s.classList.toggle('on', s.dataset.kpi===kid);
+  });
+  document.querySelectorAll('.tile[data-kpi]').forEach(function(t){
+    t.classList.toggle('sel', t.dataset.kpi===kid);
+  });
+  buildViews(kid);
+  if (history.replaceState) history.replaceState(null, '', '#'+kid);
+  setTimeout(abFit, 60); setTimeout(abFit, 400);
+}
+function buildViews(kid){
+  var box = document.getElementById('views'); if(!box) return;
+  box.innerHTML = '';
+  var sec = document.querySelector('.kdetail[data-kpi="'+kid+'"]'); if(!sec) return;
+  sec.querySelectorAll('.pane').forEach(function(p, i){
+    var id = 'v_'+kid+'_'+i;
+    var l = document.createElement('label');
+    var c = document.createElement('input');
+    c.type='checkbox'; c.checked = !p.classList.contains('hid'); c.id=id;
+    c.addEventListener('change', function(){
+      p.classList.toggle('hid', !c.checked);
+      setTimeout(abFit, 60);
+    });
+    l.appendChild(c);
+    l.appendChild(document.createTextNode(p.dataset.title || ('View '+(i+1))));
+    box.appendChild(l);
+  });
+}
+document.querySelectorAll('.tile[data-kpi]').forEach(function(t){
+  t.addEventListener('click', function(){ pick(t.dataset.kpi); });
+});
+window.addEventListener('load', function(){
+  var first = document.querySelector('.tile[data-kpi]');
+  var kid = (location.hash || '').replace('#','');
+  if (!document.querySelector('.kdetail[data-kpi="'+kid+'"]')) kid = first ? first.dataset.kpi : '';
+  if (kid) pick(kid);
+});
+</script>
+"""
 
 
 def _panels_html(card: dict[str, Any]) -> str:
-    """Render one or more data-derived panels as a sub-grid inside the card."""
+    """Render one or more data-derived panels as a sub-grid inside the card.
+
+    Every panel cell carries class ``pane`` and a ``data-title`` so the index
+    page's view toggles can show/hide individual panels.
+    """
     panels = card.get("panels") or [{"chart_html": card.get("chart_html") or "", "sub_title": ""}]
     if len(panels) == 1:
-        return f'<div class="chart">{panels[0].get("chart_html") or ""}</div>'
+        p = panels[0]
+        sub = p.get("sub_title") or ""
+        return (
+            f'<div class="pane" data-title="{sub or "View 1"}">'
+            f'<div class="chart">{p.get("chart_html") or ""}</div></div>'
+        )
     cells = []
-    for p in panels:
+    for i, p in enumerate(panels):
         sub = p.get("sub_title") or ""
         title = f'<div class="panel-title">{sub}</div>' if sub else ""
-        cells.append(f'<div class="panel">{title}<div class="chart">{p.get("chart_html") or ""}</div></div>')
+        cells.append(
+            f'<div class="panel pane" data-title="{sub or f"View {i + 1}"}">'
+            f'{title}<div class="chart">{p.get("chart_html") or ""}</div></div>'
+        )
     return f'<div class="panel-grid">{"".join(cells)}</div>'
 
 
-def _kpi_grid_card_html(kpi_id: str, card: dict[str, Any], link: str, idx: int = 0) -> str:
-    metric = card.get("metric") or ""
-    metric_html = f'<div class="metric">{metric}</div>' if metric else ""
-    panels = card.get("panels") or []
-    badge = f"{len(panels)} views" if len(panels) > 1 else (card.get("chart_type") or "single view")
-    delay = f"animation-delay:{idx * 90}ms;"
+def _load_kpi_statuses(workspace: Path) -> dict[str, str]:
+    """Per-KPI status badge text from the execution-harness + parity evidence.
+
+    "[ok] parity" when the harness passed and engines matched, "[ok]" on a
+    pass without a parity record, "" when no evidence exists. Never raises —
+    badges are decoration, not a gate.
+    """
+    badges: dict[str, str] = {}
+    evidence = workspace / "interns" / "generated" / "evidence"
+    try:
+        harness = json.loads(
+            (evidence / "kpi_execution_harness.json").read_text(encoding="utf-8")
+        )
+        for record in harness.get("records") or []:
+            if record.get("status") == "passed":
+                badges[str(record.get("kpi_id") or "")] = "[ok]"
+    except (json.JSONDecodeError, OSError):
+        pass
+    try:
+        parity = json.loads(
+            (evidence / "engine_parity" / "current.json").read_text(encoding="utf-8")
+        )
+        for kpi_id, entry in (parity.get("kpis") or {}).items():
+            verdict = (entry or {}).get("parity") or {}
+            if verdict.get("status") == "match" and badges.get(kpi_id):
+                badges[kpi_id] = "[ok] parity"
+    except (json.JSONDecodeError, OSError):
+        pass
+    badges.pop("", None)
+    return badges
+
+
+def _tile_html(kpi_id: str, headline: str, title: str, badge: str, *, blocked: bool = False) -> str:
+    cls = "tile blockedt" if blocked else "tile"
+    badge_html = f'<div class="st">{badge}</div>' if badge else ""
     return (
-        f'<article class="kpi-card" style="{delay}">'
-        f'<span class="idx">{idx + 1:02d}</span>'
-        f'<div class="head"><div><h2><a href="{link}">{card.get("title") or kpi_id}</a></h2>'
-        f'{metric_html}</div><div class="headline">{card.get("headline") or ""}</div></div>'
-        f'{_panels_html(card)}'
-        f'<div class="foot"><span class="badge">{badge}</span><a href="{link}">open detail →</a></div>'
-        f'</article>'
+        f'<div class="{cls}" data-kpi="{kpi_id}">'
+        f'<div class="t">{kpi_id.replace("_", " ").upper()}</div>'
+        f'<div class="h">{headline}</div>'
+        f'<div class="n" title="{title}">{title}</div>'
+        f"{badge_html}</div>"
     )
 
 
@@ -198,7 +329,7 @@ def _wrap_page(
         f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
         f'<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'{_fonts_link(t)}'
-        f'<title>{title}</title><style>{_root_css(t)}{_BASE_CSS}</style></head>'
+        f'<title>{title}</title><style>{_root_css(t)}{_BASE_CSS}{_DETAIL_CSS}</style></head>'
         f'<body><div class="grain"></div>{topbar_html}'
         f'<main class="container">{body}</main>{resize_js}</body></html>'
     )
@@ -221,7 +352,9 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
     diff = compute_workflow_diff(repo_root, workspace_rel)
     gaps_by_id = {str(g.get("kpi_id")): g for g in (diff.get("kpi_gaps") or [])}
 
-    index_cards: list[str] = []
+    badges = _load_kpi_statuses(workspace)
+    tiles: list[str] = []
+    detail_sections: list[str] = []
     written: list[str] = []
     kpi_total = 0
     blocked_total = 0
@@ -232,23 +365,32 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
         is_blocked = str(gap.get("status")) == "blocked" or not spec
         if is_blocked or not (spec and spec.config.get("sql_path")):
             blocked_total += 1
-            index_cards.append(_kpi_blocker_card_html(kpi_id, gap or {}))
+            tiles.append(
+                _tile_html(kpi_id, "blocked", "no executable SQL", "", blocked=True)
+            )
+            detail_sections.append(
+                f'<section class="kdetail" data-kpi="{kpi_id}">'
+                f"{_kpi_blocker_card_html(kpi_id, gap or {})}</section>"
+            )
             continue
+        # Index detail region: compact panels. Standalone page: the same
+        # panels rendered LARGER (the screenshot review found detail pages
+        # mostly dead space) — worth the second local SQL execution.
         card = render_kpi_inline(repo_root, layout, spec, height=360)
-        # Detail page: the same data-derived panels, larger.
+        page_card = render_kpi_inline(repo_root, layout, spec, height=560)
         page_body = (
-            f'<div class="kpi-card"><div class="head"><div>'
-            f'<h2>{card["title"]}</h2><div class="metric">{card.get("metric") or ""}</div></div>'
-            f'<div class="headline">{card.get("headline") or ""}</div></div>'
-            f'{_panels_html(card)}'
-            f'<div class="foot"><a href="index.html">← back to board</a></div></div>'
+            f'<div class="kpi-card detail-page"><div class="head"><div>'
+            f'<h2>{page_card["title"]}</h2><div class="metric">{page_card.get("metric") or ""}</div></div>'
+            f'<div class="headline">{page_card.get("headline") or ""}</div></div>'
+            f'{_panels_html(page_card)}'
+            f'<div class="foot"><a href="index.html#{kpi_id}">← back to board</a></div></div>'
         )
         page_path = exports_dir / f"{kpi_id}.html"
         page_path.write_text(
             _wrap_page(
                 f"{kpi_id} — {workspace.name}",
                 page_body,
-                topbar=card["title"],
+                topbar=page_card["title"],
                 stamp=f"{kpi_id.upper().replace('_', ' ')}",
                 eyebrow="KPI Detail",
                 tokens=tokens,
@@ -256,15 +398,35 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
             encoding="utf-8",
         )
         written.append(page_path.relative_to(workspace).as_posix())
-        index_cards.append(
-            _kpi_grid_card_html(kpi_id, card, f"{kpi_id}.html", idx=len(index_cards))
+        tiles.append(
+            _tile_html(
+                kpi_id,
+                str(card.get("headline") or ""),
+                str(card.get("title") or kpi_id),
+                badges.get(kpi_id, ""),
+            )
+        )
+        detail_sections.append(
+            f'<section class="kdetail" data-kpi="{kpi_id}">'
+            f'<div class="kpi-card"><div class="head"><div>'
+            f'<h2><a href="{kpi_id}.html">{card["title"]}</a></h2>'
+            f'<div class="metric">{card.get("metric") or ""}</div></div>'
+            f'<div class="headline">{card.get("headline") or ""}</div></div>'
+            f"{_panels_html(card)}"
+            f'<div class="foot"><span class="badge">{badges.get(kpi_id, "")}</span>'
+            f'<a href="{kpi_id}.html">open full page →</a></div></div></section>'
         )
 
-    grid = (
-        f'<div class="grid">{"".join(index_cards)}</div>'
-        if index_cards
-        else '<div class="empty">No KPIs registered yet.</div>'
-    )
+    if tiles:
+        body = (
+            f'<div class="strip">{"".join(tiles)}</div>'
+            f'<div class="ctl"><span class="lab">Views</span><span id="views" '
+            f'style="display:flex;gap:0.9rem;flex-wrap:wrap;"></span></div>'
+            f'{"".join(detail_sections)}'
+            f"{_INDEX_JS}"
+        )
+    else:
+        body = '<div class="empty">No KPIs registered yet.</div>'
     dot = '<span class="dot">/</span>'
     parts = [date.today().isoformat(), f"{kpi_total} indicators"]
     if blocked_total:
@@ -275,7 +437,7 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
     index_path.write_text(
         _wrap_page(
             f"Dashboard — {workspace.name}",
-            grid,
+            body,
             topbar=workspace.name.replace("-", " "),
             stamp=stamp,
             tokens=tokens,

@@ -2,7 +2,7 @@
   "artifact_type": "dashboard_index",
   "version": 2,
   "workspace": "Healthcare-RCM-Data-Platform",
-  "updated_at": "2026-06-11T20:09:05.629590+00:00",
+  "updated_at": "2026-06-12T13:12:44.938730+00:00",
   "machine_defaults": {
     "kpis": [
       {

@@ -1,0 +1,61 @@
+{
+  "artifact_type": "dashboard_index",
+  "version": 2,
+  "workspace": "Hostile_Synthetic",
+  "updated_at": "2026-06-12T13:14:23.421987+00:00",
+  "machine_defaults": {
+    "kpis": [
+      {
+        "kpi_id": "kpi_001",
+        "title": "KPI 1 - On-time delivery rate",
+        "spec_path": "dashboard/kpi_001.json"
+      },
+      {
+        "kpi_id": "kpi_002",
+        "title": "KPI 2 - Monthly revenue per active account",
+        "spec_path": "dashboard/kpi_002.json"
+      },
+      {
+        "kpi_id": "kpi_003",
+        "title": "KPI 3 - Average depot dwell hours",
+        "spec_path": "dashboard/kpi_003.json"
+      },
+      {
+        "kpi_id": "kpi_004",
+        "title": "KPI 4 - Damage claim rate by carrier",
+        "spec_path": "dashboard/kpi_004.json"
+      },
+      {
+        "kpi_id": "kpi_005",
+        "title": "KPI 5 - Share of shipments upgraded to premium after dispatch",
+        "spec_path": "dashboard/kpi_005.json"
+      },
+      {
+        "kpi_id": "kpi_006",
+        "title": "KPI 6 - Fleet utilization",
+        "spec_path": "dashboard/kpi_006.json"
+      },
+      {
+        "kpi_id": "kpi_007",
+        "title": "KPI 7 - Invoice dispute rate",
+        "spec_path": "dashboard/kpi_007.json"
+      },
+      {
+        "kpi_id": "kpi_008",
+        "title": "KPI 8 - Average cost per kilogram by lane",
+        "spec_path": "dashboard/kpi_008.json"
+      },
+      {
+        "kpi_id": "kpi_009",
+        "title": "KPI 9 - Quarterly account churn",
+        "spec_path": "dashboard/kpi_009.json"
+      },
+      {
+        "kpi_id": "kpi_010",
+        "title": "KPI 10 - Perfect shipment rate",
+        "spec_path": "dashboard/kpi_010.json"
+      }
+    ]
+  },
+  "user_overrides": {}
+}
