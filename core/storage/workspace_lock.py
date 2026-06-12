@@ -15,6 +15,7 @@ import json
 import os
 import socket
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -22,6 +23,26 @@ from pathlib import Path
 from typing import Iterator
 
 _LOCK_RELATIVE_PATH = ("interns", "state", "workspace.lock")
+
+# Re-entrancy registry: lock-file key -> {"owner": (pid, thread_ident),
+# "depth": int}. Lets the *same* pid+thread nest ``with workspace_lock(...)``
+# (e.g. a CLI wrapper that holds the lock and then calls a helper which also
+# locks) without self-deadlocking, while any other thread or process still
+# contends on the OS-level lock as before. The pid in the owner tuple guards
+# against a forked child inheriting the registry and wrongly treating itself
+# as the holder.
+_REENTRANT_GUARD = threading.Lock()
+_ACTIVE_LOCKS: dict[str, dict] = {}
+
+
+def _lock_key(lock_path: Path) -> str:
+    """Normalised registry key for a lock file (case-folded, resolved)."""
+
+    try:
+        resolved = lock_path.resolve()
+    except OSError:
+        resolved = lock_path
+    return os.path.normcase(str(resolved))
 
 
 class WorkspaceLockTimeout(RuntimeError):
@@ -183,6 +204,13 @@ def workspace_lock(
         poll_interval: Seconds to sleep between acquisition attempts while
             contended.
 
+    Re-entrancy: the lock is re-entrant within a single process *and* thread.
+    If the calling thread already holds the lock for this workspace, nested
+    acquisition succeeds immediately (a depth counter is incremented) and the
+    OS-level lock is released only when the outermost ``with`` block exits.
+    Acquisition from a different thread or process still blocks until the
+    holder releases (or :class:`WorkspaceLockTimeout` is raised).
+
     Yields:
         The :class:`pathlib.Path` to the lock file.
 
@@ -194,6 +222,28 @@ def workspace_lock(
     workspace_path = Path(workspace_path)
     lock_path = workspace_path.joinpath(*_LOCK_RELATIVE_PATH)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    key = _lock_key(lock_path)
+    me = (os.getpid(), threading.get_ident())
+
+    # Re-entrant fast path: this exact pid+thread already holds the lock.
+    with _REENTRANT_GUARD:
+        entry = _ACTIVE_LOCKS.get(key)
+        if entry is not None and entry["owner"] == me:
+            entry["depth"] += 1
+            held_lock_path: Path = entry["lock_path"]
+            nested = True
+        else:
+            nested = False
+    if nested:
+        try:
+            yield held_lock_path
+        finally:
+            with _REENTRANT_GUARD:
+                entry = _ACTIVE_LOCKS.get(key)
+                if entry is not None and entry["owner"] == me:
+                    entry["depth"] -= 1
+        return
 
     # Open (or create) the lock file. O_RDWR is required on Windows because
     # msvcrt.locking insists on a writable handle.
@@ -240,9 +290,15 @@ def workspace_lock(
             time.sleep(max(0.0, float(poll_interval)))
 
         _write_metadata(fd, lock_path)
+        with _REENTRANT_GUARD:
+            _ACTIVE_LOCKS[key] = {"owner": me, "depth": 1, "lock_path": lock_path}
         yield lock_path
     finally:
         if acquired:
+            with _REENTRANT_GUARD:
+                entry = _ACTIVE_LOCKS.get(key)
+                if entry is not None and entry["owner"] == me:
+                    _ACTIVE_LOCKS.pop(key, None)
             _unlock(fd)
         try:
             os.close(fd)

@@ -87,6 +87,10 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_chart_knowledge",
     # Databricks deployment gates (PRD section 7) + apply-deploy boundary.
     "tests.test_deploy_gates",
+    # Workspace-lock re-entrancy: nested same-process acquisition must not
+    # self-deadlock (prepare-kpi-blocker-panel --force-onboard regression);
+    # cross-thread/cross-process exclusion unchanged.
+    "tests.test_workspace_lock_reentrancy",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
