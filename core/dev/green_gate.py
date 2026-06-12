@@ -83,6 +83,8 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_medallion_incremental",
     # User-authored workspace data policy (custom PII/PHI + allowlist + tier).
     "tests.test_workspace_data_policy",
+    # data-to-viz chart-selection knowledge base + new chart types.
+    "tests.test_chart_knowledge",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

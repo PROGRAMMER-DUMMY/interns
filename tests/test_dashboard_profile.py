@@ -121,7 +121,9 @@ class DecidePanelsTests(unittest.TestCase):
             for i in range(60)
         ]
         panels = decide_panels(rows, {"metric": "v"})
-        self.assertLessEqual(len(panels), 4)
+        # 5 = one breakdown per top dimension + the two-dimensional
+        # interaction (heatmap) panel.
+        self.assertLessEqual(len(panels), 5)
 
 
 if __name__ == "__main__":

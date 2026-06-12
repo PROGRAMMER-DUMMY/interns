@@ -60,7 +60,8 @@ jobs:
             tests.test_onboarding_incremental \
             tests.test_profile_pushdown \
             tests.test_medallion_incremental \
-            tests.test_workspace_data_policy
+            tests.test_workspace_data_policy \
+            tests.test_chart_knowledge
 
   pyspark-parity:
     runs-on: ubuntu-latest

@@ -34,15 +34,11 @@ _MEASURE_NAME_RE = re.compile(
 )
 _SHARE_NAME_RE = re.compile(r"(percent|share|ratio|rate|proportion)", re.IGNORECASE)
 
-# Above this distinct-count a categorical dimension is treated as a ranked
-# top-N entity (bars per value become unreadable); below it, a plain bar.
-_RANKED_CARDINALITY = 15
+# Cardinality thresholds for chart selection live in
+# core.dashboard.chart_knowledge (the data-to-viz knowledge base).
 
-# At or below this distinct-count, a SHARE metric's categorical breakdown is a
-# composition and renders as a donut instead of yet another bar panel.
-_DONUT_CARDINALITY = 5
 # Cap how many breakdown panels a single KPI emits (most-informative first).
-_MAX_PANELS = 4
+_MAX_PANELS = 5
 # A color split is only legible up to this many series.
 _MAX_COLOR_SERIES = 6
 
@@ -194,51 +190,76 @@ def decide_panels(
 
     panels: list[dict[str, Any]] = []
 
+    from core.dashboard.chart_knowledge import (
+        choose_categorical_chart,
+        choose_trend_chart,
+        choose_two_categorical_chart,
+        is_ordinal_categories,
+        value_spread,
+    )
+
     # Trend panel: measure over time, optionally split by the smallest cat dim.
     if temporal_dims:
         t = temporal_dims[0]
         color = ""
         small_cats = sorted(cat_dims, key=lambda d: profiles[d].distinct)
-        if small_cats and profiles[small_cats[0]].distinct <= _MAX_COLOR_SERIES:
+        if small_cats:
             color = small_cats[0]
+        series_count = profiles[color].distinct if color else 1
+        choice = choose_trend_chart(series_count=series_count, is_share=is_share)
         panel = {
-            "chart_type": "line", "x": t, "y": measure, "agg": "sum",
+            **choice.spec_fields(),
+            "x": t, "y": measure, "agg": "sum",
             "title": f"{_humanize(measure)} over {_humanize(t)}",
         }
-        if color:
+        if color and not panel.pop("drop_color", False):
             panel["color"] = color
         if is_share:
             panel["y_format"] = "percent"
+        if panel["chart_type"] == "line" and _should_log_scale(rows, t, measure):
+            panel["log_scale"] = True
         panels.append(panel)
 
     # One breakdown panel per categorical dimension, ordered by informativeness.
+    # Chart types come from the data-to-viz knowledge base (chart_knowledge),
+    # not hardcoded branches: each panel records WHY its chart was chosen.
     ranked_cats = sorted(
         cat_dims, key=lambda d: _informativeness(rows, d, measure), reverse=True
     )
     for d in ranked_cats:
         p = profiles[d]
-        panel: dict[str, Any] = {"x": d, "y": measure, "agg": "sum", "title": f"{_humanize(measure)} by {_humanize(d)}"}
-        if p.distinct > _RANKED_CARDINALITY:
-            panel["chart_type"] = "ranked_bar"
-            panel["limit"] = 10
-            panel["orientation"] = "h"
-        elif is_share and p.distinct <= _DONUT_CARDINALITY:
-            # A share split across a handful of categories is a composition —
-            # a donut reads it at a glance and varies the chart language so a
-            # KPI's panel row is not four identical bar charts.
-            panel["chart_type"] = "donut"
-        else:
-            panel["chart_type"] = "bar"
+        spread = value_spread(list(_aggregate(rows, d, measure).values()))
+        choice = choose_categorical_chart(
+            distinct=p.distinct,
+            is_share=is_share,
+            value_spread=spread,
+            is_ordinal=is_ordinal_categories([r.get(d) for r in rows]),
+        )
+        panel: dict[str, Any] = {
+            **choice.spec_fields(),
+            "x": d, "y": measure, "agg": "sum",
+            "title": f"{_humanize(measure)} by {_humanize(d)}",
+        }
         if is_share:
             panel["y_format"] = "percent"
-        # Adaptive scale: a share (bounded 0-100) is never log, and BAR charts
-        # are never log (bar length must stay proportional to value — the
-        # renderer also enforces this). Log remains for line panels only.
-        elif panel.get("chart_type") not in ("bar", "ranked_bar") and _should_log_scale(
-            rows, d, measure
-        ):
-            panel["log_scale"] = True
         panels.append(panel)
+
+    # Interaction panel: two categorical dimensions against the measure
+    # (data-to-viz family 6) — shows what no single-dimension panel can.
+    if len(ranked_cats) >= 2:
+        a, b = ranked_cats[0], ranked_cats[1]
+        pair = choose_two_categorical_chart(
+            distinct_a=profiles[a].distinct, distinct_b=profiles[b].distinct
+        )
+        if pair is not None:
+            panel = {
+                **pair.spec_fields(),
+                "x": a, "color": b, "y": measure, "agg": "sum",
+                "title": f"{_humanize(measure)}: {_humanize(a)} x {_humanize(b)}",
+            }
+            if is_share:
+                panel["y_format"] = "percent"
+            panels.append(panel)
 
     return panels[:_MAX_PANELS]
 

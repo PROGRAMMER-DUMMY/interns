@@ -396,6 +396,62 @@ def _figure_from_spec(
                 data, x=x_col, y=y_col, color=color_col, barmode="group", title=title,
                 color_discrete_sequence=seq,
             )
+        elif chart_type == "lollipop":
+            # data-to-viz: many bars of SIMILAR height read better as
+            # lollipops — the dot marks the value without redundant bar ink.
+            rank_col = _first_non_constant_categorical(rows, y_col, preferred=x_col)
+            data = _aggregate_rows(rows, rank_col, None, y_col)
+            if y_is_percent:
+                data = _normalize_percent(data, y_col)
+            limit = int(config.get("limit") or 10)
+            ordered = sorted(data, key=lambda r: r.get(y_col) or 0, reverse=True)[:limit]
+            ordered = list(reversed(ordered))
+            cats = [str(r.get(rank_col)) for r in ordered]
+            vals = [r.get(y_col) or 0 for r in ordered]
+            fig = go.Figure()
+            for cat, val in zip(cats, vals):
+                fig.add_trace(go.Scatter(
+                    x=[0, val], y=[cat, cat], mode="lines",
+                    line={"color": _GRID_COLOR, "width": 2}, showlegend=False,
+                ))
+            fig.add_trace(go.Scatter(
+                x=vals, y=cats, mode="markers",
+                marker={"color": _ACTIVE.accent, "size": 11}, showlegend=False,
+            ))
+            fig.update_layout(title=title)
+            fig.update_yaxes(type="category")
+        elif chart_type == "treemap":
+            # Part-to-whole across more categories than a donut holds legibly.
+            data = _aggregate_rows(rows, x_col, None, y_col)
+            data = [r for r in data if isinstance(r.get(y_col), (int, float)) and r[y_col] > 0]
+            fig = px.treemap(
+                data, path=[x_col], values=y_col, title=title,
+                color_discrete_sequence=ramp,
+            )
+            fig.update_traces(textinfo="label+percent root")
+        elif chart_type == "heatmap":
+            # Two categorical dimensions x one measure: the interaction view.
+            data = _aggregate_rows(rows, x_col, color_col, y_col)
+            xs = sorted({str(r.get(x_col)) for r in data})
+            ys = sorted({str(r.get(color_col)) for r in data})
+            lookup = {
+                (str(r.get(x_col)), str(r.get(color_col))): r.get(y_col)
+                for r in data
+            }
+            z = [[lookup.get((x, y)) for x in xs] for y in ys]
+            fig = go.Figure(go.Heatmap(
+                z=z, x=xs, y=ys,
+                colorscale=[[0, "#f6f1e7"], [1, _ACTIVE.accent]],
+                colorbar={"thickness": 12, "outlinewidth": 0},
+            ))
+            fig.update_layout(title=title)
+        elif chart_type == "stacked_area":
+            # Few-series share evolution: composition over time.
+            data = _aggregate_rows(rows, x_col, color_col, y_col)
+            fig = px.area(
+                data, x=x_col, y=y_col, color=color_col, title=title,
+                color_discrete_sequence=list(_ACTIVE.categorical),
+            )
         elif chart_type == "donut":
             # Part-of-whole for a LOW-cardinality breakdown of a share metric:
             # a donut reads composition at a glance and gives each slice its
