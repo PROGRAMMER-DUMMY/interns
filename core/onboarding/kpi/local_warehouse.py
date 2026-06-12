@@ -204,6 +204,16 @@ class LocalWarehouse:
         if not mapping_path.exists():
             return set()
         mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+        from core.onboarding.kpi.sql_generator import _grain_dimensions
+        from core.onboarding.relationships.base_source_selector import (
+            load_pinned_base_sources,
+        )
+        from core.onboarding.relationships.contracts import load_relationship_contracts
+
+        relationships = load_relationship_contracts(
+            self.repo_root, _rel(self.workspace, self.repo_root)
+        )
+        pinned = load_pinned_base_sources(self.layout.contracts_dir)
         fact_sources: set[str] = set()
         for kpi in mapping.get("kpis", []):
             refs = [
@@ -211,7 +221,13 @@ class LocalWarehouse:
                 for feature in kpi.get("features", [])
                 for ref in _feature_source_refs(feature, self.repo_root)
             ]
-            base = _choose_base_source(refs, profile_map)
+            base = _choose_base_source(
+                refs,
+                profile_map,
+                relationships,
+                grain_dimensions=_grain_dimensions(kpi),
+                pinned=pinned.get(str(kpi.get("kpi_id") or "")),
+            )
             if base:
                 fact_sources.add(base)
         return fact_sources

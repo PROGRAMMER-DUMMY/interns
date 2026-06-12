@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from core.onboarding.kpi.feature_resolver import READY_STATES
+from core.onboarding.relationships.base_source_selector import (
+    BASE_SOURCE_DECISIONS_KEY,
+    select_base_source,
+)
 from core.onboarding.relationships.contracts import (
     find_executable_relationship,
     load_relationship_contracts,
@@ -244,10 +248,19 @@ class DuckDBKPISQLGenerator:
             try:
                 from core.onboarding.kpi.local_warehouse import warehouse_table_name
                 mapping = self._load_mapping()
+                wh_relationships = load_relationship_contracts(
+                    self.repo_root, _rel(self.workspace, self.repo_root)
+                )
                 for kpi in mapping.get("kpis", []):
                     refs = [r for f in kpi.get("features", [])
                             for r in _feature_source_refs(f, self.repo_root)]
-                    base = _choose_base_source(refs, profile_map)
+                    base = _choose_base_source(
+                        refs,
+                        profile_map,
+                        wh_relationships,
+                        grain_dimensions=_grain_dimensions(kpi),
+                        pinned=self._pinned_base_source(kpi),
+                    )
                     if base:
                         fact_sources.add(base)
             except Exception:
@@ -413,7 +426,13 @@ class DuckDBKPISQLGenerator:
             for ref in _feature_source_refs(feature, self.repo_root)
         ]
         feature_refs.extend(self._derived_formula_refs(kpi, "", profile_map))
-        base_source = _choose_base_source(feature_refs, profile_map)
+        base_source = _choose_base_source(
+            feature_refs,
+            profile_map,
+            relationships,
+            grain_dimensions=_grain_dimensions(kpi),
+            pinned=self._pinned_base_source(kpi),
+        )
         if not base_source:
             return [], {}
 
@@ -464,7 +483,13 @@ class DuckDBKPISQLGenerator:
             for ref in _feature_source_refs(feature, self.repo_root)
         ]
         feature_refs.extend(self._derived_formula_refs(kpi, "", profile_map))
-        base_source = _choose_base_source(feature_refs, profile_map)
+        base_source = _choose_base_source(
+            feature_refs,
+            profile_map,
+            relationships,
+            grain_dimensions=_grain_dimensions(kpi),
+            pinned=self._pinned_base_source(kpi),
+        )
         if not base_source:
             return "FROM all_workspace_rows", {}
         required_refs = [
@@ -694,6 +719,13 @@ class DuckDBKPISQLGenerator:
                 self._pipeline_decisions_cache = {}
         return self._pipeline_decisions_cache
 
+    def _pinned_base_source(self, kpi: dict[str, Any]) -> str | None:
+        """Human-recorded base-source decision for this KPI, if any."""
+        decisions = self._pipeline_decisions().get(BASE_SOURCE_DECISIONS_KEY)
+        if not isinstance(decisions, dict):
+            return None
+        return str(decisions.get(str(kpi.get("kpi_id") or "")) or "") or None
+
     def quote_ident(self, value: str) -> str:
         if self.dialect == "databricks":
             return "`" + str(value).replace("`", "``") + "`"
@@ -763,33 +795,24 @@ def _formula_inputs(feature: dict[str, Any]) -> list[str]:
 def _choose_base_source(
     refs: list[dict[str, str]],
     profile_map: dict[str, dict[str, Any]],
+    relationships: list[dict[str, Any]] | None = None,
+    *,
+    grain_dimensions: list[str] | tuple[str, ...] = (),
+    pinned: str | None = None,
 ) -> str:
-    # Pick the base/fact source from workspace evidence, not hardcoded table names:
-    #   - ref count: how many of the KPI's features map to the source;
-    #   - size: the largest referenced table by row count is the fact (high-volume
-    #     transaction/event table that dimensions join into) — this replaces the old
-    #     domain-noun bonus with a structural, workspace-agnostic signal;
-    #   - profile membership: a light tiebreaker.
-    ref_counts: dict[str, int] = {}
-    for ref in refs:
-        source = ref["dataset"]
-        ref_counts[source] = ref_counts.get(source, 0) + 1
-    if not ref_counts:
-        return ""
-
-    def _rows(source: str) -> int:
-        return int((profile_map.get(source) or {}).get("row_count") or 0)
-
-    max_rows = max((_rows(source) for source in ref_counts), default=0)
-    scores: dict[str, int] = {}
-    for source, count in ref_counts.items():
-        score = count
-        if source in profile_map:
-            score += 1
-        if max_rows > 0 and _rows(source) == max_rows:
-            score += 3  # the largest referenced table is the fact
-        scores[source] = score
-    return sorted(scores, key=lambda source: (-scores[source], -_rows(source), source))[0]
+    # Relationship-graph scoring (coverage, grain, fan-out safety, evidence);
+    # row count is a final tiebreak only. Every engine and the planner delegate
+    # to the same selector so they all anchor the identical base. A near-tie is
+    # resolved deterministically here (top score) — the source-to-target
+    # planner is the gate that turns a near-tie into a blocker-panel question.
+    selection = select_base_source(
+        refs,
+        profile_map,
+        relationships,
+        grain_dimensions=grain_dimensions,
+        pinned=pinned,
+    )
+    return selection.base_source
 
 
 def choose_feature_ref(
@@ -836,6 +859,9 @@ def plan_required_sources(
     kpi: dict[str, Any],
     profile_map: dict[str, dict[str, Any]],
     repo_root: Path,
+    relationships: list[dict[str, Any]] | None = None,
+    *,
+    pinned: str | None = None,
 ) -> tuple[str, list[str], list[dict[str, str]]]:
     """The canonical source plan for a KPI: (base_source, required_sources, refs).
 
@@ -844,14 +870,21 @@ def plan_required_sources(
     generators MUST consume the same plan so cross-engine parity starts from
     identical sources. ``refs`` is the chosen one-ref-per-feature list
     (including derived-formula inputs); ``base_source`` is "" when no plan can
-    be made.
+    be made. ``relationships``/``pinned`` feed the relationship-graph base
+    selector; pass them identically from every engine.
     """
     feature_refs = [
         ref
         for feature in kpi.get("features", [])
         for ref in _feature_source_refs(feature, repo_root)
     ]
-    base_source = _choose_base_source(feature_refs, profile_map)
+    base_source = _choose_base_source(
+        feature_refs,
+        profile_map,
+        relationships,
+        grain_dimensions=_grain_dimensions(kpi),
+        pinned=pinned,
+    )
     if not base_source:
         return "", [], []
     required_refs = [
@@ -871,6 +904,16 @@ def plan_required_sources(
         + [ref["dataset"] for ref in chosen if ref["dataset"] != base_source]
     )
     return base_source, required_sources, chosen
+
+
+def _grain_dimensions(kpi: dict[str, Any]) -> list[str]:
+    """KPI cut tokens for grain-compatibility scoring (mirrors the planner's
+    cuts split so every engine scores grain identically)."""
+    return [
+        part.strip()
+        for part in re.split(r"[,;]", str(kpi.get("cuts") or ""))
+        if part.strip()
+    ]
 
 
 def _source_for_column(

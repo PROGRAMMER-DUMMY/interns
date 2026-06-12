@@ -17,6 +17,12 @@ from core.onboarding.artifact_contracts import (
     KPI_FEATURE_MAPPING_CONTRACT,
     PROFILE_INDEX_CONTRACT,
 )
+from core.onboarding.relationships.base_source_selector import (
+    BaseSourceSelection,
+    base_source_blocker,
+    load_pinned_base_sources,
+    select_base_source,
+)
 from core.onboarding.relationships.contracts import (
     find_executable_relationship,
     load_relationship_contracts,
@@ -200,11 +206,22 @@ class SourceToTargetPlanner:
     ) -> dict[str, Any]:
         features = kpi.get("features", [])
         feature_plans = [self._plan_feature(feature, profiles) for feature in features]
-        selected_sources = _selected_sources_for_kpi(feature_plans, profiles, relationships)
+        kpi_id = str(kpi.get("kpi_id") or "")
+        grain = _grain_from_kpi(kpi, feature_plans)
+        pinned_bases = load_pinned_base_sources(self.layout.contracts_dir)
+        selected_sources, base_selection = _selected_sources_for_kpi(
+            feature_plans,
+            profiles,
+            relationships,
+            grain_dimensions=grain.get("dimensions") or [],
+            pinned=pinned_bases.get(kpi_id),
+        )
         rejected_sources = self._rejected_sources(selected_sources, profiles)
         blockers = []
         for feature in feature_plans:
             blockers.extend(feature.get("blockers", []))
+        if base_selection is not None and base_selection.near_tie:
+            blockers.append(base_source_blocker(kpi_id, base_selection))
         unresolved = [
             str(feature.get("feature") or "")
             for feature in features
@@ -230,9 +247,7 @@ class SourceToTargetPlanner:
                     "sources": selected_sources,
                 }
             )
-        kpi_id = str(kpi.get("kpi_id") or "")
         is_deferred = kpi_id in self.deferred_kpi_ids or _kpi_is_undefined(kpi)
-        grain = _grain_from_kpi(kpi, feature_plans)
         medallion = {
             "bronze_inputs": selected_sources,
             "silver_conformed": [
@@ -288,6 +303,9 @@ class SourceToTargetPlanner:
                 "dataset_count": len(domain_model.get("datasets", [])),
                 "data_models": domain_model.get("data_models", []),
             },
+            "base_source_selection": (
+                base_selection.rationale() if base_selection is not None else {}
+            ),
             "blockers": blockers,
         }
 
@@ -491,7 +509,10 @@ def _selected_sources_for_kpi(
     feature_plans: list[dict[str, Any]],
     profiles: dict[str, dict[str, Any]],
     relationships: list[dict[str, Any]],
-) -> list[str]:
+    *,
+    grain_dimensions: list[str] | tuple[str, ...] = (),
+    pinned: str | None = None,
+) -> tuple[list[str], BaseSourceSelection | None]:
     refs = [
         item
         for feature in feature_plans
@@ -499,8 +520,15 @@ def _selected_sources_for_kpi(
         if item.get("dataset")
     ]
     if not refs:
-        return []
-    base = _choose_base_source(refs, profiles)
+        return [], None
+    selection = select_base_source(
+        refs,
+        profiles,
+        relationships,
+        grain_dimensions=grain_dimensions,
+        pinned=pinned,
+    )
+    base = selection.base_source
     selected = [base] if base else []
     base_group = _source_group(base)
     for feature in feature_plans:
@@ -524,25 +552,7 @@ def _selected_sources_for_kpi(
             selected.append(sorted(connected)[0])
         else:
             selected.extend(item.get("dataset", "") for item in columns if item.get("dataset"))
-    return _unique_sorted(selected)
-
-
-def _choose_base_source(
-    refs: list[dict[str, Any]],
-    profiles: dict[str, dict[str, Any]],
-) -> str:
-    scores: dict[str, int] = {}
-    for ref in refs:
-        source = str(ref.get("dataset") or "")
-        scores[source] = scores.get(source, 0) + 1
-        name = source.lower()
-        if any(token in name for token in ("transactions", "claim_data", "claims", "encounters")):
-            scores[source] += 3
-        if source in profiles:
-            scores[source] += 1
-    if not scores:
-        return ""
-    return sorted(scores, key=lambda source: (-scores[source], source))[0]
+    return _unique_sorted(selected), selection
 
 
 def _source_group(source: str) -> str:

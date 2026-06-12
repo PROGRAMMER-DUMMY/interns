@@ -123,14 +123,32 @@ class BlockerQuestionPanelBuilder:
             )
         except Exception:  # pragma: no cover - defensive; intent routing is additive
             intent_questions = []
+        # Near-tied base (fact) table selections from the source-to-target plan.
+        # These HARD-block generation (the planner marks the KPI blocked), so
+        # they must be answerable here via apply-kpi-panel-answer.
+        base_source_questions: list[dict[str, Any]] = []
+        try:
+            from core.onboarding.relationships.base_source_selector import (
+                base_source_panel_questions,
+            )
+
+            base_source_questions = base_source_panel_questions(
+                self.repo_root, _rel(self.workspace, self.repo_root)
+            )
+        except Exception:  # pragma: no cover - defensive; routing is additive
+            base_source_questions = []
         # `current` (the answerable / flow-blocking panel) is an unresolved
-        # feature-mapping cluster first, preserving flow-stop semantics. With none
-        # left, fall back to the first HARD-blocking intent facet (grain_bucketing) --
-        # it also blocks the execution harness, so it MUST be answerable here via
-        # apply-kpi-panel-answer rather than leaving an empty panel (the loop that
-        # burned operator quota). Advisory facets remain set-only.
+        # feature-mapping cluster first, preserving flow-stop semantics. Next a
+        # near-tied base-source choice (it blocks the KPI's plan outright). With
+        # none left, fall back to the first HARD-blocking intent facet
+        # (grain_bucketing) -- it also blocks the execution harness, so it MUST
+        # be answerable here via apply-kpi-panel-answer rather than leaving an
+        # empty panel (the loop that burned operator quota). Advisory facets
+        # remain set-only.
         if feature_questions:
             current = feature_questions[0]
+        elif base_source_questions:
+            current = base_source_questions[0]
         else:
             hard_intent = [
                 q for q in intent_questions
@@ -141,7 +159,7 @@ class BlockerQuestionPanelBuilder:
                 if hard_intent
                 else _empty_panel(mapping, self.workspace, self.repo_root)
             )
-        questions = feature_questions + intent_questions
+        questions = feature_questions + base_source_questions + intent_questions
         # Attach the new "real-ops-dashboard" preview sections to every
         # generated panel so the renderer has data to work with.
         try:

@@ -26,12 +26,13 @@ from core.onboarding.relationships.contracts import (
     load_relationship_contracts,
 )
 from core.onboarding.kpi.sql_generator import (
-    _choose_base_source,
-    _feature_source_refs,
     _unique_preserve_order,
     _repo_path,
     _rel,
     _safe_name,
+)
+from core.onboarding.relationships.base_source_selector import (
+    load_pinned_base_sources,
 )
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -96,7 +97,11 @@ class PySparkKPIGenerator:
         from core.onboarding.kpi.sql_generator import plan_required_sources
 
         base_source, required_sources, _refs = plan_required_sources(
-            kpi, profile_map, self.repo_root
+            kpi,
+            profile_map,
+            self.repo_root,
+            relationships,
+            pinned=load_pinned_base_sources(self.layout.contracts_dir).get(kpi_id),
         )
         if not base_source:
             raise ValueError(f"Cannot determine base source for KPI {kpi_id}")

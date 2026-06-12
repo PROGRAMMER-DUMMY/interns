@@ -1140,6 +1140,14 @@ def record_intent_answer(
             str(value),
             reason=reason or f"intent-contract answer ({source})",
         )
+    if facet == "base_source" and value:
+        from core.onboarding.pipeline_plan import PipelineDecisionRecorder
+
+        PipelineDecisionRecorder(root, _rel(workspace_path, root)).record_base_source(
+            kpi_id,
+            str(value),
+            reason=reason or f"intent-contract answer ({source})",
+        )
     return record
 
 
@@ -1483,7 +1491,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[x] build-intent-contract failed: {exc}")
         raise SystemExit(1) from exc
 
-    print(f"[ok] build-intent-contract complete")
+    print("[ok] build-intent-contract complete")
     print(f"     KPIs processed : {result['kpi_count']}")
     print(f"     JSON artifact  : {result['json_path']}")
     print(f"     MD artifact    : {result['md_path']}")
