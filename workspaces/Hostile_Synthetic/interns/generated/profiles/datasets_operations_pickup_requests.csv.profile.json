@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pickup_requests.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\operations\\pickup_requests.csv",
   "format": "csv",
   "row_count": 640,
   "file_count": 1,
@@ -13,7 +13,8 @@
     "Status": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -22,14 +23,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "PU50466",
-        "PU50130",
-        "PU50153",
-        "PU50329",
-        "PU50533",
-        "PU50223",
-        "PU50044",
-        "PU50248"
+        "PU50001",
+        "PU50002",
+        "PU50003",
+        "PU50004",
+        "PU50005",
+        "PU50006",
+        "PU50007",
+        "PU50008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -45,14 +46,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1076",
-        "P-1055",
         "P-1001",
-        "P-1164",
-        "P-1155",
-        "P-1223",
-        "P-1204",
-        "P-1177"
+        "P-1002",
+        "P-1003",
+        "P-1004",
+        "P-1005",
+        "P-1006",
+        "P-1007",
+        "P-1008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -68,14 +69,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-05-16",
-        "2025-10-01",
-        "2025-09-11",
-        "2025-01-29",
-        "2025-12-22",
-        "2025-04-29",
-        "2025-11-08",
-        "2025-02-02"
+        "2025-01-02",
+        "2025-01-03",
+        "2025-01-05",
+        "2025-01-08",
+        "2025-01-09",
+        "2025-01-10",
+        "2025-01-11",
+        "2025-01-12"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -91,11 +92,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "11:00",
-        "10:00",
-        "08:00",
         "07:00",
-        "09:00"
+        "08:00",
+        "09:00",
+        "10:00",
+        "11:00"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -111,12 +112,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "16:00",
         "13:00",
-        "18:00",
-        "17:00",
+        "14:00",
         "15:00",
-        "14:00"
+        "16:00",
+        "17:00",
+        "18:00"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -132,8 +133,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "FULFILLED",
         "CANCELLED",
+        "FULFILLED",
         "MISSED"
       ],
       "sample_min": null,

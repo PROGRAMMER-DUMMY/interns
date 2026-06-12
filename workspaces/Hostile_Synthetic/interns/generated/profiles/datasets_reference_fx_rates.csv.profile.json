@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
   "format": "csv",
   "row_count": 148,
   "file_count": 1,
@@ -10,7 +10,8 @@
     "rate_to_gbp": "Float64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -19,14 +20,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2026-02-04",
-        "2025-11-05",
-        "2026-04-15",
-        "2026-03-25",
         "2025-01-01",
-        "2025-02-19",
-        "2025-06-18",
-        "2025-10-01"
+        "2025-01-08",
+        "2025-01-15",
+        "2025-01-22",
+        "2025-01-29",
+        "2025-02-05",
+        "2025-02-12",
+        "2025-02-19"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -42,8 +43,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "USD",
-        "EUR"
+        "EUR",
+        "USD"
       ],
       "sample_min": null,
       "sample_max": null,

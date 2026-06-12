@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
   "format": "csv",
   "row_count": 4,
   "file_count": 1,
@@ -11,7 +11,8 @@
     "END": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -20,10 +21,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH3",
-        "SH4",
+        "SH1",
         "SH2",
-        "SH1"
+        "SH3",
+        "SH4"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -39,10 +40,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Weekend",
-        "Night trunk",
+        "Early",
         "Late",
-        "Early"
+        "Night trunk",
+        "Weekend"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -58,10 +59,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "06:00",
         "08:00",
-        "22:00",
         "14:00",
-        "06:00"
+        "22:00"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -77,10 +78,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "22:00",
         "06:00",
         "14:00",
-        "18:00"
+        "18:00",
+        "22:00"
       ],
       "sample_min": null,
       "sample_max": null,

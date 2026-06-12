@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\dock_doors.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\masters\\dock_doors.csv",
   "format": "csv",
   "row_count": 90,
   "file_count": 1,
@@ -10,7 +10,8 @@
     "door_type": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -19,14 +20,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "DD012",
-        "DD031",
-        "DD073",
-        "DD036",
-        "DD014",
-        "DD080",
-        "DD043",
-        "DD059"
+        "DD001",
+        "DD002",
+        "DD003",
+        "DD004",
+        "DD005",
+        "DD006",
+        "DD007",
+        "DD008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -42,14 +43,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-260",
         "L-201",
-        "L-250",
-        "L-225",
         "L-205",
-        "L-251",
-        "L-245",
-        "L-230"
+        "L-206",
+        "L-210",
+        "L-211",
+        "L-215",
+        "L-216",
+        "L-220"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -65,8 +66,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "RAISED",
         "LEVEL",
+        "RAISED",
         "RAMP"
       ],
       "sample_min": null,

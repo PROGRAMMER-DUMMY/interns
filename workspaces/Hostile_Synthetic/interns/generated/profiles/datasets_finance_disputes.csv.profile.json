@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
   "format": "csv",
   "row_count": 260,
   "file_count": 1,
@@ -13,7 +13,8 @@
     "Amount": "Float64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -22,14 +23,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "DSP4197",
-        "DSP4054",
-        "DSP4181",
-        "DSP4128",
-        "DSP4146",
-        "DSP4223",
-        "DSP4224",
-        "DSP4034"
+        "DSP4001",
+        "DSP4002",
+        "DSP4003",
+        "DSP4004",
+        "DSP4005",
+        "DSP4006",
+        "DSP4007",
+        "DSP4008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -45,14 +46,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "INV-50369",
-        "INV-52878",
-        "INV-52801",
-        "INV-50339",
-        "INV-52335",
-        "INV-52454",
-        "INV-52263",
-        "INV-52591"
+        "INV-50002",
+        "INV-50005",
+        "INV-50009",
+        "INV-50011",
+        "INV-50024",
+        "INV-50025",
+        "INV-50046",
+        "INV-50058"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -68,14 +69,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-09-05",
-        "2026-01-22",
-        "2025-02-19",
-        "2025-01-11",
-        "2025-02-14",
-        "2025-09-18",
-        "2025-07-12",
-        "2026-02-06"
+        "2025-01-01",
+        "2025-01-02",
+        "2025-01-04",
+        "2025-01-05",
+        "2025-01-06",
+        "2025-01-08",
+        "2025-01-10",
+        "2025-01-11"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -91,9 +92,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "RESOLVED",
+        "OPEN",
         "REJECTED",
-        "OPEN"
+        "RESOLVED"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -109,10 +110,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "X07",
         "RR1",
+        "RR2",
         "RR5",
-        "RR2"
+        "X07"
       ],
       "sample_min": null,
       "sample_max": null,

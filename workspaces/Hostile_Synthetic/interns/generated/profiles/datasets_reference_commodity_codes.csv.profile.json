@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\commodity_codes.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\reference\\commodity_codes.csv",
   "format": "csv",
   "row_count": 10,
   "file_count": 1,
@@ -10,7 +10,8 @@
     "hazmat_flag": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -19,13 +20,13 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "C007",
-        "C003",
-        "C006",
-        "C002",
-        "C009",
         "C001",
+        "C002",
+        "C003",
+        "C004",
         "C005",
+        "C006",
+        "C007",
         "C008"
       ],
       "sample_min": null,
@@ -43,13 +44,13 @@
       "nullable": null,
       "sample_values": [
         "Aerosols",
-        "Print media",
-        "Paints",
-        "Chilled food",
-        "Batteries",
         "Apparel",
-        "Furniture",
-        "Dry food"
+        "Auto parts",
+        "Batteries",
+        "Chilled food",
+        "Dry food",
+        "Electronics",
+        "Furniture"
       ],
       "sample_min": null,
       "sample_max": null,

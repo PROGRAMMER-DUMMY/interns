@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vendors.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vendors.csv",
   "format": "csv",
   "row_count": 40,
   "file_count": 1,
@@ -11,7 +11,8 @@
     "Status": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -20,14 +21,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "V001",
+        "V002",
+        "V003",
         "V004",
-        "V038",
-        "V029",
-        "V011",
-        "V019",
-        "V027",
-        "V014",
-        "V035"
+        "V005",
+        "V006",
+        "V007",
+        "V008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -43,14 +44,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Wexford Print Ltd",
-        "Orchard Marine Group",
-        "Keystone Outdoors Group",
+        "Alfa Garden Trading",
         "Delta Builders Trading",
-        "Pinnacle Electrics Group",
-        "Yarrow Pharma-Free PLC",
-        "Vector Packaging & Co",
-        "Lumen Packaging PLC"
+        "Delta Print Group",
+        "Delta Print Holdings",
+        "Delta Retail Holdings",
+        "Ember Beverages PLC",
+        "Ember Foods Holdings",
+        "Iron Print Holdings"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -68,10 +69,10 @@
       "sample_values": [
         "AGENCY",
         "FACILITIES",
-        "PARTS",
-        "TYRES",
+        "FUEL",
         "IT",
-        "FUEL"
+        "PARTS",
+        "TYRES"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -87,9 +88,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "TRIAL",
+        "APPROVED",
         "BLOCKED",
-        "APPROVED"
+        "TRIAL"
       ],
       "sample_min": null,
       "sample_max": null,

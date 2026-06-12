@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\edi_messages.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\operations\\edi_messages.csv",
   "format": "csv",
   "row_count": 800,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "Status": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -21,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "EDI70325",
-        "EDI70503",
-        "EDI70192",
-        "EDI70430",
-        "EDI70696",
-        "EDI70402",
-        "EDI70798",
-        "EDI70343"
+        "EDI70001",
+        "EDI70002",
+        "EDI70003",
+        "EDI70004",
+        "EDI70005",
+        "EDI70006",
+        "EDI70007",
+        "EDI70008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SH102516",
-        "SH102490",
-        "SH100362",
-        "SH102921",
-        "SH104147",
-        "SH102470",
-        "SH101096",
-        "SH102956"
+        "SH100002",
+        "SH100005",
+        "SH100007",
+        "SH100015",
+        "SH100029",
+        "SH100030",
+        "SH100032",
+        "SH100036"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -86,14 +87,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-03-06 11:37",
-        "2026-04-06 14:42",
-        "2026-05-08 11:50",
-        "2025-11-19 13:20",
-        "2025-02-21 08:37",
-        "2025-10-16 13:32",
-        "2025-11-03 11:09",
-        "2026-04-14 12:08"
+        "2025-01-01 06:40",
+        "2025-01-01 21:21",
+        "2025-01-03 06:07",
+        "2025-01-03 20:10",
+        "2025-01-04 08:48",
+        "2025-01-06 08:30",
+        "2025-01-06 14:17",
+        "2025-01-06 15:32"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -110,8 +111,8 @@
       "nullable": null,
       "sample_values": [
         "ACK",
-        "PENDING",
-        "NACK"
+        "NACK",
+        "PENDING"
       ],
       "sample_min": null,
       "sample_max": null,

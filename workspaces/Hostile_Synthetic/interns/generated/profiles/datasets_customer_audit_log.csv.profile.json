@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\audit_log.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\customer\\audit_log.csv",
   "format": "csv",
   "row_count": 300,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "entity": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -21,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "AU00224",
-        "AU00187",
-        "AU00109",
-        "AU00111",
-        "AU00116",
-        "AU00156",
-        "AU00177",
-        "AU00135"
+        "AU00001",
+        "AU00002",
+        "AU00003",
+        "AU00004",
+        "AU00005",
+        "AU00006",
+        "AU00007",
+        "AU00008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-09-27 20:10",
-        "2025-01-13 15:08",
-        "2025-03-21 14:58",
-        "2025-11-04 17:35",
-        "2026-01-11 16:31",
-        "2026-01-21 20:22",
-        "2025-10-06 06:50",
-        "2025-05-15 10:47"
+        "2025-01-01 18:29",
+        "2025-01-04 21:14",
+        "2025-01-05 12:49",
+        "2025-01-07 18:03",
+        "2025-01-08 06:08",
+        "2025-01-12 16:38",
+        "2025-01-12 16:39",
+        "2025-01-13 15:08"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -105,9 +106,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "rate_card",
         "invoice",
         "party",
+        "rate_card",
         "shipment"
       ],
       "sample_min": null,

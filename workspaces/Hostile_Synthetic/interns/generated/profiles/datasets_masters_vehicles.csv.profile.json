@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
   "format": "csv",
   "row_count": 120,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "Status": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -21,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "VIN215",
-        "VIN111",
-        "VIN113",
-        "VIN129",
-        "VIN137",
-        "VIN201",
+        "VIN100",
+        "VIN101",
+        "VIN102",
+        "VIN103",
+        "VIN104",
+        "VIN105",
         "VIN106",
-        "VIN217"
+        "VIN107"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "UH36 WEP",
-        "LG71 XUP",
-        "HK39 KKG",
-        "EF15 GCE",
-        "KH28 KMM",
-        "UH54 HTT",
+        "AD37 CWF",
         "AD55 VSB",
-        "HX11 LSL"
+        "AM20 NWG",
+        "AP44 RGX",
+        "AS38 WXD",
+        "AW32 FCB",
+        "CA24 FRR",
+        "CB22 UGS"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,11 +68,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "VC5",
         "VC1",
-        "VC3",
         "VC2",
-        "VC4"
+        "VC3",
+        "VC4",
+        "VC5"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -87,14 +88,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-211",
-        "L-241",
+        "L-201",
+        "L-205",
+        "L-206",
         "L-210",
-        "L-225",
-        "L-240",
-        "L-250",
-        "L-220",
-        "L-255"
+        "L-211",
+        "L-215",
+        "L-216",
+        "L-220"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -110,9 +111,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
+        "DISPOSED",
         "IN_SERVICE",
-        "VOR",
-        "DISPOSED"
+        "VOR"
       ],
       "sample_min": null,
       "sample_max": null,

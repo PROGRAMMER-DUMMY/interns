@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\holidays.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\reference\\holidays.csv",
   "format": "csv",
   "row_count": 8,
   "file_count": 1,
@@ -10,7 +10,8 @@
     "country_cd": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -19,12 +20,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-03-17",
         "2025-01-01",
-        "2025-12-26",
+        "2025-03-17",
+        "2025-04-18",
         "2025-05-05",
         "2025-12-25",
-        "2025-04-18",
+        "2025-12-26",
         "2026-01-01",
         "2026-04-03"
       ],
@@ -42,11 +43,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "May Day",
-        "Christmas",
-        "New Year",
-        "Good Friday",
         "Boxing Day",
+        "Christmas",
+        "Good Friday",
+        "May Day",
+        "New Year",
         "St Patrick"
       ],
       "sample_min": null,
@@ -63,8 +64,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "IE",
-        "GB"
+        "GB",
+        "IE"
       ],
       "sample_min": null,
       "sample_max": null,

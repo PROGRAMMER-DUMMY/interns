@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\vehicle_classes.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\reference\\vehicle_classes.csv",
   "format": "csv",
   "row_count": 5,
   "file_count": 1,
@@ -10,7 +10,8 @@
     "capacity_kg": "Int64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -19,11 +20,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "VC5",
+        "VC1",
+        "VC2",
         "VC3",
         "VC4",
-        "VC1",
-        "VC2"
+        "VC5"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -39,11 +40,11 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "7.5t rigid",
-        "Luton van",
-        "Small van",
         "18t rigid",
-        "Artic 44t"
+        "7.5t rigid",
+        "Artic 44t",
+        "Luton van",
+        "Small van"
       ],
       "sample_min": null,
       "sample_max": null,

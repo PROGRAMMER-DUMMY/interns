@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\zones.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\reference\\zones.csv",
   "format": "csv",
   "row_count": 12,
   "file_count": 1,
@@ -10,7 +10,8 @@
     "region_cd": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -19,14 +20,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Z11",
+        "Z01",
         "Z02",
+        "Z03",
         "Z04",
+        "Z05",
         "Z06",
         "Z07",
-        "Z08",
-        "Z09",
-        "Z10"
+        "Z08"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -42,13 +43,13 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Zone 07",
+        "Zone 01",
         "Zone 02",
         "Zone 03",
-        "Zone 09",
-        "Zone 12",
+        "Zone 04",
         "Zone 05",
-        "Zone 01",
+        "Zone 06",
+        "Zone 07",
         "Zone 08"
       ],
       "sample_min": null,
@@ -65,12 +66,12 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "R4",
+        "R1",
         "R2",
         "R3",
-        "R6",
-        "R1",
-        "R5"
+        "R4",
+        "R5",
+        "R6"
       ],
       "sample_min": null,
       "sample_max": null,

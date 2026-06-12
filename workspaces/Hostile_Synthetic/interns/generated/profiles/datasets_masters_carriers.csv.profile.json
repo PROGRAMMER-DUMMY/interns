@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\carriers.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\masters\\carriers.csv",
   "format": "csv",
   "row_count": 8,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "Amount": "Float64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -21,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "HLCY",
         "ARRW",
-        "GRYP",
-        "EGRT",
-        "DNUB",
+        "BLTC",
         "CDRX",
+        "DNUB",
+        "EGRT",
         "FNCH",
-        "BLTC"
+        "GRYP",
+        "HLCY"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Cedar Express",
-        "Gryphon Air Cargo",
-        "Halcyon Logistics",
-        "Finch Parcel Net",
-        "Baltic Crossways",
         "Arrowline Haulage",
+        "Baltic Crossways",
+        "Cedar Express",
         "Danube Freight",
-        "Egret Couriers"
+        "Egret Couriers",
+        "Finch Parcel Net",
+        "Gryphon Air Cargo",
+        "Halcyon Logistics"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -68,8 +69,8 @@
       "nullable": null,
       "sample_values": [
         "AIR",
-        "ROAD",
-        "RAIL"
+        "RAIL",
+        "ROAD"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -85,8 +86,8 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "SUSPENDED",
-        "ACTIVE"
+        "ACTIVE",
+        "SUSPENDED"
       ],
       "sample_min": null,
       "sample_max": null,

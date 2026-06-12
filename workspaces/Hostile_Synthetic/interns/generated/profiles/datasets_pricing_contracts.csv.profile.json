@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\contracts.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\contracts.csv",
   "format": "csv",
   "row_count": 95,
   "file_count": 1,
@@ -13,7 +13,8 @@
     "Amount": "Float64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -22,14 +23,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CTR0051",
-        "CTR0044",
-        "CTR0065",
-        "CTR0059",
-        "CTR0063",
-        "CTR0029",
-        "CTR0022",
-        "CTR0083"
+        "CTR0001",
+        "CTR0002",
+        "CTR0003",
+        "CTR0004",
+        "CTR0005",
+        "CTR0006",
+        "CTR0007",
+        "CTR0008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -45,14 +46,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "P-1176",
-        "P-1092",
-        "P-1175",
-        "P-1152",
-        "P-1103",
-        "P-1035",
-        "P-1100",
-        "P-1153"
+        "P-1004",
+        "P-1006",
+        "P-1007",
+        "P-1009",
+        "P-1010",
+        "P-1011",
+        "P-1019",
+        "P-1020"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -68,14 +69,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2024-07-20",
-        "2024-04-09",
-        "2024-06-15",
-        "2025-04-26",
-        "2024-06-21",
-        "2025-02-05",
-        "2024-09-16",
-        "2024-10-13"
+        "2024-01-01",
+        "2024-01-05",
+        "2024-01-21",
+        "2024-02-01",
+        "2024-02-04",
+        "2024-02-13",
+        "2024-02-23",
+        "2024-02-27"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -91,14 +92,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-06-23",
+        "2024-12-31",
         "2025-01-04",
-        "2025-09-24",
-        "2025-03-28",
-        "2026-06-02",
-        "2025-05-21",
-        "2025-07-25",
-        "2025-05-26"
+        "2025-01-20",
+        "2025-01-31",
+        "2025-02-03",
+        "2025-02-12",
+        "2025-02-22",
+        "2025-02-26"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -114,9 +115,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "LIVE",
         "DRAFT",
-        "EXPIRED"
+        "EXPIRED",
+        "LIVE"
       ],
       "sample_min": null,
       "sample_max": null,

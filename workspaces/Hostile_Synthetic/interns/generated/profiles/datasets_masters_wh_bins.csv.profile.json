@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\wh_bins.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\masters\\wh_bins.csv",
   "format": "csv",
   "row_count": 200,
   "file_count": 1,
@@ -10,7 +10,8 @@
     "bin_capacity_m3": "Float64"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -19,14 +20,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "B0038",
-        "B0069",
-        "B0170",
-        "B0074",
-        "B0145",
-        "B0177",
-        "B0188",
-        "B0189"
+        "B0001",
+        "B0002",
+        "B0003",
+        "B0004",
+        "B0005",
+        "B0006",
+        "B0007",
+        "B0008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -42,14 +43,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-221",
-        "L-260",
-        "L-230",
-        "L-235",
         "L-201",
-        "L-240",
+        "L-205",
         "L-206",
-        "L-231"
+        "L-210",
+        "L-211",
+        "L-215",
+        "L-216",
+        "L-220"
       ],
       "sample_min": null,
       "sample_max": null,

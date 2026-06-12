@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
   "format": "csv",
   "row_count": 120,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "Status": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -21,14 +22,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "D3053",
-        "D3022",
-        "D3015",
-        "D3007",
-        "D3066",
-        "D3117",
-        "D3080",
-        "D3098"
+        "D3000",
+        "D3001",
+        "D3002",
+        "D3003",
+        "D3004",
+        "D3005",
+        "D3006",
+        "D3007"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,14 +45,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "Stefan Gallo",
-        "Quinn Lindgren",
-        "Tomas Dvorak",
-        "Femi Kovacs",
-        "Nadia Fuentes",
-        "Katya Petrov",
-        "Boris Petrov",
-        "Nadia Lindgren"
+        "Aisha Iqbal",
+        "Aisha Marek",
+        "Aisha Okafor",
+        "Aisha Petrov",
+        "Boris Costa",
+        "Boris Kovacs",
+        "Boris Marek",
+        "Boris Petrov"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -67,14 +68,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "L-235",
-        "L-260",
-        "L-220",
-        "L-251",
-        "L-241",
-        "L-240",
-        "L-236",
-        "L-215"
+        "L-201",
+        "L-205",
+        "L-206",
+        "L-210",
+        "L-211",
+        "L-215",
+        "L-216",
+        "L-220"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -90,10 +91,10 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "CE",
-        "C1",
+        "B",
         "C",
-        "B"
+        "C1",
+        "CE"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -109,9 +110,9 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "LEFT",
+        "ACTIVE",
         "BANNED",
-        "ACTIVE"
+        "LEFT"
       ],
       "sample_min": null,
       "sample_max": null,

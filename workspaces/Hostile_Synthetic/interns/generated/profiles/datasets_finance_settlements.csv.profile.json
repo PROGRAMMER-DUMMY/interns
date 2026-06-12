@@ -1,5 +1,5 @@
 {
-  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a73791a7a522fd0d4\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
   "format": "csv",
   "row_count": 84,
   "file_count": 1,
@@ -12,7 +12,8 @@
     "Status": "String"
   },
   "sources_used": [
-    "sample_profile"
+    "sample_profile",
+    "duckdb_pushdown"
   ],
   "warnings": [],
   "columns": [
@@ -22,13 +23,13 @@
       "nullable": null,
       "sample_values": [
         "STL0001",
-        "STL0031",
-        "STL0044",
-        "STL0008",
-        "STL0027",
-        "STL0035",
-        "STL0061",
-        "STL0003"
+        "STL0002",
+        "STL0003",
+        "STL0004",
+        "STL0005",
+        "STL0006",
+        "STL0007",
+        "STL0008"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -44,13 +45,13 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "DNUB",
+        "ARRW",
         "BLTC",
-        "FNCH",
         "CDRX",
+        "DNUB",
         "EGRT",
-        "GRYP",
-        "ARRW"
+        "FNCH",
+        "GRYP"
       ],
       "sample_min": null,
       "sample_max": null,
@@ -66,14 +67,14 @@
       "dtype": "String",
       "nullable": null,
       "sample_values": [
-        "2025-10",
-        "2025-03",
-        "2025-12",
-        "2025-04",
-        "2025-08",
+        "2025-01",
         "2025-02",
+        "2025-03",
+        "2025-04",
+        "2025-05",
         "2025-06",
-        "2025-09"
+        "2025-07",
+        "2025-08"
       ],
       "sample_min": null,
       "sample_max": null,
