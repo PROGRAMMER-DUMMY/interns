@@ -90,8 +90,12 @@ def apply_accepted_definitions_to_kpis(kpis: list[Any], store: dict[str, Any]) -
         changes: dict[str, Any] = {}
         if metric:
             changes["metric"] = metric
+            if hasattr(kpi, "metric_provenance"):
+                changes["metric_provenance"] = "user_confirmed"
         if cuts:
             changes["cuts"] = cuts
+            if hasattr(kpi, "cuts_provenance"):
+                changes["cuts_provenance"] = "user_confirmed"
         out.append(replace(kpi, **changes) if changes else kpi)
     return out
 
@@ -224,8 +228,10 @@ def apply_kpi_definition(
             if matches_id or matches_q:
                 if metric:
                     kpi["metric"] = metric
+                    kpi["metric_provenance"] = "user_confirmed"
                 if cuts:
                     kpi["cuts"] = cuts
+                    kpi["cuts_provenance"] = "user_confirmed"
                 kpi["definition_source"] = (
                     "human_confirmed" if source == "human" else "agent_asserted"
                 )

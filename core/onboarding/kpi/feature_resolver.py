@@ -207,7 +207,7 @@ class KPIFeatureResolver:
             workspace_filter_terms=_vocab_terms_for(self.layout, "filter_terms"),
         )
         if _requires_kpi_definition(kpi, expression_context, extracted):
-            feature = _kpi_definition_feature(kpi)
+            feature = _kpi_definition_feature(kpi, schema_index)
             return {
                 "kpi_id": f"kpi_{idx:03d}",
                 "name": kpi.get("name", ""),
@@ -239,7 +239,7 @@ class KPIFeatureResolver:
             if pattern_options:
                 feature = _derived_pattern_feature(pattern_options)
             else:
-                feature = _kpi_definition_feature(kpi)
+                feature = _kpi_definition_feature(kpi, schema_index)
             return {
                 "kpi_id": f"kpi_{idx:03d}",
                 "name": kpi.get("name", ""),
@@ -382,18 +382,41 @@ class KPIFeatureResolver:
                 "question": f"What source, formula, or accepted rule should define `{token}` for this KPI?",
             })
         features = _dedupe_features_by_physical_column(features)
+        kpi_id = f"kpi_{idx:03d}"
+        metric_provenance = str(kpi.get("metric_provenance") or "authored").strip() or "authored"
+        if not metric.strip():
+            # Cuts-only KPI: dimension tokens may resolve, but there is no
+            # measure. A KPI without a metric must never be silently ready.
+            features.append(_kpi_definition_feature(kpi, schema_index))
+        elif metric_provenance == "derived_from_question":
+            # The metric is a machine guess derived from the question text
+            # during onboarding. It needs human confirmation before the KPI can
+            # be ready — silently trusting it bound `avg(hours)` to an
+            # unrelated timesheet column on the hostile workspace.
+            features.append(
+                _derived_metric_confirmation_feature(kpi, kpi_id, features, schema_index)
+            )
         blocked = [feature for feature in features if feature.get("state") not in READY_STATES]
+        open_questions = [feature["question"] for feature in blocked if feature.get("question")]
+        status = "ready_for_sql" if not blocked and features else "blocked_questions_pending"
+        if status == "blocked_questions_pending" and not open_questions:
+            # F1 invariant: a blocked KPI must always carry at least one
+            # answerable question or an explicit machine-readable blocker.
+            fallback = _kpi_definition_feature(kpi, schema_index)
+            features.append(fallback)
+            blocked.append(fallback)
+            open_questions.append(fallback["question"])
         return {
-            "kpi_id": f"kpi_{idx:03d}",
+            "kpi_id": kpi_id,
             "name": kpi.get("name", ""),
             "source": kpi.get("source", ""),
             "metric": metric,
             "cuts": cuts,
-            "status": "ready_for_sql" if not blocked and features else "blocked_questions_pending",
+            "status": status,
             "features": features,
             "function_context": extracted.functions,
             "join_candidates": infer_join_candidates(features),
-            "open_questions": [feature["question"] for feature in blocked if feature.get("question")],
+            "open_questions": open_questions,
         }
 
     def _derivation_pattern_options(self, kpi: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1043,7 +1066,103 @@ def _derived_pattern_feature(options: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _kpi_definition_feature(kpi: dict[str, Any]) -> dict[str, Any]:
+def _prose_anchor_evidence(
+    kpi: dict[str, Any],
+    schema_index: dict[str, list[dict[str, Any]]] | None,
+    *,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Workspace-evidence anchors for a prose KPI.
+
+    Scans the KPI's name + prose description against THIS workspace's profiled
+    columns, dataset names, and data-dictionary descriptions, and returns the
+    top-scoring matches as evidence entries. Derived from workspace evidence
+    only — no curated vocabulary. Used so a definition blocker can show the
+    user WHERE the prose touches the data instead of asking a bare question.
+    """
+    if not schema_index:
+        return []
+    text = " ".join(
+        str(kpi.get(key) or "") for key in ("name", "description", "refinement_required")
+    )
+    tokens = _semantic_tokens(text)
+    if not tokens:
+        return []
+    scored: list[tuple[float, dict[str, Any]]] = []
+    seen: set[tuple[str, str]] = set()
+    for entries in schema_index.values():
+        for entry in entries:
+            dataset = str(entry.get("dataset") or "")
+            column = str(entry.get("column") or "")
+            key = (Path(dataset).name.lower(), column.lower())
+            if not column or key in seen:
+                continue
+            column_hits = tokens & _semantic_tokens(_split_identifier(column))
+            dataset_hits = tokens & _semantic_tokens(_split_identifier(Path(dataset).stem))
+            description_hits = tokens & _semantic_tokens(
+                str(entry.get("dictionary_description") or "")
+            )
+            score = (
+                3.0 * len(column_hits)
+                + 2.0 * len(dataset_hits)
+                + min(6.0, 2.0 * float(len(description_hits)))
+            )
+            if score < 3.0:
+                continue
+            seen.add(key)
+            matched = sorted(column_hits | dataset_hits | description_hits)
+            scored.append(
+                (
+                    score,
+                    {
+                        "type": "prose_term_match",
+                        "source": dataset,
+                        "column": column,
+                        "matched_terms": matched[:8],
+                        "dictionary_description": str(
+                            entry.get("dictionary_description") or ""
+                        ),
+                        "score": score,
+                    },
+                )
+            )
+    scored.sort(key=lambda item: (-item[0], str(item[1]["source"]), str(item[1]["column"])))
+    return [item for _, item in scored[:limit]]
+
+
+def _kpi_definition_feature(
+    kpi: dict[str, Any],
+    schema_index: dict[str, list[dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    name = str(kpi.get("name") or "").strip()
+    description = str(kpi.get("description") or "").strip()
+    evidence: list[dict[str, Any]] = [
+        {
+            "type": "kpi_registry_placeholder",
+            "source": kpi.get("source", ""),
+            "refinement_required": kpi.get("refinement_required", ""),
+        }
+    ]
+    if description:
+        evidence.append(
+            {
+                "type": "kpi_prose",
+                "source": kpi.get("source", ""),
+                "excerpt": description[:600],
+            }
+        )
+    evidence.extend(_prose_anchor_evidence(kpi, schema_index))
+    if name and description:
+        question = (
+            f"Define the metric and grain for `{name}`: which datasets, columns, "
+            "filters, or derivations implement the prose definition? Matched "
+            "workspace evidence is attached; confirm with apply-kpi-definition."
+        )
+    else:
+        question = (
+            "Which concrete business question, metric expression, grain/dimensions, owner, "
+            "and acceptance tests should replace this seed KPI?"
+        )
     return {
         "feature": "KPI definition",
         "state": "blocked_missing_evidence",
@@ -1052,19 +1171,78 @@ def _kpi_definition_feature(kpi: dict[str, Any]) -> dict[str, Any]:
         "grain": "undefined",
         "conflicts": [],
         "decision_history": [],
-        "evidence": [
-            {
-                "type": "kpi_registry_placeholder",
-                "source": kpi.get("source", ""),
-                "refinement_required": kpi.get("refinement_required", ""),
-            }
-        ],
+        "evidence": evidence,
         "candidate_patterns": [],
         "derived_feature_options": [],
         "candidates": [],
+        "question": question,
+    }
+
+
+def _derived_metric_confirmation_feature(
+    kpi: dict[str, Any],
+    kpi_id: str,
+    resolved_features: list[dict[str, Any]],
+    schema_index: dict[str, list[dict[str, Any]]] | None,
+) -> dict[str, Any]:
+    """Confirmation blocker for a metric the platform GUESSED from prose.
+
+    Onboarding's derivation pass fills empty metric cells from the question
+    text + profiled columns (provenance ``derived_from_question``). That guess
+    is candidate evidence, never ground truth: it must be confirmed (or
+    corrected) by a human before the KPI is ready. The feature carries the
+    columns the guess resolved to so the panel renders JSON-backed evidence.
+    """
+    metric = str(kpi.get("metric") or "")
+    name = str(kpi.get("name") or "")
+    source_columns: list[dict[str, Any]] = []
+    for feature in resolved_features:
+        if feature.get("state") in READY_STATES:
+            for column in feature.get("source_columns") or []:
+                source_columns.append(column)
+    evidence: list[dict[str, Any]] = [
+        {
+            "type": "derived_metric_provenance",
+            "source": kpi.get("source", ""),
+            "metric": metric,
+            "provenance": "derived_from_question",
+            "note": (
+                "Onboarding derived this metric from the KPI question text and "
+                "profiled columns. It is a machine guess, not an authored or "
+                "user-confirmed definition; column-name similarity alone is "
+                "low-confidence evidence."
+            ),
+        }
+    ]
+    evidence.extend(_prose_anchor_evidence(kpi, schema_index))
+    return {
+        "feature": f"{kpi_id} derived metric",
+        "state": "candidate_unconfirmed",
+        "resolution_type": "derived_metric_unconfirmed",
+        "source_columns": source_columns,
+        "grain": "needs_user_confirmation",
+        "conflicts": [],
+        "decision_history": [],
+        "evidence": evidence,
+        "candidate_patterns": [],
+        "derived_feature_options": [],
+        "candidates": [
+            {
+                "state": "candidate_unconfirmed",
+                "column": column.get("column"),
+                "source": column.get("dataset"),
+                "reason": (
+                    "Column matched the machine-derived metric by name; needs "
+                    "human confirmation."
+                ),
+            }
+            for column in source_columns
+        ],
         "question": (
-            "Which concrete business question, metric expression, grain/dimensions, owner, "
-            "and acceptance tests should replace this seed KPI?"
+            f"Onboarding derived metric `{metric}` for `{name}` from the question "
+            "text (provenance: derived_from_question). Confirm the metric and its "
+            "column binding, or provide the correct definition via "
+            "apply-kpi-definition."
         ),
     }
 

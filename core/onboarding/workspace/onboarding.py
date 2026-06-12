@@ -75,6 +75,13 @@ class KpiDefinition:
     refinement_required: str = ""
     source: str = ""
     status: str = "needs_mapping"
+    # Cell provenance: how the metric/cuts VALUES got there. "authored" means
+    # the registry file carried the cell; gap-fill passes record themselves
+    # ("lexicon_inferred", "derived_from_question") and accepted human
+    # decisions record "user_confirmed". The resolver uses this to keep
+    # machine-guessed metrics from silently reaching ready_for_sql.
+    metric_provenance: str = "authored"
+    cuts_provenance: str = "authored"
 
 
 @dataclass(frozen=True)
@@ -833,13 +840,14 @@ class WorkspaceOnboarder:
             inferred_metric, inferred_cuts = lexicon.infer_metric_and_cuts(
                 kpi.name, kpi.description
             )
-            filled.append(
-                replace(
-                    kpi,
-                    metric=metric or inferred_metric,
-                    cuts=cuts or inferred_cuts,
-                )
-            )
+            changes: dict[str, Any] = {}
+            if not metric and inferred_metric:
+                changes["metric"] = inferred_metric
+                changes["metric_provenance"] = "lexicon_inferred"
+            if not cuts and inferred_cuts:
+                changes["cuts"] = inferred_cuts
+                changes["cuts_provenance"] = "lexicon_inferred"
+            filled.append(replace(kpi, **changes) if changes else kpi)
         return filled
 
     def _apply_accepted_kpi_definitions(
@@ -968,20 +976,18 @@ class WorkspaceOnboarder:
             except Exception:  # pragma: no cover - derivation must never break onboarding
                 filled.append(kpi)
                 continue
-            new_metric = metric
-            new_cuts = cuts
-            if not str(new_metric).strip() and (
+            changes: dict[str, Any] = {}
+            if not str(metric).strip() and (
                 derivation["metric"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD
             ):
-                new_metric = derivation["metric"]["value"]
-            if not str(new_cuts).strip() and (
+                changes["metric"] = derivation["metric"]["value"]
+                changes["metric_provenance"] = "derived_from_question"
+            if not str(cuts).strip() and (
                 derivation["cuts"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD
             ):
-                new_cuts = derivation["cuts"]["value"]
-            if new_metric != metric or new_cuts != cuts:
-                filled.append(replace(kpi, metric=new_metric, cuts=new_cuts))
-            else:
-                filled.append(kpi)
+                changes["cuts"] = derivation["cuts"]["value"]
+                changes["cuts_provenance"] = "derived_from_question"
+            filled.append(replace(kpi, **changes) if changes else kpi)
         return filled
 
     def profile_inputs(
