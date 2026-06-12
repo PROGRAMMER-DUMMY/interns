@@ -130,16 +130,23 @@ A plan may be APPLIED only when all of the following hold, in order:
 
 ## 9. Out of Scope (this PRD)
 
-- Live `plan-apply` implementation (next PRD slice; requires the gates above
-  wired into `workspace_deployer.py`).
+- ~~Live `plan-apply` implementation~~ SHIPPED 2026-06-12 up to the approval
+  boundary: `core/onboarding/databricks/deploy_gates.py` implements the five
+  gates from section 7; `medallion apply-deploy --workspace <ws>
+  --confirmed-by <name> [--dry-run]` evaluates them, prints a verdict table,
+  and on all-green records `interns/state/medallion/deploy_approval.json`
+  (gate evidence + provenance + plan hash) — and STOPS. The actual workspace
+  mutation (workspace_deployer consuming the approval artifact) is the next
+  slice; it must refuse to run without a fresh approval artifact.
 - MLflow experiment/telemetry deployment — already covered by the 2026-05-11
   PRD.
 - Dashboard hosting (Lakeview) — deferred until Gold tables are live.
 
 ## 10. Known Limitations / Follow-ups
 
-- `permissions.phi.datasets` currently records absolute local paths; switch to
-  repo-relative before plan-apply lands (cosmetic; validator-tracked).
+- ~~`permissions.phi.datasets` currently records absolute local paths~~ FIXED
+  2026-06-12: paths are repo-relative and the plan validator rejects absolute
+  paths.
 - The refresh-manifest fingerprint helper is intentionally local to
   `core/medallion/incremental.py`; onboarding's
   `core/onboarding/workspace/incremental.py` grew a sibling implementation the

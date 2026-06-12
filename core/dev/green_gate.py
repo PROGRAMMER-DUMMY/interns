@@ -85,6 +85,8 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_workspace_data_policy",
     # data-to-viz chart-selection knowledge base + new chart types.
     "tests.test_chart_knowledge",
+    # Databricks deployment gates (PRD section 7) + apply-deploy boundary.
+    "tests.test_deploy_gates",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

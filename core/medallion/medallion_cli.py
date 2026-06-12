@@ -14,6 +14,7 @@ SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
     "lineage": ("core.medallion.lineage_cli", "main", "report medallion lineage"),
     "init-salt": ("core.medallion.salt_store", "_init_salt_cli", "initialise the hashing salt store"),
     "plan-deploy": ("core.medallion.deploy_plan", "main", "emit a validated Databricks deployment plan (plan only)"),
+    "apply-deploy": ("core.medallion.apply_deploy", "main", "evaluate the 5 deployment gates; record approval when all pass (no remote calls)"),
 }
 
 

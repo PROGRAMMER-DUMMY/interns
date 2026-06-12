@@ -1055,6 +1055,24 @@ the generated plan, `generate-kpi-sql` includes the resource mode/strategy in SQ
 DuckDB generation when the plan requires remote execution, and local DuckDB execution records or
 enforces the resource decision before subprocess launch.
 
+### medallion apply-deploy
+
+Command:
+
+```powershell
+uv run medallion apply-deploy --workspace workspaces/<project> --confirmed-by "<name>" [--dry-run]
+```
+
+Evaluates the five Databricks deployment gates from
+`docs/prd/databricks_deployment.md` section 7 (G1 local-green, G2 design
+ratified, G3 human provenance, G4 plan freshness, G5 remote approval env) and
+prints a per-gate verdict table. NO remote call is ever made: on all-green it
+records `interns/state/medallion/deploy_approval.json` (gate evidence +
+provenance + plan hash) and stops at the approval boundary; any failing gate
+exits nonzero with the blocking reasons. `--dry-run` never records. An empty
+`--confirmed-by` fails G3 by design (Human-Gate Provenance Rule); agents must
+never set `AUTORESEARCH_ALLOW_REMOTE_EXECUTION` to satisfy G5.
+
 ### context-router
 
 Command:
