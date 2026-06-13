@@ -385,17 +385,24 @@ class SourceCatalogManager:
             warnings=[],
         )
 
-    def finalize_selection(self, source_id: str, *, approve_final_preview: bool = False) -> CatalogResult:
+    def finalize_selection(
+        self, source_id: str | None = None, *, approve_final_preview: bool = False
+    ) -> CatalogResult:
         if not approve_final_preview:
             raise ValueError("finalize-selection requires --approve-final-preview")
         draft_path = self.workspace / "docs" / "source_selection.generated.json"
         if not draft_path.exists():
             raise FileNotFoundError(f"source selection draft not found: {draft_path}")
         draft = json.loads(draft_path.read_text(encoding="utf-8"))
-        if draft.get("source_catalog_id") != source_id:
+        draft_id = str(draft.get("source_catalog_id") or "").strip()
+        # source_id is optional: infer it from the draft's source_catalog_id, then
+        # the workspace folder name. Only enforce a match when the caller passes an
+        # explicit id AND the draft also records one and they differ.
+        if source_id and draft_id and draft_id != source_id:
             raise ValueError(
-                f"draft source_catalog_id mismatch: expected {source_id}, found {draft.get('source_catalog_id')}"
+                f"draft source_catalog_id mismatch: expected {source_id}, found {draft_id}"
             )
+        source_id = source_id or draft_id or self.workspace.name
         sources = draft.get("sources")
         if not isinstance(sources, list):
             raise ValueError("draft selection must contain a sources list")
