@@ -100,6 +100,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # (documented claims contradicted by profile evidence become structured
     # dictionary_conflicts + an answerable blocker on tainted KPIs).
     "tests.test_dictionary_reconciliation",
+    # Slice 3 hostile refinement 1d: derived-feature option synthesis
+    # (a quantity in mixed units yields a JSON-backed UOM-normalization option;
+    # honest blocker stays when no mixed-unit evidence exists).
+    "tests.test_derived_option_synthesis",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
