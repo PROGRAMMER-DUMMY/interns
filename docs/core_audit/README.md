@@ -29,10 +29,10 @@ Section-by-section deep read of `core/` (227 files, ~86.9k lines). Each package 
 | execution | core/execution | 3 | 909 | **done** — BUG:4 NP:7 MISS:1 DEAD:1 DUP:2 | `execution.md` |
 | small-combo | contracts+dev+resource+presentation+profiling+skills+observability | 23 | ~3500 | **done** — BUG:2 INT:2 NP:6 MISS:1 DEAD:3 DUP:1 | `small-combo.md` |
 | onboarding-root | core/onboarding/*.py | 12 | ~3800 | **done** — BUG:5 NP:3 INT:2 MISS:1 DEAD:1 DUP:1 | `onboarding-root.md` |
-| ob-kpi-A | onboarding/kpi (intent/resolve/derive) | ~10 | ~7000 | pending | `ob-kpi-a.md` |
-| ob-kpi-B | onboarding/kpi (engines/parity/exec) | ~8 | ~4000 | pending | `ob-kpi-b.md` |
-| ob-kpi-C | onboarding/kpi (panels/blockers) | ~7 | ~5000 | pending | `ob-kpi-c.md` |
-| ob-kpi-D | onboarding/kpi (results/proof/generation) | ~9 | ~5000 | pending | `ob-kpi-d.md` |
+| ob-kpi-A | onboarding/kpi (intent/resolve/derive) | ~10 | ~7000 | **done** — BUG:10 INT:1 NP:1 DUP:1 DEAD:1 MISS:1 | `ob-kpi-a.md` |
+| ob-kpi-B | onboarding/kpi (engines/parity/exec) | ~8 | ~4000 | **done** — BUG:9 NP:2 INT:1 MISS:1 DUP:1 | `ob-kpi-b.md` |
+| ob-kpi-C | onboarding/kpi (panels/blockers) | ~7 | ~5000 | **done** — BUG:4 NP:3 MISS:2 INT:2 DUP:1 DEAD:1 | `ob-kpi-c.md` |
+| ob-kpi-D | onboarding/kpi (results/proof/generation) | ~9 | ~5000 | **done** — BUG:7 NP:3 INT:2 DUP:2 | `ob-kpi-d.md` |
 | ob-workspace-A | onboarding/workspace/flow.py | 1 | 4068 | pending | `ob-workspace-a.md` |
 | ob-workspace-B | onboarding/workspace (onboarding/validation/bootstrap) | ~4 | ~4500 | pending | `ob-workspace-b.md` |
 | ob-workspace-C | onboarding/workspace (runner/idempotency/misc) | ~10 | ~3000 | pending | `ob-workspace-c.md` |
@@ -42,7 +42,7 @@ Section-by-section deep read of `core/` (227 files, ~86.9k lines). Each package 
 | ob-documents | onboarding/documents | 5 | ~2500 | **done** — BUG:4 NP:5 INT:2 MISS:1 DUP:1 | `ob-documents.md` |
 | ob-databricks | onboarding/databricks | 4 | ~2500 | pending | `ob-databricks.md` |
 | ob-sources | onboarding/sources | 4 | ~3000 | pending | `ob-sources.md` |
-| ob-features | onboarding/features | 6 | ~2000 | pending | `ob-features.md` |
+| ob-features | onboarding/features | 6 | ~2000 | **done** — BUG:3 NP:5 MISS:1 INT:1 DEAD:2 DUP:2 (eval-safe) | `ob-features.md` |
 | ob-memory | onboarding/memory | 5 | ~1500 | pending | `ob-memory.md` |
 | ob-lexicon-benchmark | onboarding/lexicon + benchmark | 5 | ~1500 | pending | `ob-lexicon-benchmark.md` |
 
