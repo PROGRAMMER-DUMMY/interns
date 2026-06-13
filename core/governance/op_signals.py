@@ -129,7 +129,11 @@ def derive_op_signals(command: str, payload: dict[str, Any]) -> OpSignals:
         and _as_int(question_count) == 0
         and blocked_count > 0
     )
-    stuck = empty_panel or (blocked and unresolved == 0 and question_count == 0)
+    # Normalize question_count before comparing: a raw "0" (str) or None made the
+    # second branch silently never fire. _as_int is already used by empty_panel.
+    # Ref: core-audit governance.md.
+    _qc = _as_int(question_count) if question_count is not None else None
+    stuck = empty_panel or (blocked and unresolved == 0 and _qc == 0)
     confidence = _scan_confidence(payload)
     ambiguous = bool(payload.get("ambiguous")) or status in {"ambiguous", "awaiting_user_answer"}
 

@@ -139,6 +139,7 @@ class WorkflowGuardHarness:
         findings.extend(self._check_incomplete_workflow())
         findings.extend(self._check_session_monitored())
         findings.extend(self._check_repeated_commands())
+        findings.extend(self._check_generated_sql_raw_paths())
         findings.extend(self._check_hand_edited_generated_artifacts())
         findings.extend(self._check_throwaway_reader_scripts())
         findings.extend(self._check_vision_review_done())
@@ -221,6 +222,52 @@ class WorkflowGuardHarness:
                 ),
             )
         ]
+
+    def _check_generated_sql_raw_paths(self) -> list[dict[str, Any]]:
+        """Flag a raw dataset reader (read_csv_auto/read_parquet of a literal
+        path) in generated SQL OUTSIDE a `CATALOG BOOTSTRAP` block. Generated KPI
+        / pipeline SQL must read through the catalog_raw_* views the bootstrap
+        block defines; a raw path elsewhere bypasses governance + breaks the
+        cwd-independent execution contract. Ref: core-audit ob-harness.md."""
+        findings: list[dict[str, Any]] = []
+        candidate_dirs = [
+            self.layout.generated_dir / "solutions",
+            self.layout.generated_dir / "pipeline",
+        ]
+        for directory in candidate_dirs:
+            if not directory.exists():
+                continue
+            for sql_file in sorted(directory.glob("*.sql")):
+                try:
+                    text = sql_file.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                in_bootstrap = False
+                for line in text.splitlines():
+                    upper = line.upper()
+                    if "CATALOG BOOTSTRAP" in upper:
+                        # "END CATALOG BOOTSTRAP" closes; any other CATALOG
+                        # BOOTSTRAP marker opens the exempt region.
+                        in_bootstrap = "END" not in upper
+                        continue
+                    if in_bootstrap:
+                        continue
+                    low = line.lower()
+                    if "read_csv_auto(" in low or "read_parquet(" in low:
+                        findings.append(
+                            _finding(
+                                "error",
+                                "generated_sql_raw_path_outside_bootstrap",
+                                f"Generated SQL `{sql_file.name}` reads a raw dataset path "
+                                "outside the CATALOG BOOTSTRAP block; read through the "
+                                "catalog_raw_* views instead.",
+                                artifact=_rel(sql_file, self.repo_root),
+                                recommendation="Regenerate the SQL so raw read_csv_auto/read_parquet "
+                                "calls live only in the catalog bootstrap block.",
+                            )
+                        )
+                        break  # one finding per file is enough
+        return findings
 
     def _check_artifacts(self) -> list[dict[str, Any]]:
         findings = []

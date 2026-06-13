@@ -55,7 +55,9 @@ class SignalsToSkillsTests(unittest.TestCase):
                                 {"blocked_kpi_count": 2, "question_count": 0})
         skills = {s["skill"] for s in signals_to_skills(sig)}
         self.assertIn("kpi-analyst", skills)
-        self.assertIn("self-grill", skills)
+        # `grill-requirements` is the registered skill (self-grill is a *mode* of
+        # it, not a skill); routing must reference the real skill name.
+        self.assertIn("grill-requirements", skills)
 
     def test_unresolved_routes_to_feature_derivation_library(self) -> None:
         sig = derive_op_signals("resolve-kpi-features", {"unresolved_feature_count": 1})
