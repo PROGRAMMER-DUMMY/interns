@@ -103,9 +103,18 @@ def _normalize_cell(value: Any) -> Any:
     if isinstance(value, float):
         if math.isnan(value):
             return None
-        return round(value, _FLOAT_TOLERANCE_DP)
+        # Documented contract: floats compare under a fixed decimal tolerance
+        # (engines differ in float representation). An integral result canonicals
+        # to int so a float 10.0 still matches an int 10 across engines.
+        rounded = round(value, _FLOAT_TOLERANCE_DP)
+        return int(rounded) if rounded == int(rounded) else rounded
     if isinstance(value, int):
-        return round(float(value), _FLOAT_TOLERANCE_DP)
+        # T3: keep ints EXACT — do not coerce through float. Coercing an identity
+        # column / large id (> 2^53) to float silently loses precision and could
+        # mask a real divergence. Integral floats canonical to int (above), so an
+        # int column still matches a float column of equal value.
+        # Ref: core-audit ob-kpi-b.md.
+        return value
     if isinstance(value, datetime):
         # date_trunc in SQL yields midnight timestamps where Polars yields
         # dates; collapse both to the ISO day.

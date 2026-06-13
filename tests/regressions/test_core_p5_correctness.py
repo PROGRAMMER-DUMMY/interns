@@ -85,5 +85,37 @@ class SubstringTokenMatchingTests(unittest.TestCase):
         self.assertEqual(cand_pid.grain_matches, ["id"])
 
 
+# ── P5c: parity coverage (T3) — only certified engines recommended ───────────
+class ParityCoverageTests(unittest.TestCase):
+    def test_recommender_never_routes_to_uncertified_engine(self) -> None:
+        from core.onboarding.kpi.engine_recommender import ComplexitySignals, recommend
+
+        def sig(**kw):
+            base = dict(feature_count=3, join_depth=0, dim_count=1, has_window=False,
+                        has_ratio=False, unsupported_window="", estimated_bytes=10 * 1024 * 1024)
+            base.update(kw)
+            return ComplexitySignals(**base)
+
+        gb = 1024 * 1024 * 1024
+        cases = [
+            sig(estimated_bytes=50 * gb),                 # would have been pyspark
+            sig(estimated_bytes=2 * gb, join_depth=2),    # would have been hybrid
+            sig(estimated_bytes=5 * 1024 * 1024),         # small -> sql
+        ]
+        for s in cases:
+            rec = recommend("k", s)
+            self.assertNotIn(rec.recommended_engine, ("pyspark", "hybrid"))
+
+    def test_normalize_cell_keeps_large_int_exact(self) -> None:
+        from core.onboarding.kpi.engine_parity import _normalize_cell
+
+        big = 9007199254740993  # 2**53 + 1, not exactly representable as float
+        self.assertEqual(_normalize_cell(big), big)
+        # integral float canonicalizes to int so 10 == 10.0 across engines
+        self.assertEqual(_normalize_cell(10), _normalize_cell(10.0))
+        # non-integral floats still round under tolerance
+        self.assertEqual(_normalize_cell(10.5), 10.5)
+
+
 if __name__ == "__main__":
     unittest.main()
