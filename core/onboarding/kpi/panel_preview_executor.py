@@ -147,19 +147,20 @@ def execute_preview(
     # 2. chdir into repo_root so relative CSV paths in the SQL resolve, and
     #    submit the query to a worker thread so we can enforce a wall-clock
     #    budget via ``future.result(timeout=...)``.
-    old_cwd = Path.cwd()
+    from core.storage.atomic_io import pushd
+
     start = time.perf_counter()
     try:
-        try:
-            os.chdir(repo_root)
-        except OSError as exc:
-            return PreviewResult(
-                status="error",
-                sql=sql,
-                duration_ms=0,
-                error=f"Could not chdir to repo_root: {exc}"[:200],
-            )
-
+        cm = pushd(repo_root)
+        cm.__enter__()
+    except OSError as exc:
+        return PreviewResult(
+            status="error",
+            sql=sql,
+            duration_ms=0,
+            error=f"Could not chdir to repo_root: {exc}"[:200],
+        )
+    try:
         # Run the query in a *daemon* thread so a hung DuckDB query cannot
         # block process exit. ``ThreadPoolExecutor`` creates non-daemon
         # workers, which means Python's atexit waits for them — that's how a
@@ -202,10 +203,7 @@ def execute_preview(
             )
         columns, fetched = payload
     finally:
-        try:
-            os.chdir(old_cwd)
-        except OSError:
-            pass
+        cm.__exit__(None, None, None)
 
     duration_ms = int((time.perf_counter() - start) * 1000)
 

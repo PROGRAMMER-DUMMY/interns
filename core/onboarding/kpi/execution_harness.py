@@ -181,16 +181,12 @@ class KPIExecutionHarness:
             conn.execute("SET TimeZone='UTC'")
         except Exception:
             pass
-        old_cwd = Path.cwd()
+        from core.storage.atomic_io import pushd
+
         try:
-            import os
-
-            os.chdir(self.repo_root)
-            return [self._execute_one(conn, sql_path) for sql_path in sql_files]
+            with pushd(self.repo_root):
+                return [self._execute_one(conn, sql_path) for sql_path in sql_files]
         finally:
-            import os
-
-            os.chdir(old_cwd)
             conn.close()
 
     def _sql_files(self) -> list[Path]:

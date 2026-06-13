@@ -30,13 +30,15 @@ from core.storage.workspace_layout import WorkspaceLayout
 
 @contextmanager
 def _at_repo_root(repo_root: Path):
-    """DuckDB read_csv_auto paths in generated SQL are relative to repo root."""
-    old = Path.cwd()
-    try:
-        os.chdir(repo_root)
+    """DuckDB read_csv_auto paths in generated SQL are relative to repo root.
+
+    Delegates to the shared thread-safe ``pushd`` so concurrent Dash callbacks
+    can't race the process-global cwd. Ref: core-audit SUMMARY.md T1.
+    """
+    from core.storage.atomic_io import pushd
+
+    with pushd(repo_root):
         yield
-    finally:
-        os.chdir(old)
 
 
 def _execute_sql_view(repo_root: Path, sql_path: Path, view_name: str, limit: int = 5000):

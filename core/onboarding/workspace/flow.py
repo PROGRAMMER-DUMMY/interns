@@ -1334,11 +1334,11 @@ class WorkspaceFlow:
             conn.execute("SET TimeZone='UTC'")
         except Exception:
             pass
-        old_cwd = Path.cwd()
-        try:
-            import os
+        from core.storage.atomic_io import pushd
 
-            os.chdir(self.repo_root)
+        cwd_cm = pushd(self.repo_root)
+        cwd_cm.__enter__()
+        try:
             for sql_file in sql_files:
                 kpi_id = sql_file.stem
                 sql_text = sql_file.read_text(encoding="utf-8")
@@ -1472,9 +1472,7 @@ class WorkspaceFlow:
                     entry["error"] = str(exc)
                 entries.append(entry)
         finally:
-            import os
-
-            os.chdir(old_cwd)
+            cwd_cm.__exit__(None, None, None)
             conn.close()
 
         if parity_enabled:

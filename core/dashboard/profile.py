@@ -316,13 +316,12 @@ def decide_panels(
 
 @contextmanager
 def _at_repo_root(repo_root: Path):
-    import os
-    old = os.getcwd()
-    try:
-        os.chdir(repo_root)
+    """Thread-safe cwd guard (shared pushd) for relative DuckDB paths.
+    Ref: core-audit SUMMARY.md T1."""
+    from core.storage.atomic_io import pushd
+
+    with pushd(repo_root):
         yield
-    finally:
-        os.chdir(old)
 
 
 def execute_result_view(

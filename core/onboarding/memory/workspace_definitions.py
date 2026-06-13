@@ -10,6 +10,7 @@ from core.onboarding.features.blockers import (
     normalize,
     prioritize_blockers,
 )
+from core.storage.atomic_io import read_json_or_quarantine, write_text_atomic
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -101,13 +102,13 @@ def apply_workspace_definition(
     definitions_path.parent.mkdir(parents=True, exist_ok=True)
     definitions["workspace"] = mapping.get("workspace", str(workspace))
     definitions["updated_at"] = timestamp
-    definitions_path.write_text(json.dumps(definitions, indent=2, default=str) + "\n", encoding="utf-8")
+    write_text_atomic(definitions_path, json.dumps(definitions, indent=2, default=str) + "\n")
 
     updated = apply_workspace_definition_to_mapping(mapping, definition_record)
     if not updated:
         raise ValueError(f"Feature not found in mapping: {feature}")
     recompute_mapping_status(mapping)
-    mapping_path.write_text(json.dumps(mapping, indent=2, default=str) + "\n", encoding="utf-8")
+    write_text_atomic(mapping_path, json.dumps(mapping, indent=2, default=str) + "\n")
     append_decision_history(layout, "workspace", feature, state, evidence_note)
     append_workspace_definition_requirement(
         layout,
@@ -209,9 +210,11 @@ def load_workspace_definitions(layout: WorkspaceLayout) -> dict[str, Any]:
             "workspace": "",
             "definitions": [],
         }
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+    # Fail loud on a corrupt store: quarantine the bad file and raise, instead of
+    # silently returning an empty skeleton that the next write would persist —
+    # permanently erasing every saved human definition. Ref: ob-memory.md (T6).
+    data = read_json_or_quarantine(path, default=None)
+    if not isinstance(data, dict):
         return {
             "artifact_type": "workspace_feature_definitions.json",
             "version": WORKSPACE_DEFINITIONS_VERSION,
@@ -428,12 +431,9 @@ def append_workspace_definition_requirement(
 ) -> None:
     requirements_path = layout.requirements_dir / "requirements.json"
     requirements_path.parent.mkdir(parents=True, exist_ok=True)
-    requirements = {}
-    if requirements_path.exists():
-        try:
-            requirements = json.loads(requirements_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            requirements = {}
+    # Fail loud (quarantine + raise) on a corrupt requirements mirror instead of
+    # silently zeroing prior audit rows. Ref: ob-memory.md (T6).
+    requirements = read_json_or_quarantine(requirements_path, default={}) or {}
     requirements.setdefault("workspace_feature_definitions", []).append(
         {
             "feature": feature,
@@ -445,4 +445,4 @@ def append_workspace_definition_requirement(
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )
-    requirements_path.write_text(json.dumps(requirements, indent=2) + "\n", encoding="utf-8")
+    write_text_atomic(requirements_path, json.dumps(requirements, indent=2) + "\n")

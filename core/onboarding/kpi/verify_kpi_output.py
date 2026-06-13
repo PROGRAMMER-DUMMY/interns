@@ -380,9 +380,9 @@ class KPIOutputVerifier:
         warehouse_path = self.layout.state_dir / "warehouse.duckdb"
         use_warehouse = bool(_WAREHOUSE_TABLE_REF.search(sql)) and warehouse_path.exists()
 
-        import os
+        from core.storage.atomic_io import pushd
 
-        old_cwd = Path.cwd()
+        cwd_cm = None  # thread-safe cwd guard, only for the in-memory branch
         conn = None
         try:
             if use_warehouse:
@@ -394,7 +394,9 @@ class KPIOutputVerifier:
                     pass
             else:
                 conn = duckdb.connect(":memory:")
-                os.chdir(self.repo_root)  # so read_csv_auto('workspaces/...') resolves
+                # so read_csv_auto('workspaces/...') resolves; serialized via pushd
+                cwd_cm = pushd(self.repo_root)
+                cwd_cm.__enter__()
             conn.execute(sql)
             record.executed = True
             views = {
@@ -432,8 +434,8 @@ class KPIOutputVerifier:
         finally:
             if conn is not None:
                 conn.close()
-            if not use_warehouse:
-                os.chdir(old_cwd)
+            if cwd_cm is not None:
+                cwd_cm.__exit__(None, None, None)
 
     # ── cross-engine parity (executes Polars, compares to SQL) ────────────────
 
@@ -561,9 +563,9 @@ class KPIOutputVerifier:
             return None, None
         warehouse_path = self.layout.state_dir / "warehouse.duckdb"
         use_warehouse = bool(_WAREHOUSE_TABLE_REF.search(sql)) and warehouse_path.exists()
-        import os
+        from core.storage.atomic_io import pushd
 
-        old_cwd = Path.cwd()
+        cwd_cm = None
         conn = None
         try:
             if use_warehouse:
@@ -574,7 +576,8 @@ class KPIOutputVerifier:
                     pass
             else:
                 conn = duckdb.connect(":memory:")
-                os.chdir(self.repo_root)
+                cwd_cm = pushd(self.repo_root)
+                cwd_cm.__enter__()
             conn.execute(sql)
             rows = int(conn.execute(f'SELECT COUNT(*) FROM "{result_view}"').fetchone()[0])
             cols = {
@@ -591,8 +594,8 @@ class KPIOutputVerifier:
         finally:
             if conn is not None:
                 conn.close()
-            if not use_warehouse:
-                os.chdir(old_cwd)
+            if cwd_cm is not None:
+                cwd_cm.__exit__(None, None, None)
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
