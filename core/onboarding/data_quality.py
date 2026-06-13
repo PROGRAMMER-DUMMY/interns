@@ -40,11 +40,15 @@ class DataQualityHarness:
         duplicate_findings = _detect_duplicate_pk_candidates(self.workspace, self.layout)
         findings = []
         for finding in duplicate_findings:
+            unreadable = bool(finding.get("unreadable"))
             findings.append(
                 {
-                    "code": "duplicate_rows_detected",
-                    "severity": "medium",
-                    "status": "resolved" if resolved else "unresolved",
+                    # An unreadable dataset is always unresolved (a duplicate
+                    # decision can't "resolve" a read failure) so the gate can't
+                    # report ok=True on an error swallowed during the scan.
+                    "code": "dataset_unreadable" if unreadable else "duplicate_rows_detected",
+                    "severity": "high" if unreadable else "medium",
+                    "status": "unresolved" if unreadable else ("resolved" if resolved else "unresolved"),
                     "dataset": finding["dataset"],
                     "column": finding["column"],
                     "query": finding["query"],
@@ -241,6 +245,22 @@ def _detect_duplicate_pk_candidates(
             continue
         for column in candidate_columns:
             duplicate_count = _count_duplicate_values(path, column)
+            if duplicate_count == DATASET_UNREADABLE:
+                # A candidate dataset we could not read is NOT clean — surface it
+                # as a finding so the DQ gate cannot report ok=True on an error.
+                findings.append(
+                    {
+                        "dataset": str(path),
+                        "column": column,
+                        "duplicate_key_count": 0,
+                        "unreadable": True,
+                        "query": (
+                            f"-- dataset could not be read for duplicate check: "
+                            f"{path.as_posix()} (column {column})"
+                        ),
+                    }
+                )
+                continue
             if duplicate_count <= 0:
                 continue
             table_alias = path.stem
@@ -278,7 +298,7 @@ def _profiled_datasets(layout: WorkspaceLayout) -> list[tuple[Path, list[str]]]:
         return []
     try:
         data = _load_json(index_path)
-    except Exception:
+    except (json.JSONDecodeError, OSError):
         return []
     out: list[tuple[Path, list[str]]] = []
     for profile in data.get("profiles") or []:
@@ -327,10 +347,15 @@ def _infer_pk_candidates_from_csv_header(path: Path) -> list[str]:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
             reader = csv.reader(handle)
             header = next(reader, [])
-    except OSError:
+    except (OSError, UnicodeDecodeError, csv.Error):
         return []
     pk_candidates = [col for col in header if _looks_like_pk_column(col)]
     return pk_candidates or ([header[0]] if header else [])
+
+
+# Sentinel: the dataset could not be READ (distinct from "0 duplicates found").
+# A read failure must NOT be treated as a clean dataset. Ref: onboarding-root.md.
+DATASET_UNREADABLE = -1
 
 
 def _count_duplicate_values(path: Path, column: str) -> int:
@@ -349,8 +374,10 @@ def _count_duplicate_values(path: Path, column: str) -> int:
                     duplicates.add(value)
                 seen.add(value)
             return len(duplicates)
-    except OSError:
-        return 0
+    except (OSError, UnicodeDecodeError, csv.Error):
+        # Read/parse failure — signal unreadable so the harness records a finding
+        # instead of reporting the dataset as clean (false "ok").
+        return DATASET_UNREADABLE
 
 
 def main(argv: list[str] | None = None) -> int:

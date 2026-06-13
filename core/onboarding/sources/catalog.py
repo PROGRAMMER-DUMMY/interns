@@ -1315,7 +1315,10 @@ def _read_existing_rows(path: Path) -> list[dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, list):
             return [row for row in data if isinstance(row, dict)]
-    except Exception:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, csv.Error):
+        # Narrowed from bare Exception: a corrupt checkpoint resume now degrades
+        # to "restart from empty" only on a genuine read/parse error, not on an
+        # unrelated bug masquerading as an empty resume. Ref: P6 (sources).
         return []
     return []
 
