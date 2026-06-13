@@ -1,5 +1,9 @@
 # core/ Full-Read Audit
 
+> **New session? Read `HANDOFF.md` first**, then `SUMMARY.md` (themes), then
+> `REMEDIATION_PLAN.md` (phased fix plan with `file:line` + progress ledger).
+
+
 Section-by-section deep read of `core/` (227 files, ~86.9k lines). Each package is read
 **in full** by a dedicated agent in its own context; findings land in one file per unit here.
 
