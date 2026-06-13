@@ -280,6 +280,9 @@ class ExternalSourceDiscoverer:
             "artifact_type": "source_selection.generated.json",
             "version": 1,
             "generated_by": "discover-external-sources",
+            # The catalog id finalize-selection infers when none is passed: the
+            # workspace folder name. Keeps the draft -> finalize handoff coherent.
+            "source_catalog_id": self.workspace.name,
             "external_root": str(self.external_root),
             "approval_policy": "review_required_before_finalize",
             "sources": sources,
