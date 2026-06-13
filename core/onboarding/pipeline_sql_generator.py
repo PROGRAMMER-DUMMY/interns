@@ -52,8 +52,14 @@ class PipelineSQLGenerator:
                 [
                     f'CREATE OR REPLACE VIEW "bronze_{stem}" AS '
                     f'SELECT * FROM "{raw_view}";',
+                    # P5 (T9-adjacent): plain SELECT * — NOT SELECT DISTINCT.
+                    # Deduplication is approval_gated (pipeline_plan silver policy
+                    # + bronze/silver standards list dedup as a forbidden,
+                    # approval-required transform). The generator must not dedup
+                    # silently; dedup belongs behind duplicate_decisions approval.
+                    # Ref: core-audit onboarding-root.md.
                     f'CREATE OR REPLACE VIEW "silver_{stem}" AS '
-                    f'SELECT DISTINCT * FROM "bronze_{stem}";',
+                    f'SELECT * FROM "bronze_{stem}";',
                     f'CREATE OR REPLACE VIEW "gold_{stem}" AS '
                     f'SELECT * FROM "silver_{stem}";',
                 ]
