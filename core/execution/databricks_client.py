@@ -146,17 +146,32 @@ class DatabricksClient:
         """
         if not records:
             return
-        rows_json = json.dumps(records)
-        sql = f"""
-        INSERT INTO {catalog}.{schema}.{table}
-        SELECT * FROM (
-          SELECT explode(from_json('{rows_json}', 'array<map<string,string>>'))
+        # T4 (P3): the records carry untrusted free text (user names, error
+        # messages, KPI text). Pass the JSON as a BOUND PARAMETER instead of
+        # f-string interpolation so a single quote / SQL metacharacter cannot
+        # break or inject into the statement. Validate the table parts as
+        # identifiers and backtick-quote them (they are config-derived, but the
+        # gate is cheap and closes the surface). Ref: core-audit execution.md.
+        from databricks.sdk.service.sql import StatementParameterListItem
+
+        from core.sql_safety import assert_safe_identifier, quote_ident_backtick
+
+        target = ".".join(
+            quote_ident_backtick(assert_safe_identifier(part, context="delta table part"))
+            for part in (catalog, schema, table)
         )
-        """
+        rows_json = json.dumps(records)
+        statement = (
+            f"INSERT INTO {target}\n"
+            "SELECT * FROM (\n"
+            "  SELECT explode(from_json(:rows, 'array<map<string,string>>'))\n"
+            ")"
+        )
         client = self.get_client()
         client.statement_execution.execute_statement(
             warehouse_id=self._extract_warehouse_id(),
-            statement=sql,
+            statement=statement,
+            parameters=[StatementParameterListItem(name="rows", value=rows_json)],
             wait_timeout="30s",
         )
 
