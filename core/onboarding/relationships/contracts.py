@@ -18,6 +18,19 @@ from core.contracts.versioning import register_contract
 
 EXECUTABLE_RELATIONSHIP_STATES = {"proven_data_model", "user_confirmed"}
 USER_DECIDED_RELATIONSHIP_STATES = {"user_confirmed", "rejected"}
+# Human-authored / data-model-proven evidence that a rebuild must NEVER silently
+# drop. A rebuild re-derives relationships from profiles + docs; for a
+# single-dataset workspace (or any run where the prior evidence is no longer
+# re-derivable) the rebuilt list can be empty. These states encode decisions or
+# proofs that are first-class evidence -- losing them on rebuild is silent
+# data loss (a user_confirmed/rejected decision, or a proven_data_model edge a
+# finalized model / diagram / promotion established earlier). They are carried
+# forward when the rebuild does not re-derive the same edge. Workspace-agnostic.
+PRESERVABLE_RELATIONSHIP_STATES = {
+    "user_confirmed",
+    "rejected",
+    "proven_data_model",
+}
 # A join the workspace's own documentation declares (data-model doc table row,
 # dictionary "joins to table.column" gloss) but that has not yet been proven
 # against observed key values. First-class evidence -- ranked above raw profile
@@ -139,6 +152,27 @@ class RelationshipContractBuilder:
         }
         json_path = self.layout.contracts_dir / "relationship_contracts.json"
         markdown_path = self.layout.reports_dir / "relationship_contracts.md"
+        # Data-loss floor: never overwrite a populated on-disk contracts file with
+        # an EMPTY relationships list. Preservation above carries forward
+        # human-authored / proven edges, so an empty result here means the rebuild
+        # had no evidence to re-derive AND nothing preservable on disk -- but if a
+        # populated file nonetheless exists (e.g. a single-dataset rebuild with
+        # legacy/unrecognized states), keep it rather than silently clobbering it.
+        # A genuinely fresh workspace (no prior file) still writes the empty result.
+        if not relationships:
+            existing = self._on_disk_relationships()
+            if existing:
+                return RelationshipContractResult(
+                    json_path=_rel(json_path, self.repo_root),
+                    markdown_path=_rel(markdown_path, self.repo_root),
+                    relationship_count=len(existing),
+                    executable_relationship_count=sum(
+                        1 for item in existing if _executable_allowed(item)
+                    ),
+                    candidate_relationship_count=sum(
+                        1 for item in existing if not _executable_allowed(item)
+                    ),
+                )
         json_path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
         markdown_path.write_text(_render_markdown(contract), encoding="utf-8")
         summary = contract["summary"]
@@ -167,6 +201,24 @@ class RelationshipContractBuilder:
             except Exception:
                 continue
         return existing
+
+    def _on_disk_relationships(self) -> list[dict[str, Any]]:
+        """The relationships currently persisted on disk (empty if none/unreadable).
+
+        Used by the data-loss floor in ``build()`` to decide whether an empty
+        rebuild would clobber a populated contracts file.
+        """
+        path = self.layout.contracts_dir / "relationship_contracts.json"
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return []
+        relationships = data.get("relationships")
+        if not isinstance(relationships, list):
+            return []
+        return [item for item in relationships if isinstance(item, dict)]
 
     def _profile_index(self) -> dict[str, dict[str, Any]]:
         path = self.layout.profiles_dir / "profile_index.json"
@@ -1484,7 +1536,7 @@ def _preserve_user_decided_relationships(
             continue
         seen_keys.add(key)
         prior = existing_by_key.get(key)
-        if prior and prior.get("state") in USER_DECIDED_RELATIONSHIP_STATES:
+        if prior and prior.get("state") in PRESERVABLE_RELATIONSHIP_STATES:
             carried = json.loads(json.dumps(prior))
             history = carried.setdefault("decision_history", [])
             history.append(
@@ -1498,10 +1550,13 @@ def _preserve_user_decided_relationships(
             preserved.append(carried)
         else:
             preserved.append(relationship)
+    # Carry forward any prior human-authored / proven edge the rebuild did NOT
+    # re-derive (e.g. a single-dataset rebuild that yields no edges, or a
+    # data-model doc that no longer parses). Dropping these is silent data loss.
     for key, prior in existing_by_key.items():
         if key in seen_keys:
             continue
-        if prior.get("state") in USER_DECIDED_RELATIONSHIP_STATES:
+        if prior.get("state") in PRESERVABLE_RELATIONSHIP_STATES:
             preserved.append(prior)
     return sorted(preserved, key=lambda item: item.get("relationship_id", ""))
 
