@@ -4,6 +4,16 @@
   "generated_by": "onboard-workspace",
   "workspace": "workspaces/Hostile_Synthetic",
   "source_registries": [
+    "workspaces/Hostile_Synthetic/dashboard/kpi_001.json",
+    "workspaces/Hostile_Synthetic/dashboard/kpi_002.json",
+    "workspaces/Hostile_Synthetic/dashboard/kpi_003.json",
+    "workspaces/Hostile_Synthetic/dashboard/kpi_004.json",
+    "workspaces/Hostile_Synthetic/dashboard/kpi_005.json",
+    "workspaces/Hostile_Synthetic/dashboard/kpi_006.json",
+    "workspaces/Hostile_Synthetic/dashboard/kpi_007.json",
+    "workspaces/Hostile_Synthetic/dashboard/kpi_008.json",
+    "workspaces/Hostile_Synthetic/dashboard/kpi_009.json",
+    "workspaces/Hostile_Synthetic/dashboard/kpi_010.json",
     "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md"
   ],
   "kpis": [

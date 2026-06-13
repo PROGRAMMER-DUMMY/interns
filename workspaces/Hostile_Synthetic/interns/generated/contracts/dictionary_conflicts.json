@@ -1,0 +1,122 @@
+{
+  "artifact_type": "dictionary_conflicts.json",
+  "version": 1,
+  "generated_by": "resolve-kpi-features",
+  "workspace": "workspaces/Hostile_Synthetic",
+  "generated_at": "2026-06-13T04:14:28.562648+00:00",
+  "dictionary_sources": [
+    "workspaces/Hostile_Synthetic/docs/data_dictionary.csv"
+  ],
+  "dictionary_row_count": 77,
+  "rule": "Dictionary descriptions are documentation evidence, not ground truth. Each conflict records a documented claim that generated profile evidence contradicts; error-severity conflicts must block any KPI that consumes the conflicted column until a human decides.",
+  "summary": {
+    "conflict_count": 5,
+    "error_count": 4,
+    "warning_count": 1
+  },
+  "conflicts": [
+    {
+      "dictionary_table": "shipments",
+      "dictionary_field": "wgt",
+      "dictionary_path": "workspaces/Hostile_Synthetic/docs/data_dictionary.csv",
+      "claim": "Chargeable weight in kilograms",
+      "dataset_name": "shipments.csv",
+      "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+      "row_count": 4200,
+      "type": "unit_mismatch",
+      "severity": "error",
+      "column": "wgt",
+      "claimed_qualifier": "kilograms",
+      "claimed_qualifier_canonical": "kg",
+      "qualifier_column": "wgt_uom",
+      "observed_values": [
+        "KG",
+        "LB"
+      ],
+      "detail": "The dictionary describes `shipments.wgt` with the single unit/qualifier claim `kilograms`, but the sibling column `shipments.csv.wgt_uom` observes mixed values ['KG', 'LB']. The documented single-unit claim does not hold for every row.",
+      "resolution_hint": "Values of `wgt` must be interpreted per-row via `wgt_uom` (e.g. normalized to one unit) before aggregation; using the raw column as documented is unsafe.",
+      "conflict_id": "dict_conflict_001"
+    },
+    {
+      "dictionary_table": "shipments",
+      "dictionary_field": "Amount",
+      "dictionary_path": "workspaces/Hostile_Synthetic/docs/data_dictionary.csv",
+      "claim": "Final invoiced revenue for the shipment in GBP",
+      "dataset_name": "shipments.csv",
+      "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+      "row_count": 4200,
+      "type": "unit_mismatch",
+      "severity": "error",
+      "column": "Amount",
+      "claimed_qualifier": "GBP",
+      "claimed_qualifier_canonical": "gbp",
+      "qualifier_column": "ccy",
+      "observed_values": [
+        "EUR",
+        "GBP"
+      ],
+      "detail": "The dictionary describes `shipments.Amount` with the single unit/qualifier claim `GBP`, but the sibling column `shipments.csv.ccy` observes mixed values ['EUR', 'GBP']. The documented single-unit claim does not hold for every row.",
+      "resolution_hint": "Values of `Amount` must be interpreted per-row via `ccy` (e.g. normalized to one unit) before aggregation; using the raw column as documented is unsafe.",
+      "conflict_id": "dict_conflict_002"
+    },
+    {
+      "dictionary_table": "shipments",
+      "dictionary_field": "Amount",
+      "dictionary_path": "workspaces/Hostile_Synthetic/docs/data_dictionary.csv",
+      "claim": "Final invoiced revenue for the shipment in GBP",
+      "dataset_name": "shipments.csv",
+      "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+      "row_count": 4200,
+      "type": "misattributed_claim",
+      "severity": "warning",
+      "column": "Amount",
+      "suspected_dataset": "invoices.csv",
+      "suspected_column": "Amount",
+      "matched_terms": [
+        "invoic"
+      ],
+      "detail": "The dictionary describes `shipments.Amount` using wording that names a different dataset (`invoices.csv`), which carries its own `Amount` column. The documented meaning may belong to that other column; treating `shipments.csv.Amount` as documented risks using the wrong source.",
+      "resolution_hint": "Confirm which column actually holds what the description claims: `shipments.csv.Amount` or `invoices.csv.Amount`.",
+      "conflict_id": "dict_conflict_003"
+    },
+    {
+      "dictionary_table": "shipments",
+      "dictionary_field": "del_date",
+      "dictionary_path": "workspaces/Hostile_Synthetic/docs/data_dictionary.csv",
+      "claim": "Actual delivery date",
+      "dataset_name": "shipments.csv",
+      "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+      "row_count": 4200,
+      "type": "phantom_column",
+      "severity": "error",
+      "column": "",
+      "detail": "The dictionary documents `shipments.del_date`, but no profiled dataset contains that column. The documented column does not exist (renamed, dropped, or never shipped).",
+      "resolution_hint": "Identify which physical column (if any) replaced this documented field, or mark the dictionary entry as obsolete.",
+      "conflict_id": "dict_conflict_004"
+    },
+    {
+      "dictionary_table": "party",
+      "dictionary_field": "Status",
+      "dictionary_path": "workspaces/Hostile_Synthetic/docs/data_dictionary.csv",
+      "claim": "Account status: ACTIVE or CLOSED",
+      "dataset_name": "party.csv",
+      "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_masters_party.csv.profile.json",
+      "row_count": 240,
+      "type": "enum_mismatch",
+      "severity": "error",
+      "column": "Status",
+      "declared_values": [
+        "ACTIVE",
+        "CLOSED"
+      ],
+      "observed_values": [
+        "A",
+        "C",
+        "S"
+      ],
+      "detail": "The dictionary declares values ['ACTIVE', 'CLOSED'] for `party.Status`, but profiled values of `party.csv.Status` are ['A', 'C', 'S'] -- none of the documented vocabulary exists in the data.",
+      "resolution_hint": "Map each observed code to its business meaning, or correct the dictionary; the documented vocabulary cannot be used in filters.",
+      "conflict_id": "dict_conflict_005"
+    }
+  ]
+}

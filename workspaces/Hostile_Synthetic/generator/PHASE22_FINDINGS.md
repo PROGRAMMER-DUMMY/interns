@@ -148,3 +148,79 @@ generate-kpi-sql -> execution harness):
   (non-reentrant `workspace_lock`); the timeout reports the process's own pid
   as the holder. Pre-existing at base 8bc4141; worked around by running
   `onboard-workspace` first. Worth a reentrancy fix or lock hoisting.
+
+## Slice 3 refinements (2026-06-13)
+
+Phase 2.2 left four hostile gaps open (dictionary reconciliation, richer
+derived-feature synthesis, false-presupposition labeling, lock reentrancy).
+Slice 3 addressed three of the four; this section APPENDS results without
+rewriting the Phase 2.2 record above. Regenerated end-to-end on this date via
+`onboard-workspace` -> `prepare-kpi-blocker-panel --domain logistics` ->
+`validate-workspace-artifacts` (validator: 0 errors, 8 expected
+empty-metric+cuts warnings). Platform code never reads GROUND_TRUTH.md; the
+scoring below is a human cross-check.
+
+### Updated scorecard vs GROUND_TRUTH.md
+
+| Expectation | Phase 2.2 | Slice 3 |
+|---|---|---|
+| Dictionary contradictions flagged | [x] not attempted | [ok] all four false/stale entries flagged in `dictionary_conflicts.json` (4 error + 1 warning) |
+| KPIs 1,3,8,10 carry JSON-backed derived options | [~] only KPI 3 candidate-column confirm | [~] KPI 8 now carries `wgt_kg` UOM-normalization option; 1/3/10 still bare asks (see open items) |
+| KPI 5 false presupposition explicitly labeled | [~] blocked, unlabeled | [~] still unlabeled here (see open items) |
+| `prepare --force-onboard` reentrancy | [x] self-deadlock | [ok] fixed: `workspace_lock` is re-entrant per pid+thread |
+| No silently wrong numeric answers | [ok] ready=0 | [ok] ready=0; nothing fabricated |
+| Honest evidence-backed blocker per KPI | [ok] 10/10 | [ok] 10/10 |
+
+### 1a - workspace-lock reentrancy (commit 8a2fb48)
+`workspace_lock` now tracks owner `(pid, thread)` + depth, so nested
+acquisition in one process (CLI lock -> `WorkspaceOnboarder.run()`) no longer
+self-deadlocks; cross-thread/cross-process exclusion is unchanged. The
+"Environmental notes" deadlock above is resolved.
+
+### 1b - dictionary-vs-profile reconciliation (commit 322592e)
+New `core/onboarding/documents/dictionary_reconciliation.py` cross-checks every
+documented claim against profile evidence. On Hostile_Synthetic it emits 5
+conflicts covering all four designed lies:
+- `shipments.wgt` "kilograms" -> `unit_mismatch` (error): profiled values are
+  mixed KG/LB.
+- `shipments.Amount` "final invoiced revenue" -> `misattributed_claim`
+  (warning, names `invoices.csv`) + `unit_mismatch` (error, GBP claim vs mixed).
+- `shipments.del_date` -> `phantom_column` (error): no profiled dataset has it.
+- `party.Status` "ACTIVE/CLOSED" -> `enum_mismatch` (error): observed A/C/S.
+Error-severity conflicts demote a proven feature on the tainted column to an
+answerable `dictionary_conflict` blocker; the validator fails any ready KPI
+consuming an error-conflicted column without a `user_confirmed` decision.
+
+### 1c - no_supporting_evidence labeling (commit 2ea52f1)
+The resolver labels a blocked KPI `no_supporting_evidence` when NO prose term
+anchors to any profiled column, dataset name, dictionary description, or
+accepted definition (panel then asks confirm-absence-or-point-at-source).
+Note: on this RICH 57-table workspace, every KPI (including 5 and 9) anchors to
+at least one column once the dictionary is enriched, so the strict zero-anchor
+label does not fire here. The feature is exercised by unit tests and fires on
+genuinely anchorless KPIs.
+
+### 1d - derived-feature option synthesis (commit 532d950)
+A new generic, evidence-driven detector recognizes a quantity stored in MIXED
+units (numeric column + sibling unit-of-measure column with >=2 observed unit
+codes) and proposes a JSON-backed normalization option. KPI 8 now carries:
+`wgt_kg = CASE upper(trim("wgt_uom")) WHEN 'KG' THEN "wgt" WHEN 'LB' THEN
+"wgt" * 0.45359237 ELSE NULL END` (the GROUND_TRUTH-expected formula and
+factor). Detection uses universal physical constants only; no domain
+vocabulary or per-workspace column list.
+
+### Still open after Slice 3
+- **KPI 1 (on_time) derived option**: needs a cross-table SLA-deadline
+  comparison (`date(END) <= date(START) + svc_catalog.sla_days`) -- a join-fed
+  derivation the current single-table detectors do not synthesize. Honest
+  blocker stays.
+- **KPI 3 (dwell) derived option**: needs a consecutive-leg self-join window
+  (`START` of leg n+1 minus `END` of leg n, attributed to the intermediate
+  facility) -- ordered self-join, not yet a detector. Honest blocker stays.
+- **KPI 10 (perfect shipment) derived option**: composite of KPI 1/4/7
+  outcomes; depends on those derivations existing first. Honest blocker stays.
+- **KPI 5 explicit false-presupposition label**: `svc`/`premium_flag` exist so
+  the KPI is not zero-anchor; flagging it specifically needs event-level
+  evidence-absence detection (no post-dispatch service-change audit grain),
+  which is stronger than the 1c zero-anchor rule. Honest blocker stays
+  (no numeric answer emitted).

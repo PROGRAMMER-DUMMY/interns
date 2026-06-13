@@ -4,7 +4,7 @@
   "generated_by": "resolve-kpi-features",
   "workspace": "workspaces/Hostile_Synthetic",
   "mode": "candidate_enriched",
-  "generated_at": "2026-06-12T09:03:55.743828+00:00",
+  "generated_at": "2026-06-13T04:14:28.284607+00:00",
   "derived_feature_evidence_contract": {
     "version": 1,
     "required_fields": [
@@ -64,7 +64,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
               "column": "sla_days",
               "matched_terms": [
                 "day",
@@ -75,7 +75,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
               "column": "Id",
               "matched_terms": [
                 "not",
@@ -88,7 +88,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
               "column": "premium_flag",
               "matched_terms": [
                 "is",
@@ -100,7 +100,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "Date",
               "matched_terms": [
                 "booked",
@@ -112,7 +112,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
               "column": "END",
               "matched_terms": [
                 "day",
@@ -124,7 +124,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
               "column": "START",
               "matched_terms": [
                 "day",
@@ -136,7 +136,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
               "column": "carrier_cd",
               "matched_terms": [
                 "carrier"
@@ -146,7 +146,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\customers_legacy.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\customers_legacy.csv",
               "column": "customer_name",
               "matched_terms": [
                 "customer"
@@ -156,7 +156,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "carrier_cd",
               "matched_terms": [
                 "carrier"
@@ -166,7 +166,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
               "column": "rate_to_gbp",
               "matched_terms": [
                 "rate"
@@ -216,7 +216,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
               "column": "Status",
               "matched_terms": [
                 "invoice",
@@ -228,7 +228,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
               "column": "Status",
               "matched_terms": [
                 "account",
@@ -241,7 +241,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "Status",
               "matched_terms": [
                 "in",
@@ -253,7 +253,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
               "column": "Status",
               "matched_terms": [
                 "statu",
@@ -264,7 +264,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
               "column": "inv_no",
               "matched_terms": [
                 "has",
@@ -276,7 +276,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
               "column": "Status",
               "matched_terms": [
                 "in",
@@ -288,7 +288,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\customer\\complaints.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\customer\\complaints.csv",
               "column": "Status",
               "matched_terms": [
                 "statu",
@@ -299,7 +299,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
               "column": "Status",
               "matched_terms": [
                 "statu",
@@ -310,7 +310,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
               "column": "acct",
               "matched_terms": [
                 "account",
@@ -322,7 +322,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\purchase_orders.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\purchase_orders.csv",
               "column": "Status",
               "matched_terms": [
                 "statu",
@@ -358,7 +358,7 @@
           "resolution_type": "direct_column",
           "source_columns": [
             {
-              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
               "column": "hours",
               "dtype": "Float64",
               "row_count": 1100,
@@ -413,7 +413,7 @@
                 ],
                 "dictionary_evidence": null,
                 "profile_evidence": {
-                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
                   "column": "hours",
                   "dtype": "Float64",
                   "row_count": 1100,
@@ -469,7 +469,7 @@
           "evidence": [
             {
               "type": "schema_profile",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
               "column": "hours"
             }
           ],
@@ -483,7 +483,7 @@
           "resolution_type": "derived_metric_unconfirmed",
           "source_columns": [
             {
-              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
               "column": "hours",
               "dtype": "Float64",
               "row_count": 1100,
@@ -538,7 +538,7 @@
                 ],
                 "dictionary_evidence": null,
                 "profile_evidence": {
-                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
                   "column": "hours",
                   "dtype": "Float64",
                   "row_count": 1100,
@@ -601,7 +601,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
               "column": "hours",
               "matched_terms": [
                 "hour",
@@ -612,7 +612,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
               "column": "depot",
               "matched_terms": [
                 "depot"
@@ -622,7 +622,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
               "column": "depot",
               "matched_terms": [
                 "depot"
@@ -632,7 +632,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
               "column": "depot",
               "matched_terms": [
                 "depot"
@@ -647,7 +647,7 @@
             {
               "state": "candidate_unconfirmed",
               "column": "hours",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\people\\timesheets.csv",
               "reason": "Column matched the machine-derived metric by name; needs human confirmation."
             }
           ],
@@ -681,30 +681,30 @@
           "resolution_type": "direct_column",
           "source_columns": [
             {
-              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
               "column": "carrier_cd",
               "dtype": "String",
               "row_count": 84,
               "score": null,
               "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_settlements.csv.profile.json",
               "observed_values": [
-                "DNUB",
+                "ARRW",
                 "BLTC",
-                "FNCH",
                 "CDRX",
+                "DNUB",
                 "EGRT",
-                "GRYP",
-                "ARRW"
+                "FNCH",
+                "GRYP"
               ],
               "value_profile": {
                 "sample_values": [
-                  "DNUB",
+                  "ARRW",
                   "BLTC",
-                  "FNCH",
                   "CDRX",
+                  "DNUB",
                   "EGRT",
-                  "GRYP",
-                  "ARRW"
+                  "FNCH",
+                  "GRYP"
                 ],
                 "sample_min": null,
                 "sample_max": null,
@@ -747,20 +747,20 @@
                   "file": "workspaces/Hostile_Synthetic/docs/data_dictionary.csv"
                 },
                 "profile_evidence": {
-                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
                   "column": "carrier_cd",
                   "dtype": "String",
                   "row_count": 84,
                   "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_finance_settlements.csv.profile.json",
                   "value_profile": {
                     "sample_values": [
-                      "DNUB",
+                      "ARRW",
                       "BLTC",
-                      "FNCH",
                       "CDRX",
+                      "DNUB",
                       "EGRT",
-                      "GRYP",
-                      "ARRW"
+                      "FNCH",
+                      "GRYP"
                     ],
                     "sample_min": null,
                     "sample_max": null,
@@ -776,16 +776,16 @@
                 "sample_query": "SELECT \"carrier_cd\" AS \"carriercd\" FROM \"settlements\" LIMIT 5;",
                 "sample_output": [
                   {
-                    "carriercd": "DNUB"
+                    "carriercd": "ARRW"
                   },
                   {
                     "carriercd": "BLTC"
                   },
                   {
-                    "carriercd": "FNCH"
+                    "carriercd": "CDRX"
                   },
                   {
-                    "carriercd": "CDRX"
+                    "carriercd": "DNUB"
                   },
                   {
                     "carriercd": "EGRT"
@@ -796,16 +796,16 @@
               "reason": "Column is present in generated profile evidence and matched the KPI term directly or through a configured alias."
             },
             {
-              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "carrier_cd",
               "dtype": "String",
               "row_count": 4200,
               "score": null,
               "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
               "observed_values": [
-                "CDRX",
                 "ARRW",
                 "BLTC",
+                "CDRX",
                 "DNUB",
                 "EGRT",
                 "FNCH",
@@ -813,9 +813,9 @@
               ],
               "value_profile": {
                 "sample_values": [
-                  "CDRX",
                   "ARRW",
                   "BLTC",
+                  "CDRX",
                   "DNUB",
                   "EGRT",
                   "FNCH",
@@ -862,16 +862,16 @@
                   "file": "workspaces/Hostile_Synthetic/docs/data_dictionary.csv"
                 },
                 "profile_evidence": {
-                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
                   "column": "carrier_cd",
                   "dtype": "String",
                   "row_count": 4200,
                   "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
                   "value_profile": {
                     "sample_values": [
-                      "CDRX",
                       "ARRW",
                       "BLTC",
+                      "CDRX",
                       "DNUB",
                       "EGRT",
                       "FNCH",
@@ -891,13 +891,13 @@
                 "sample_query": "SELECT \"carrier_cd\" AS \"carriercd\" FROM \"shipments\" LIMIT 5;",
                 "sample_output": [
                   {
-                    "carriercd": "CDRX"
-                  },
-                  {
                     "carriercd": "ARRW"
                   },
                   {
                     "carriercd": "BLTC"
+                  },
+                  {
+                    "carriercd": "CDRX"
                   },
                   {
                     "carriercd": "DNUB"
@@ -917,12 +917,12 @@
           "evidence": [
             {
               "type": "schema_profile",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
               "column": "carrier_cd"
             },
             {
               "type": "schema_profile",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "carrier_cd"
             },
             {
@@ -956,7 +956,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
               "column": "claim_type",
               "matched_terms": [
                 "claim",
@@ -971,7 +971,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
               "column": "ship_ref",
               "matched_terms": [
                 "against",
@@ -984,7 +984,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
               "column": "rate_to_gbp",
               "matched_terms": [
                 "rate",
@@ -995,7 +995,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\settlements.csv",
               "column": "carrier_cd",
               "matched_terms": [
                 "carrier",
@@ -1006,7 +1006,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "carrier_cd",
               "matched_terms": [
                 "carrier",
@@ -1017,7 +1017,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
               "column": "Amount",
               "matched_terms": [
                 "by",
@@ -1029,7 +1029,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
               "column": "Id",
               "matched_terms": [
                 "claim",
@@ -1040,7 +1040,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\rate_cards.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\rate_cards.csv",
               "column": "acct",
               "matched_terms": [
                 "rate",
@@ -1051,7 +1051,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
               "column": "to_loc",
               "matched_terms": [
                 "to"
@@ -1061,7 +1061,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\fuel_logs.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\fuel_logs.csv",
               "column": "Amount",
               "matched_terms": [
                 "log",
@@ -1112,7 +1112,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "Date",
               "matched_terms": [
                 "job",
@@ -1126,7 +1126,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "Id",
               "matched_terms": [
                 "shipment",
@@ -1138,7 +1138,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "svc",
               "matched_terms": [
                 "service",
@@ -1151,7 +1151,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\svc_catalog.csv",
               "column": "premium_flag",
               "matched_terms": [
                 "premium",
@@ -1162,7 +1162,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
               "column": "ship_no",
               "matched_terms": [
                 "shipment",
@@ -1174,7 +1174,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
               "column": "ship_ref",
               "matched_terms": [
                 "shipment",
@@ -1186,7 +1186,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
               "column": "ship_ref",
               "matched_terms": [
                 "shipment",
@@ -1198,7 +1198,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "Amount",
               "matched_terms": [
                 "shipment",
@@ -1209,7 +1209,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "carrier_cd",
               "matched_terms": [
                 "shipment",
@@ -1221,7 +1221,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "cust_ref",
               "matched_terms": [
                 "shipment",
@@ -1273,7 +1273,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
               "column": "Status",
               "matched_terms": [
                 "disposed",
@@ -1287,7 +1287,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
               "column": "class_cd",
               "matched_terms": [
                 "vehicle",
@@ -1298,7 +1298,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
               "column": "vin",
               "matched_terms": [
                 "vehicle",
@@ -1309,7 +1309,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
               "column": "depot",
               "matched_terms": [
                 "vehicle",
@@ -1320,7 +1320,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
               "column": "reg_no",
               "matched_terms": [
                 "vehicle",
@@ -1331,7 +1331,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\movements.csv",
               "column": "Amount",
               "matched_terms": [
                 "in",
@@ -1342,7 +1342,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\vehicle_classes.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\reference\\vehicle_classes.csv",
               "column": "class_cd",
               "matched_terms": [
                 "vehicle"
@@ -1392,7 +1392,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
               "column": "inv_no",
               "matched_terms": [
                 "dispute",
@@ -1407,7 +1407,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
               "column": "inv_no",
               "matched_terms": [
                 "invoice",
@@ -1420,7 +1420,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
               "column": "opened",
               "matched_terms": [
                 "dispute",
@@ -1432,7 +1432,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
               "column": "Amount",
               "matched_terms": [
                 "invoice",
@@ -1445,7 +1445,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
               "column": "Id",
               "matched_terms": [
                 "invoice",
@@ -1457,7 +1457,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\reference\\shifts.csv",
               "column": "END",
               "matched_terms": [
                 "end",
@@ -1468,7 +1468,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
               "column": "Amount",
               "matched_terms": [
                 "dispute",
@@ -1479,7 +1479,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
               "column": "Id",
               "matched_terms": [
                 "dispute",
@@ -1490,7 +1490,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
               "column": "Date",
               "matched_terms": [
                 "invoice",
@@ -1501,7 +1501,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
               "column": "Status",
               "matched_terms": [
                 "invoice",
@@ -1533,136 +1533,163 @@
       "status": "blocked_questions_pending",
       "features": [
         {
-          "feature": "KPI definition",
+          "feature": "wgt_kg",
           "state": "blocked_missing_evidence",
-          "resolution_type": "kpi_definition_required",
+          "resolution_type": "derived_formula",
           "source_columns": [],
-          "grain": "undefined",
+          "grain": "derived",
           "conflicts": [],
           "decision_history": [],
-          "evidence": [
+          "evidence": [],
+          "candidate_patterns": [],
+          "derived_feature_options": [
             {
-              "type": "kpi_registry_placeholder",
-              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-              "refinement_required": ""
-            },
-            {
-              "type": "kpi_prose",
-              "source": "workspaces/Hostile_Synthetic/docs/kpi_wishlist_ops_review.md",
-              "excerpt": "\"Take the freight charge and divide by the weight, lane by lane, so I can see which corridors\nare bleeding us. Watch the weights - half the legacy depots still key imperial.\""
-            },
-            {
-              "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
-              "column": "charge_type",
-              "matched_terms": [
-                "charge"
+              "derived_column_name": "wgt_kg",
+              "source_pattern_id": "uom_normalization",
+              "business_meaning": "`wgt` is stored in mixed mass units (observed: KG (x1), LB (x1)); this normalizes every row to KG using `wgt_uom` so the values can be summed or averaged.",
+              "formula": "CASE upper(trim(\"wgt_uom\")) WHEN 'KG' THEN \"wgt\" WHEN 'LB' THEN \"wgt\" * 0.45359237 ELSE NULL END",
+              "input_columns": [
+                {
+                  "input_name": "quantity",
+                  "column": "wgt",
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+                  "dtype": "Float64",
+                  "role": "formula_input",
+                  "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+                  "row_count": 4200,
+                  "observed_values": [
+                    2.9,
+                    3.1,
+                    3.8,
+                    4.2,
+                    4.3,
+                    5.3,
+                    5.5,
+                    5.7
+                  ],
+                  "value_profile": {
+                    "sample_values": [
+                      2.9,
+                      3.1,
+                      3.8,
+                      4.2,
+                      4.3,
+                      5.3,
+                      5.5,
+                      5.7
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": null,
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  },
+                  "semantic_meaning_sources": [
+                    {
+                      "file": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+                      "field": "wgt",
+                      "meaning": "Column `wgt` is bound to required derivation input `quantity` by schema/profile name matching.",
+                      "evidence_state": "schema_profile_inferred"
+                    }
+                  ],
+                  "reason": "Used for `quantity` because `wgt` was the closest available profiled column in `C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv`. This is candidate evidence, not a business definition.",
+                  "example_value": 2.9,
+                  "evidence_state": "profile_inferred"
+                },
+                {
+                  "input_name": "unit",
+                  "column": "wgt_uom",
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+                  "dtype": "String",
+                  "role": "formula_input",
+                  "profile_path": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+                  "row_count": 4200,
+                  "observed_values": [
+                    "KG",
+                    "LB"
+                  ],
+                  "value_profile": {
+                    "sample_values": [
+                      "KG",
+                      "LB"
+                    ],
+                    "sample_min": null,
+                    "sample_max": null,
+                    "exact_min": null,
+                    "exact_max": null,
+                    "metadata_min": null,
+                    "metadata_max": null,
+                    "null_count": null,
+                    "profile_source": null,
+                    "note": "Values come from bounded profile evidence, not a full raw-data dump."
+                  },
+                  "semantic_meaning_sources": [
+                    {
+                      "file": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+                      "field": "wgt_uom",
+                      "meaning": "Column `wgt_uom` is bound to required derivation input `unit` by schema/profile name matching.",
+                      "evidence_state": "schema_profile_inferred"
+                    }
+                  ],
+                  "reason": "Used for `unit` because `wgt_uom` was the closest available profiled column in `C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv`. This is candidate evidence, not a business definition.",
+                  "example_value": "KG",
+                  "evidence_state": "profile_inferred"
+                }
               ],
-              "dictionary_description": "Line charge class: BASE / FUEL / ACCESSORIAL",
-              "score": 5.0
-            },
-            {
-              "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\drivers.csv",
-              "column": "depot",
-              "matched_terms": [
-                "depot"
+              "example": {
+                "example_type": "synthetic_formula_example",
+                "input": {
+                  "wgt": 2.9,
+                  "wgt_uom": "KG"
+                },
+                "output": {
+                  "wgt_kg": "apply the formula to the example inputs"
+                },
+                "substituted_formula": "CASE upper(trim(\"wgt_uom\")) WHEN 'KG' THEN \"wgt\" WHEN 'LB' THEN \"wgt\" * 0.45359237 ELSE NULL END",
+                "warning": "Example demonstrates formula mechanics only; it is not workspace ground truth."
+              },
+              "evidence_sources": [
+                {
+                  "file": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+                  "column": "wgt",
+                  "evidence_type": "profile_schema",
+                  "evidence": "Input column `wgt` is present in generated profile evidence.",
+                  "evidence_state": "schema_presence_only"
+                },
+                {
+                  "file": "workspaces/Hostile_Synthetic/interns/generated/profiles/datasets_operations_shipments.csv.profile.json",
+                  "dataset": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+                  "column": "wgt_uom",
+                  "evidence_type": "profile_schema",
+                  "evidence": "Input column `wgt_uom` is present in generated profile evidence.",
+                  "evidence_state": "schema_presence_only"
+                }
               ],
-              "dictionary_description": "Home depot; joins to locs.loc_nbr",
-              "score": 5.0
-            },
-            {
-              "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
-              "column": "depot",
-              "matched_terms": [
-                "depot"
-              ],
-              "dictionary_description": "Home depot; joins to locs.loc_nbr",
-              "score": 5.0
-            },
-            {
-              "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\lanes.csv",
-              "column": "lane_id",
-              "matched_terms": [
-                "lane"
-              ],
-              "dictionary_description": "",
-              "score": 5.0
-            },
-            {
-              "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\vehicles.csv",
-              "column": "depot",
-              "matched_terms": [
-                "depot"
-              ],
-              "dictionary_description": "Home depot; joins to locs.loc_nbr",
-              "score": 5.0
-            },
-            {
-              "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
-              "column": "wgt",
-              "matched_terms": [
-                "kilogram",
-                "weight"
-              ],
-              "dictionary_description": "Chargeable weight in kilograms",
-              "score": 4.0
-            },
-            {
-              "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\fuel_prices.csv",
-              "column": "pence_per_litre",
-              "matched_terms": [
-                "per"
-              ],
-              "dictionary_description": "",
-              "score": 3.0
-            },
-            {
-              "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\quotes.csv",
-              "column": "lane_id",
-              "matched_terms": [
-                "lane"
-              ],
-              "dictionary_description": "",
-              "score": 3.0
-            },
-            {
-              "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
-              "column": "min_charge",
-              "matched_terms": [
-                "charge"
-              ],
-              "dictionary_description": "",
-              "score": 3.0
-            },
-            {
-              "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\pricing\\tariffs.csv",
-              "column": "rate_per_kg",
-              "matched_terms": [
-                "per"
-              ],
-              "dictionary_description": "",
-              "score": 3.0
+              "derivation_reasoning": {
+                "summary": "`wgt_uom` carries more than one mass unit code (KG (x1), LB (x1)), so raw `wgt` mixes units and cannot be aggregated directly; conversion to KG uses universal physical constants. Confirm the target unit and that `wgt_uom` governs `wgt`.",
+                "why_this_formula": "`wgt_uom` carries more than one mass unit code (KG (x1), LB (x1)), so raw `wgt` mixes units and cannot be aggregated directly; conversion to KG uses universal physical constants. Confirm the target unit and that `wgt_uom` governs `wgt`.",
+                "why_not_ground_truth": "No source artifact explicitly defines this derived column with this formula.",
+                "remaining_risk": "Input columns are profile-backed, but the business meaning still needs confirmation.",
+                "evidence_state": "candidate_derivation_not_ground_truth"
+              },
+              "evidence_state": "candidate_derivation_not_ground_truth",
+              "confidence": "medium",
+              "needs_user_confirmation": true
             }
           ],
-          "candidate_patterns": [],
-          "derived_feature_options": [],
           "candidates": [],
-          "question": "Define the metric and grain for `KPI 8 - Average cost per kilogram by lane`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+          "question": "Confirm the derived feature `wgt_kg` (pattern `uom_normalization`) for this KPI, or supply a definition."
         }
       ],
       "function_context": [],
       "join_candidates": [],
       "open_questions": [
-        "Define the metric and grain for `KPI 8 - Average cost per kilogram by lane`: which datasets, columns, filters, or derivations implement the prose definition? Matched workspace evidence is attached; confirm with apply-kpi-definition."
+        "Confirm the derived feature `wgt_kg` (pattern `uom_normalization`) for this KPI, or supply a definition."
       ]
     },
     {
@@ -1694,7 +1721,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
               "column": "party_key",
               "matched_terms": [
                 "account",
@@ -1706,7 +1733,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
               "column": "Id",
               "matched_terms": [
                 "thi",
@@ -1757,7 +1784,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
               "column": "inv_no",
               "matched_terms": [
                 "dispute",
@@ -1769,7 +1796,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
               "column": "inv_no",
               "matched_terms": [
                 "no",
@@ -1781,7 +1808,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
               "column": "inv_no",
               "matched_terms": [
                 "no",
@@ -1792,7 +1819,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
               "column": "claim_type",
               "matched_terms": [
                 "claim",
@@ -1803,7 +1830,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\cargo_claims.csv",
               "column": "ship_ref",
               "matched_terms": [
                 "claim",
@@ -1814,7 +1841,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\shipments.csv",
               "column": "Id",
               "matched_terms": [
                 "number",
@@ -1825,7 +1852,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\invoices.csv",
               "column": "ship_no",
               "matched_terms": [
                 "no",
@@ -1836,7 +1863,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
               "column": "rate_to_gbp",
               "matched_terms": [
                 "rate"
@@ -1846,7 +1873,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
               "column": "Amount",
               "matched_terms": [
                 "dispute"
@@ -1856,7 +1883,7 @@
             },
             {
               "type": "prose_term_match",
-              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\.claude\\worktrees\\agent-a122d47b32149fd70\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+              "source": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
               "column": "Id",
               "matched_terms": [
                 "dispute"
@@ -1878,12 +1905,18 @@
       ]
     }
   ],
+  "dictionary_conflicts": {
+    "contract_path": "workspaces/Hostile_Synthetic/interns/generated/contracts/dictionary_conflicts.json",
+    "conflict_count": 5,
+    "error_count": 4,
+    "warning_count": 1
+  },
   "blocker_clusters": [
     {
       "feature": "KPI definition",
-      "count": 9,
+      "count": 8,
       "risk": "business_semantics",
-      "priority_score": 209,
+      "priority_score": 208,
       "example_kpis": [
         "kpi_001",
         "kpi_002",
@@ -1900,6 +1933,16 @@
         "kpi_003"
       ],
       "recommended_question": "What source, formula, or accepted rule should define `kpi_003 derived metric`?"
+    },
+    {
+      "feature": "wgt_kg",
+      "count": 1,
+      "risk": "business_semantics",
+      "priority_score": 201,
+      "example_kpis": [
+        "kpi_008"
+      ],
+      "recommended_question": "What source, formula, or accepted rule should define `wgt_kg`?"
     }
   ],
   "summary": {

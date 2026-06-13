@@ -1,0 +1,14 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\dashboard\\index.json",
+  "format": "json",
+  "row_count": null,
+  "file_count": 1,
+  "size_bytes": 1764,
+  "schema": {},
+  "sources_used": [],
+  "warnings": [
+    "polars_profile_failed:ComputeError:Syntax at character 0 ('{')"
+  ],
+  "columns": [],
+  "downcast_recommendations": []
+}
