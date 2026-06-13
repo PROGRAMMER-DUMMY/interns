@@ -24,11 +24,11 @@ Section-by-section deep read of `core/` (227 files, ~86.9k lines). Each package 
 | context | core/context | 5 | 1060 | **done** — BUG:2 INT:1 NP:2 DEAD:1 DUP:1 MISS:1 | `context.md` |
 | wiki | core/wiki | 6 | 928 | **done** — BUG:5 INT:1 NP:2 MISS:2 DEAD:1 DUP:2 | `wiki.md` |
 | dashboard | core/dashboard | 9 | 3773 | **done** — BUG:6 NP:8 DEAD:2 MISS:1 | `dashboard.md` |
-| medallion-A | core/medallion (design/build/schema) | ~16 | ~3600 | pending | `medallion-a.md` |
-| medallion-B | core/medallion (lineage/emit/deploy) | ~15 | ~3000 | pending | `medallion-b.md` |
+| medallion-A | core/medallion (design/build/schema) | ~16 | ~3600 | **done** — BUG:9 NP:6 DEAD:2 INT:1 DUP:1 | `medallion-a.md` |
+| medallion-B | core/medallion (lineage/emit/deploy) | ~15 | ~3000 | **done** — BUG:7 NP:4 DEAD:1 DUP:1 INT:1 MISS:1 | `medallion-b.md` |
 | execution | core/execution | 3 | 909 | **done** — BUG:4 NP:7 MISS:1 DEAD:1 DUP:2 | `execution.md` |
 | small-combo | contracts+dev+resource+presentation+profiling+skills+observability | 23 | ~3500 | **done** — BUG:2 INT:2 NP:6 MISS:1 DEAD:3 DUP:1 | `small-combo.md` |
-| onboarding-root | core/onboarding/*.py | 12 | ~3800 | pending | `onboarding-root.md` |
+| onboarding-root | core/onboarding/*.py | 12 | ~3800 | **done** — BUG:5 NP:3 INT:2 MISS:1 DEAD:1 DUP:1 | `onboarding-root.md` |
 | ob-kpi-A | onboarding/kpi (intent/resolve/derive) | ~10 | ~7000 | pending | `ob-kpi-a.md` |
 | ob-kpi-B | onboarding/kpi (engines/parity/exec) | ~8 | ~4000 | pending | `ob-kpi-b.md` |
 | ob-kpi-C | onboarding/kpi (panels/blockers) | ~7 | ~5000 | pending | `ob-kpi-c.md` |
@@ -38,8 +38,8 @@ Section-by-section deep read of `core/` (227 files, ~86.9k lines). Each package 
 | ob-workspace-C | onboarding/workspace (runner/idempotency/misc) | ~10 | ~3000 | pending | `ob-workspace-c.md` |
 | ob-harness | onboarding/harness | 11 | ~5000 | pending | `ob-harness.md` |
 | ob-data_model | onboarding/data_model | 5 | ~5000 | pending | `ob-data_model.md` |
-| ob-relationships | onboarding/relationships | 4 | ~3500 | pending | `ob-relationships.md` |
-| ob-documents | onboarding/documents | 5 | ~2500 | pending | `ob-documents.md` |
+| ob-relationships | onboarding/relationships | 4 | ~3500 | **done** — BUG:7 INT:4 MISS:2 DUP:1 NP:1 | `ob-relationships.md` |
+| ob-documents | onboarding/documents | 5 | ~2500 | **done** — BUG:4 NP:5 INT:2 MISS:1 DUP:1 | `ob-documents.md` |
 | ob-databricks | onboarding/databricks | 4 | ~2500 | pending | `ob-databricks.md` |
 | ob-sources | onboarding/sources | 4 | ~3000 | pending | `ob-sources.md` |
 | ob-features | onboarding/features | 6 | ~2000 | pending | `ob-features.md` |
