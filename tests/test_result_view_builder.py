@@ -309,14 +309,23 @@ def test_date_arithmetic_days_since():
     assert "days_since_order_date" in sql
 
 
-def test_mismatched_grain_percentage_now_emits_window_function_instead_of_fallback():
-    """KPI_002 shape: previously a fallback comment. Now it composes."""
+def test_mismatched_grain_percentage_row_based_share_emits_window_function():
+    """Mismatched-grain percentage on a ROW-BASED (non-distinct) share composes via
+    window functions instead of a fallback comment.
+
+    The window path applies to row-based shares (``sum`` / non-distinct ``count``):
+    every row already belongs to exactly one grain cell, so the numerator partitions
+    by the full grain and the denominator is the grand total. DISTINCT-entity shares
+    (``sum(distinct <entity>)``) deliberately take the single-attribution path instead
+    — see ``ShareOfTotalByGroupTests`` and the human-confirmed share-attribution
+    decision — so they are covered there, not here.
+    """
     kpi = _kpi(
-        name="Percentage share of lives by department",
-        metric="percentage of sum(distinct PatientID) / sum(distinct PatientID) for departement",
+        name="Percentage share of revenue by department",
+        metric="percentage of sum(total_amount) / sum(total_amount) for departement",
         cuts="departement, Gender",
         features=[
-            {"feature": "PatientID", "source_columns": [{"column": "PatientID"}]},
+            {"feature": "total_amount", "source_columns": [{"column": "total_amount"}]},
             {"feature": "departement", "source_columns": [{"column": "departement"}]},
             {"feature": "Gender", "source_columns": [{"column": "Gender"}]},
         ],
@@ -326,8 +335,9 @@ def test_mismatched_grain_percentage_now_emits_window_function_instead_of_fallba
     )
     # No fallback marker — it composes.
     assert "-- Generic builder fallback" not in sql
-    # Uses window functions over the partition column.
+    # Uses window functions over the partition column (full grain), not attribution.
     assert "PARTITION BY \"departement\"" in sql
+    assert "__attribution_rn" not in sql
     assert "percentage_share" in sql
     assert "NULLIF" in sql
 
