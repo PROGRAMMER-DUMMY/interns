@@ -211,6 +211,28 @@ independently shippable; P0 first.
    engines actually executed. (Smaller P5 footprint — no live PySpark wiring.)
 4. **flow.py decomposition (P8)** -> **Defer** until P1-P7 are green.
 
+## Finishing pass (branch `fix/core-finish`, off P8)
+Cleared 8 more baseline failures (14 -> 4): medallion design-naming x2 (T12 generic
+heuristics), pipeline_deployment_plan (deployment_actions), metadata_store (local
+default + fail-loud unknown backend), source_catalog finalize (source_id inference),
+external_source_discovery (draft source_catalog_id), session_snapshot (cwd-relative
+named sessions), workflow_guard x3 (external-source governance, stage time budget,
+panel-output-not-read, cp/mv/rm/ln unsupported).
+
+### Remaining 4 baseline failures — DEFERRED with cause (each a deep feature-build / design call)
+1. `test_kpi_pipeline_wrapper` relationship gate — **deliberate non-fix.** The test wants
+   pipeline_main to hard-block when any candidate relationship exists; the existing code
+   intentionally does NOT (reasoned comment), because that would block legitimate
+   single-dataset KPIs that need no join (e.g. "count encounters"). Honoring the test would
+   degrade real behavior. The per-KPI join-proof gate in `start` is the correct stop.
+2. `test_data_model_image_parser` — OCR-text -> schema-candidate extraction (Fact/Dim_*);
+   a real OCR/NLP parsing feature.
+3. `test_kpi_proof_packet` — needs a new `data_engineering_evidence` packet section
+   aggregating catalog/route/pipeline/layered+exec+DQ harness + duplicate-review + blockers
+   + markdown. A sizable evidence-wiring feature.
+4. `test_result_view_builder` mismatched-grain percentage — emit a window function
+   (`PARTITION BY`) instead of the single-attribution fallback; deep share-SQL generation.
+
 ## Progress ledger (update as phases land)
 | Phase | Branch | PR | Status | Tests added | Notes |
 | --- | --- | --- | --- | --- | --- |
