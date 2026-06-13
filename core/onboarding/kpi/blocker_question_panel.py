@@ -471,6 +471,13 @@ def _question_for_cluster(
                 _custom_rule_option(feature),
             ],
         }
+    conflict_items = [
+        item
+        for item in items
+        if item["feature"].get("resolution_type") == "dictionary_conflict"
+    ]
+    if conflict_items:
+        return _dictionary_conflict_question(base, feature, applies_to, conflict_items)
     if any(item["feature"].get("resolution_type") == "kpi_definition_required" for item in items):
         definition_items = [
             item
@@ -674,6 +681,120 @@ def _question_for_cluster(
             "derived option. This answer can be saved as a reusable workspace definition."
         ),
         "options": [
+            _custom_rule_option(feature),
+        ],
+    }
+
+
+def _dictionary_conflict_question(
+    base: dict[str, Any],
+    feature: str,
+    applies_to: list[str],
+    conflict_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Panel question for a feature whose dictionary claim contradicts profiles.
+
+    The conflicted column was documented one way and observed another, so the
+    user must rule which evidence wins. option_a/option_b carry
+    expected_answer_shape placeholders the user must fill in, so neither is
+    appliable as-recommended; `custom` is the only recommendation the
+    validator accepts here (same rule as no_supporting_evidence).
+    """
+    conflicts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in conflict_items:
+        for conflict in item["feature"].get("conflicts") or []:
+            if not isinstance(conflict, dict):
+                continue
+            conflict_id = str(conflict.get("conflict_id") or "")
+            if conflict_id and conflict_id in seen:
+                continue
+            seen.add(conflict_id)
+            conflicts.append(conflict)
+    errors = [c for c in conflicts if c.get("severity") == "error"]
+    lead = errors[0] if errors else (conflicts[0] if conflicts else {})
+    dataset_name = str(lead.get("dataset_name") or "")
+    column = str(lead.get("column") or feature)
+    column_label = f"{Path(dataset_name).stem or 'dataset'}.{column}"
+    feature_question = next(
+        (
+            str(item["feature"].get("question") or "")
+            for item in conflict_items
+            if item["feature"].get("question")
+        ),
+        "",
+    )
+    return {
+        **base,
+        "blocker_label": "dictionary_conflict",
+        "blocker": (
+            f"`{feature}` resolves to `{column_label}`, but the data "
+            "dictionary's documented claim about that column contradicts "
+            "profiled evidence. Documentation and data cannot both be right, "
+            "so the mapping is blocked until a human rules which wins."
+        ),
+        "question": feature_question
+        or (
+            f"The dictionary's claim about `{column_label}` conflicts with "
+            "profiled evidence. Should the observed data be trusted over the "
+            "dictionary (and how should the column be interpreted), or is the "
+            "dictionary right and the data needs normalization first?"
+        ),
+        "answer_type": "dictionary_conflict",
+        "recommended_option_id": "custom",
+        "recommended_answer": (
+            "Rule which evidence wins for this column: trust the observed "
+            "data (state the interpretation to use), trust the dictionary "
+            "(state the normalization/repair required first), or provide a "
+            "different source. The documented claim will not be silently "
+            "trusted over contradicting profile evidence."
+        ),
+        "why": (
+            "The data dictionary is documentation evidence, not ground truth. "
+            "Profile evidence actively contradicts its claim for this column "
+            "(see `dictionary_conflicts`), so using the column as documented "
+            "could silently produce wrong KPI numbers."
+        ),
+        "dictionary_conflicts": conflicts,
+        "options": [
+            {
+                "option_id": "option_a",
+                "label": "Trust the observed data over the dictionary",
+                "business_summary": (
+                    "Treat the dictionary entry as stale or wrong. Provide the "
+                    "interpretation the profiled values support (e.g. the real "
+                    "code meanings, the per-row unit rule, or the correct "
+                    "source column) and record it as a workspace definition."
+                ),
+                "expected_answer_shape": {
+                    "ruling": "trust_observed_data",
+                    "feature": feature,
+                    "interpretation": "",
+                    "source_columns": [],
+                    "reason": "",
+                    "confirmed_by": "",
+                    "applies_to_kpis": applies_to,
+                },
+                "json_backed": False,
+            },
+            {
+                "option_id": "option_b",
+                "label": "The dictionary is right; the data needs repair first",
+                "business_summary": (
+                    "Treat the profiled values as bad data. State the "
+                    "normalization or upstream fix required before this column "
+                    "may feed any KPI; the KPI stays blocked until then."
+                ),
+                "expected_answer_shape": {
+                    "ruling": "trust_dictionary_claim",
+                    "feature": feature,
+                    "required_data_fix": "",
+                    "reason": "",
+                    "confirmed_by": "",
+                    "applies_to_kpis": applies_to,
+                },
+                "json_backed": False,
+            },
             _custom_rule_option(feature),
         ],
     }
