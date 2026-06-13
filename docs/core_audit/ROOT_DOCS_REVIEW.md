@@ -3,6 +3,13 @@ Audit date: 2026-06-14
 Scope: README.md, AGENTS.md, CONTEXT.md, DEVELOPMENT.md, CODEX.md, GEMINI.md
 Verdict key: [ok] accurate | [~] minor drift | [x] materially wrong/misleading
 
+> **Resolved (2026-06-14, branch `follow-up/root-fixes`):** the high-priority README and
+> AGENTS items below are now FIXED. README: the 3 dead harness commands now read
+> `harness ai-app` / `harness ai-cli` / `harness workflow-guardrails`, and the dangling
+> `workspace_scenarios.md` pointer was removed. AGENTS: the `clarify-ambiguity` skill
+> references now point to `grill-requirements` (its merged-in mode). The remaining
+> lower-priority CONTEXT/CODEX/GEMINI drift items are left as-is for a future pass.
+
 ---
 
 ## README.md [x]
