@@ -40,10 +40,10 @@ Section-by-section deep read of `core/` (227 files, ~86.9k lines). Each package 
 | ob-data_model | onboarding/data_model | 5 | ~5000 | **done** — INT:2 NP:4 BUG:2 DUP:1 DEAD:1 | `ob-data_model.md` |
 | ob-relationships | onboarding/relationships | 4 | ~3500 | **done** — BUG:7 INT:4 MISS:2 DUP:1 NP:1 | `ob-relationships.md` |
 | ob-documents | onboarding/documents | 5 | ~2500 | **done** — BUG:4 NP:5 INT:2 MISS:1 DUP:1 | `ob-documents.md` |
-| ob-databricks | onboarding/databricks | 4 | ~2500 | pending | `ob-databricks.md` |
-| ob-sources | onboarding/sources | 4 | ~3000 | pending | `ob-sources.md` |
+| ob-databricks | onboarding/databricks | 4 | ~2500 | **done** — BUG:2 NP:3 DEAD:1 MISS:1 INT:1 | `ob-databricks.md` |
+| ob-sources | onboarding/sources | 4 | ~3000 | **done** — BUG:11 NP:3 INT:1 DUP:1 DEAD:1 MISS:1 | `ob-sources.md` |
 | ob-features | onboarding/features | 6 | ~2000 | **done** — BUG:3 NP:5 MISS:1 INT:1 DEAD:2 DUP:2 (eval-safe) | `ob-features.md` |
-| ob-memory | onboarding/memory | 5 | ~1500 | pending | `ob-memory.md` |
-| ob-lexicon-benchmark | onboarding/lexicon + benchmark | 5 | ~1500 | pending | `ob-lexicon-benchmark.md` |
+| ob-memory | onboarding/memory | 5 | ~1500 | **done** — BUG:4 INT:1 NP:1 DUP:1 DEAD:1 MISS:1 | `ob-memory.md` |
+| ob-lexicon-benchmark | onboarding/lexicon + benchmark | 5 | ~1500 | **done** — BUG:1 NP:6 INT:1 MISS:1 | `ob-lexicon-benchmark.md` |
 
 Update the Status column as units complete. Aggregate findings roll up into `SUMMARY.md`.
