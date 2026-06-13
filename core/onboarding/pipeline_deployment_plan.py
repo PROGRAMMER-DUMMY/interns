@@ -33,9 +33,23 @@ class PipelineDeploymentPlanner:
         self.mode = mode
         self.layout = WorkspaceLayout(project_root=self.workspace)
 
+    # The ONLY target that performs no remote mutation. Everything else
+    # (databricks/uc/external/warehouse/remote/unknown) is treated as remote and
+    # must hold the human-set approval env in apply mode. Local allow-list, fail
+    # closed — a brittle remote *deny*-list let a `databricks` target bypass the
+    # gate. Ref: core-audit onboarding-root.md (theme T7).
+    LOCAL_TARGETS = frozenset({"local"})
+
     def build(self) -> PipelineDeploymentPlanResult:
-        if self.mode == "apply" and self.target in {"external", "warehouse"} and os.environ.get(REMOTE_APPROVAL_ENV) != "1":
-            raise PermissionError(f"{REMOTE_APPROVAL_ENV}=1 is required for remote apply")
+        if (
+            self.mode == "apply"
+            and self.target not in self.LOCAL_TARGETS
+            and os.environ.get(REMOTE_APPROVAL_ENV) != "1"
+        ):
+            raise PermissionError(
+                f"{REMOTE_APPROVAL_ENV}=1 is required for remote apply "
+                f"(target={self.target!r}); only target 'local' is exempt"
+            )
         self.layout.ensure_runtime_dirs()
         status = "planned_apply" if self.mode == "apply" else "dry_run_ready"
         payload = {

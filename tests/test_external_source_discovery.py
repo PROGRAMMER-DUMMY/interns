@@ -6,6 +6,19 @@ from pathlib import Path
 from core.onboarding.sources.external_discovery import ExternalSourceDiscoverer, main
 
 
+def _allowlist_external_root(repo: Path, external: Path) -> None:
+    """Register `external` as a configured external_data_root for this repo.
+
+    Discovery enforces the external-root allowlist (core-audit P2/T8), so a test
+    that scans an out-of-repo root must declare it, exactly as an operator would.
+    """
+    config_dir = repo / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "external_data_roots.local.json").write_text(
+        json.dumps({"external_roots": [str(external)]}), encoding="utf-8"
+    )
+
+
 class ExternalSourceDiscoveryTests(unittest.TestCase):
     def test_discovers_external_groups_and_drafts_source_selection(self):
         with tempfile.TemporaryDirectory() as repo_td, tempfile.TemporaryDirectory() as external_td:
@@ -25,6 +38,7 @@ class ExternalSourceDiscoveryTests(unittest.TestCase):
             (partition / "part-00000.parquet").write_text("parquet bytes", encoding="utf-8")
             (external / "system").mkdir()
             (external / "system" / "sessions.jsonl").write_text("{}", encoding="utf-8")
+            _allowlist_external_root(repo, external)
 
             result = ExternalSourceDiscoverer(
                 repo,
@@ -57,6 +71,7 @@ class ExternalSourceDiscoveryTests(unittest.TestCase):
             (repo / "workspaces" / "cold-storage").mkdir(parents=True)
             (external / "raw" / "claims").mkdir(parents=True)
             (external / "raw" / "claims" / "claims.csv").write_text("id\n1\n", encoding="utf-8")
+            _allowlist_external_root(repo, external)
 
             code = main(
                 [

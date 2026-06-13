@@ -10,10 +10,12 @@ import argparse
 import asyncio
 import csv
 import hashlib
+import ipaddress
 import json
 import os
 import re
 import shutil
+import socket
 import time
 import urllib.parse
 from dataclasses import asdict, dataclass, field
@@ -25,7 +27,11 @@ import aiohttp
 import polars as pl
 
 from core.resource.manager import ResourceManager
-from core.storage.external_data import is_external_path, load_external_data_policy
+from core.storage.external_data import (
+    is_external_path,
+    is_within_allowed_roots,
+    load_external_data_policy,
+)
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -645,6 +651,17 @@ class SourceCatalogManager:
 
     def _apply_local_source(self, action: dict[str, Any]) -> dict[str, Any]:
         source_path = Path(action["path"]).resolve()
+        # T8: refuse any source path outside the repo or a configured external
+        # root, even after approval — otherwise an approved selection could copy
+        # or register-by-allowlist an arbitrary host file (e.g. C:/Windows, /etc,
+        # another user's home) into a governed workspace. Ref: ob-sources.md.
+        policy = load_external_data_policy(self.repo_root)
+        if not is_within_allowed_roots(source_path, self.repo_root, policy):
+            return {
+                "status": "blocked",
+                "reason": "local_source_outside_allowed_roots",
+                "path": str(source_path),
+            }
         if not source_path.exists():
             return {"status": "blocked", "reason": "local_source_missing"}
         mode = action.get("mode", "copy")
@@ -1145,11 +1162,42 @@ def _page_url(url: str, pagination: dict[str, Any], page: int, page_size: int) -
     return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query)))
 
 
+def assert_url_egress_allowed(url: str) -> None:
+    """Raise RuntimeError unless ``url`` is a safe public HTTP(S) egress target.
+
+    SSRF guard for approved `api` sources (T8): blocks non-http(s) schemes and any
+    host that resolves to loopback / private (RFC1918) / link-local
+    (169.254.0.0/16, incl. the cloud metadata IP 169.254.169.254) / reserved /
+    multicast / unspecified addresses. A human may opt out for a trusted internal
+    host by setting AUTORESEARCH_ALLOW_PRIVATE_EGRESS=1. Ref: ob-sources.md.
+    """
+    if os.environ.get("AUTORESEARCH_ALLOW_PRIVATE_EGRESS") == "1":
+        return
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise RuntimeError(f"ssrf_blocked_scheme:{parsed.scheme or '<none>'}")
+    host = parsed.hostname
+    if not host:
+        raise RuntimeError("ssrf_blocked_no_host")
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except OSError as exc:
+        raise RuntimeError(f"ssrf_unresolvable_host:{host}:{exc}") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_loopback or ip.is_private or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+        ):
+            raise RuntimeError(f"ssrf_blocked_private_ip:{host}->{ip}")
+
+
 async def _fetch_bytes_with_retry(
     session: aiohttp.ClientSession,
     url: str,
     policy: ApiFetchPolicy,
 ) -> bytes:
+    assert_url_egress_allowed(url)
     last_exc: Exception | None = None
     for attempt in range(policy.attempts):
         try:
@@ -1190,6 +1238,7 @@ async def _stream_to_path_with_retry(
     path: Path,
     policy: ApiFetchPolicy,
 ) -> int:
+    assert_url_egress_allowed(url)
     last_exc: Exception | None = None
     for attempt in range(policy.attempts):
         part_path = path.with_suffix(path.suffix + ".part")
