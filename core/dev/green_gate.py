@@ -96,6 +96,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # Slice 3 hostile refinement 1c: no_supporting_evidence blocker labeling
     # (zero prose-term anchors -> confirm-missing-data-or-point-at-source ask).
     "tests.test_no_supporting_evidence",
+    # Slice 3 hostile refinement 1b: dictionary-vs-profile reconciliation
+    # (documented claims contradicted by profile evidence become structured
+    # dictionary_conflicts + an answerable blocker on tainted KPIs).
+    "tests.test_dictionary_reconciliation",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

@@ -65,7 +65,8 @@ jobs:
             tests.test_deploy_gates \
             tests.test_workspace_lock_reentrancy \
             tests.test_workspace_deployer \
-            tests.test_no_supporting_evidence
+            tests.test_no_supporting_evidence \
+            tests.test_dictionary_reconciliation
 
   pyspark-parity:
     runs-on: ubuntu-latest
