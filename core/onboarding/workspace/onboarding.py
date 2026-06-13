@@ -36,6 +36,14 @@ from core.onboarding.lexicon import (
     WorkspaceLexicon,
     build_workspace_lexicon,
 )
+from core.onboarding.workspace.incremental import (
+    artifacts_exist,
+    build_manifest_payload,
+    diff_fingerprints,
+    fingerprint_inputs,
+    load_manifest,
+    write_manifest,
+)
 from core.observability.events import time_command
 from core.resource.manager import ResourceManager
 from core.profiling.data_model_profiler import DataModelProfiler
@@ -75,6 +83,13 @@ class KpiDefinition:
     refinement_required: str = ""
     source: str = ""
     status: str = "needs_mapping"
+    # Cell provenance: how the metric/cuts VALUES got there. "authored" means
+    # the registry file carried the cell; gap-fill passes record themselves
+    # ("lexicon_inferred", "derived_from_question") and accepted human
+    # decisions record "user_confirmed". The resolver uses this to keep
+    # machine-guessed metrics from silently reaching ready_for_sql.
+    metric_provenance: str = "authored"
+    cuts_provenance: str = "authored"
 
 
 @dataclass(frozen=True)
@@ -88,6 +103,9 @@ class OnboardingResult:
     next_step: str
     next_command: str
     warnings: list[str] = field(default_factory=list)
+    # Incremental-run accounting: mode is "full" | "incremental" | "skipped";
+    # counts say how many datasets were re-profiled vs reused vs dropped.
+    incremental: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -100,6 +118,7 @@ class OnboardingResult:
             "next_step": self.next_step,
             "next_command": self.next_command,
             "warnings": self.warnings,
+            "incremental": self.incremental,
         }
 
 
@@ -112,11 +131,15 @@ class WorkspaceOnboarder:
         exact_profile: bool = False,
         sample_rows: int = 100_000,
         metadata_store: MetadataStore | None = None,
+        force: bool = False,
     ):
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
         self.exact_profile = exact_profile
         self.sample_rows = sample_rows
+        # force=True preserves the legacy behavior: clear everything and
+        # re-profile every dataset regardless of the incremental manifest.
+        self.force = force
         self.layout = WorkspaceLayout(project_root=self.workspace)
         self.profiler = DataModelProfiler()
         self.metadata_store = metadata_store or build_metadata_store(self.layout, repo_root=self.repo_root)
@@ -531,8 +554,67 @@ class WorkspaceOnboarder:
         return notes, warnings
 
     def _run_locked(self) -> OnboardingResult:
-        self._clear_onboarding_artifacts()
         inputs = self.discover_inputs()
+
+        # Incremental planning: fingerprint every input (datasets, KPI
+        # registries, data-model files, durable decision stores) and compare
+        # against the manifest from the previous run. Unchanged datasets keep
+        # their profile artifacts; aggregate contracts rebuild when ANY input
+        # changed; a fully unchanged workspace replays the recorded result
+        # without touching a single artifact. --force restores the legacy
+        # clear-everything behavior.
+        manifest = None if self.force else load_manifest(self.layout.state_dir)
+        previous_inputs = (manifest or {}).get("inputs") or {}
+        current_inputs = {
+            "data_files": fingerprint_inputs(
+                self.repo_root, inputs.data_files, previous_inputs.get("data_files")
+            ),
+            "registry_files": fingerprint_inputs(
+                self.repo_root, inputs.kpi_registries, previous_inputs.get("registry_files")
+            ),
+            "model_files": fingerprint_inputs(
+                self.repo_root, inputs.data_models, previous_inputs.get("model_files")
+            ),
+            "decision_files": fingerprint_inputs(
+                self.repo_root, self._decision_input_files(), previous_inputs.get("decision_files")
+            ),
+        }
+        data_changes = diff_fingerprints(
+            previous_inputs.get("data_files"), current_inputs["data_files"]
+        )
+        non_data_unchanged = all(
+            diff_fingerprints(previous_inputs.get(cat), current_inputs[cat]).nothing_changed
+            for cat in ("registry_files", "model_files", "decision_files")
+        )
+        if (
+            manifest is not None
+            and data_changes.nothing_changed
+            and non_data_unchanged
+            and artifacts_exist(self.repo_root, manifest)
+        ):
+            return self._replay_unchanged_result(manifest, inputs, data_changes)
+
+        reusable_profiles: dict[str, dict[str, Any]] = {}
+        removed_warnings: list[str] = []
+        if manifest is None:
+            run_mode = "full"
+            self._clear_onboarding_artifacts()
+        else:
+            run_mode = "incremental"
+            reusable_profiles = self._reusable_profile_summaries(
+                manifest, data_changes.unchanged
+            )
+            self._clear_onboarding_artifacts(
+                keep_profile_paths={
+                    str(summary.get("profile_path") or "")
+                    for summary in reusable_profiles.values()
+                },
+                clear_metadata_store=False,
+            )
+            removed_warnings = self._drop_removed_dataset_artifacts(
+                manifest, data_changes.removed
+            )
+
         estimated_profile_bytes = _total_existing_bytes(inputs.data_files, self.repo_root)
         resource_manager = ResourceManager(self.workspace, repo_root=self.repo_root)
         resource_artifacts = resource_manager.write_report(
@@ -556,13 +638,33 @@ class WorkspaceOnboarder:
         # Surface human-confirmed PDF data-model candidates as NON-EXECUTABLE notes.
         document_dm_notes, document_dm_warnings = self._accepted_document_relationship_notes()
         kpi_warnings = kpi_warnings + document_dm_warnings
-        profiles, profile_warnings = self.profile_inputs(
-            inputs.data_files,
-            sample_rows=profiling_settings.sample_rows,
-            exact_profile=profiling_settings.exact_profile,
-            expensive_checks=profiling_settings.expensive_checks,
-            resource_mode=profiling_settings.mode,
-        )
+        # Per-dataset skip/redo: reuse the recorded summary (and the on-disk
+        # *.profile.json) for content-unchanged datasets; profile only the
+        # changed/new ones. Output order stays inputs.data_files order (sorted)
+        # so artifacts are byte-identical regardless of which subset re-ran.
+        profiles: list[dict[str, Any]] = []
+        profile_warnings: list[str] = list(removed_warnings)
+        profile_map: dict[str, str] = {}
+        profiled_count = 0
+        for data_file in inputs.data_files:
+            reused = reusable_profiles.get(data_file)
+            if reused is not None:
+                profiles.append(reused)
+                profile_map[data_file] = str(reused.get("profile_path") or "")
+                continue
+            file_profiles, file_warnings = self.profile_inputs(
+                [data_file],
+                sample_rows=profiling_settings.sample_rows,
+                exact_profile=profiling_settings.exact_profile,
+                expensive_checks=profiling_settings.expensive_checks,
+                resource_mode=profiling_settings.mode,
+            )
+            profile_warnings.extend(file_warnings)
+            if file_profiles:
+                profiled_count += 1
+                profiles.extend(file_profiles)
+                profile_map[data_file] = str(file_profiles[0].get("profile_path") or "")
+        reused_count = len(reusable_profiles)
         # Extract dictionary text from PDF/DOCX data-model files. The text is
         # downstream evidence for the CLI-agent proposal panel; failures
         # (missing pdfplumber/docx) are warnings, not errors.
@@ -679,7 +781,7 @@ class WorkspaceOnboarder:
         }
         artifacts["generated_file_readability"] = self._write_generated_file_readability()
 
-        return OnboardingResult(
+        result = OnboardingResult(
             workspace=str(self.workspace),
             interns_dir=str(self.layout.interns_dir),
             inputs=inputs,
@@ -693,7 +795,24 @@ class WorkspaceOnboarder:
             + dictionary_warnings
             + diagram_warnings
             + document_warnings,
+            incremental={
+                "mode": run_mode,
+                "datasets_total": len(inputs.data_files),
+                "datasets_profiled": profiled_count,
+                "datasets_reused": reused_count,
+                "datasets_removed": len(data_changes.removed),
+            },
         )
+        write_manifest(
+            self.layout.state_dir,
+            build_manifest_payload(
+                workspace=_rel(self.workspace, self.repo_root),
+                inputs=current_inputs,
+                profiles=profile_map,
+                result_summary=result.summary(),
+            ),
+        )
+        return result
 
     def discover_inputs(self) -> WorkspaceInputs:
         classified = self._classified_workspace_inputs()
@@ -711,12 +830,16 @@ class WorkspaceOnboarder:
         kpi_registries = [
             path
             for path, roles in classified
-            if "kpi_input" in roles and path.suffix.lower() in REGISTRY_SUFFIXES
+            if "kpi_input" in roles
+            and path.suffix.lower() in REGISTRY_SUFFIXES
+            and not self._is_platform_governance_note(path)
         ]
         data_models = [
             path
             for path, roles in classified
-            if "data_model_input" in roles and path.suffix.lower() in MODEL_SUFFIXES
+            if "data_model_input" in roles
+            and path.suffix.lower() in MODEL_SUFFIXES
+            and not self._is_platform_governance_note(path)
         ]
 
         return WorkspaceInputs(
@@ -725,6 +848,20 @@ class WorkspaceOnboarder:
             kpi_registries=[_rel(path, self.repo_root) for path in sorted(set(kpi_registries))],
             data_models=[_rel(path, self.repo_root) for path in sorted(set(data_models))],
         )
+
+    def _is_platform_governance_note(self, path: Path) -> bool:
+        """Whether a file is a platform-generated governance note, not input.
+
+        The workspace ``wiki/`` tree is written by the platform itself (feature
+        decisions, KPI notes). Re-ingesting those records as KPI/data-model
+        INPUTS is circular: a wiki feature note resurfaced as a phantom KPI on
+        re-onboarding. Generic location rule -- no filename vocabulary.
+        """
+        try:
+            relative = path.resolve().relative_to(self.workspace)
+        except ValueError:
+            return False
+        return bool(relative.parts) and relative.parts[0] == "wiki"
 
     def _classified_workspace_inputs(self) -> list[tuple[Path, set[str]]]:
         from tools.list_workspace_files import list_workspace_files
@@ -833,13 +970,14 @@ class WorkspaceOnboarder:
             inferred_metric, inferred_cuts = lexicon.infer_metric_and_cuts(
                 kpi.name, kpi.description
             )
-            filled.append(
-                replace(
-                    kpi,
-                    metric=metric or inferred_metric,
-                    cuts=cuts or inferred_cuts,
-                )
-            )
+            changes: dict[str, Any] = {}
+            if not metric and inferred_metric:
+                changes["metric"] = inferred_metric
+                changes["metric_provenance"] = "lexicon_inferred"
+            if not cuts and inferred_cuts:
+                changes["cuts"] = inferred_cuts
+                changes["cuts_provenance"] = "lexicon_inferred"
+            filled.append(replace(kpi, **changes) if changes else kpi)
         return filled
 
     def _apply_accepted_kpi_definitions(
@@ -968,20 +1106,18 @@ class WorkspaceOnboarder:
             except Exception:  # pragma: no cover - derivation must never break onboarding
                 filled.append(kpi)
                 continue
-            new_metric = metric
-            new_cuts = cuts
-            if not str(new_metric).strip() and (
+            changes: dict[str, Any] = {}
+            if not str(metric).strip() and (
                 derivation["metric"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD
             ):
-                new_metric = derivation["metric"]["value"]
-            if not str(new_cuts).strip() and (
+                changes["metric"] = derivation["metric"]["value"]
+                changes["metric_provenance"] = "derived_from_question"
+            if not str(cuts).strip() and (
                 derivation["cuts"]["confidence"] >= HIGH_CONFIDENCE_THRESHOLD
             ):
-                new_cuts = derivation["cuts"]["value"]
-            if new_metric != metric or new_cuts != cuts:
-                filled.append(replace(kpi, metric=new_metric, cuts=new_cuts))
-            else:
-                filled.append(kpi)
+                changes["cuts"] = derivation["cuts"]["value"]
+                changes["cuts_provenance"] = "derived_from_question"
+            filled.append(replace(kpi, **changes) if changes else kpi)
         return filled
 
     def profile_inputs(
@@ -1049,12 +1185,66 @@ class WorkspaceOnboarder:
             "status": "generated_from_workspace_inputs",
         }
 
+    def _sensitive_columns_section(self) -> dict[str, Any]:
+        """The semantic contract's ``columns`` map + data-policy summary.
+
+        ``columns.<name>.is_sensitive`` is what the SQL generator consults to
+        mask sensitive output columns. Sources, in order: the user-authored
+        workspace ``data_policy.json`` (declared sensitive + allowlist), then
+        built-in HIPAA/PCI identifier detection over the profiled schema.
+        """
+        from core.governance.data_policy import (
+            is_allowlisted,
+            load_workspace_data_policy,
+            policy_category_for_column,
+        )
+        from core.governance.phi_gate import identifier_category, pci_identifier_category
+
+        policy = load_workspace_data_policy(self.workspace)
+        columns: dict[str, dict[str, Any]] = {}
+        try:
+            profile_index = json.loads(
+                (self.layout.profiles_dir / "profile_index.json").read_text(encoding="utf-8")
+            )
+        except (json.JSONDecodeError, OSError):
+            profile_index = {}
+        seen: set[str] = set()
+        for profile in profile_index.get("profiles") or []:
+            schema = profile.get("schema") if isinstance(profile, dict) else None
+            names = (
+                list(schema.keys())
+                if isinstance(schema, dict)
+                else [c.get("name") for c in schema or [] if isinstance(c, dict)]
+            )
+            for name in names:
+                if not isinstance(name, str) or name in seen:
+                    continue
+                seen.add(name)
+                if is_allowlisted(policy, name):
+                    columns[name] = {
+                        "is_sensitive": False,
+                        "source": "workspace_data_policy_allowlist",
+                    }
+                    continue
+                category = (
+                    policy_category_for_column(policy, name)
+                    or identifier_category(name)
+                    or pci_identifier_category(name)
+                )
+                if category:
+                    columns[name] = {"is_sensitive": True, "category": category}
+        section: dict[str, Any] = {"columns": columns}
+        if policy is not None:
+            section["data_policy"] = policy.summary()
+        return section
+
     def _build_semantic_contract(
         self,
         kpis: list[KpiDefinition],
         inputs: WorkspaceInputs,
     ) -> dict[str, Any]:
         return {
+            **self._sensitive_columns_section(),
             "workspace": inputs.workspace,
             "kpi_count": len(kpis),
             "term_resolution_order": [
@@ -1471,8 +1661,133 @@ if __name__ == "__main__":
                 )
         return sorted(set(data_files))
 
-    def _clear_onboarding_artifacts(self) -> None:
+    def _decision_input_files(self) -> list[str]:
+        """Durable human-decision stores that feed onboarding outputs.
+
+        These survive re-onboarding and are consumed by the KPI gap-fill,
+        lexicon build, and document-candidate merge. A change in any of them
+        must invalidate the nothing-changed fast path so aggregate contracts
+        rebuild with the new decisions. Workspace-agnostic: fixed layout
+        locations only, no domain vocabulary.
+        """
+        candidates = [
+            self.layout.generated_dir / "decisions" / "kpi_definitions.json",
+            self.layout.contracts_dir / "workspace_feature_definitions.json",
+            self.layout.generated_dir / "documents" / "accepted_candidates.json",
+            self.layout.kpi_feature_mapping_path,
+        ]
+        return [
+            _rel(path, self.repo_root)
+            for path in candidates
+            if path.exists() and path.is_file()
+        ]
+
+    def _replay_unchanged_result(
+        self,
+        manifest: dict[str, Any],
+        inputs: WorkspaceInputs,
+        data_changes: Any,
+    ) -> OnboardingResult:
+        """Nothing-changed fast path: replay the recorded result verbatim.
+
+        No artifact is rewritten (byte-identical guarantee) and no dataset is
+        re-read beyond the fingerprint stat/hash check.
+        """
+        stored = manifest.get("result") or {}
+        warnings = [str(w) for w in (stored.get("warnings") or [])]
+        warnings.append(
+            f"[~] incremental_skip: {len(data_changes.unchanged)} dataset(s) unchanged; "
+            "all onboarding artifacts reused byte-identical. Pass --force to rebuild."
+        )
+        return OnboardingResult(
+            workspace=str(self.workspace),
+            interns_dir=str(self.layout.interns_dir),
+            inputs=inputs,
+            kpi_count=int(stored.get("kpi_count") or 0),
+            profile_count=int(stored.get("profile_count") or 0),
+            artifacts={
+                str(key): str(value)
+                for key, value in (stored.get("artifacts") or {}).items()
+            },
+            next_step=str(stored.get("next_step") or ""),
+            next_command=str(stored.get("next_command") or ""),
+            warnings=warnings,
+            incremental={
+                "mode": "skipped",
+                "datasets_total": len(inputs.data_files),
+                "datasets_profiled": 0,
+                "datasets_reused": len(data_changes.unchanged),
+                "datasets_removed": 0,
+            },
+        )
+
+    def _reusable_profile_summaries(
+        self,
+        manifest: dict[str, Any],
+        unchanged: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Map unchanged dataset rel-path -> its recorded profile summary.
+
+        A dataset is reusable only when the manifest recorded a profile path
+        for it, the previous profile_index.json still carries its summary, and
+        the *.profile.json artifact is still on disk. Anything else re-profiles.
+        """
+        if not unchanged:
+            return {}
+        recorded_profiles = manifest.get("profiles") or {}
+        index_path = self.layout.profiles_dir / "profile_index.json"
+        try:
+            index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        summaries_by_profile_path: dict[str, dict[str, Any]] = {}
+        for summary in index_payload.get("profiles") or []:
+            if isinstance(summary, dict) and summary.get("profile_path"):
+                summaries_by_profile_path[str(summary["profile_path"])] = summary
+        reusable: dict[str, dict[str, Any]] = {}
+        for rel in unchanged:
+            profile_rel = str(recorded_profiles.get(rel) or "")
+            summary = summaries_by_profile_path.get(profile_rel)
+            if (
+                profile_rel
+                and summary is not None
+                and (self.repo_root / profile_rel).exists()
+            ):
+                reusable[rel] = summary
+        return reusable
+
+    def _drop_removed_dataset_artifacts(
+        self,
+        manifest: dict[str, Any],
+        removed: list[str],
+    ) -> list[str]:
+        """Delete profile artifacts for datasets that disappeared and flag
+        downstream contracts as potentially stale."""
+        warnings: list[str] = []
+        recorded_profiles = manifest.get("profiles") or {}
+        for rel in removed:
+            profile_rel = str(recorded_profiles.get(rel) or "")
+            if profile_rel:
+                profile_path = self.repo_root / profile_rel
+                if profile_path.exists():
+                    profile_path.unlink()
+            warnings.append(
+                f"[~] dataset_removed:{rel}: profile artifact dropped; downstream "
+                "contracts built from it (relationships, source-to-target, medallion "
+                "plans) may be stale -- re-run their builders."
+            )
+        return warnings
+
+    def _clear_onboarding_artifacts(
+        self,
+        *,
+        keep_profile_paths: set[str] | None = None,
+        clear_metadata_store: bool = True,
+    ) -> None:
+        keep = keep_profile_paths or set()
         for path in self.layout.profiles_dir.glob("*.profile.json"):
+            if _rel(path, self.repo_root) in keep:
+                continue
             path.unlink()
         for path in [
             self.layout.profiles_dir / "profile_index.json",
@@ -1491,13 +1806,17 @@ if __name__ == "__main__":
         ]:
             if path.exists():
                 path.unlink()
-        metadata_root = self.layout.state_dir / "metadata_store"
-        if metadata_root.exists():
-            for path in metadata_root.rglob("*.json"):
-                path.unlink()
-        delta_root = self.layout.state_dir / "delta_metadata"
-        if delta_root.exists():
-            shutil.rmtree(delta_root)
+        # Incremental runs keep the metadata store: reused profiles are not
+        # re-upserted, so wiping it would orphan their entries. Full runs wipe
+        # and rebuild as before.
+        if clear_metadata_store:
+            metadata_root = self.layout.state_dir / "metadata_store"
+            if metadata_root.exists():
+                for path in metadata_root.rglob("*.json"):
+                    path.unlink()
+            delta_root = self.layout.state_dir / "delta_metadata"
+            if delta_root.exists():
+                shutil.rmtree(delta_root)
         # Clear extracted data-dictionary text from prior runs so a fresh
         # onboarding re-extracts from whatever PDFs/DOCX are present today.
         dictionary_root = self.layout.generated_dir / "data_dictionary"
@@ -1804,18 +2123,93 @@ def _read_json_kpis(path: Path, repo_root: Path) -> list[KpiDefinition]:
 
 
 def _read_markdown_kpis(path: Path, repo_root: Path) -> list[KpiDefinition]:
+    """Read KPI definitions from a markdown document.
+
+    Two authoring shapes are supported, both evidence-preserving:
+
+    1. Table rows (``| name | detail | ... |``) — unchanged behavior.
+    2. Prose sections: a heading whose text mentions a KPI starts a section;
+       every prose line until the next same-or-higher-level heading (or a
+       thematic break ``---``) is the KPI's authored body and is preserved as
+       the ``description``. Stakeholder sentences ARE the KPI definition in
+       natural-language registries; dropping them starves feature extraction
+       and produces blocked-with-no-question dead ends (hostile-workspace
+       finding F2). No heading layout beyond "heading + body" is assumed.
+    """
     text = path.read_text(encoding="utf-8")
-    kpis = []
+    source = _rel(path, repo_root)
+    kpis: list[KpiDefinition] = []
+    heading_re = re.compile(r"^(#{1,6})\s+(.*)$")
+    rule_re = re.compile(r"^(?:-{3,}|\*{3,}|_{3,})$")
+    current_name: str | None = None
+    current_level = 0
+    current_body: list[str] = []
+
+    def table_row_kpi(stripped: str) -> KpiDefinition | None:
+        if not stripped.startswith("|") or "kpi" in stripped.lower():
+            return None
+        if stripped.startswith("|---") or stripped.startswith("| :"):
+            return None
+        cells = [cell.strip(" *`") for cell in stripped.strip("|").split("|")]
+        if not cells or not cells[0]:
+            return None
+        return KpiDefinition(
+            name=cells[0], description=" | ".join(cells[1:]), source=source
+        )
+
+    def flush() -> None:
+        nonlocal current_name, current_body
+        if current_name is not None:
+            table_rows = [line for line in current_body if line.startswith("|")]
+            prose_lines = [
+                line for line in current_body if line and not line.startswith("|")
+            ]
+            if table_rows and not prose_lines:
+                # A "## KPIs" container heading over a table: the table rows are
+                # the KPIs, not the heading itself.
+                for row in table_rows:
+                    parsed = table_row_kpi(row)
+                    if parsed is not None:
+                        kpis.append(parsed)
+            else:
+                description = "\n".join(current_body).strip()
+                kpis.append(
+                    KpiDefinition(
+                        name=current_name, description=description, source=source
+                    )
+                )
+        current_name = None
+        current_body = []
+
     for line in text.splitlines():
         stripped = line.strip()
-        if not stripped or stripped.startswith("|---") or stripped.startswith("| :"):
+        heading = heading_re.match(stripped)
+        if heading:
+            level = len(heading.group(1))
+            title = heading.group(2).strip()
+            if "kpi" in title.lower():
+                flush()
+                current_name = title
+                current_level = level
+            elif current_name is not None and level <= current_level:
+                # A non-KPI heading at the same or higher level closes the
+                # current KPI section.
+                flush()
+            elif current_name is not None:
+                # A deeper non-KPI subheading stays part of the prose body.
+                current_body.append(title)
             continue
-        if stripped.startswith("|") and "kpi" not in stripped.lower():
-            cells = [cell.strip(" *`") for cell in stripped.strip("|").split("|")]
-            if cells and cells[0]:
-                kpis.append(KpiDefinition(name=cells[0], description=" | ".join(cells[1:]), source=_rel(path, repo_root)))
-        elif re.match(r"^#{1,4}\s+", stripped) and "kpi" in stripped.lower():
-            kpis.append(KpiDefinition(name=re.sub(r"^#{1,4}\s+", "", stripped), source=_rel(path, repo_root)))
+        if current_name is not None:
+            if rule_re.match(stripped):
+                # A thematic break ends the section (shared document trailer).
+                flush()
+                continue
+            current_body.append(stripped)
+            continue
+        parsed = table_row_kpi(stripped)
+        if parsed is not None:
+            kpis.append(parsed)
+    flush()
     return kpis
 
 
@@ -2001,6 +2395,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--exact-profile", action="store_true", help="Run exact scans for profile bounds.")
     parser.add_argument("--sample-rows", type=int, default=100_000, help="Sample rows for profiling.")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Ignore the incremental onboarding manifest and re-profile every "
+            "dataset (full clear + rebuild, the legacy behavior)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     onboarder = WorkspaceOnboarder(
@@ -2008,6 +2410,7 @@ def main(argv: list[str] | None = None) -> int:
         args.workspace,
         exact_profile=args.exact_profile,
         sample_rows=args.sample_rows,
+        force=args.force,
     )
     workspace_path = (Path(args.repo_root) / args.workspace).resolve()
     try:

@@ -57,7 +57,7 @@ class ProjectHarnessTests(unittest.TestCase):
             self.assertFalse(result.checks["workflow_guardrails"]["ok"])
             self.assertTrue(any("workflow guardrail" in blocker for blocker in result.blockers))
             self.assertIn(
-                "uv run validate-workflow-guardrails --workspace workspaces/demo",
+                "uv run harness workflow-guardrails --workspace workspaces/demo",
                 result.next_commands,
             )
 

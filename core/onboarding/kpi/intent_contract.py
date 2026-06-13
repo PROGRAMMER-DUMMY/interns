@@ -1140,6 +1140,14 @@ def record_intent_answer(
             str(value),
             reason=reason or f"intent-contract answer ({source})",
         )
+    if facet == "base_source" and value:
+        from core.onboarding.pipeline_plan import PipelineDecisionRecorder
+
+        PipelineDecisionRecorder(root, _rel(workspace_path, root)).record_base_source(
+            kpi_id,
+            str(value),
+            reason=reason or f"intent-contract answer ({source})",
+        )
     return record
 
 
@@ -1352,6 +1360,17 @@ def _load_registry_with_features(workspace_root: Path) -> list[dict[str, Any]]:
         registry = []
     registry = [kpi for kpi in registry if isinstance(kpi, dict)]
 
+    # Backfill the positional kpi_id that the rest of the system uses (execution
+    # harness, feature resolver, evidence graph all key on
+    # ``kpi.get("kpi_id") or f"kpi_{idx:03d}"``). The on-disk registry rows carry
+    # no explicit kpi_id, so without this every intent-contract question/answer
+    # keyed to "" -> question_id "intent__<facet>", feature "intent::::<facet>",
+    # and decisions mirrored to pipeline_decisions[""] which the generator never
+    # reads (follow_ups #1). Enumerate order matches the harness's scheme.
+    for idx, kpi in enumerate(registry, start=1):
+        if not str(kpi.get("kpi_id") or "").strip():
+            kpi["kpi_id"] = f"kpi_{idx:03d}"
+
     # Try to merge feature mapping (source_columns resolution)
     feat_path = layout.kpi_feature_mapping_path
     if feat_path.exists():
@@ -1472,7 +1491,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[x] build-intent-contract failed: {exc}")
         raise SystemExit(1) from exc
 
-    print(f"[ok] build-intent-contract complete")
+    print("[ok] build-intent-contract complete")
     print(f"     KPIs processed : {result['kpi_count']}")
     print(f"     JSON artifact  : {result['json_path']}")
     print(f"     MD artifact    : {result['md_path']}")

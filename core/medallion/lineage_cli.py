@@ -1,5 +1,5 @@
 """
-core/medallion/lineage_cli.py — `uv run medallion-lineage` CLI (P5).
+core/medallion/lineage_cli.py — `uv run medallion lineage` CLI (P5).
 
 Subcommands:
   trace   Trace a Gold column back to its Bronze sources.
@@ -55,7 +55,7 @@ def _trace(args) -> int:
 
     if not lineage_path.exists():
         print(f"[medallion-lineage] lineage.json not found at {lineage_path}", file=sys.stderr)
-        print("  Run: uv run design-medallion --workspace ...", file=sys.stderr)
+        print("  Run: uv run medallion design --workspace ...", file=sys.stderr)
         return 1
 
     data = json.loads(lineage_path.read_text(encoding="utf-8"))

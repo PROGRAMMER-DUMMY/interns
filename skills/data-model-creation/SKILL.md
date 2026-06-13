@@ -5,7 +5,7 @@ description: >
   Interview for grain, entities, keys, facts/dimensions, relationships, cardinality, temporal anchors,
   and SCD policy; score how well the model is understood; then produce a governed model + ERD/SVG.
   Use when a workspace needs a data model created, refined, or proven before SQL/pipeline generation,
-  or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[clarify-ambiguity]],
+  or when relationship detection is uncertain. Pairs with [[grill-requirements]], [[grill-requirements]],
   [[domain-model]], [[stakeholder-memory]], and [[dashboard-design]] (for the diagram export).
 ---
 
@@ -33,7 +33,7 @@ prepare-data-model-generation        # route panel (text docs / image ERD / infe
   -> export-data-model-diagram        # ERD as SVG + Mermaid for stakeholders
 ```
 
-Use [[grill-requirements]] for the interview and [[clarify-ambiguity]] only for the few high-impact
+Use [[grill-requirements]] for the interview and [[grill-requirements]] only for the few high-impact
 ambiguities a reasonable default cannot resolve. Save accepted decisions with [[stakeholder-memory]]
 and align terms with [[domain-model]].
 

@@ -10,7 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core.storage.external_data import bounded_external_files
+from core.storage.external_data import (
+    bounded_external_files,
+    is_within_allowed_roots,
+    load_external_data_policy,
+)
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -276,6 +280,9 @@ class ExternalSourceDiscoverer:
             "artifact_type": "source_selection.generated.json",
             "version": 1,
             "generated_by": "discover-external-sources",
+            # The catalog id finalize-selection infers when none is passed: the
+            # workspace folder name. Keeps the draft -> finalize handoff coherent.
+            "source_catalog_id": self.workspace.name,
             "external_root": str(self.external_root),
             "approval_policy": "review_required_before_finalize",
             "sources": sources,
@@ -286,6 +293,18 @@ class ExternalSourceDiscoverer:
             raise FileNotFoundError(f"external root not found: {self.external_root}")
         if self.workspace == self.repo_root or not self.workspace.is_relative_to(self.repo_root):
             raise ValueError(f"workspace must be inside repo root: {self.workspace}")
+        # T8: enforce the external-root allowlist. Without this, ANY absolute host
+        # path (C:/Windows, /etc, another user's home, a drive root) could be
+        # enumerated and its full file tree written into workspace artifacts. The
+        # root must be inside the repo or a configured external_data_root.
+        # Ref: core-audit ob-sources.md.
+        policy = load_external_data_policy(self.repo_root)
+        if not is_within_allowed_roots(self.external_root, self.repo_root, policy):
+            raise PermissionError(
+                f"external root is not allow-listed: {self.external_root}. "
+                "Add it to config/external_data_roots.local.json (or set the "
+                "profile's local_root_env) before discovery."
+            )
 
 
 def _strategy_for(items: list[ExternalFileClass]) -> tuple[str, str]:

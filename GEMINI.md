@@ -1,7 +1,9 @@
 # Gemini CLI Init
 
 Read `AGENTS.md` first and follow it as the canonical operating guide for this repo.
-Then inspect `TOOLS.md` and `.agents/tools.json` before inventing workflows or helper scripts.
+For tool discovery use the Stage index in `AGENTS.md` > Tool And Evidence Discovery, then read
+only the matching `### <command>` section of `TOOLS.md` on demand. Do not read `TOOLS.md` or
+`.agents/tools.json` whole as session preamble.
 For Gemini CLI command, configuration, policy, tool, and memory behavior, use
 `docs/agents/gemini-cli-reference.md` as the repo-local reference.
 
@@ -26,8 +28,8 @@ After a shell command completes successfully, respond quickly. Do not spend minu
 re-reading generated artifacts, or expanding hidden output. Summarize from the returned command
 output in under 30 seconds, list key artifact paths, and give the next deterministic command. After
 `onboard-workspace`, the next command is usually
-`uv run resolve-kpi-features --workspace workspaces/<project> --domain <domain> --include-candidates`.
-`resolve-kpi-features` prints `question_panel_path` and `question_panel_markdown_path`; if
+`uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>`.
+It prints `question_panel_path` and `question_panel_markdown_path`; if
 `blocked_kpi_count` is nonzero, read `question_panel_markdown_path` next and do not invent a
 separate interview.
 After onboarding, feature resolution, derived-feature markdown, or question-panel generation, run
@@ -68,7 +70,7 @@ definitions before KPI-specific exceptions, save accepted answers as workspace-l
 and reuse them automatically for every KPI they apply to.
 
 Before asking any KPI blocker question, run
-`uv run blocker-question-panel --workspace <workspace>` and ask from
+`uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>` and ask from
 `interns/reports/blocker_question_panel/current.json` or `current.md` only. Do not create freehand
 Ask User prompts for direct mappings, source-of-truth choices, aliases, workspace definitions, or
 derived features. If the panel files are missing, generate them first, then run
@@ -97,8 +99,9 @@ For derived-column blockers, prose-only options are invalid. Show JSON-backed op
 `derived_column_name`, `formula`, `input_columns`, `observed_values`, `value_profile`,
 `semantic_meaning_sources`, per-column `reason`, `example`, `evidence_sources`,
 `derivation_reasoning`, `evidence_state`, `confidence`, and `needs_user_confirmation`. If
-`derived_feature_options` exist, run `uv run derived-feature-markdown --workspace <workspace>` and
-then `uv run blocker-question-panel --workspace <workspace>`, followed by
+`derived_feature_options` exist, run
+`uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>` (it owns
+derived-feature markdown, panel generation, and validation), followed by
 `uv run validate-workspace-artifacts --workspace <workspace>`. Ask from
 `interns/reports/blocker_question_panel/current.json` or `current.md`, not from freehand prose.
 
@@ -159,7 +162,11 @@ parallel agent work, subagents, workers, or a review team.
 
 ## Data Isolation Rule
 
-For any active workspace, always restrict dataset processing strictly to EMR data from Hospital A (datasets/EMR/trendytech-hospital-a). Ensure interns/state/workspace_settings.json is created or updated with a dataset_allowlist enforcing this path before running workspace commands like onboarding or profiling.
+When the operator scopes a workspace to a subset of its datasets, persist that scope as a
+`dataset_allowlist` in `workspaces/<project>/interns/state/workspace_settings.json` BEFORE running
+onboarding, profiling, or generation. If the allowlist file already exists, honor it in every
+session without being re-told. All downstream stages must read only from allowlisted paths. (Full
+rule: `AGENTS.md` > Dataset Isolation Rule.)
 
 ## KPI Result Packet Forwarding Rule
 
@@ -176,3 +183,46 @@ markdown, and the same packet is written to `interns/reports/kpi_results/current
   but you only printed paths or a one-line status, that is an under-presentation bug — surface the
   rendered tables.
 - If the user does ask "show results" after the fact, still forward the file; never rebuild it.
+- Compact vs full: by default forward the COMPACT packet (`interns/reports/kpi_results/current.md`,
+  same content as `interns/runs/<date>/results.md`). If the user asks for "full results" /
+  "entire results", forward the FULL packet (`current_full.md` / `runs/<date>/results_full.md`)
+  verbatim — never answer a full-results request with the compact packet or a hand-built summary.
+
+### Results read discipline (token/quota guardrail)
+
+Reading the packet must be ONE cheap read. Re-reading the results in many forms in a single
+"show me the results" turn burned ~7% of a quota in one go -- do not repeat that.
+
+- Read `interns/reports/kpi_results/current.md` with the NATIVE `ReadFile` tool, NOT a shell
+  command (`Get-Content`/`cat`/`powershell`). Shell output is summarized/capped by
+  `model.summarizeToolOutput.run_shell_command.tokenBudget` (12000), which truncates a long read
+  and is exactly what makes the re-read loop start. `ReadFile` is not shell-summarized and returns
+  the whole compact file in one read. `current.md` is now the COMPACT packet (SQL is linked, not
+  inlined; the full inlined-SQL packet is `current_full.md`), so it is small.
+- Do NOT re-read the same file with `-TotalCount`, `-Head`, `-Tail`, `-Raw`, `-Encoding`,
+  `Select-String`, or `workspace-flow results --preview-rows N` back-to-back to "see more" -- they
+  all return the same packet. One `ReadFile` is the whole thing.
+- For many KPIs, forward the per-KPI files `interns/runs/<date>/kpi_<id>.md` (one ReadFile each,
+  each self-contained) instead of the combined file -- this never exceeds the read cap.
+- NEVER `Get-Content` the evidence JSON `interns/generated/evidence/kpi_results/current.json`
+  (a ~2000-line machine artifact). Read the paired `.md`. (CLAUDE.md/AGENTS.md token discipline.)
+- NEVER use `-Wait` or any follow/stream flag on these files -- it hangs until cancelled.
+- If the CLI display shows "... first N lines hidden ...", the read SUCCEEDED -- that is a UI
+  truncation, not a failure. Forward what was read; do not retry with another command.
+
+## Grain-Bucketing Blocker Rule
+
+When the execution harness blocks a share/percentage KPI on a grain-bucketing decision (a raw
+continuous cut like Age/DOB fragmenting the denominator), the blocker question panel shows NO
+options -- this is a pipeline decision, not a feature blocker. Do NOT loop on
+`apply-kpi-panel-answer` or `workspace-flow answer` (they error with "current panel has no options"
+/ "not waiting for a supported answer"). Apply it deterministically, then re-run generation:
+
+```
+uv run apply-pipeline-decision --kpi-id <kpi_id> --grain-bucketing band_continuous_cuts
+uv run workspace-flow start --workspace workspaces/<project> --intent full_kpi_sql --domain <domain>
+```
+
+Use `band_continuous_cuts:<width>` for a non-default band width (default 10), or `exact_value_grain`
+only if exact-value rows are genuinely wanted. (The panel route for this facet is a known open bug --
+see `develop_spec/follow_ups.md`.)

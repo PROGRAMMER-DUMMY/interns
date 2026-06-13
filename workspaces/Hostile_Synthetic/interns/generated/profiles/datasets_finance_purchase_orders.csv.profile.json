@@ -1,0 +1,146 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\purchase_orders.csv",
+  "format": "csv",
+  "row_count": 220,
+  "file_count": 1,
+  "size_bytes": 9108,
+  "schema": {
+    "po_no": "String",
+    "vend_id": "String",
+    "Date": "String",
+    "Amount": "Float64",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "po_no",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "PO30001",
+        "PO30002",
+        "PO30003",
+        "PO30004",
+        "PO30005",
+        "PO30006",
+        "PO30007",
+        "PO30008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "vend_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "V001",
+        "V002",
+        "V003",
+        "V004",
+        "V005",
+        "V006",
+        "V007",
+        "V008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-01-02",
+        "2025-01-04",
+        "2025-01-05",
+        "2025-01-12",
+        "2025-01-14",
+        "2025-01-16",
+        "2025-01-19",
+        "2025-01-25"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        68.64,
+        82.84,
+        127.71,
+        163.92,
+        196.02,
+        197.56,
+        265.01,
+        322.09
+      ],
+      "sample_min": 68.64,
+      "sample_max": 8987.18,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "CANCELLED",
+        "OPEN",
+        "RECEIPTED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

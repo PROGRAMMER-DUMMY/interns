@@ -96,7 +96,10 @@ class SourceFamilyContractTests(unittest.TestCase):
             self.assertEqual(family["source_group"], "Medicare Part D Prescribers - by Provider")
             self.assertTrue(family["schema_drift"]["has_schema_drift"])
             self.assertTrue(family["schema_drift"]["has_type_drift"])
-            self.assertIn("report_year", family["bronze_plan"]["partition_columns"])
+            # T12: partition columns are DERIVED from the schema, not fabricated.
+            # This CMS data has no year/period column (the year lives in the path),
+            # so no partition column is invented.
+            self.assertEqual(family["bronze_plan"]["partition_columns"], [])
             self.assertEqual(
                 sorted(family["observed_release_tokens"]["data_year"]),
                 [2022, 2023],

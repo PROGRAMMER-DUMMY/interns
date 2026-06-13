@@ -1,0 +1,174 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\party.csv",
+  "format": "csv",
+  "row_count": 240,
+  "file_count": 1,
+  "size_bytes": 14952,
+  "schema": {
+    "party_key": "String",
+    "Id": "String",
+    "Name": "String",
+    "Status": "String",
+    "Date": "String",
+    "segment": "String",
+    "region_cd": "String"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "party_key",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "P-1001",
+        "P-1002",
+        "P-1003",
+        "P-1004",
+        "P-1005",
+        "P-1006",
+        "P-1007",
+        "P-1008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "CRM40412",
+        "CRM41252",
+        "CRM41385",
+        "CRM41551",
+        "CRM42280",
+        "CRM42946",
+        "CRM43444",
+        "CRM43644"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Alfa Beverages & Co",
+        "Alfa Beverages Trading",
+        "Alfa Chemicals & Co",
+        "Alfa Chemicals PLC",
+        "Alfa Electrics PLC",
+        "Alfa Marine Holdings",
+        "Alfa Marine PLC",
+        "Alfa Motors Group"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "A",
+        "C",
+        "S"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2022-01-06",
+        "2022-01-25",
+        "2022-01-26",
+        "2022-01-27",
+        "2022-01-30",
+        "2022-02-02",
+        "2022-02-14",
+        "2022-02-27"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "segment",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "ENTERPRISE",
+        "PUBLIC",
+        "RESELLER",
+        "SME"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "region_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R5",
+        "R6"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

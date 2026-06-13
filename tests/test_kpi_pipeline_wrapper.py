@@ -368,12 +368,19 @@ class PipelineWrapperTests(unittest.TestCase):
                     pass
             # Just verify it didn't crash — no crash == new-session flag accepted.
 
-    def test_pipeline_main_relationship_gate_fires_for_candidate_relationships(self):
-        """When the relationship builder produces non-executable (candidate) relationships,
-        pipeline_main must exit 1 with a [blocked] gate stop.
+    def test_pipeline_main_does_not_gate_on_advisory_candidate_relationships(self):
+        """Candidate (non-executable) relationships are ADVISORY and must NOT cause a
+        wrapper-level relationship gate.
 
-        This test directly exercises the gate condition in pipeline_main by patching
-        RelationshipContractBuilder to return a summary with candidate_relationship_count > 0.
+        A candidate join only matters if an in-scope KPI actually needs it; the per-KPI
+        join-proof check inside `start` is the correct stop (it sets the session
+        `source_to_target_blocked` only for a KPI that requires an unapproved join). The
+        STEP-3 relationship block in `pipeline_main` therefore proceeds with an advisory
+        `[~]` note and never blocks merely because candidates remain. Hard-blocking on raw
+        candidate count over-blocks legitimate single-dataset KPIs that need no join
+        (including this single-CSV `count encounters` workspace), so this test locks the
+        NON-blocking contract. (Replaces the prior over-broad gate test; see the reasoned
+        comment in core/onboarding/workspace/flow.py at the STEP-3 relationship block.)
         """
         import unittest.mock as mock
 
@@ -381,8 +388,7 @@ class PipelineWrapperTests(unittest.TestCase):
             root = Path(tmp)
             ws = _make_simple_encounters_workspace(root)
 
-            # Mock RelationshipContractBuilder so it always returns a summary with
-            # candidate relationships, and also a proper contracts file.
+            # Force the relationship builder to report a candidate (advisory) relationship.
             from core.onboarding.relationships.contracts import RelationshipContractResult
 
             fake_result = mock.MagicMock(spec=RelationshipContractResult)
@@ -392,7 +398,8 @@ class PipelineWrapperTests(unittest.TestCase):
                 "relationship_count": 1,
             }
 
-            # Also pre-seed the relationship contracts JSON so _gate_stop can read it.
+            # Pre-seed the contracts JSON with a candidate relationship whose own policy
+            # declares it advisory -- exactly the shape that must NOT gate the wrapper.
             workspace_path = root / ws
             contracts_dir = workspace_path / "interns" / "generated" / "contracts"
             contracts_dir.mkdir(parents=True, exist_ok=True)
@@ -434,6 +441,7 @@ class PipelineWrapperTests(unittest.TestCase):
             ) as MockBuilder:
                 MockBuilder.return_value.build.return_value = fake_result
 
+                # No --quiet: the advisory STEP-3 `_log` note is only emitted when not quiet.
                 stdout = io.StringIO()
                 exit_code: int = -1
                 with contextlib.redirect_stdout(stdout):
@@ -441,20 +449,21 @@ class PipelineWrapperTests(unittest.TestCase):
                         exit_code = pipeline_main([
                             "--repo-root", str(root),
                             "--workspace", ws,
-                            "--quiet",
                         ])
                     except SystemExit as exc:
                         exit_code = int(exc.code or 0)
 
             output = stdout.getvalue()
-            # Must gate with exit code 1 when candidate (non-executable) rels exist.
-            self.assertEqual(exit_code, 1,
-                             f"pipeline_main must exit 1 when candidate relationships exist.\nOutput:\n{output}")
-            self.assertIn("[blocked]", output,
-                          "pipeline_main must print [blocked] when candidate relationships need approval")
-            # Must mention the relationship id from the contracts file.
-            self.assertIn("rel_test_001", output,
-                          "gate message must list the pending relationship id")
+            # STEP 3 must reach the non-blocking advisory path for the candidate relationship.
+            self.assertIn(
+                "candidate relationship", output,
+                f"pipeline_main must emit the advisory candidate note and proceed.\nOutput:\n{output}",
+            )
+            # The candidate id must NEVER surface as a wrapper-level relationship gate.
+            self.assertNotIn(
+                "rel_test_001", output,
+                f"advisory candidate relationships must not be surfaced as a gate.\nOutput:\n{output}",
+            )
 
 
 if __name__ == "__main__":

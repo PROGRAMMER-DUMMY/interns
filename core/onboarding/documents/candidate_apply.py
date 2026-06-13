@@ -34,6 +34,7 @@ from typing import Any
 from core.onboarding.documents.candidate_review import (
     _stable_candidate_id,
 )
+from core.storage.atomic_io import read_json_or_quarantine
 from core.storage.workspace_layout import WorkspaceLayout
 
 # ---------------------------------------------------------------------------
@@ -301,10 +302,10 @@ def merge_accepted_candidates(layout: WorkspaceLayout) -> dict[str, Any]:
     if not durable_path.exists():
         return _empty_merge_result(str(durable_path))
 
-    try:
-        store = json.loads(durable_path.read_text(encoding="utf-8"))
-    except Exception:
-        return _empty_merge_result(str(durable_path))
+    # Fail loud (quarantine + raise) on a corrupt store rather than silently
+    # returning an empty merge that drops every accepted human decision.
+    # Ref: core-audit P6 (documents).
+    store = read_json_or_quarantine(durable_path, default={}) or {}
 
     decisions: list[dict[str, Any]] = store.get("decisions") or []
     accepted = [d for d in decisions if d.get("decision") == "accepted"]
@@ -352,12 +353,11 @@ def merge_accepted_candidates(layout: WorkspaceLayout) -> dict[str, Any]:
 def _load_durable(path: Path, workspace_rel: str) -> dict[str, Any]:
     """Load the durable accepted_candidates store, or create a fresh skeleton."""
     if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and "decisions" in data:
-                return data
-        except Exception:
-            pass
+        # Fail loud on corruption: a skeleton fallback here would be written back
+        # and erase accepted decisions (the durability hole). Quarantine + raise.
+        data = read_json_or_quarantine(path, default=None)
+        if isinstance(data, dict) and "decisions" in data:
+            return data
     return {
         "artifact_type": "accepted_document_candidates",
         "version": ACCEPTED_CANDIDATES_VERSION,

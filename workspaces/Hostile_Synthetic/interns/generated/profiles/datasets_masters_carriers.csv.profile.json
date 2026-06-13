@@ -1,0 +1,140 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\carriers.csv",
+  "format": "csv",
+  "row_count": 8,
+  "file_count": 1,
+  "size_bytes": 394,
+  "schema": {
+    "scac": "String",
+    "Name": "String",
+    "mode": "String",
+    "Status": "String",
+    "Amount": "Float64"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "scac",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "ARRW",
+        "BLTC",
+        "CDRX",
+        "DNUB",
+        "EGRT",
+        "FNCH",
+        "GRYP",
+        "HLCY"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Arrowline Haulage",
+        "Baltic Crossways",
+        "Cedar Express",
+        "Danube Freight",
+        "Egret Couriers",
+        "Finch Parcel Net",
+        "Gryphon Air Cargo",
+        "Halcyon Logistics"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "mode",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "AIR",
+        "RAIL",
+        "ROAD"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "ACTIVE",
+        "SUSPENDED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        500000.0,
+        750000.0,
+        1000000.0,
+        1200000.0,
+        1500000.0,
+        2000000.0,
+        5000000.0,
+        8000000.0
+      ],
+      "sample_min": 500000.0,
+      "sample_max": 8000000.0,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

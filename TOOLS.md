@@ -227,17 +227,22 @@ steps, and shows manual/local-safe/autopilot options. Modes:
 Command:
 
 ```powershell
-uv run workspace-flow start --workspace workspaces/<project> --intent kpi_generation --domain healthcare
+uv run workspace-flow start --workspace workspaces/<project> --intent kpi_generation --domain <domain>
 uv run workspace-flow status --session <session-id>
 uv run workspace-flow --quiet status --diff --workspace workspaces/<project>   # compact KPI-readiness summary
 uv run workspace-flow answer --session <session-id> --answer option_a
 uv run workspace-flow results --session <session-id>
+uv run workspace-flow results --workspace workspaces/<project>   # latest session auto-resolved
+uv run workspace-flow results --workspace workspaces/<project> --full --kpi kpi_002
 ```
 
-`--quiet` is a top-level flag (place it before the subcommand). For `status --diff` it prints a
-compact ready/blocked/gap summary plus the manifest path instead of the full diff JSON. `start`
-resumes an existing open session when one exists; do not re-run `start` in a loop — read the
-artifact paths it prints.
+`--quiet` and `--json` are accepted both before and after the subcommand. For `status --diff`,
+`--quiet` prints a compact ready/blocked/gap summary plus the manifest path instead of the full
+diff JSON. `status`/`answer`/`results`/`review` accept `--workspace` in place of `--session` and
+resolve that workspace's most recent session. `start` resumes an existing open session when one
+exists; do not re-run `start` in a loop — read the artifact paths it prints. `results` emits the
+result packet itself (compact by default, `--full` inlines SQL, `--kpi <id>` forwards one KPI's
+file) — do not re-run it with different flags to "see more".
 
 Use as the quiet front door for agent-led workspace workflows. It persists session state under
 `interns/state/workflow_sessions/<session-id>/`, runs existing governed tools in-process, hides
@@ -256,7 +261,47 @@ workspaces/<project>/interns/reports/kpi_results/current.md
 workspaces/<project>/interns/generated/evidence/kpi_results/current.json
 ```
 
-### prepare-wiki-memory
+### run-kpi-pipeline
+
+Command:
+
+```powershell
+uv run run-kpi-pipeline --workspace workspaces/<project> --domain <domain>
+uv run run-kpi-pipeline --workspace workspaces/<project> --domain <domain> --quiet
+uv run run-kpi-pipeline --workspace workspaces/<project> --domain <domain> --new-session
+```
+
+The preferred single entry point for the deterministic KPI chain (see CLAUDE.md Token
+Discipline). Runs onboard-workspace -> prepare-kpi-blocker-panel -> [human KPI-blocker gate] ->
+build-relationship-contracts -> [human relationship-approval gate] -> workspace-flow start
+--intent full_kpi_sql -> [human kpi-analyst review gate] -> results, stopping only at genuine
+human gates with the exact resolving command. Idempotent and resumable: re-invoke after each gate
+is resolved. Never auto-approves relationships or review verdicts (BUG-014).
+
+Outputs: same session/panel/result artifacts as `workspace-flow` (it drives the same flow).
+
+### generate-kpi-engines
+
+Command:
+
+```powershell
+uv run generate-kpi-engines --workspace workspaces/<project> --engine recommended
+uv run generate-kpi-engines --workspace workspaces/<project> --engine sql,polars --kpi-id kpi_002
+```
+
+Generates KPI code for the recommended engine (or `all`, or a comma list; SQL is always the
+baseline) from the same ready feature mappings the SQL generator uses, preserving cross-engine
+parity. PySpark execution requires JDK 8/11/17 (parity gates env-skip Spark when the JVM is
+unsuitable); SQL/Polars need no JVM. The `guard_uv_run` hook blocks `uv run` for engine
+generation in test contexts — use the venv interpreter (`.venv\Scripts\python.exe -m
+core.onboarding.kpi.generate_kpi_engines ...`) or `green-gate` there.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/solutions/kpi_*_polars.py   (and *_pyspark.py)
+workspaces/<project>/interns/reports/engine_generation/current.md  (+ current.json)
+```
 
 Command:
 
@@ -353,14 +398,14 @@ workspaces/<project>/interns/generated/evidence/project_harness.json
 workspaces/<project>/interns/reports/project_harness.md
 ```
 
-### run-reliability-suite
+### harness reliability  (formerly run-reliability-suite)
 
 Command:
 
 ```powershell
-uv run run-reliability-suite --workspace workspaces/<project> --domain <domain>
-uv run run-reliability-suite --workspace workspaces/<project> --project-harness skip
-uv run run-reliability-suite --workspace workspaces/<project> --project-harness run
+uv run harness reliability --workspace workspaces/<project> --domain <domain>
+uv run harness reliability --workspace workspaces/<project> --project-harness skip
+uv run harness reliability --workspace workspaces/<project> --project-harness run
 ```
 
 Use for scheduled or local-safe reliability checks that should compose existing workspace harnesses
@@ -376,12 +421,12 @@ workspaces/<project>/interns/reports/reliability_suite/current.md
 workspaces/<project>/interns/generated/evidence/reliability_suite/current.json
 ```
 
-### run-ai-app-harness
+### harness ai-app  (formerly run-ai-app-harness)
 
 Command:
 
 ```powershell
-uv run run-ai-app-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_harness/datasets/happy_path.jsonl
+uv run harness ai-app --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_harness/datasets/happy_path.jsonl
 ```
 
 Use when a workspace needs dependency-free AI application tests from JSONL cases. The harness
@@ -417,13 +462,13 @@ workspaces/<project>/interns/reports/ai_app_harness/current.md
 workspaces/<project>/interns/generated/evidence/ai_app_harness/current.json
 ```
 
-### run-ai-cli-harness
+### harness ai-cli  (formerly run-ai-cli-harness)
 
 Command:
 
 ```powershell
-uv run run-ai-cli-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl
-uv run run-ai-cli-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl --config config/ai_cli_harness.example.json --allow-cli-exec
+uv run harness ai-cli --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl
+uv run harness ai-cli --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl --config config/ai_cli_harness.example.json --allow-cli-exec
 ```
 
 Use when a CLI agent such as Claude, Gemini, Codex, or a custom CLI needs to be tested against the
@@ -438,7 +483,7 @@ Supported eval types:
   use, raw-data read avoidance, and non-portable shell markers.
 - `artifact_exists`: asserts generated files exist.
 - `artifact_json_path`: checks JSON artifact fields such as `feature` or `status`.
-- `workflow_guard`: runs `validate-workflow-guardrails` against the case transcript.
+- `workflow_guard`: runs `harness workflow-guardrails` against the case transcript.
 - `cli_text`: checks required keywords in final CLI output.
 
 Example CLI suite rows live at `config/ai_cli_harness.governed_suite.example.jsonl`.
@@ -453,13 +498,13 @@ workspaces/<project>/interns/reports/ai_cli_harness/current.md
 workspaces/<project>/interns/generated/evidence/ai_cli_harness/current.json
 ```
 
-### validate-workflow-guardrails
+### harness workflow-guardrails  (formerly validate-workflow-guardrails)
 
 Command:
 
 ```powershell
-uv run validate-workflow-guardrails --workspace workspaces/<project>
-uv run validate-workflow-guardrails --workspace workspaces/<project> --command-log workspaces/<project>/interns/state/commands.jsonl
+uv run harness workflow-guardrails --workspace workspaces/<project>
+uv run harness workflow-guardrails --workspace workspaces/<project> --command-log workspaces/<project>/interns/state/commands.jsonl
 ```
 
 Use when the workflow itself needs a reliability gate. It checks for invented generic KPI features
@@ -476,12 +521,12 @@ workspaces/<project>/interns/reports/workflow_guard_harness/current.md
 workspaces/<project>/interns/generated/evidence/workflow_guard_harness/current.json
 ```
 
-### run-layered-pipeline-harness
+### harness layered-pipeline  (formerly run-layered-pipeline-harness)
 
 Command:
 
 ```powershell
-uv run run-layered-pipeline-harness --workspace workspaces/<project>
+uv run harness layered-pipeline --workspace workspaces/<project>
 ```
 
 Use after `build-catalog-contract`, `prepare-data-engineering-route`, and
@@ -499,12 +544,12 @@ workspaces/<project>/interns/reports/layered_pipeline_harness/current.md
 workspaces/<project>/interns/generated/evidence/layered_pipeline_harness/current.json
 ```
 
-### run-pipeline-execution-harness
+### harness pipeline-execution  (formerly run-pipeline-execution-harness)
 
 Command:
 
 ```powershell
-uv run run-pipeline-execution-harness --workspace workspaces/<project>
+uv run harness pipeline-execution --workspace workspaces/<project>
 ```
 
 Use after `generate-pipeline-sql` to execute `pipeline_layers.sql` locally in DuckDB and verify
@@ -519,12 +564,12 @@ workspaces/<project>/interns/reports/pipeline_execution_harness/current.md
 workspaces/<project>/interns/generated/evidence/pipeline_execution_harness/current.json
 ```
 
-### run-data-quality-harness
+### harness data-quality  (formerly run-data-quality-harness)
 
 Command:
 
 ```powershell
-uv run run-data-quality-harness --workspace workspaces/<project>
+uv run harness data-quality --workspace workspaces/<project>
 ```
 
 Use after catalog, profile, and pipeline contracts exist when a workspace needs a local-safe data
@@ -550,7 +595,7 @@ Command:
 uv run prepare-duplicate-review-panel --workspace workspaces/<project>
 ```
 
-Use after `run-data-quality-harness` when duplicate findings need a JSON-backed stakeholder review
+Use after `harness data-quality` when duplicate findings need a JSON-backed stakeholder review
 panel. It prepares bounded, redacted duplicate evidence and options from profile/catalog/pipeline
 contracts. It does not apply a duplicate decision and does not generate or run deduplication or
 quarantine SQL in milestone 1.
@@ -596,7 +641,7 @@ uv run record-workspace-trajectory --workspace workspaces/<project> --render-onl
 
 Use when an agent, CLI, or workflow wrapper needs a workspace-scoped replay log. It appends
 secret-redacted JSONL events to the active workspace and writes current JSON/Markdown summaries.
-`validate-workflow-guardrails` reads this trajectory by default when present, so unsupported
+`harness workflow-guardrails` reads this trajectory by default when present, so unsupported
 commands, raw dataset reads, and failed steps without nearby recovery become scoreable findings.
 Controlled tools such as `workspace-flow`, `prepare-kpi-blocker-panel`, and
 `apply-kpi-panel-answer` record best-effort trajectory events automatically; this command remains
@@ -1010,6 +1055,24 @@ the generated plan, `generate-kpi-sql` includes the resource mode/strategy in SQ
 DuckDB generation when the plan requires remote execution, and local DuckDB execution records or
 enforces the resource decision before subprocess launch.
 
+### medallion apply-deploy
+
+Command:
+
+```powershell
+uv run medallion apply-deploy --workspace workspaces/<project> --confirmed-by "<name>" [--dry-run]
+```
+
+Evaluates the five Databricks deployment gates from
+`docs/prd/databricks_deployment.md` section 7 (G1 local-green, G2 design
+ratified, G3 human provenance, G4 plan freshness, G5 remote approval env) and
+prints a per-gate verdict table. NO remote call is ever made: on all-green it
+records `interns/state/medallion/deploy_approval.json` (gate evidence +
+provenance + plan hash) and stops at the approval boundary; any failing gate
+exits nonzero with the blocking reasons. `--dry-run` never records. An empty
+`--confirmed-by` fails G3 by design (Human-Gate Provenance Rule); agents must
+never set `AUTORESEARCH_ALLOW_REMOTE_EXECUTION` to satisfy G5.
+
 ### context-router
 
 Command:
@@ -1068,10 +1131,15 @@ files with hashes. Databricks UC remains metadata-only and returns `planned_only
 
 ### resolve-kpi-features
 
+[deprecated] The default invocation now redirects to `prepare-kpi-blocker-panel`
+(same workspace/repo-root/domain arguments). Only the `--apply-decision` and
+`--apply-workspace-definition` debug modes still run stage logic directly;
+prefer `apply-kpi-panel-answer` for those as well.
+
 Command:
 
 ```powershell
-uv run resolve-kpi-features --workspace workspaces/<project> --domain <domain> --include-candidates
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
 Use when KPI/query features must be mapped to schema/profile evidence,
@@ -1137,6 +1205,29 @@ The command is idempotent: a deterministic op id is derived from the arguments, 
 with the same arguments returns the prior result instead of duplicating decision history. Pass
 `--allow-replay` to force re-execution.
 
+### apply-kpi-definition
+
+Command:
+
+```powershell
+uv run apply-kpi-definition --workspace workspaces/<project> --kpi-id kpi_004 --metric "count(distinct Id)" --cuts "PAYER_COVERAGE = 0" --confirmed-by "<reviewer>"
+uv run apply-kpi-definition --workspace workspaces/<project> --business-question "<question text>" --metric "avg(BASE_COST)" --cuts "DESCRIPTION" --confirmed-by "<reviewer>"
+```
+
+Governed write-back for a human-confirmed KPI definition when the source row
+left `metric`/`cuts` empty and the blocker panel reports "definition help"
+(blocked KPIs with no answerable feature question). Records the decision in
+`interns/generated/decisions/kpi_definitions.json` keyed by the business
+question; onboarding re-applies accepted decisions on every registry rebuild.
+An empty `--confirmed-by` records the entry as agent-asserted per the
+human-gate provenance rule. Re-run `prepare-kpi-blocker-panel` afterwards.
+
+Outputs:
+
+```text
+workspaces/<project>/interns/generated/decisions/kpi_definitions.json
+```
+
 ### confirm-cli-agent-proposal
 
 Command:
@@ -1155,13 +1246,18 @@ never run this command on the user's behalf without explicit direction.
 
 ### derived-feature-markdown
 
+[deprecated] The default invocation now redirects to `prepare-kpi-blocker-panel`,
+which regenerates derived-feature markdown as part of the panel build. Stage-only
+flags (`--mapping`, `--out`, `--no-strict`) keep the legacy single-stage behavior
+for debugging.
+
 Command:
 
 ```powershell
-uv run derived-feature-markdown --workspace workspaces/<project>
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
-Use after `resolve-kpi-features --include-candidates` when business analysts,
+Use after feature resolution when business analysts,
 product leads, or stakeholders need readable Markdown review files for strict
 derived-feature JSON options. The converter validates required fields by
 default and writes separated `.md` and `.json` files under:
@@ -1176,13 +1272,17 @@ and one JSON file.
 
 ### blocker-question-panel
 
+[deprecated] The default invocation now redirects to `prepare-kpi-blocker-panel`,
+which runs feature resolution, panel build, and validation atomically. Stage-only
+flags (`--mapping`, `--out`) keep the legacy single-stage behavior for debugging.
+
 Command:
 
 ```powershell
-uv run blocker-question-panel --workspace workspaces/<project>
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
-Use after `resolve-kpi-features --include-candidates` whenever an agent needs to
+Use whenever an agent needs to
 ask a stakeholder a KPI blocker question. This is mandatory for direct mappings,
 source-of-truth choices, aliases, reusable workspace definitions, and
 derived-feature questions. The tool writes a stable question panel with the
@@ -1432,6 +1532,42 @@ workspaces/<project>/interns/reports/relationship_contracts.md
 Only relationships with executable-approved states such as `proven_data_model` or `user_confirmed`
 may be used by trusted executable generation. Profile-only relationships remain advisory
 `profile_validated` candidates and should trigger blocker grilling before SQL/code generation.
+
+### workspace-dashboard
+
+Commands:
+
+```powershell
+uv run workspace-dashboard --workspace workspaces/<project>            # live Dash app (127.0.0.1:8060)
+uv run workspace-dashboard --workspace workspaces/<project> --export  # static HTML to dashboard/exports/
+uv run workspace-dashboard --workspace workspaces/<project> --screen  # export + screenshot + visual checks
+```
+
+The per-workspace BI dashboard: clickable KPI tile strip with status badges,
+per-panel view toggles, charts chosen by the data-to-viz knowledge base
+(`core/dashboard/chart_knowledge.py`; every panel spec records
+`selection_reason`/`selection_source`), and a display-redacted Data table per
+KPI. KPI completion exports and opens it automatically.
+
+`--screen` is the visual screener: exports, screenshots every page (headless
+Edge/Chrome), runs deterministic checks (render failures, blank pages, missing
+or unredacted data viewer, palette delta-E / contrast), writes
+`interns/reports/dashboard_screener/current.{json,md}`, and stages the
+screenshots under `.../dashboard_screener/shots/` for the agent's vision
+review (misalignment, color mismatch, visual defects). Exits nonzero on
+findings. KPI completion runs it automatically (skip with
+`AUTORESEARCH_SCREEN_DASHBOARD=0`).
+
+### dashboard-verify
+
+```powershell
+uv run dashboard-verify <url-or-file> --screenshot out.png
+```
+
+Single-page DOM gate via agent-browser: chart render counts, container
+overflow, legend presence, perceptual color-clash (delta-E) and contrast
+checks. The screener supersedes it for whole-board sweeps; keep it for
+one-page debugging.
 
 ### apply-relationship-answer
 

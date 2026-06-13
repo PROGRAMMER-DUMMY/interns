@@ -27,6 +27,11 @@ import unittest
 # green gate: any failure here is a hard stop.
 CURATED_MODULES: tuple[str, ...] = (
     "tests.test_parser_parity",
+    "tests.test_engine_parity",
+    "tests.test_engine_parity_aggregate",
+    "tests.test_kpi_definition_bulk",
+    "tests.test_cli_deprecation_redirect",
+    "tests.test_base_source_selector",
     "tests.test_kpi_engine_generators",
     "tests.test_verify_kpi_output",
     "tests.test_engine_recommender",
@@ -51,6 +56,54 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_intent_contract_routing",
     "tests.test_phi_gate",
     "tests.test_workflow_guard_specialist_firing",
+    # Dashboard + tooling suites added 2026-06 (data-driven panels, verify gate,
+    # DESIGN.md, token report, wiki lineage). Previously passed on demand but were
+    # not gated — wiring them in so they protect against regressions.
+    "tests.test_dashboard_inference",
+    "tests.test_dashboard_profile",
+    "tests.test_dashboard_design_md",
+    "tests.test_dashboard_nested",
+    "tests.test_dashboard_verify",
+    "tests.test_token_report",
+    "tests.test_wiki_writer",
+    # Pipeline-SQL failure contracts: green again after the validator now rejects
+    # empty pipeline SQL + raw dataset paths outside CATALOG BOOTSTRAP (2026-06-11).
+    "tests.test_failure_contracts",
+    # Phase 2.2 hostile-workspace fixes: prose KPI ingestion (F2), blocked-KPI
+    # honesty invariant + validator dead-end errors (F1/F3), documented-join
+    # relationship evidence (F4a), collision-blocks-not-resolves (F4b).
+    "tests.test_prose_kpi_ingestion",
+    "tests.test_blocked_kpi_invariant",
+    "tests.test_documented_join_evidence",
+    "tests.test_collision_blocking",
+    # Phase 3 track A: incremental onboarding fingerprints + DuckDB pushdown profiling.
+    "tests.test_onboarding_incremental",
+    "tests.test_profile_pushdown",
+    # Phase 3 track C: incremental medallion refresh + deploy-plan schema.
+    "tests.test_medallion_incremental",
+    # User-authored workspace data policy (custom PII/PHI + allowlist + tier).
+    "tests.test_workspace_data_policy",
+    # data-to-viz chart-selection knowledge base + new chart types.
+    "tests.test_chart_knowledge",
+    # Databricks deployment gates (PRD section 7) + apply-deploy boundary.
+    "tests.test_deploy_gates",
+    # Workspace-lock re-entrancy: nested same-process acquisition must not
+    # self-deadlock (prepare-kpi-blocker-panel --force-onboard regression);
+    # cross-thread/cross-process exclusion unchanged.
+    "tests.test_workspace_lock_reentrancy",
+    # Medallion UC deployer: approval consumption, G4/G5 re-checks, dry-run seam.
+    "tests.test_workspace_deployer",
+    # Slice 3 hostile refinement 1c: no_supporting_evidence blocker labeling
+    # (zero prose-term anchors -> confirm-missing-data-or-point-at-source ask).
+    "tests.test_no_supporting_evidence",
+    # Slice 3 hostile refinement 1b: dictionary-vs-profile reconciliation
+    # (documented claims contradicted by profile evidence become structured
+    # dictionary_conflicts + an answerable blocker on tainted KPIs).
+    "tests.test_dictionary_reconciliation",
+    # Slice 3 hostile refinement 1d: derived-feature option synthesis
+    # (a quantity in mixed units yields a JSON-backed UOM-normalization option;
+    # honest blocker stays when no mixed-unit evidence exists).
+    "tests.test_derived_option_synthesis",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

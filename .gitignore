@@ -20,6 +20,10 @@ state/
 *.sqlite
 *.log
 
+# --- MLflow local run artifacts (not source) ---
+mlruns/
+mlflow.db
+
 # --- Caches / build / IDE ---
 __pycache__/
 *.py[cod]

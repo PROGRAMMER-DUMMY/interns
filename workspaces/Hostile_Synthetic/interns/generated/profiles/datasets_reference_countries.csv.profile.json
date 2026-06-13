@@ -1,0 +1,61 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\reference\\countries.csv",
+  "format": "csv",
+  "row_count": 6,
+  "file_count": 1,
+  "size_bytes": 99,
+  "schema": {
+    "country_cd": "String",
+    "Name": "String"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "country_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "BE",
+        "DE",
+        "FR",
+        "GB",
+        "IE",
+        "NL"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Belgium",
+        "France",
+        "Germany",
+        "Ireland",
+        "Netherlands",
+        "United Kingdom"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

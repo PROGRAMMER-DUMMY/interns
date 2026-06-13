@@ -1,0 +1,158 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\masters\\employees.csv",
+  "format": "csv",
+  "row_count": 140,
+  "file_count": 1,
+  "size_bytes": 6507,
+  "schema": {
+    "emp_id": "String",
+    "Name": "String",
+    "role": "String",
+    "depot": "String",
+    "START": "String",
+    "END": "String"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "emp_id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "E500",
+        "E501",
+        "E502",
+        "E503",
+        "E504",
+        "E505",
+        "E506",
+        "E507"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Aisha Brennan",
+        "Aisha Costa",
+        "Aisha Iqbal",
+        "Aisha Jensen",
+        "Aisha Sorensen",
+        "Aisha Tanaka",
+        "Boris Dvorak",
+        "Boris Jensen"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "role",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "CS_AGENT",
+        "FITTER",
+        "LOADER",
+        "PLANNER",
+        "SUPERVISOR"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "depot",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "L-201",
+        "L-205",
+        "L-206",
+        "L-210",
+        "L-211",
+        "L-215",
+        "L-216",
+        "L-220"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "START",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2018-01-29",
+        "2018-02-15",
+        "2018-02-28",
+        "2018-04-15",
+        "2018-04-22",
+        "2018-04-26",
+        "2018-06-06",
+        "2018-06-12"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "END",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-11-05",
+        "2025-11-10",
+        "2025-11-27",
+        "2025-12-03",
+        "2025-12-22",
+        "2025-12-30",
+        "2026-01-13",
+        "2026-01-25"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

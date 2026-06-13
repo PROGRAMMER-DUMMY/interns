@@ -50,8 +50,12 @@ def register_spark_salt_udf(spark, workspace: str) -> None:
 
 def collect_pii_columns_from_semantic_contract(sc: dict) -> set[str]:
     """
-    Walk semantic_contract.json and collect all columns marked pii=True.
+    Walk semantic_contract.json and collect all columns marked sensitive.
     Returns a set of "column_name" strings (lowercased).
+
+    Handles BOTH contract shapes: the nested ``datasets[].columns[].pii`` /
+    ``datasets[].pii_columns`` form AND the flat ``columns.<name>.is_sensitive``
+    form the onboarder actually writes (Ref: core-audit ob-workspace-b.md).
     """
     pii_cols: set[str] = set()
     for dataset in sc.get("datasets", []) or []:
@@ -61,4 +65,10 @@ def collect_pii_columns_from_semantic_contract(sc: dict) -> set[str]:
         # Flat list style
         for col in dataset.get("pii_columns", []) or []:
             pii_cols.add(str(col).lower())
+    # Flat shape the onboarder writes: columns.<name>.is_sensitive
+    flat_columns = sc.get("columns")
+    if isinstance(flat_columns, dict):
+        for col, meta in flat_columns.items():
+            if isinstance(meta, dict) and (meta.get("is_sensitive") or meta.get("pii")):
+                pii_cols.add(str(col).lower())
     return pii_cols

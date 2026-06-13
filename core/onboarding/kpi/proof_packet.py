@@ -70,6 +70,17 @@ class KPIProofPacketBuilder:
         source_plan_path = self.layout.contracts_dir / "source_to_target_plan.json"
         relationship_path = self.layout.contracts_dir / "relationship_contracts.json"
         execution_path = self.layout.evidence_dir / "kpi_execution_harness.json"
+        # Data-engineering / pipeline evidence artifacts (catalog -> route ->
+        # pipeline plan -> layered + execution + data-quality harnesses). Each is
+        # optional; the packet aggregates whatever is present so the DE track is
+        # auditable alongside the KPI mapping evidence.
+        catalog_path = self.layout.contracts_dir / "catalog_contract.json"
+        route_path = self.layout.contracts_dir / "data_engineering_route.json"
+        pipeline_plan_path = self.layout.contracts_dir / "pipeline_plan.json"
+        layered_path = self.layout.reports_dir / "layered_pipeline_harness" / "current.json"
+        pipeline_exec_path = self.layout.evidence_dir / "pipeline_execution_harness" / "current.json"
+        data_quality_path = self.layout.evidence_dir / "data_quality_harness" / "current.json"
+        duplicate_review_path = self.layout.reports_dir / "duplicate_review" / "current.json"
 
         registry = _load_json(registry_path)
         mapping = _load_json(mapping_path)
@@ -83,8 +94,24 @@ class KPIProofPacketBuilder:
             "source_to_target_plan": _artifact_state(source_plan_path, self.repo_root),
             "relationship_contracts": _artifact_state(relationship_path, self.repo_root),
             "execution_harness": _artifact_state(execution_path, self.repo_root),
+            "catalog_contract": _artifact_state(catalog_path, self.repo_root),
+            "data_engineering_route": _artifact_state(route_path, self.repo_root),
+            "pipeline_plan": _artifact_state(pipeline_plan_path, self.repo_root),
+            "layered_pipeline_harness": _artifact_state(layered_path, self.repo_root),
+            "pipeline_execution_harness": _artifact_state(pipeline_exec_path, self.repo_root),
+            "data_quality_harness": _artifact_state(data_quality_path, self.repo_root),
+            "duplicate_review": _artifact_state(duplicate_review_path, self.repo_root),
         }
         packet_id = _packet_id(artifacts)
+        data_engineering_evidence = _data_engineering_evidence(
+            catalog=_load_json(catalog_path),
+            route=_load_json(route_path),
+            pipeline_plan=_load_json(pipeline_plan_path),
+            layered=_load_json(layered_path),
+            pipeline_execution=_load_json(pipeline_exec_path),
+            data_quality=_load_json(data_quality_path),
+            duplicate_review=_load_json(duplicate_review_path),
+        )
         kpis = self._kpi_cards(
             registry=registry,
             mapping=mapping,
@@ -107,6 +134,7 @@ class KPIProofPacketBuilder:
             "status": _packet_status(kpis, validation, artifacts),
             "summary": _summary(kpis),
             "artifacts": artifacts,
+            "data_engineering_evidence": data_engineering_evidence,
             "validation": validation,
             "kpis": kpis,
             "next_commands": _next_commands(self.workspace_rel, self.domain, packet_id),
@@ -499,6 +527,64 @@ def _next_commands(workspace: str, domain: str, packet_id: str) -> dict[str, lis
     }
 
 
+def _data_engineering_evidence(
+    *,
+    catalog: dict[str, Any],
+    route: dict[str, Any],
+    pipeline_plan: dict[str, Any],
+    layered: dict[str, Any],
+    pipeline_execution: dict[str, Any],
+    data_quality: dict[str, Any],
+    duplicate_review: dict[str, Any],
+) -> dict[str, Any]:
+    """Aggregate the data-engineering / pipeline track into one evidence block.
+
+    Pure read-only aggregation over already-written artifacts; missing artifacts
+    degrade to empty/zero values rather than failing the packet. Blockers are the
+    union of the pipeline plan's own ``blockers`` and the layered harness
+    ``findings``, each rendered ``<code>: <message>`` so the cause is explicit.
+    """
+    catalog_objects = catalog.get("objects")
+    catalog_object_count = route.get("catalog_object_count")
+    if not isinstance(catalog_object_count, int):
+        catalog_object_count = len(catalog_objects) if isinstance(catalog_objects, list) else 0
+
+    exec_summary = pipeline_execution.get("summary") if isinstance(pipeline_execution.get("summary"), dict) else {}
+    dq_summary = data_quality.get("summary") if isinstance(data_quality.get("summary"), dict) else {}
+    dup_summary = duplicate_review.get("summary") if isinstance(duplicate_review.get("summary"), dict) else {}
+
+    blockers: list[str] = []
+    for blocker in pipeline_plan.get("blockers") or []:
+        if isinstance(blocker, dict):
+            label = str(blocker.get("type") or blocker.get("code") or "blocker")
+            blockers.append(f"{label}: {blocker.get('message') or ''}".rstrip())
+    for finding in layered.get("findings") or []:
+        if isinstance(finding, dict):
+            label = str(finding.get("code") or finding.get("type") or "finding")
+            blockers.append(f"{label}: {finding.get('message') or ''}".rstrip())
+
+    return {
+        "catalog_object_count": catalog_object_count,
+        "selected_track": str(route.get("selected_track") or pipeline_plan.get("selected_track") or ""),
+        "table_format": str(pipeline_plan.get("table_format") or ""),
+        "pipeline_status": str(pipeline_plan.get("status") or ""),
+        "layered_harness_status": str(layered.get("status") or ""),
+        "pipeline_execution_harness": {
+            "status": str(pipeline_execution.get("status") or ""),
+            "passed": int(exec_summary.get("passed_count") or 0),
+            "failed": int(exec_summary.get("failed_count") or 0),
+        },
+        "data_quality_harness": {
+            "status": str(data_quality.get("status") or ""),
+            "passed": int(dq_summary.get("passed_count") or 0),
+            "failed": int(dq_summary.get("failed_count") or 0),
+            "duplicate_finding_count": int(dup_summary.get("duplicate_finding_count") or 0),
+            "unresolved_finding_count": int(dup_summary.get("unresolved_finding_count") or 0),
+        },
+        "blockers": blockers,
+    }
+
+
 def _artifact_state(path: Path, repo_root: Path) -> dict[str, Any]:
     exists = path.exists()
     return {
@@ -561,6 +647,7 @@ def _render_markdown(packet: dict[str, Any]) -> str:
                 "",
             ]
         )
+    lines.extend(_render_data_engineering_evidence(packet.get("data_engineering_evidence") or {}))
     for kpi in packet["kpis"]:
         lines.extend(_render_kpi_card(kpi))
     lines.extend(["## Next Commands", ""])
@@ -569,6 +656,48 @@ def _render_markdown(packet: dict[str, Any]) -> str:
         lines.extend(f"- `{command}`" for command in commands)
         lines.append("")
     return "\n".join(lines)
+
+
+def _render_data_engineering_evidence(evidence: dict[str, Any]) -> list[str]:
+    """Render the data-engineering / pipeline evidence section.
+
+    Skipped entirely when no DE artifacts were present (all-empty evidence), so
+    workspaces without a pipeline track keep the packet unchanged.
+    """
+    exec_h = evidence.get("pipeline_execution_harness") or {}
+    dq_h = evidence.get("data_quality_harness") or {}
+    blockers = evidence.get("blockers") or []
+    has_content = any(
+        [
+            evidence.get("selected_track"),
+            evidence.get("table_format"),
+            evidence.get("pipeline_status"),
+            evidence.get("layered_harness_status"),
+            evidence.get("catalog_object_count"),
+            blockers,
+        ]
+    )
+    if not has_content:
+        return []
+    lines = [
+        "## Data Engineering Evidence",
+        "",
+        f"- Catalog objects: {evidence.get('catalog_object_count', 0)}",
+        f"- Selected track: `{evidence.get('selected_track') or 'n/a'}`",
+        f"- Table format: `{evidence.get('table_format') or 'n/a'}`",
+        f"- Pipeline plan status: `{evidence.get('pipeline_status') or 'n/a'}`",
+        f"- Layered harness status: `{evidence.get('layered_harness_status') or 'n/a'}`",
+        f"- Pipeline execution: {int(exec_h.get('passed') or 0)} passed / "
+        f"{int(exec_h.get('failed') or 0)} failed (status `{exec_h.get('status') or 'n/a'}`)",
+        f"- Data quality: {int(dq_h.get('duplicate_finding_count') or 0)} duplicate / "
+        f"{int(dq_h.get('unresolved_finding_count') or 0)} unresolved (status `{dq_h.get('status') or 'n/a'}`)",
+        "",
+    ]
+    if blockers:
+        lines.append("Blockers:")
+        lines.extend(f"- {blocker}" for blocker in blockers)
+        lines.append("")
+    return lines
 
 
 def _summary_table(kpis: list[dict[str, Any]]) -> str:

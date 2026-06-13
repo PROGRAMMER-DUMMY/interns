@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 from pathlib import Path
 
@@ -63,19 +64,40 @@ class WorkspaceLockTests(unittest.TestCase):
             f"Lock file {lock_path_seen} should be removed on release",
         )
 
-    def test_second_acquire_times_out(self) -> None:
-        with workspace_lock(self.workspace):
-            with self.assertRaises(WorkspaceLockTimeout) as ctx:
+    def test_second_acquire_from_other_thread_times_out(self) -> None:
+        """A different owner (here: another thread) must still time out.
+
+        Same-thread nested acquisition is re-entrant by design (see
+        tests/test_workspace_lock_reentrancy.py), so the contending acquire
+        runs on a separate thread to exercise the cross-owner path.
+        """
+        outcome: dict[str, object] = {}
+
+        def contend() -> None:
+            try:
                 with workspace_lock(
                     self.workspace,
                     timeout_seconds=0.5,
                     poll_interval=0.05,
                 ):
-                    self.fail("Second acquisition should not have succeeded")
+                    outcome["acquired"] = True
+            except WorkspaceLockTimeout as exc:
+                outcome["error"] = str(exc)
 
-            message = str(ctx.exception)
-            self.assertIn("workspace.lock", message)
-            self.assertIn(str(os.getpid()), message)
+        with workspace_lock(self.workspace):
+            thread = threading.Thread(target=contend)
+            thread.start()
+            thread.join(timeout=30)
+            self.assertFalse(thread.is_alive(), "contending thread must finish")
+
+        self.assertNotIn(
+            "acquired",
+            outcome,
+            "Second acquisition from another thread should not have succeeded",
+        )
+        message = str(outcome.get("error", ""))
+        self.assertIn("workspace.lock", message)
+        self.assertIn(str(os.getpid()), message)
 
     def test_lock_file_records_pid_and_hostname(self) -> None:
         with workspace_lock(self.workspace) as lock_path:

@@ -19,10 +19,17 @@ from core.onboarding.kpi.panel_preview_cache import (
     save_cached_preview,
 )
 from core.onboarding.kpi.panel_preview_executor import execute_preview
+from core.governance.injection_guard import neutralize_rows
 from core.onboarding.kpi.pii_redaction import is_pii_column, redact_rows, redact_sample_values
 
 
 PANEL_VERSION = 1
+
+# Intent-contract facets are normally advisory (surfaced in the panel SET, enforced
+# via gate-provenance, not made `current`). The exception is a facet that ALSO hard-
+# blocks the execution harness: it must be answerable as `current` so the operator
+# can resolve it via apply-kpi-panel-answer instead of looping on an empty panel.
+_HARD_BLOCKING_INTENT_FACETS = frozenset({"grain_bucketing"})
 
 register_contract("blocker_question_panel/current.json", current_version=PANEL_VERSION)
 INTERACTION_CONTRACT = {
@@ -102,18 +109,11 @@ class BlockerQuestionPanelBuilder:
         feature_questions = _build_questions(
             mapping, self.workspace, self.repo_root, self.deferred_kpi_ids
         )
-        # `current` (the answerable / flow-blocking panel) is driven ONLY by
-        # unresolved feature-mapping clusters, preserving flow stop semantics.
-        current = (
-            feature_questions[0]
-            if feature_questions
-            else _empty_panel(mapping, self.workspace, self.repo_root)
-        )
         # Route low-confidence KPI intent-contract facets into the panel SET
-        # (index.json) so they are visible/answerable, but NOT into `current`:
-        # intent ambiguities are surfaced + enforced via gate-provenance
-        # (--require-human-gates), not by hard-blocking the KPI flow. Additive;
-        # never breaks panel emission.
+        # (index.json) so they are visible/answerable. Most are advisory -- surfaced
+        # + enforced via gate-provenance (--require-human-gates), not hard-blocking
+        # the KPI flow -- so they stay out of `current`. Additive; never breaks
+        # panel emission.
         intent_questions: list[dict[str, Any]] = []
         try:
             from core.onboarding.kpi.intent_contract import intent_facet_panel_questions
@@ -123,7 +123,43 @@ class BlockerQuestionPanelBuilder:
             )
         except Exception:  # pragma: no cover - defensive; intent routing is additive
             intent_questions = []
-        questions = feature_questions + intent_questions
+        # Near-tied base (fact) table selections from the source-to-target plan.
+        # These HARD-block generation (the planner marks the KPI blocked), so
+        # they must be answerable here via apply-kpi-panel-answer.
+        base_source_questions: list[dict[str, Any]] = []
+        try:
+            from core.onboarding.relationships.base_source_selector import (
+                base_source_panel_questions,
+            )
+
+            base_source_questions = base_source_panel_questions(
+                self.repo_root, _rel(self.workspace, self.repo_root)
+            )
+        except Exception:  # pragma: no cover - defensive; routing is additive
+            base_source_questions = []
+        # `current` (the answerable / flow-blocking panel) is an unresolved
+        # feature-mapping cluster first, preserving flow-stop semantics. Next a
+        # near-tied base-source choice (it blocks the KPI's plan outright). With
+        # none left, fall back to the first HARD-blocking intent facet
+        # (grain_bucketing) -- it also blocks the execution harness, so it MUST
+        # be answerable here via apply-kpi-panel-answer rather than leaving an
+        # empty panel (the loop that burned operator quota). Advisory facets
+        # remain set-only.
+        if feature_questions:
+            current = feature_questions[0]
+        elif base_source_questions:
+            current = base_source_questions[0]
+        else:
+            hard_intent = [
+                q for q in intent_questions
+                if str(q.get("facet")) in _HARD_BLOCKING_INTENT_FACETS
+            ]
+            current = (
+                hard_intent[0]
+                if hard_intent
+                else _empty_panel(mapping, self.workspace, self.repo_root)
+            )
+        questions = feature_questions + base_source_questions + intent_questions
         # Attach the new "real-ops-dashboard" preview sections to every
         # generated panel so the renderer has data to work with.
         try:
@@ -248,11 +284,16 @@ def _feature_items(
     for kpi in mapping.get("kpis", []):
         # Partial-completion: skip deferred (undefined) KPIs so their unresolved
         # feature tokens do not become feature-blocker questions. Defined KPIs
-        # still surface their own blockers normally.
-        if str(kpi.get("kpi_id") or "") in deferred:
-            continue
+        # still surface their own blockers normally. Exception: a
+        # `no_supporting_evidence` blocker is about the KPI itself (its prose
+        # matched nothing in the workspace), not a sibling feature token — the
+        # user must be asked to confirm the missing data or point at the
+        # source, so it survives deferral.
+        kpi_deferred = str(kpi.get("kpi_id") or "") in deferred
         for feature in kpi.get("features", []):
             if feature.get("state") in READY_STATES:
+                continue
+            if kpi_deferred and feature.get("resolution_type") != "no_supporting_evidence":
                 continue
             name = str(feature.get("feature") or "")
             items.setdefault(_norm(name), []).append({"kpi": kpi, "feature": feature})
@@ -342,17 +383,143 @@ def _question_for_cluster(
     prior = _prior_wiki_decision(workspace, repo_root, feature)
     if prior:
         base["prior_decision_wiki"] = prior
-    if any(item["feature"].get("resolution_type") == "kpi_definition_required" for item in items):
+    no_evidence_items = [
+        item
+        for item in items
+        if item["feature"].get("resolution_type") == "no_supporting_evidence"
+    ]
+    if no_evidence_items:
+        kpi_labels = ", ".join(
+            str(item["kpi"].get("kpi_id") or "") for item in no_evidence_items
+        )
+        feature_question = next(
+            (
+                str(item["feature"].get("question") or "")
+                for item in no_evidence_items
+                if item["feature"].get("question")
+            ),
+            "",
+        )
         return {
             **base,
+            "blocker_label": "no_supporting_evidence",
             "blocker": (
+                f"No workspace evidence supports KPI(s) {kpi_labels}: no term in "
+                "the KPI prose matches any profiled column, dataset name, "
+                "data-dictionary entry, or accepted workspace definition. The "
+                "KPI may presuppose data this workspace does not contain."
+            ),
+            "question": feature_question
+            or (
+                "Does this KPI presuppose data that does not exist in this "
+                "workspace? Confirm that, or point to the source dataset, "
+                "column, or file that holds the data."
+            ),
+            "answer_type": "no_supporting_evidence",
+            # option_a/option_b carry expected_answer_shape placeholders the
+            # user must fill in, so neither is appliable as-recommended;
+            # `custom` is the only recommendation the validator accepts here.
+            "recommended_option_id": "custom",
+            "recommended_answer": (
+                "Confirm the workspace does not contain the presupposed data, "
+                "or point to the source that holds it. No mapping will be "
+                "fabricated from zero evidence."
+            ),
+            "why": (
+                "Every prose term of this KPI was scanned against the "
+                "workspace's profiled columns, dataset names, dictionary "
+                "descriptions, and accepted definitions, and nothing matched. "
+                "Mapping it anyway would fabricate evidence; the honest options "
+                "are to confirm the data is absent or to supply the missing "
+                "source."
+            ),
+            "options": [
+                {
+                    "option_id": "option_a",
+                    "label": "Confirm the data does not exist in this workspace",
+                    "business_summary": (
+                        "Record that this KPI presupposes data the workspace "
+                        "does not contain. The KPI stays blocked as not "
+                        "computable from this workspace until a source is "
+                        "supplied."
+                    ),
+                    "expected_answer_shape": {
+                        "confirmation": "data_not_in_workspace",
+                        "reason": "",
+                        "confirmed_by": "",
+                        "applies_to_kpis": applies_to,
+                    },
+                    "json_backed": False,
+                },
+                {
+                    "option_id": "option_b",
+                    "label": "Point to the source that holds this data",
+                    "business_summary": (
+                        "Name the dataset, column(s), file, or upstream system "
+                        "that contains the data this KPI needs, so it can be "
+                        "onboarded and profiled as evidence."
+                    ),
+                    "expected_answer_shape": {
+                        "source_dataset_or_file": "",
+                        "columns": [],
+                        "owner_or_system": "",
+                        "reason": "",
+                        "applies_to_kpis": applies_to,
+                    },
+                    "json_backed": False,
+                },
+                _custom_rule_option(feature),
+            ],
+        }
+    conflict_items = [
+        item
+        for item in items
+        if item["feature"].get("resolution_type") == "dictionary_conflict"
+    ]
+    if conflict_items:
+        return _dictionary_conflict_question(base, feature, applies_to, conflict_items)
+    if any(item["feature"].get("resolution_type") == "kpi_definition_required" for item in items):
+        definition_items = [
+            item
+            for item in items
+            if item["feature"].get("resolution_type") == "kpi_definition_required"
+        ]
+        has_prose = any(
+            isinstance(evidence, dict) and evidence.get("type") == "kpi_prose"
+            for item in definition_items
+            for evidence in item["feature"].get("evidence") or []
+        )
+        feature_question = next(
+            (
+                str(item["feature"].get("question") or "")
+                for item in definition_items
+                if item["feature"].get("question")
+            ),
+            "",
+        )
+        if has_prose:
+            blocker_text = (
+                "The KPI is defined in stakeholder prose; a concrete metric "
+                "expression and grain have not been confirmed yet. The prose and "
+                "matched workspace evidence are attached."
+            )
+            question_text = feature_question or (
+                "Which concrete metric expression and grain/dimensions implement "
+                "this KPI's prose definition?"
+            )
+        else:
+            blocker_text = (
                 "The current KPI registry contains a seed placeholder KPI, not a concrete "
                 "business metric that can be mapped to data."
-            ),
-            "question": (
+            )
+            question_text = (
                 "Which concrete KPI should replace the seed? Include the business question, "
                 "metric expression, grain/dimensions, owner, and acceptance tests."
-            ),
+            )
+        return {
+            **base,
+            "blocker": blocker_text,
+            "question": question_text,
             "answer_type": "kpi_definition_required",
             "recommended_option_id": "custom",
             "recommended_answer": "Provide a concrete KPI definition before mapping features.",
@@ -514,6 +681,120 @@ def _question_for_cluster(
             "derived option. This answer can be saved as a reusable workspace definition."
         ),
         "options": [
+            _custom_rule_option(feature),
+        ],
+    }
+
+
+def _dictionary_conflict_question(
+    base: dict[str, Any],
+    feature: str,
+    applies_to: list[str],
+    conflict_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Panel question for a feature whose dictionary claim contradicts profiles.
+
+    The conflicted column was documented one way and observed another, so the
+    user must rule which evidence wins. option_a/option_b carry
+    expected_answer_shape placeholders the user must fill in, so neither is
+    appliable as-recommended; `custom` is the only recommendation the
+    validator accepts here (same rule as no_supporting_evidence).
+    """
+    conflicts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in conflict_items:
+        for conflict in item["feature"].get("conflicts") or []:
+            if not isinstance(conflict, dict):
+                continue
+            conflict_id = str(conflict.get("conflict_id") or "")
+            if conflict_id and conflict_id in seen:
+                continue
+            seen.add(conflict_id)
+            conflicts.append(conflict)
+    errors = [c for c in conflicts if c.get("severity") == "error"]
+    lead = errors[0] if errors else (conflicts[0] if conflicts else {})
+    dataset_name = str(lead.get("dataset_name") or "")
+    column = str(lead.get("column") or feature)
+    column_label = f"{Path(dataset_name).stem or 'dataset'}.{column}"
+    feature_question = next(
+        (
+            str(item["feature"].get("question") or "")
+            for item in conflict_items
+            if item["feature"].get("question")
+        ),
+        "",
+    )
+    return {
+        **base,
+        "blocker_label": "dictionary_conflict",
+        "blocker": (
+            f"`{feature}` resolves to `{column_label}`, but the data "
+            "dictionary's documented claim about that column contradicts "
+            "profiled evidence. Documentation and data cannot both be right, "
+            "so the mapping is blocked until a human rules which wins."
+        ),
+        "question": feature_question
+        or (
+            f"The dictionary's claim about `{column_label}` conflicts with "
+            "profiled evidence. Should the observed data be trusted over the "
+            "dictionary (and how should the column be interpreted), or is the "
+            "dictionary right and the data needs normalization first?"
+        ),
+        "answer_type": "dictionary_conflict",
+        "recommended_option_id": "custom",
+        "recommended_answer": (
+            "Rule which evidence wins for this column: trust the observed "
+            "data (state the interpretation to use), trust the dictionary "
+            "(state the normalization/repair required first), or provide a "
+            "different source. The documented claim will not be silently "
+            "trusted over contradicting profile evidence."
+        ),
+        "why": (
+            "The data dictionary is documentation evidence, not ground truth. "
+            "Profile evidence actively contradicts its claim for this column "
+            "(see `dictionary_conflicts`), so using the column as documented "
+            "could silently produce wrong KPI numbers."
+        ),
+        "dictionary_conflicts": conflicts,
+        "options": [
+            {
+                "option_id": "option_a",
+                "label": "Trust the observed data over the dictionary",
+                "business_summary": (
+                    "Treat the dictionary entry as stale or wrong. Provide the "
+                    "interpretation the profiled values support (e.g. the real "
+                    "code meanings, the per-row unit rule, or the correct "
+                    "source column) and record it as a workspace definition."
+                ),
+                "expected_answer_shape": {
+                    "ruling": "trust_observed_data",
+                    "feature": feature,
+                    "interpretation": "",
+                    "source_columns": [],
+                    "reason": "",
+                    "confirmed_by": "",
+                    "applies_to_kpis": applies_to,
+                },
+                "json_backed": False,
+            },
+            {
+                "option_id": "option_b",
+                "label": "The dictionary is right; the data needs repair first",
+                "business_summary": (
+                    "Treat the profiled values as bad data. State the "
+                    "normalization or upstream fix required before this column "
+                    "may feed any KPI; the KPI stays blocked until then."
+                ),
+                "expected_answer_shape": {
+                    "ruling": "trust_dictionary_claim",
+                    "feature": feature,
+                    "required_data_fix": "",
+                    "reason": "",
+                    "confirmed_by": "",
+                    "applies_to_kpis": applies_to,
+                },
+                "json_backed": False,
+            },
             _custom_rule_option(feature),
         ],
     }
@@ -1656,6 +1937,50 @@ def _evidence_files(items: list[dict[str, Any]], repo_root: Path) -> list[dict[s
     )
 
 
+def _blocked_kpi_details(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+    """Per-KPI definition asks for the blocked-without-feature-question card.
+
+    Each blocked KPI contributes its name, prose excerpt, open questions, and
+    the workspace-evidence anchors its definition blocker carries, so the
+    definition-help card asks concretely per KPI instead of a bare command.
+    """
+    details: list[dict[str, Any]] = []
+    for kpi in mapping.get("kpis", []) or []:
+        if not isinstance(kpi, dict) or kpi.get("status") != "blocked_questions_pending":
+            continue
+        prose = ""
+        anchors: list[dict[str, Any]] = []
+        for feature in kpi.get("features") or []:
+            if not isinstance(feature, dict):
+                continue
+            for evidence in feature.get("evidence") or []:
+                if not isinstance(evidence, dict):
+                    continue
+                if evidence.get("type") == "kpi_prose" and not prose:
+                    prose = str(evidence.get("excerpt") or "")
+                elif evidence.get("type") == "prose_term_match":
+                    anchors.append(
+                        {
+                            "dataset": evidence.get("source", ""),
+                            "column": evidence.get("column", ""),
+                            "matched_terms": evidence.get("matched_terms") or [],
+                            "dictionary_description": evidence.get(
+                                "dictionary_description", ""
+                            ),
+                        }
+                    )
+        details.append(
+            {
+                "kpi_id": kpi.get("kpi_id", ""),
+                "name": kpi.get("name", ""),
+                "prose_excerpt": prose,
+                "open_questions": list(kpi.get("open_questions") or []),
+                "anchor_evidence": anchors[:6],
+            }
+        )
+    return details
+
+
 def _empty_panel(mapping: dict[str, Any], workspace: Path, repo_root: Path) -> dict[str, Any]:
     summary = mapping.get("summary", {}) or {}
     blocked_count = 0
@@ -1695,9 +2020,13 @@ def _empty_panel(mapping: dict[str, Any], workspace: Path, repo_root: Path) -> d
             "feature-mapping gap. This needs definition help, not a column choice."
         )
         panel["question"] = (
-            "Define the metric and grain for the blocked KPI(s), or restart KPI "
-            "generation, before mapping features."
+            "Define the metric and grain for the blocked KPI(s) with "
+            "`uv run apply-kpi-definition --workspace <workspace> --kpi-id "
+            "<kpi_id> --metric \"...\" --cuts \"...\" --confirmed-by \"<name>\"` "
+            "(one per KPI), then re-run prepare-kpi-blocker-panel. "
+            "Or restart KPI generation."
         )
+        panel["blocked_kpi_details"] = _blocked_kpi_details(mapping)
         try:
             from core.onboarding.workspace.delegation import routing_for
 
@@ -1889,6 +2218,35 @@ def _render_markdown(panel: dict[str, Any]) -> str:
         str(panel.get("why", "")),
         "",
     ]
+    blocked_details = panel.get("blocked_kpi_details") or []
+    if blocked_details:
+        lines += [
+            "## Blocked KPIs (definition needed)",
+            "",
+        ]
+        for detail in blocked_details:
+            lines.append(f"### {detail.get('kpi_id', '')} -- {detail.get('name', '')}")
+            lines.append("")
+            prose = str(detail.get("prose_excerpt") or "").strip()
+            if prose:
+                lines.append("> " + " ".join(prose.split())[:400])
+                lines.append("")
+            for question in detail.get("open_questions") or []:
+                lines.append(f"- Ask: {question}")
+            anchors = detail.get("anchor_evidence") or []
+            if anchors:
+                lines.append("- Workspace evidence anchors:")
+                for anchor in anchors:
+                    dataset = str(anchor.get("dataset") or "")
+                    dataset_label = dataset.split("/")[-1] if dataset else ""
+                    terms = ", ".join(str(t) for t in anchor.get("matched_terms") or [])
+                    gloss = str(anchor.get("dictionary_description") or "")
+                    suffix = f" -- {gloss}" if gloss else ""
+                    lines.append(
+                        f"  - `{dataset_label}.{anchor.get('column', '')}` "
+                        f"(matched: {terms}){suffix}"
+                    )
+            lines.append("")
     cli_agent_task = panel.get("cli_agent_task") or {}
     if cli_agent_task:
         lines.extend(
@@ -2161,14 +2519,7 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-def main() -> None:
-    from core.onboarding.cli_deprecation import warn_soft_deprecated_cli
-
-    warn_soft_deprecated_cli(
-        "blocker-question-panel",
-        prefer="prepare-kpi-blocker-panel",
-        reason="the wrapper runs feature resolution, panel build, and validation atomically",
-    )
+def main(argv: list[str] | None = None) -> int | None:
     parser = argparse.ArgumentParser(
         description="Generate a stakeholder-friendly blocker question panel."
     )
@@ -2177,7 +2528,32 @@ def main() -> None:
     parser.add_argument("--mapping", help="Optional path to kpi_feature_mapping.json.")
     parser.add_argument("--out", help="Optional output directory.")
     parser.add_argument("--json", action="store_true", help="Print JSON summary.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    from core.onboarding.cli_deprecation import (
+        announce_deprecated_cli_redirect,
+        is_internal_cli_call,
+        warn_soft_deprecated_cli,
+    )
+
+    stage_only = bool(args.mapping or args.out)
+    if stage_only or is_internal_cli_call():
+        warn_soft_deprecated_cli(
+            "blocker-question-panel",
+            prefer="prepare-kpi-blocker-panel",
+            reason="the wrapper runs feature resolution, panel build, and validation atomically",
+        )
+    else:
+        announce_deprecated_cli_redirect(
+            "blocker-question-panel",
+            prefer="prepare-kpi-blocker-panel",
+            reason="the wrapper runs feature resolution, panel build, and validation atomically",
+        )
+        from core.onboarding.kpi.blocker_cli import prepare_main
+
+        return prepare_main(
+            ["--workspace", args.workspace, "--repo-root", args.repo_root]
+        )
 
     result = BlockerQuestionPanelBuilder(
         args.repo_root,
@@ -2187,15 +2563,16 @@ def main() -> None:
     ).run()
     if args.json:
         print(json.dumps(result.summary(), indent=2))
-        return
+        return None
     print(f"Wrote {result.question_count} blocker question panel(s) to {result.output_dir}")
     print(f"- {result.current_json}")
     print(f"- {result.current_markdown}")
     print(f"- {result.index_json}")
+    return None
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
 
 
 # ---------------------------------------------------------------------------
@@ -2292,7 +2669,21 @@ def _build_feature_resolution_table(mapping: dict[str, Any]) -> list[dict[str, s
     return rows
 
 
-def _build_sample_evidence(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+def _workspace_redaction_patterns(workspace_path: Path | None) -> tuple[str, ...]:
+    """Default PII patterns extended with the workspace's user data policy.
+
+    Thin wrapper over the shared ``pii_redaction.workspace_redaction_patterns``
+    (single source of truth) so the panel, the result packet, and the verifier
+    all redact with the same effective pattern set.
+    """
+    from core.onboarding.kpi.pii_redaction import workspace_redaction_patterns
+
+    return workspace_redaction_patterns(workspace_path)
+
+
+def _build_sample_evidence(
+    mapping: dict[str, Any], workspace_path: Path | None = None
+) -> list[dict[str, Any]]:
     """Build the sample-evidence mini-table.
 
     For each feature that has source_columns with samples, emit one row with
@@ -2302,6 +2693,7 @@ def _build_sample_evidence(mapping: dict[str, Any]) -> list[dict[str, Any]]:
 
     seen: set[str] = set()
     rows: list[dict[str, Any]] = []
+    policy_patterns = _workspace_redaction_patterns(workspace_path)
     for kpi in mapping.get("kpis", []):
         for feature in kpi.get("features", []):
             name = str(feature.get("feature") or "")
@@ -2319,13 +2711,15 @@ def _build_sample_evidence(mapping: dict[str, Any]) -> list[dict[str, Any]]:
                 if not samples:
                     continue
                 seen.add(name)
-                display_samples = redact_sample_values(column, samples)
+                display_samples = redact_sample_values(
+                    column, samples, patterns=policy_patterns
+                )
                 rows.append(
                     {
                         "feature": name,
                         "column": f"{Path(str(source.get('dataset') or '')).stem}.{column}",
                         "first_samples": [str(value) for value in display_samples],
-                        "redacted": is_pii_column(column),
+                        "redacted": is_pii_column(column, patterns=policy_patterns),
                     }
                 )
                 break  # one row per feature
@@ -2418,7 +2812,14 @@ def _execute_option_preview(
     )
     payload = result.summary()
     if payload.get("status") == "ok" and payload.get("rows"):
-        payload["rows"] = redact_rows(payload["rows"])
+        # PII redaction first, then injection neutralization: sample values
+        # are untrusted workspace data rendered into an LLM-facing panel.
+        payload["rows"] = neutralize_rows(
+            redact_rows(
+                payload["rows"],
+                patterns=_workspace_redaction_patterns(workspace_path),
+            )
+        )
     if payload.get("status") == "ok":
         save_cached_preview(workspace_path, cache_key, payload)
     return payload
@@ -2435,7 +2836,7 @@ def _attach_preview_sections(
     recommended option has an executable preview that succeeded."""
 
     panel["feature_resolution_table"] = _build_feature_resolution_table(mapping)
-    panel["sample_evidence"] = _build_sample_evidence(mapping)
+    panel["sample_evidence"] = _build_sample_evidence(mapping, workspace_path)
     recommended_option_id = str(panel.get("recommended_option_id") or "")
     recommended_preview: dict[str, Any] | None = None
     for option in panel.get("options") or []:

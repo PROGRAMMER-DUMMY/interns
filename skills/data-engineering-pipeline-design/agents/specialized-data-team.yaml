@@ -169,32 +169,3 @@ subagents:
       gemini:
         enabled: true
 
-  - name: agent-advisor-router
-    display_name: Agent Advisor Router
-    description: Advises which specialist agent, skill chain, sandbox, and model tier should handle a task before expensive work starts.
-    skills:
-      - workspace-governance
-      - clarify-ambiguity
-      - evolution
-    default_prompt: "Act as the advisor/router. Classify the user's request, choose the narrowest specialist role, choose the cheapest sufficient model tier, and name the required skills and tool route. Escalate only when ambiguity, production risk, security, or semantic correctness requires it. Do not perform the downstream implementation yourself unless no specialist route fits."
-    safety: read_only_routing_and_cost_control_advice
-    model_policy:
-      default_tier: light
-      use_light_for:
-        - task classification
-        - agent selection
-        - model tier recommendation
-      escalate_to_standard_for:
-        - conflicting routes
-        - missing active workspace context
-      escalate_to_deep_for:
-        - only when route selection itself affects production safety
-    targets:
-      codex:
-        enabled: true
-        sandbox_mode: read-only
-      claude:
-        enabled: true
-        permission: read-only
-      gemini:
-        enabled: true

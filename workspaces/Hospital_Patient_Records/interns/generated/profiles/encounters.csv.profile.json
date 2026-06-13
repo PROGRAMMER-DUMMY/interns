@@ -1,0 +1,407 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hospital_Patient_Records\\encounters.csv",
+  "format": "csv",
+  "row_count": 27891,
+  "file_count": 1,
+  "size_bytes": 7647591,
+  "schema": {
+    "Id": "String",
+    "START": "String",
+    "STOP": "String",
+    "PATIENT": "String",
+    "ORGANIZATION": "String",
+    "PAYER": "String",
+    "ENCOUNTERCLASS": "String",
+    "CODE": "Int64",
+    "DESCRIPTION": "String",
+    "BASE_ENCOUNTER_COST": "Float64",
+    "TOTAL_CLAIM_COST": "Float64",
+    "PAYER_COVERAGE": "Float64",
+    "REASONCODE": "Int64",
+    "REASONDESCRIPTION": "String"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "0002c38a-54e9-0788-930a-90900dce3612",
+        "00059b24-6473-ca4a-8795-7373d4ddc7e0",
+        "00091c5b-f3a1-ee7b-88cc-850c746f8f58",
+        "00092210-7294-428e-1334-9d3f4b671ca4",
+        "000cc8f4-f2c7-5cf3-419d-13be23d959da",
+        "00100582-8baf-695b-63fd-1f6ea1465a46",
+        "0011d269-53cb-06c9-e0df-10f3d01d8c47",
+        "00122be2-0d9e-15d4-72f9-74f1a72faa2b"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "START",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2011-01-02T09:26:36Z",
+        "2011-01-03T05:44:39Z",
+        "2011-01-03T14:32:11Z",
+        "2011-01-03T16:24:45Z",
+        "2011-01-03T17:36:53Z",
+        "2011-01-03T19:08:16Z",
+        "2011-01-03T22:39:50Z",
+        "2011-01-04T14:49:55Z"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "STOP",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2011-01-02T12:58:36Z",
+        "2011-01-03T06:01:42Z",
+        "2011-01-03T14:47:11Z",
+        "2011-01-03T16:39:45Z",
+        "2011-01-03T17:51:53Z",
+        "2011-01-03T19:23:16Z",
+        "2011-01-03T22:54:50Z",
+        "2011-01-04T15:04:55Z"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "PATIENT",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "002bc307-2fff-04ba-161b-98cce123e226",
+        "0034fe01-207f-275f-6b4b-821f7b0af044",
+        "00abe029-00fa-a666-34f5-258a36978f6d",
+        "010ff9c1-564b-6e32-09f4-29cb4224bba9",
+        "01274098-150f-8211-6150-29f2a2da266c",
+        "01296e88-f6d9-1c18-cf91-87523325e034",
+        "015ecc1c-4488-c56d-92c3-c9c94fcf0514",
+        "01c497f8-aaf9-51d6-d6fd-6de9a5dad750"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ORGANIZATION",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "d78e84ec-30aa-3bba-a33a-f29a3a454662"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "PAYER",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "047f6ec3-6215-35eb-9608-f9dda363a44c",
+        "42c4fca7-f8a9-3cd1-982a-dd9751bf3e2a",
+        "4d71f845-a6a9-3c39-b242-14d25ef86a8d",
+        "5059a55e-5d6e-34d1-b6cb-d83d16e57bcf",
+        "6e2f1a2d-27bd-3701-8d08-dae202c58632",
+        "7c4411ce-02f1-39b5-b9ec-dfbea9ad3c1a",
+        "7caa7254-5050-3b5e-9eae-bd5ea30e809c",
+        "b1c428d6-4f07-31e0-90f0-68ffa6ff8c76"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ENCOUNTERCLASS",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "ambulatory",
+        "emergency",
+        "inpatient",
+        "outpatient",
+        "urgentcare",
+        "wellness"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "CODE",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        1505002,
+        1853470,
+        22298006,
+        32485007,
+        33879002,
+        47505003,
+        50849002,
+        56876005
+      ],
+      "sample_min": 1505002,
+      "sample_max": 702927004,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "DESCRIPTION",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Administration of vaccine to produce active immunity (procedure)",
+        "Admission to hospice (procedure)",
+        "Admission to intensive care unit (procedure)",
+        "Admission to surgical department",
+        "Allergic disorder follow-up assessment",
+        "Allergic disorder initial assessment",
+        "Asthma follow-up",
+        "Cardiac Arrest"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "BASE_ENCOUNTER_COST",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        85.55,
+        87.71,
+        136.8,
+        142.58,
+        146.18
+      ],
+      "sample_min": 85.55,
+      "sample_max": 146.18,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "TOTAL_CLAIM_COST",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        0.0,
+        85.55,
+        85.56,
+        85.57,
+        85.59,
+        85.6,
+        85.61,
+        85.65
+      ],
+      "sample_min": 0.0,
+      "sample_max": 641882.7,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "PAYER_COVERAGE",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        0.0,
+        0.31,
+        0.34,
+        3.05,
+        4.16,
+        4.18,
+        5.78,
+        5.83
+      ],
+      "sample_min": 0.0,
+      "sample_max": 247751.42,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "REASONCODE",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        5602001,
+        6072007,
+        10509002,
+        15724005,
+        16114001,
+        22298006,
+        26929004,
+        30832001
+      ],
+      "sample_min": 5602001,
+      "sample_max": 124171000119105,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 19541,
+      "source": "sample_profile"
+    },
+    {
+      "name": "REASONDESCRIPTION",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Acute Cholecystitis",
+        "Acute bacterial sinusitis (disorder)",
+        "Acute bronchitis (disorder)",
+        "Acute viral pharyngitis (disorder)",
+        "Alzheimer's disease (disorder)",
+        "Anemia (disorder)",
+        "Appendicitis",
+        "Asthma"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "CODE",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    },
+    {
+      "column": "BASE_ENCOUNTER_COST",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    },
+    {
+      "column": "TOTAL_CLAIM_COST",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    },
+    {
+      "column": "PAYER_COVERAGE",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    },
+    {
+      "column": "REASONCODE",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    }
+  ]
+}

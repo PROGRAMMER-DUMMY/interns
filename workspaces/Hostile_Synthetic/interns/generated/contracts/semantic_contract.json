@@ -1,0 +1,114 @@
+{
+  "columns": {
+    "acct": {
+      "is_sensitive": true,
+      "category": "account_number"
+    },
+    "Name": {
+      "is_sensitive": true,
+      "category": "name"
+    },
+    "vin": {
+      "is_sensitive": true,
+      "category": "vehicle_identifier"
+    }
+  },
+  "workspace": "workspaces/Hostile_Synthetic",
+  "kpi_count": 10,
+  "term_resolution_order": [
+    "kpi_registry",
+    "data_model_docs_or_diagrams",
+    "dataset_schema_profile_evidence",
+    "data_dictionary_or_metadata_files",
+    "catalog_metadata_if_connected",
+    "stakeholder_or_user_clarification"
+  ],
+  "rules": [
+    {
+      "id": "kpi_001",
+      "name": "KPI 1 - On-time delivery rate",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_002",
+      "name": "KPI 2 - Monthly revenue per active account",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_003",
+      "name": "KPI 3 - Average depot dwell hours",
+      "metric": "avg(hours)",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_004",
+      "name": "KPI 4 - Damage claim rate by carrier",
+      "metric": "",
+      "grain_or_cuts": "carrier_cd",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_005",
+      "name": "KPI 5 - Share of shipments upgraded to premium after dispatch",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_006",
+      "name": "KPI 6 - Fleet utilization",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_007",
+      "name": "KPI 7 - Invoice dispute rate",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_008",
+      "name": "KPI 8 - Average cost per kilogram by lane",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_009",
+      "name": "KPI 9 - Quarterly account churn",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    },
+    {
+      "id": "kpi_010",
+      "name": "KPI 10 - Perfect shipment rate",
+      "metric": "",
+      "grain_or_cuts": "",
+      "status": "needs_mapping",
+      "refinement_required": ""
+    }
+  ],
+  "guardrails": [
+    "preserve_kpi_semantics_before_runtime_optimization",
+    "record_assumptions_for_ambiguous_or_missing_fields",
+    "mark_unmapped_kpis_as_needs_review",
+    "ask_for_missing_dictionary_metadata_catalog_contract_or_sla_files_when_required"
+  ]
+}

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Databricks Access Gates"
-  short_description: "Ask for missing Databricks access gates"
-  default_prompt: "Use Databricks access gates to identify missing scopes, grants, policies, approvals, warehouse paths, and workspace permissions before retrying Databricks remote actions."

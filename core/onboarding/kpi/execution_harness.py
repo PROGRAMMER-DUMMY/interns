@@ -175,26 +175,58 @@ class KPIExecutionHarness:
             ]
 
         conn = duckdb.connect(":memory:")
-        old_cwd = Path.cwd()
+        # Deterministic temporal semantics: pin UTC so date bucketing does not
+        # depend on the machine's session timezone (see flow._write_result_preview).
         try:
-            import os
+            conn.execute("SET TimeZone='UTC'")
+        except Exception:
+            pass
+        from core.storage.atomic_io import pushd
 
-            os.chdir(self.repo_root)
-            return [self._execute_one(conn, sql_path) for sql_path in sql_files]
+        try:
+            with pushd(self.repo_root):
+                return [self._execute_one(conn, sql_path) for sql_path in sql_files]
         finally:
-            import os
-
-            os.chdir(old_cwd)
             conn.close()
 
     def _sql_files(self) -> list[Path]:
         if not self.layout.solutions_dir.exists():
             return []
-        return [
+        files = [
             path
             for path in sorted(self.layout.solutions_dir.glob("kpi_*.sql"))
             if KPI_SQL_PATTERN.match(path.name) and path.name != "kpi_metrics.sql"
         ]
+        # Orphan/stale guard: a solutions file whose kpi_id is no longer in
+        # the current feature mapping is a stale leftover from an earlier
+        # registry (e.g. extraction noise since cleaned up); one whose KPI is
+        # currently BLOCKED is stale by definition — its contract changed and
+        # SQL cannot regenerate until the blocker is answered. Executing
+        # either pollutes the harness with junk and dead-locks the validation
+        # gate (a blocked KPI's old SQL can never pass its new contract).
+        # Empty/missing mapping applies no filter.
+        status_by_id = self._mapping_kpi_status()
+        if status_by_id:
+            files = [
+                path
+                for path in files
+                if status_by_id.get(_kpi_id_from_path(path), "") == "ready_for_sql"
+            ]
+        return files
+
+    def _mapping_kpi_status(self) -> dict[str, str]:
+        path = self.layout.contracts_dir / "kpi_feature_mapping.json"
+        if not path.exists():
+            return {}
+        try:
+            mapping = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return {
+            str(kpi.get("kpi_id") or ""): str(kpi.get("status") or "")
+            for kpi in (mapping.get("kpis") or [])
+            if isinstance(kpi, dict) and kpi.get("kpi_id")
+        }
 
     def _execute_one(self, conn: Any, sql_path: Path) -> KPIExecutionRecord:
         kpi_id = _kpi_id_from_path(sql_path)
@@ -285,12 +317,20 @@ class KPIExecutionHarness:
             # raw metric text here. This keeps the gate consistent with the
             # generator for every workspace and inherits its metric-token handling
             # (no metric-spelling rules duplicated in the verifier).
+            parsed_check = parse_kpi(kpi, grain_bucketing=grain_decision)
             expects_distinct_count = any(
-                agg.distinct
-                for agg in parse_kpi(kpi, grain_bucketing=grain_decision).aggregations
+                agg.distinct for agg in parsed_check.aggregations
             )
-            implements_sum = "sum(" in lowered_sql or (
-                expects_distinct_count and "count(distinct" in lowered_sql
+            # Single-attribution shares render the distinct-entity count as an
+            # attribution CTE (ROW_NUMBER ... __attribution_rn = 1 + COUNT(*)):
+            # one row per entity IS the distinct count. The legacy windowed
+            # COUNT(DISTINCT ...) rendering stays accepted for older SQL.
+            attribution_expected = parsed_check.share_attribution is not None
+            implements_sum = (
+                "sum(" in lowered_sql
+                or ((expects_distinct_count or attribution_expected)
+                    and "count(distinct" in lowered_sql)
+                or (attribution_expected and "__attribution_rn" in lowered_sql)
             )
             if not implements_sum:
                 errors.append(f"SQL does not implement workbook metric `{metric}`")

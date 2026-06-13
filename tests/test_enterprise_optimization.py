@@ -1391,6 +1391,45 @@ diff --git a/model.sql b/model.sql
             self.assertNotIn("Commercial", features)
             self.assertNotIn("Medicare", features)
 
+    def test_prepare_kpi_blocker_panel_next_step_carries_truncation_guard(self):
+        """The blocker-panel next_step (short, always fully visible even when the panel
+        body is UI-truncated) must tell any CLI to read the panel ONCE and NOT escalate
+        — no re-read, no subagent delegation — because a `... N lines hidden ...` notice
+        means the read succeeded. This is where the truncation-as-failure escalation
+        recurred (a Gemini subagent spawned to re-read and looped)."""
+        try:
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            (workspace / "datasets").mkdir(parents=True)
+            (workspace / "docs").mkdir(parents=True)
+            (workspace / "datasets" / "transactions.csv").write_text(
+                "ClaimID,PaidAmount,LineOfBusiness,PayorID,PatientID,VisitType,DepartmentID\n"
+                "C1,10.50,Commercial,P1,PT1,Office,D1\n"
+                "C2,20.25,Medicare,P2,PT2,Inpatient,D2\n",
+                encoding="utf-8",
+            )
+            (workspace / "docs" / "kpi_registry.csv").write_text(
+                "Key business question,Description,Unused,Unused2\n"
+                "\"What is percentage share of lives by gender, age, visit type, department\",Percentage of lives count,,\n",
+                encoding="utf-8",
+            )
+            (workspace / "docs" / "data_model.md").write_text("# Data Model\n", encoding="utf-8")
+
+            result = prepare_kpi_blocker_panel(root, "workspaces/demo", domain="healthcare")
+
+            # A blocker is open (current_feature set), so the guard must be present.
+            self.assertTrue(result.current_feature)
+            step = result.next_step
+            self.assertIn("ONCE", step)
+            self.assertIn("first N lines hidden", step)
+            self.assertIn("SUCCEEDED", step)
+            self.assertIn("subagent", step)
+
     def test_apply_kpi_panel_answer_resolves_friendly_option_and_reprepares(self):
         try:
             import polars  # noqa: F401

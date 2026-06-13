@@ -1,0 +1,273 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hospital_Patient_Records\\procedures.csv",
+  "format": "csv",
+  "row_count": 47701,
+  "file_count": 1,
+  "size_bytes": 8712632,
+  "schema": {
+    "START": "String",
+    "STOP": "String",
+    "PATIENT": "String",
+    "ENCOUNTER": "String",
+    "CODE": "Int64",
+    "DESCRIPTION": "String",
+    "BASE_COST": "Int64",
+    "REASONCODE": "Int64",
+    "REASONDESCRIPTION": "String"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "START",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2011-01-02T09:26:36Z",
+        "2011-01-03T05:44:39Z",
+        "2011-01-04T14:49:55Z",
+        "2011-01-05T04:02:09Z",
+        "2011-01-05T12:58:36Z",
+        "2011-01-06T18:12:41Z",
+        "2011-01-07T21:02:09Z",
+        "2011-01-07T22:39:45Z"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "STOP",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2011-01-02T12:58:36Z",
+        "2011-01-03T06:01:42Z",
+        "2011-01-04T15:04:55Z",
+        "2011-01-05T04:17:09Z",
+        "2011-01-05T16:42:36Z",
+        "2011-01-06T18:17:12Z",
+        "2011-01-07T22:39:45Z",
+        "2011-01-07T23:00:45Z"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "PATIENT",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "002bc307-2fff-04ba-161b-98cce123e226",
+        "0034fe01-207f-275f-6b4b-821f7b0af044",
+        "00abe029-00fa-a666-34f5-258a36978f6d",
+        "010ff9c1-564b-6e32-09f4-29cb4224bba9",
+        "01296e88-f6d9-1c18-cf91-87523325e034",
+        "01c497f8-aaf9-51d6-d6fd-6de9a5dad750",
+        "0226f105-2572-1c6f-15f0-1aa0438e40d0",
+        "0292e8ad-61bf-0676-db49-fb08c34db695"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ENCOUNTER",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "000cc8f4-f2c7-5cf3-419d-13be23d959da",
+        "0011d269-53cb-06c9-e0df-10f3d01d8c47",
+        "00169f6a-632c-357a-3cb2-a91a71c48f11",
+        "0019dbc5-e696-1444-d988-6ae5907580a4",
+        "001fb5d9-0c4a-3e8f-bd27-5c8317674632",
+        "00206994-c580-da92-7caa-00e2620d4363",
+        "00240922-2219-9d5d-e727-0767db3c2f13",
+        "0024384c-8b5a-0360-be03-101b81f26523"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "CODE",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        1225002,
+        5880005,
+        10383002,
+        11466000,
+        14768001,
+        15081005,
+        18286008,
+        18946005
+      ],
+      "sample_min": 1225002,
+      "sample_max": 16335031000119100,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "DESCRIPTION",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Admission to burn unit",
+        "Admission to long stay hospital",
+        "Admission to orthopedic department",
+        "Admission to trauma surgery department",
+        "Admit to ICU (procedure)",
+        "Allergy screening test",
+        "Alpha-fetoprotein test",
+        "Ankle X-ray"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "BASE_COST",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        9,
+        26,
+        27
+      ],
+      "sample_min": 1,
+      "sample_max": 289531,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "REASONCODE",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        5602001,
+        10509002,
+        16114001,
+        22298006,
+        30832001,
+        33737001,
+        43878008,
+        47505003
+      ],
+      "sample_min": 5602001,
+      "sample_max": 67811000119102,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 36945,
+      "source": "sample_profile"
+    },
+    {
+      "name": "REASONDESCRIPTION",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Acute bronchitis (disorder)",
+        "Acute respiratory failure (disorder)",
+        "Acute viral pharyngitis (disorder)",
+        "Appendicitis",
+        "Atrial Fibrillation",
+        "Bullet wound",
+        "Cardiac Arrest",
+        "Chronic congestive heart failure (disorder)"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "CODE",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    },
+    {
+      "column": "BASE_COST",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    },
+    {
+      "column": "REASONCODE",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    }
+  ]
+}

@@ -399,14 +399,7 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-def main() -> None:
-    from core.onboarding.cli_deprecation import warn_soft_deprecated_cli
-
-    warn_soft_deprecated_cli(
-        "derived-feature-markdown",
-        prefer="prepare-kpi-blocker-panel",
-        reason="the wrapper regenerates derived-feature markdown as part of the panel build",
-    )
+def main(argv: list[str] | None = None) -> int | None:
     parser = argparse.ArgumentParser(
         description="Convert strict derived-feature JSON options into stakeholder Markdown."
     )
@@ -420,7 +413,32 @@ def main() -> None:
         help="Allow missing fields. Default is strict validation.",
     )
     parser.add_argument("--json", action="store_true", help="Print JSON summary.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    from core.onboarding.cli_deprecation import (
+        announce_deprecated_cli_redirect,
+        is_internal_cli_call,
+        warn_soft_deprecated_cli,
+    )
+
+    stage_only = bool(args.mapping or args.out or args.no_strict)
+    if stage_only or is_internal_cli_call():
+        warn_soft_deprecated_cli(
+            "derived-feature-markdown",
+            prefer="prepare-kpi-blocker-panel",
+            reason="the wrapper regenerates derived-feature markdown as part of the panel build",
+        )
+    else:
+        announce_deprecated_cli_redirect(
+            "derived-feature-markdown",
+            prefer="prepare-kpi-blocker-panel",
+            reason="the wrapper regenerates derived-feature markdown as part of the panel build",
+        )
+        from core.onboarding.kpi.blocker_cli import prepare_main
+
+        return prepare_main(
+            ["--workspace", args.workspace, "--repo-root", args.repo_root]
+        )
 
     result = DerivedFeatureMarkdownConverter(
         args.repo_root,
@@ -431,11 +449,12 @@ def main() -> None:
     ).run()
     if args.json:
         print(json.dumps(result.summary(), indent=2))
-        return
+        return None
     print(f"Wrote {result.option_count} derived feature review file(s) to {result.output_dir}")
     for file in result.files:
         print(f"- {file}")
+    return None
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1,0 +1,44 @@
+{
+  "artifact_type": "dashboard_spec",
+  "version": 2,
+  "kpi_id": "kpi_003",
+  "updated_at": "2026-06-12T17:58:08.226658+00:00",
+  "machine_defaults": {
+    "title": "What are top 10 payers in Commercial LOB w.r.t. amount paid",
+    "metric": "sum(PaidAmount)",
+    "y_label": "sum(PaidAmount)",
+    "chart_type": "lollipop",
+    "x": "payorid",
+    "x_label": "LineOfBusiness",
+    "y": "sum_paidamount",
+    "agg": "sum",
+    "limit": 10,
+    "sort": "desc",
+    "orientation": "h",
+    "panels": [
+      {
+        "chart_type": "lollipop",
+        "selection_reason": "similar-height categories render as a Cleveland dot plot on a value-zoomed axis: position encodes the value, keeping near-equal categories separable (data-to-viz recommendation)",
+        "selection_source": "https://www.data-to-viz.com/",
+        "x": "payorid",
+        "y": "sum_paidamount",
+        "agg": "sum",
+        "title": "Sum Paidamount by Payorid"
+      }
+    ],
+    "sql_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/solutions/kpi_003.sql",
+    "definition": {
+      "business_question": "What are top 10 payers in Commercial LOB w.r.t. amount paid",
+      "description": "",
+      "metric": "sum(PaidAmount)",
+      "cuts": "LineOfBusiness, PayorID"
+    },
+    "_column_validation": [],
+    "_result_columns": [
+      "lineofbusiness",
+      "payorid",
+      "sum_paidamount"
+    ]
+  },
+  "user_overrides": {}
+}

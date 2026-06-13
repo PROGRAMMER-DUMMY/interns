@@ -83,6 +83,15 @@ class PipelineDecisionRecorder:
         data.setdefault("grain_bucketing_reasons", {})[kpi_id] = reason
         return self._write(data)
 
+    def record_base_source(self, kpi_id: str, dataset: str, *, reason: str = "") -> dict[str, Any]:
+        """Pin the base (fact) table for a KPI whose relationship-graph
+        selection was near-tied. The planner and every engine honor the pin via
+        ``load_pinned_base_sources``. Mirrors record_denominator_scope."""
+        data = self._load()
+        data.setdefault("base_source_decisions", {})[kpi_id] = dataset
+        data.setdefault("base_source_reasons", {})[kpi_id] = reason
+        return self._write(data)
+
 
 class PipelineFormatPanel:
     def __init__(self, repo_root: str | Path, workspace: str | Path) -> None:

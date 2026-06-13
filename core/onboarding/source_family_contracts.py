@@ -95,7 +95,11 @@ class SourceFamilyContractBuilder:
                             }
                         )
                     },
-                    "bronze_plan": {"partition_columns": ["report_year"]},
+                    # T12: derive partition columns from columns ACTUALLY present
+                    # in the family schema (year/period-like), never a hardcoded
+                    # `report_year` that may not exist. Empty when no such column.
+                    # Ref: SUMMARY.md T12, onboarding-root.md.
+                    "bronze_plan": {"partition_columns": _partition_columns(items)},
                     "documentation": docs_by_group.get(name, []),
                     "profiles": [
                         {
@@ -142,6 +146,22 @@ def _extract_data_year(path: str) -> int | None:
         return None
     value = int(match.group(1))
     return 2000 + value if value < 100 else value
+
+
+_PARTITION_COLUMN_RE = re.compile(
+    r"(?i)^(report_)?year$|^.*_year$|^fiscal_year$|^data_year$|^period$|^.*_period$"
+)
+
+
+def _partition_columns(items: list[dict[str, Any]]) -> list[str]:
+    """Year/period-like columns present in the family's schema, derived from
+    evidence (never fabricated). Empty when no such column exists. T12."""
+    columns: set[str] = set()
+    for item in items:
+        schema = item.get("schema")
+        if isinstance(schema, dict):
+            columns.update(str(c) for c in schema.keys())
+    return sorted(c for c in columns if _PARTITION_COLUMN_RE.match(c))
 
 
 def _safe_family_name(value: str) -> str:

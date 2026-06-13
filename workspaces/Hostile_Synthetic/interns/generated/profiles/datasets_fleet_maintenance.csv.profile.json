@@ -1,0 +1,185 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\maintenance.csv",
+  "format": "csv",
+  "row_count": 280,
+  "file_count": 1,
+  "size_bytes": 12204,
+  "schema": {
+    "Id": "String",
+    "vin": "String",
+    "Date": "String",
+    "work_cd": "String",
+    "Amount": "Float64",
+    "downtime_hrs": "Int64"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "MN0001",
+        "MN0002",
+        "MN0003",
+        "MN0004",
+        "MN0005",
+        "MN0006",
+        "MN0007",
+        "MN0008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "vin",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "VIN100",
+        "VIN101",
+        "VIN102",
+        "VIN103",
+        "VIN104",
+        "VIN105",
+        "VIN106",
+        "VIN107"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-01-01",
+        "2025-01-05",
+        "2025-01-10",
+        "2025-01-13",
+        "2025-01-17",
+        "2025-01-20",
+        "2025-01-26",
+        "2025-01-29"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "work_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "BODYWORK",
+        "BRAKES",
+        "MOT",
+        "SERVICE",
+        "TYRES"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        66.45,
+        85.38,
+        90.09,
+        92.57,
+        93.04,
+        98.37,
+        108.3,
+        109.92
+      ],
+      "sample_min": 66.45,
+      "sample_max": 2195.53,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "downtime_hrs",
+      "dtype": "Int64",
+      "nullable": null,
+      "sample_values": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "sample_min": 1,
+      "sample_max": 72,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    },
+    {
+      "column": "downtime_hrs",
+      "current_dtype": "Int64",
+      "recommended_dtype": null,
+      "decision": "needs_exact_bounds",
+      "reason": "Integer downcast requires exact min/max proof.",
+      "requires_approval": false,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "source": "sample_profile"
+      }
+    }
+  ]
+}

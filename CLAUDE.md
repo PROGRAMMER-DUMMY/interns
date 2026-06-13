@@ -1,7 +1,9 @@
 # Claude Code Init
 
 Read `AGENTS.md` first and follow it as the canonical operating guide for this repo.
-Then inspect `TOOLS.md` and `.agents/tools.json` before inventing workflows or helper scripts.
+For tool discovery use the Stage index in `AGENTS.md` > Tool And Evidence Discovery, then read
+only the matching `### <command>` section of `TOOLS.md` on demand. Do not read `TOOLS.md` or
+`.agents/tools.json` whole as session preamble.
 
 For startup commands such as `set <workspace>`, `set current workspace to ...`, or a bare project
 name, treat the message as workspace selection only. File mutation during selection is a hard stop.
@@ -43,8 +45,8 @@ After a shell command completes successfully, respond quickly. Do not spend minu
 re-reading generated artifacts, or expanding hidden output. Summarize from the returned command
 output in under 30 seconds, list key artifact paths, and give the next deterministic command. After
 `onboard-workspace`, the next command is usually
-`uv run resolve-kpi-features --workspace workspaces/<project> --domain <domain> --include-candidates`.
-`resolve-kpi-features` prints `question_panel_path` and `question_panel_markdown_path`; if
+`uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>`.
+It prints `question_panel_path` and `question_panel_markdown_path`; if
 `blocked_kpi_count` is nonzero, read `question_panel_markdown_path` next and do not invent a
 separate interview.
 After onboarding, feature resolution, derived-feature markdown, or question-panel generation, run
@@ -85,7 +87,7 @@ definitions before KPI-specific exceptions, save accepted answers as workspace-l
 and reuse them automatically for every KPI they apply to.
 
 Before asking any KPI blocker question, run
-`uv run blocker-question-panel --workspace <workspace>` and ask from
+`uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>` and ask from
 `interns/reports/blocker_question_panel/current.json` or `current.md` only. Do not create freehand
 Ask User prompts for direct mappings, source-of-truth choices, aliases, workspace definitions, or
 derived features. If the panel files are missing, generate them first, then run
@@ -99,8 +101,9 @@ For derived-column blockers, prose-only options are invalid. Show JSON-backed op
 `derived_column_name`, `formula`, `input_columns`, `observed_values`, `value_profile`,
 `semantic_meaning_sources`, per-column `reason`, `example`, `evidence_sources`,
 `derivation_reasoning`, `evidence_state`, `confidence`, and `needs_user_confirmation`. If
-`derived_feature_options` exist, run `uv run derived-feature-markdown --workspace <workspace>` and
-then `uv run blocker-question-panel --workspace <workspace>`, followed by
+`derived_feature_options` exist, run
+`uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>` (it owns
+derived-feature markdown, panel generation, and validation), followed by
 `uv run validate-workspace-artifacts --workspace <workspace>`. Ask from
 `interns/reports/blocker_question_panel/current.json` or `current.md`, not from freehand prose.
 
@@ -137,6 +140,10 @@ When presenting KPI results, read and forward the canonical artifact verbatim:
 Do NOT re-type or reconstruct the generated SQL or result tables from memory. Re-authoring from
 memory caused a fabricated data-source render (BUG-015). Show the emitted packet once; do not
 paraphrase the SQL. (Residual from BUG-015.)
+
+Default = the compact packet above (same content as `interns/runs/<date>/results.md`). On
+"full results" forward `interns/reports/kpi_results/current_full.md` (= `runs/<date>/results_full.md`)
+verbatim instead. See `AGENTS.md` > Compact vs full results.
 
 ## Token Discipline
 

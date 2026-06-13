@@ -79,6 +79,17 @@ def prepare_kpi_blocker_panel(
         WorkspaceOnboarder(root, _rel(workspace_path, root)).run()
         onboarded = True
 
+    # Relationship/lineage evidence feeds feature resolution (documented joins,
+    # collision unification), so contracts are rebuilt before resolving.
+    # Additive: a failure here degrades resolution (collisions block instead of
+    # unifying) but must never break panel preparation.
+    try:
+        from core.onboarding.relationships.contracts import RelationshipContractBuilder
+
+        RelationshipContractBuilder(root, _rel(workspace_path, root)).build()
+    except Exception:  # pragma: no cover - relationship evidence is additive
+        pass
+
     resolver_result = KPIFeatureResolver(
         root,
         _rel(workspace_path, root),
@@ -106,8 +117,10 @@ def prepare_kpi_blocker_panel(
         question_count=panel_result.question_count,
         validation=validation.summary(),
         next_step=(
-            f"Render {panel_result.current_markdown} as-is. Do not summarize it or write a "
-            f"second blocker prompt. Apply answers only from {panel_result.current_json}."
+            f"Render {panel_result.current_markdown} as-is, reading it ONCE. Do not summarize it, "
+            f"write a second blocker prompt, re-read it in another form, or delegate to a subagent "
+            f"to read it: a `... first N lines hidden ...` notice means the read SUCCEEDED "
+            f"(UI truncation, not a failure). Apply answers only from {panel_result.current_json}."
             if panel_result.current_feature
             else "No blocker question remains."
         ),
@@ -254,14 +267,33 @@ def _apply_option(
     if option_id == "custom":
         if not custom_definition:
             raise ValueError("--custom-definition is required when applying the custom option")
+        # A custom definition that is a SQL EXPRESSION (EXISTS/CASE/comparison/
+        # function call) must be recorded as a derived FORMULA so the features
+        # view materializes it under the feature's name — recording it as a
+        # plain business definition made resolution fall back to a column
+        # alias (a readmission flag column full of entity ids). Quoted
+        # identifiers in the formula are its input columns, exactly like the
+        # JSON-backed derived options.
+        definition_text = str(custom_definition).strip()
+        looks_like_formula = bool(
+            re.search(r"[()<>=]|\bexists\b|\bcase\b", definition_text, re.IGNORECASE)
+        )
+        formula_inputs = (
+            list(dict.fromkeys(re.findall(r'"([A-Za-z_][A-Za-z0-9_]*)"', definition_text)))
+            if looks_like_formula
+            else []
+        )
         return apply_workspace_definition(
             repo_root,
             workspace,
             feature=feature,
             state=accepted_state,
-            resolution_type="custom_business_definition",
-            definition=custom_definition,
+            resolution_type=(
+                "derived_formula" if looks_like_formula else "custom_business_definition"
+            ),
+            definition=definition_text,
             evidence_note=(note_prefix + (evidence_note or custom_definition)),
+            source_columns=formula_inputs,
             applies_to_kpis=panel.get("applies_to_kpis") or [],
         )
     if physical := option.get("physical_column_option"):

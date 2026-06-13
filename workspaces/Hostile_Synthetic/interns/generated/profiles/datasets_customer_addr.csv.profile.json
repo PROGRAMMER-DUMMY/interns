@@ -1,0 +1,133 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\customer\\addr.csv",
+  "format": "csv",
+  "row_count": 380,
+  "file_count": 1,
+  "size_bytes": 13407,
+  "schema": {
+    "Id": "String",
+    "acct": "String",
+    "line1": "String",
+    "post_area": "String",
+    "country_cd": "String"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "AD0001",
+        "AD0002",
+        "AD0003",
+        "AD0004",
+        "AD0005",
+        "AD0006",
+        "AD0007",
+        "AD0008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "acct",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "P-1001",
+        "P-1002",
+        "P-1003",
+        "P-1004",
+        "P-1005",
+        "P-1006",
+        "P-1007",
+        "P-1008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "line1",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "1 Forge Way",
+        "1 Quartz Way",
+        "10 Bravo Way",
+        "10 Forge Way",
+        "10 Wexford Way",
+        "100 Delta Way",
+        "100 Solstice Way",
+        "100 Zenith Way"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "post_area",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "AB",
+        "B",
+        "CF",
+        "EH",
+        "G",
+        "LS",
+        "M",
+        "NE"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "country_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "FR",
+        "GB",
+        "IE",
+        "NL"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

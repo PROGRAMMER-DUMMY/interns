@@ -1,0 +1,166 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\disputes.csv",
+  "format": "csv",
+  "row_count": 260,
+  "file_count": 1,
+  "size_bytes": 12661,
+  "schema": {
+    "Id": "String",
+    "inv_no": "String",
+    "opened": "String",
+    "Status": "String",
+    "reason_cd": "String",
+    "Amount": "Float64"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "DSP4001",
+        "DSP4002",
+        "DSP4003",
+        "DSP4004",
+        "DSP4005",
+        "DSP4006",
+        "DSP4007",
+        "DSP4008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "inv_no",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "INV-50002",
+        "INV-50005",
+        "INV-50009",
+        "INV-50011",
+        "INV-50024",
+        "INV-50025",
+        "INV-50046",
+        "INV-50058"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "opened",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-01-01",
+        "2025-01-02",
+        "2025-01-04",
+        "2025-01-05",
+        "2025-01-06",
+        "2025-01-08",
+        "2025-01-10",
+        "2025-01-11"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "OPEN",
+        "REJECTED",
+        "RESOLVED"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "reason_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "RR1",
+        "RR2",
+        "RR5",
+        "X07"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        14.53,
+        23.15,
+        29.02,
+        29.23,
+        31.62,
+        32.17,
+        36.05,
+        39.09
+      ],
+      "sample_min": 14.53,
+      "sample_max": 597.59,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

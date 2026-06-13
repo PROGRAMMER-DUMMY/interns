@@ -1,0 +1,132 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\operations\\exceptions.csv",
+  "format": "csv",
+  "row_count": 520,
+  "file_count": 1,
+  "size_bytes": 21973,
+  "schema": {
+    "Id": "String",
+    "ship_ref": "String",
+    "Date": "String",
+    "exc_cd": "String",
+    "note": "String"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "EX20001",
+        "EX20002",
+        "EX20003",
+        "EX20004",
+        "EX20005",
+        "EX20006",
+        "EX20007",
+        "EX20008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ship_ref",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "SH100005",
+        "SH100017",
+        "SH100020",
+        "SH100033",
+        "SH100039",
+        "SH100041",
+        "SH100051",
+        "SH100054"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-01-02",
+        "2025-01-03",
+        "2025-01-07",
+        "2025-01-08",
+        "2025-01-11",
+        "2025-01-12",
+        "2025-01-14",
+        "2025-01-15"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "exc_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X06",
+        "X07",
+        "X08"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "note",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "auto-flag",
+        "driver note",
+        "see CS ticket"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

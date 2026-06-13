@@ -9,6 +9,8 @@ from pathlib import Path
 
 from core.onboarding.workspace.flow import (
     WorkspaceFlow,
+    _active_run_paths,
+    _emit_result_packet,
     _build_kpi_resolution_review,
     _compact_panel,
     compute_workflow_diff,
@@ -18,6 +20,117 @@ from core.onboarding.workspace.flow import (
     _result_view,
     _undefined_kpis,
 )
+
+
+class ActiveRunPathsTests(unittest.TestCase):
+    """The completion output advertises the dated runs/<date>/results.md as the
+    ONE stable surface a driving CLI should read+forward. A CLI agent previously
+    misread a UI-truncated inline packet as a read failure and looped re-reading
+    the results in many forms. `_active_run_paths` resolves that surface."""
+
+    def _make_run(self, root: Path, ws_rel: str, day: str, kpis):
+        run_dir = root / ws_rel / "interns" / "runs" / day
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "results.md").write_text("# KPI Query Results\n", encoding="utf-8")
+        for kpi in kpis:
+            (run_dir / f"{kpi}.md").write_text(f"## {kpi}\n", encoding="utf-8")
+        return run_dir
+
+    def test_resolves_today_with_per_kpi_files_sorted(self):
+        from datetime import date
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = "workspaces/W"
+            self._make_run(root, ws, date.today().isoformat(), ["kpi_002", "kpi_001"])
+            resolved = _active_run_paths(root, ws)
+            self.assertIsNotNone(resolved)
+            results_rel, kpi_rels = resolved
+            self.assertTrue(results_rel.endswith(f"runs/{date.today().isoformat()}/results.md"))
+            # per-KPI files are sorted, so kpi_001 precedes kpi_002
+            self.assertEqual(len(kpi_rels), 2)
+            self.assertTrue(kpi_rels[0].endswith("kpi_001.md"))
+            self.assertTrue(kpi_rels[1].endswith("kpi_002.md"))
+
+    def test_falls_back_to_latest_dated_dir_when_today_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = "workspaces/W"
+            self._make_run(root, ws, "2025-01-01", ["kpi_001"])
+            self._make_run(root, ws, "2025-03-09", ["kpi_001"])  # latest by name
+            results_rel, _ = _active_run_paths(root, ws)
+            self.assertTrue(results_rel.endswith("runs/2025-03-09/results.md"))
+
+    def test_none_when_no_run_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(_active_run_paths(Path(tmp), "workspaces/W"))
+
+
+class EmitResultPacketTests(unittest.TestCase):
+    """`_emit_result_packet` selects its source: full (default), compact (auto-surface),
+    or a single per-KPI file (`--kpi`). Verified without running the pipeline by
+    constructing the on-disk artifacts the emitter reads."""
+
+    def _make_artifacts(self, root: Path, ws: str = "workspaces/W"):
+        from datetime import date
+
+        reports = root / ws / "interns" / "reports" / "kpi_results"
+        reports.mkdir(parents=True)
+        # New convention: current.md = compact (the canonical forward target);
+        # current_full.md = full (inlined SQL, for --full drill-down).
+        (reports / "current.md").write_text(
+            "# KPI Query Results\n\n- Compact view: SQL is linked per KPI\n\n## kpi_001\nTABLE_001\n## kpi_002\nTABLE_002\n",
+            encoding="utf-8",
+        )
+        (reports / "current_full.md").write_text(
+            "# KPI Query Results\n\n## kpi_001\nFULL_SQL_BLOCK_001\n## kpi_002\nFULL_SQL_BLOCK_002\n",
+            encoding="utf-8",
+        )
+        run = root / ws / "interns" / "runs" / date.today().isoformat()
+        run.mkdir(parents=True)
+        (run / "results.md").write_text("# KPI Query Results\ncombined\n", encoding="utf-8")
+        (run / "kpi_001.md").write_text("## kpi_001\nONLY_001_CONTENT\n", encoding="utf-8")
+        (run / "kpi_002.md").write_text("## kpi_002\nONLY_002_CONTENT\n", encoding="utf-8")
+        return ws
+
+    def _emit(self, root: Path, ws: str, **kw) -> str:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _emit_result_packet(root, ws, **kw)
+        return buf.getvalue()
+
+    def test_default_emits_full_packet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_artifacts(root)
+            out = self._emit(root, ws)
+            self.assertIn("FULL_SQL_BLOCK_001", out)
+            self.assertNotIn("Compact view", out)
+            self.assertIn("## Active Run", out)
+
+    def test_compact_emits_compact_packet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_artifacts(root)
+            out = self._emit(root, ws, compact=True)
+            self.assertIn("Compact view", out)
+            self.assertNotIn("FULL_SQL_BLOCK_001", out)
+
+    def test_kpi_id_forwards_only_that_kpi(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_artifacts(root)
+            out = self._emit(root, ws, kpi_id="kpi_002")
+            self.assertIn("## KPI Result Packet: kpi_002", out)
+            self.assertIn("ONLY_002_CONTENT", out)
+            self.assertNotIn("ONLY_001_CONTENT", out)  # other KPI excluded
+
+    def test_kpi_id_not_found_falls_back_with_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_artifacts(root)
+            out = self._emit(root, ws, kpi_id="kpi_404")
+            self.assertIn("kpi_404 not found", out)
 
 
 class StatusParityTests(unittest.TestCase):
@@ -251,13 +364,16 @@ class ResultsPanelInlineRenderTests(unittest.TestCase):
             },
         }
 
-    def test_results_panel_embeds_definition_sql_and_table_inline(self):
+    def test_results_panel_shows_definition_table_and_sql_pointer_compact(self):
+        # The results-stage panel markdown is now COMPACT: definition + table + SQL
+        # pointer, no inlined SQL (full SQL via `results --full` / the .sql files).
+        # This keeps the panel markdown from UI-truncating.
         markdown = _render_panel_markdown(self._results_panel())
         self.assertIn("## KPI Results", markdown)
         self.assertIn("Top payers by paid amount", markdown)
-        self.assertIn("```sql", markdown)
-        self.assertIn("GROUP BY payor", markdown)
-        self.assertIn("| payor | paid |", markdown)
+        self.assertNotIn("```sql", markdown)            # SQL not inlined
+        self.assertIn("interns/generated/solutions/kpi_001.sql", markdown)  # pointer kept
+        self.assertIn("| payor | paid |", markdown)     # result table kept
 
     def test_completed_kpis_still_take_precedence_when_present(self):
         # When a panel carries completed_kpis (the `complete` stage), that block
@@ -267,6 +383,23 @@ class ResultsPanelInlineRenderTests(unittest.TestCase):
         markdown = _render_panel_markdown(panel)
         self.assertIn("## Completed KPIs", markdown)
         self.assertNotIn("## KPI Results", markdown)
+
+    def test_render_kpi_block_include_sql_false_drops_sql_keeps_pointer_and_table(self):
+        # Compact rendering: omit the inlined ```sql``` block (the size driver that
+        # triggers CLI truncation) but keep the SQL path pointer and the result table.
+        from core.onboarding.kpi.registry_loader import render_kpi_block
+
+        entry = self._results_panel()["summary"]["kpis"][0]
+        full = "\n".join(render_kpi_block(entry, heading_level=2, include_sql=True))
+        compact = "\n".join(render_kpi_block(entry, heading_level=2, include_sql=False))
+
+        self.assertIn("```sql", full)
+        self.assertNotIn("```sql", compact)
+        # pointer + definition + table survive in compact
+        self.assertIn("interns/generated/solutions/kpi_001.sql", compact)
+        self.assertIn("| payor | paid |", compact)
+        self.assertIn("Top payers by paid amount", compact)
+        self.assertLess(len(compact), len(full))
 
 
 class WorkspaceFlowTests(unittest.TestCase):
@@ -807,6 +940,85 @@ class BugFixTests(unittest.TestCase):
             self.assertIn("kpi_001", output)
             # Must NOT be pointer-only (just an artifact path without content).
             self.assertNotIn("Review generated KPI SQL and result previews.\n\n## Next Step", output[:500])
+
+    def test_results_auto_emit_at_kpi_analyst_review_gate(self):
+        """Results must surface the moment the flow STOPS at the kpi-analyst review
+        gate — the operator should never have to type "show results". A plain
+        `status` call (no `review`, no `results`) must already print the packet and
+        the Active Run pointer, because results are executed before the gate."""
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_simple_workspace(root)
+
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            # The flow must stop at the enforced human review gate (not auto-complete).
+            self.assertEqual(result.status, "needs_specialist_review")
+            self.assertEqual(result.stage, "kpi_analyst_review")
+
+            # Drive ONLY `status` — no review, no results subcommand.
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = workspace_flow_main(
+                    ["--repo-root", str(root), "status", "--session", result.session_id]
+                )
+            output = stdout.getvalue()
+            self.assertEqual(exit_code, 0)
+            # Packet + dated Active Run pointer must already be present at the gate.
+            self.assertIn("KPI Result Packet", output)
+            self.assertIn("kpi_001", output)
+            self.assertIn("## Active Run", output)
+            self.assertIn("results.md", output)
+
+    def test_complete_compact_explicit_full_and_kpi_filter(self):
+        """Wiring proof: at `complete` the auto-surface is COMPACT (SQL linked, no
+        truncation), explicit `results` stays FULL (SQL inlined), and `results --kpi`
+        forwards a single KPI."""
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._make_simple_workspace(root)
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            result = WorkspaceFlow.from_session(root, result.session_id).review(
+                verdict="ok", summary="ok",
+            )
+            self.assertEqual(result.status, "complete")
+            sid = result.session_id
+
+            def run(args):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    workspace_flow_main(["--repo-root", str(root), *args])
+                return buf.getvalue()
+
+            # complete-stage auto-surface (status) -> compact
+            out_status = run(["status", "--session", sid])
+            self.assertIn("## KPI Result Packet", out_status)
+            self.assertIn("Compact view: SQL is linked per KPI", out_status)
+            self.assertIn("## Active Run", out_status)
+
+            # results (default) -> COMPACT, no inlined SQL (won't truncate)
+            out_default = run(["results", "--session", sid])
+            self.assertNotIn("```sql", out_default)
+            self.assertIn("Compact view: SQL is linked per KPI", out_default)
+
+            # results --full -> full packet with inlined SQL (drill-down)
+            out_full = run(["results", "--session", sid, "--full"])
+            self.assertIn("```sql", out_full)
+
+            # results --kpi -> single-KPI header (per-KPI file forwarded)
+            out_kpi = run(["results", "--session", sid, "--kpi", "kpi_001"])
+            self.assertIn("## KPI Result Packet: kpi_001", out_kpi)
 
     # BUG-014: review records provenance (agent vs human).
     def test_bug014_review_records_agent_provenance_by_default(self):

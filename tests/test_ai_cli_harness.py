@@ -148,7 +148,7 @@ class AICLIHarnessTests(unittest.TestCase):
                         "eval_type": "workflow_guard",
                         "stub_commands": [
                             {
-                                "command": "uv run validate-workflow-guardrails --workspace workspaces/demo",
+                                "command": "uv run harness workflow-guardrails --workspace workspaces/demo",
                                 "status": "passed",
                                 "exit_code": 0,
                             }

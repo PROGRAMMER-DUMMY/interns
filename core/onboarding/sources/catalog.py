@@ -10,10 +10,12 @@ import argparse
 import asyncio
 import csv
 import hashlib
+import ipaddress
 import json
 import os
 import re
 import shutil
+import socket
 import time
 import urllib.parse
 from dataclasses import asdict, dataclass, field
@@ -25,7 +27,11 @@ import aiohttp
 import polars as pl
 
 from core.resource.manager import ResourceManager
-from core.storage.external_data import is_external_path, load_external_data_policy
+from core.storage.external_data import (
+    is_external_path,
+    is_within_allowed_roots,
+    load_external_data_policy,
+)
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -379,17 +385,24 @@ class SourceCatalogManager:
             warnings=[],
         )
 
-    def finalize_selection(self, source_id: str, *, approve_final_preview: bool = False) -> CatalogResult:
+    def finalize_selection(
+        self, source_id: str | None = None, *, approve_final_preview: bool = False
+    ) -> CatalogResult:
         if not approve_final_preview:
             raise ValueError("finalize-selection requires --approve-final-preview")
         draft_path = self.workspace / "docs" / "source_selection.generated.json"
         if not draft_path.exists():
             raise FileNotFoundError(f"source selection draft not found: {draft_path}")
         draft = json.loads(draft_path.read_text(encoding="utf-8"))
-        if draft.get("source_catalog_id") != source_id:
+        draft_id = str(draft.get("source_catalog_id") or "").strip()
+        # source_id is optional: infer it from the draft's source_catalog_id, then
+        # the workspace folder name. Only enforce a match when the caller passes an
+        # explicit id AND the draft also records one and they differ.
+        if source_id and draft_id and draft_id != source_id:
             raise ValueError(
-                f"draft source_catalog_id mismatch: expected {source_id}, found {draft.get('source_catalog_id')}"
+                f"draft source_catalog_id mismatch: expected {source_id}, found {draft_id}"
             )
+        source_id = source_id or draft_id or self.workspace.name
         sources = draft.get("sources")
         if not isinstance(sources, list):
             raise ValueError("draft selection must contain a sources list")
@@ -645,6 +658,17 @@ class SourceCatalogManager:
 
     def _apply_local_source(self, action: dict[str, Any]) -> dict[str, Any]:
         source_path = Path(action["path"]).resolve()
+        # T8: refuse any source path outside the repo or a configured external
+        # root, even after approval — otherwise an approved selection could copy
+        # or register-by-allowlist an arbitrary host file (e.g. C:/Windows, /etc,
+        # another user's home) into a governed workspace. Ref: ob-sources.md.
+        policy = load_external_data_policy(self.repo_root)
+        if not is_within_allowed_roots(source_path, self.repo_root, policy):
+            return {
+                "status": "blocked",
+                "reason": "local_source_outside_allowed_roots",
+                "path": str(source_path),
+            }
         if not source_path.exists():
             return {"status": "blocked", "reason": "local_source_missing"}
         mode = action.get("mode", "copy")
@@ -690,19 +714,27 @@ class SourceCatalogManager:
         return {"status": "metadata_exported", "metadata_path": _rel(out, self.repo_root)}
 
     def _register_external_allowlist(self, path: Path, source_id: str) -> None:
+        # P4d (T6): take the workspace lock around the settings read-modify-write
+        # and re-read UNDER the lock, so concurrent local-stage of multiple
+        # sources can't lose allowlist entries (last-writer-wins). Atomic write.
+        # Ref: core-audit ob-sources.md, storage.md.
+        from core.storage.atomic_io import write_text_atomic
+        from core.storage.workspace_lock import workspace_lock
+
         self.layout.state_dir.mkdir(parents=True, exist_ok=True)
-        settings = self.layout.load_settings()
-        entries = settings.setdefault("dataset_allowlist", [])
-        normalized = str(path)
-        if not any(str(item.get("path")) == normalized for item in entries if isinstance(item, dict)):
-            entries.append(
-                {
-                    "type": "external_absolute" if path.is_absolute() else "workspace_relative",
-                    "path": normalized,
-                    "reason": f"source_catalog:{source_id}",
-                }
-            )
-        self.layout.workspace_settings.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+        with workspace_lock(self.layout.project_root):
+            settings = self.layout.load_settings()
+            entries = settings.setdefault("dataset_allowlist", [])
+            normalized = str(path)
+            if not any(str(item.get("path")) == normalized for item in entries if isinstance(item, dict)):
+                entries.append(
+                    {
+                        "type": "external_absolute" if path.is_absolute() else "workspace_relative",
+                        "path": normalized,
+                        "reason": f"source_catalog:{source_id}",
+                    }
+                )
+            write_text_atomic(self.layout.workspace_settings, json.dumps(settings, indent=2))
 
     def _write_plan(
         self,
@@ -1145,11 +1177,42 @@ def _page_url(url: str, pagination: dict[str, Any], page: int, page_size: int) -
     return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query)))
 
 
+def assert_url_egress_allowed(url: str) -> None:
+    """Raise RuntimeError unless ``url`` is a safe public HTTP(S) egress target.
+
+    SSRF guard for approved `api` sources (T8): blocks non-http(s) schemes and any
+    host that resolves to loopback / private (RFC1918) / link-local
+    (169.254.0.0/16, incl. the cloud metadata IP 169.254.169.254) / reserved /
+    multicast / unspecified addresses. A human may opt out for a trusted internal
+    host by setting AUTORESEARCH_ALLOW_PRIVATE_EGRESS=1. Ref: ob-sources.md.
+    """
+    if os.environ.get("AUTORESEARCH_ALLOW_PRIVATE_EGRESS") == "1":
+        return
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise RuntimeError(f"ssrf_blocked_scheme:{parsed.scheme or '<none>'}")
+    host = parsed.hostname
+    if not host:
+        raise RuntimeError("ssrf_blocked_no_host")
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except OSError as exc:
+        raise RuntimeError(f"ssrf_unresolvable_host:{host}:{exc}") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_loopback or ip.is_private or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+        ):
+            raise RuntimeError(f"ssrf_blocked_private_ip:{host}->{ip}")
+
+
 async def _fetch_bytes_with_retry(
     session: aiohttp.ClientSession,
     url: str,
     policy: ApiFetchPolicy,
 ) -> bytes:
+    assert_url_egress_allowed(url)
     last_exc: Exception | None = None
     for attempt in range(policy.attempts):
         try:
@@ -1190,6 +1253,7 @@ async def _stream_to_path_with_retry(
     path: Path,
     policy: ApiFetchPolicy,
 ) -> int:
+    assert_url_egress_allowed(url)
     last_exc: Exception | None = None
     for attempt in range(policy.attempts):
         part_path = path.with_suffix(path.suffix + ".part")
@@ -1258,7 +1322,10 @@ def _read_existing_rows(path: Path) -> list[dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, list):
             return [row for row in data if isinstance(row, dict)]
-    except Exception:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, csv.Error):
+        # Narrowed from bare Exception: a corrupt checkpoint resume now degrades
+        # to "restart from empty" only on a genuine read/parse error, not on an
+        # unrelated bug masquerading as an empty resume. Ref: P6 (sources).
         return []
     return []
 

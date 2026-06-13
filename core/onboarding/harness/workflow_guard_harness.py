@@ -22,11 +22,27 @@ from core.storage.workspace_layout import WorkspaceLayout
 
 
 HARNESS_VERSION = 1
-WINDOWS_UNIX_COMMANDS = {"cat", "head", "tail", "grep", "sed", "awk"}
+WINDOWS_UNIX_COMMANDS = {"cat", "head", "tail", "grep", "sed", "awk", "cp", "mv", "rm", "ln"}
 RAW_DATA_READ_COMMANDS = {"cat", "type", "get-content", "import-csv"}
 DATA_SUFFIXES = {".csv", ".parquet", ".json", ".jsonl", ".xlsx", ".xls"}
 GENERIC_TEMPORAL_PLACEHOLDERS = {"created_at", "updated_at", "timestamp", "event_time"}
 SLOW_STEP_THRESHOLD_MS = 120000
+# Per-stage wall-clock budget for a single recorded command (seconds). A
+# deterministic stage tool should finish well under this; a longer run points at
+# a hung/runaway invocation.
+STAGE_TIME_BUDGET_SECONDS = 30
+# Workflow-route commands that require the agent to have read the tool registry
+# (.agents/**/SKILLS.md) first so it picks the right route for the workspace.
+WORKFLOW_ROUTE_TOKENS = (
+    "resolve-kpi-features", "prepare-kpi-generation", "prepare-kpi-blocker-panel",
+    "build-source-family-contracts", "run-data-engineering-route",
+)
+# KPI-generation/resolution routes that are WRONG for an external-source
+# workspace (which must go through the source-catalog/source-family route first).
+KPI_ROUTE_TOKENS = (
+    "resolve-kpi-features", "prepare-kpi-generation", "prepare-kpi-blocker-panel",
+    "generate-pipeline-sql",
+)
 # Generic shell, git, and runner executables that are always allowed regardless of
 # the project tool roster. Kept domain-agnostic on purpose.
 GENERIC_COMMANDS = {
@@ -139,8 +155,10 @@ class WorkflowGuardHarness:
         findings.extend(self._check_incomplete_workflow())
         findings.extend(self._check_session_monitored())
         findings.extend(self._check_repeated_commands())
+        findings.extend(self._check_generated_sql_raw_paths())
         findings.extend(self._check_hand_edited_generated_artifacts())
         findings.extend(self._check_throwaway_reader_scripts())
+        findings.extend(self._check_vision_review_done())
         error_count = sum(1 for item in findings if item["severity"] == "error")
         warning_count = sum(1 for item in findings if item["severity"] == "warning")
         report = {
@@ -192,6 +210,80 @@ class WorkflowGuardHarness:
             return None
         path = Path(value)
         return (self.repo_root / path).resolve() if not path.is_absolute() else path.resolve()
+
+    def _check_vision_review_done(self) -> list[dict[str, Any]]:
+        """A screener run stages screenshots for the agent's vision review;
+        a report still pending means nobody (agent or human) actually looked
+        at the rendered dashboard — the visual gate silently didn't happen."""
+        from core.dashboard.screener import vision_review_pending
+
+        if not vision_review_pending(self.repo_root, self.workspace_rel):
+            return []
+        report_rel = (
+            f"{self.workspace_rel}/interns/reports/dashboard_screener/current.json"
+        )
+        return [
+            _finding(
+                "warning",
+                "dashboard_vision_review_pending",
+                "Dashboard screener ran but its staged screenshots were never "
+                "vision-reviewed; visual defects (misalignment, color mismatch) "
+                "may be unexamined.",
+                artifact=report_rel,
+                recommendation=(
+                    "Read the screenshots under interns/reports/dashboard_screener/shots/, "
+                    "then record the pass: uv run workspace-dashboard --workspace "
+                    f"{self.workspace_rel} --record-vision-review --reviewed-by <name> "
+                    "--notes <findings>"
+                ),
+            )
+        ]
+
+    def _check_generated_sql_raw_paths(self) -> list[dict[str, Any]]:
+        """Flag a raw dataset reader (read_csv_auto/read_parquet of a literal
+        path) in generated SQL OUTSIDE a `CATALOG BOOTSTRAP` block. Generated KPI
+        / pipeline SQL must read through the catalog_raw_* views the bootstrap
+        block defines; a raw path elsewhere bypasses governance + breaks the
+        cwd-independent execution contract. Ref: core-audit ob-harness.md."""
+        findings: list[dict[str, Any]] = []
+        candidate_dirs = [
+            self.layout.generated_dir / "solutions",
+            self.layout.generated_dir / "pipeline",
+        ]
+        for directory in candidate_dirs:
+            if not directory.exists():
+                continue
+            for sql_file in sorted(directory.glob("*.sql")):
+                try:
+                    text = sql_file.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                in_bootstrap = False
+                for line in text.splitlines():
+                    upper = line.upper()
+                    if "CATALOG BOOTSTRAP" in upper:
+                        # "END CATALOG BOOTSTRAP" closes; any other CATALOG
+                        # BOOTSTRAP marker opens the exempt region.
+                        in_bootstrap = "END" not in upper
+                        continue
+                    if in_bootstrap:
+                        continue
+                    low = line.lower()
+                    if "read_csv_auto(" in low or "read_parquet(" in low:
+                        findings.append(
+                            _finding(
+                                "error",
+                                "generated_sql_raw_path_outside_bootstrap",
+                                f"Generated SQL `{sql_file.name}` reads a raw dataset path "
+                                "outside the CATALOG BOOTSTRAP block; read through the "
+                                "catalog_raw_* views instead.",
+                                artifact=_rel(sql_file, self.repo_root),
+                                recommendation="Regenerate the SQL so raw read_csv_auto/read_parquet "
+                                "calls live only in the catalog bootstrap block.",
+                            )
+                        )
+                        break  # one finding per file is enough
+        return findings
 
     def _check_artifacts(self) -> list[dict[str, Any]]:
         findings = []
@@ -339,7 +431,7 @@ class WorkflowGuardHarness:
                         recommendation="Run data quality before KPI blocker questions.",
                         details={
                             "violated_rule_id": "skip_data_quality_before_kpi_or_generation",
-                            "replacement_command": f"uv run run-data-quality-harness --workspace {self.workspace_rel}",
+                            "replacement_command": f"uv run harness data-quality --workspace {self.workspace_rel}",
                         },
                     )
                 )
@@ -353,7 +445,112 @@ class WorkflowGuardHarness:
                         recommendation="Run source-to-target, pipeline plan, and layered harness first.",
                     )
                 )
+
+        # Per-command stage time budget.
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            elapsed = record.get("elapsed_seconds")
+            if isinstance(elapsed, (int, float)) and elapsed > STAGE_TIME_BUDGET_SECONDS:
+                findings.append(
+                    _finding(
+                        "warning",
+                        "stage_time_budget_exceeded",
+                        f"Command ran {int(elapsed)}s, above the {STAGE_TIME_BUDGET_SECONDS}s "
+                        "per-stage time budget.",
+                        command=str(record.get("command") or ""),
+                        details={"elapsed_seconds": elapsed},
+                        recommendation="Investigate the long-running stage; bound/split the work or record why it is expected.",
+                    )
+                )
+
+        # A prepared panel whose output is never read afterward (silent dead-end).
+        lowered_commands = [c.lower().replace("\\", "/") for c in commands]
+        for idx, low in enumerate(lowered_commands):
+            if "-panel" not in low or "prepare-" not in low:
+                continue
+            later = lowered_commands[idx + 1 :]
+            if not any(("panel" in c and ("current.md" in c or "current.json" in c or "question_panel" in c)) for c in later):
+                findings.append(
+                    _finding(
+                        "error",
+                        "panel_output_not_read",
+                        "A blocker/decision panel was prepared but its output was never read before continuing.",
+                        command=commands[idx],
+                        recommendation="Read the panel's current.md/current.json before answering or routing onward.",
+                    )
+                )
+
+        # External-source-workspace governance.
+        if self._is_external_source_workspace():
+            registry_read_seen = False
+            for idx, low in enumerate(lowered_commands):
+                if ("skills.md" in low or "/.agents/" in low or low.endswith(".agents")) and (
+                    "get-content" in low or low.startswith("cat ") or "type " in low
+                ):
+                    registry_read_seen = True
+                # Manual promotion of the generated selection without finalize-selection.
+                if ("cp " in low or "copy-item" in low or low.startswith("copy ")) and "source_selection.json" in low:
+                    findings.append(
+                        _finding(
+                            "error",
+                            "manual_source_selection_promotion",
+                            "Source selection was promoted by a manual file copy instead of finalize-selection.",
+                            command=commands[idx],
+                            recommendation="Use `uv run source-catalog finalize-selection` so provenance/approval is recorded.",
+                        )
+                    )
+                is_route = any(tok in low for tok in WORKFLOW_ROUTE_TOKENS)
+                if is_route and not registry_read_seen:
+                    findings.append(
+                        _finding(
+                            "error",
+                            "tool_registry_not_read_before_workflow_route",
+                            "A workflow route was chosen before reading the tool registry (.agents/**/SKILLS.md).",
+                            command=commands[idx],
+                            recommendation="Read the tool registry first so the correct route is chosen for the workspace.",
+                        )
+                    )
+                if any(tok in low for tok in KPI_ROUTE_TOKENS):
+                    findings.append(
+                        _finding(
+                            "error",
+                            "wrong_kpi_route_for_external_source_workspace",
+                            "A KPI generation/resolution route was run on an external-source workspace; "
+                            "it must go through the source-catalog/source-family route first.",
+                            command=commands[idx],
+                            recommendation="Run build-source-family-contracts / source-catalog before KPI routes.",
+                        )
+                    )
         return findings
+
+    def _is_external_source_workspace(self) -> bool:
+        """True when the workspace's profiles point at dataset files OUTSIDE the
+        workspace tree (an external source root) AND its source selection targets
+        a dataset — the shape that needs the source-catalog route, not KPI routes."""
+        profile_index = _load_json(self.layout.profiles_dir / "profile_index.json")
+        external = False
+        for profile in profile_index.get("profiles") or []:
+            if not isinstance(profile, dict):
+                continue
+            raw = str(profile.get("path") or "")
+            if not raw:
+                continue
+            p = Path(raw)
+            try:
+                under_ws = self.workspace in p.resolve().parents or p.resolve() == self.workspace
+            except OSError:
+                under_ws = False
+            if p.is_absolute() and not under_ws:
+                external = True
+                break
+        if not external:
+            return False
+        selection = _load_json(self.workspace / "docs" / "source_selection.json")
+        return any(
+            isinstance(s, dict) and str(s.get("target_kind") or "") == "dataset"
+            for s in (selection.get("sources") or [])
+        )
 
     def _check_trajectory(self) -> list[dict[str, Any]]:
         trajectory_path = self.layout.state_dir / "trajectory.jsonl"
@@ -417,7 +614,7 @@ class WorkflowGuardHarness:
         commands = []
         if any(item["code"] in {"invented_temporal_feature", "blocker_panel_invented_feature"} for item in findings):
             commands.append(f"uv run prepare-kpi-blocker-panel --workspace {self.workspace_rel} --domain healthcare")
-        commands.append(f"uv run validate-workflow-guardrails --workspace {self.workspace_rel}")
+        commands.append(f"uv run harness workflow-guardrails --workspace {self.workspace_rel}")
         return commands
 
     def _check_roster_utilization(self) -> list[dict[str, Any]]:

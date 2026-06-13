@@ -132,7 +132,11 @@ def parse_intent(kpi: dict[str, Any]) -> KPIIntent:
         if bucket:
             unit, source, alias = bucket
             col = _resolve_column(source or alias, lookup)
-            dims.append(DimIntent(kind="time", column=col, alias=f"{unit}_bucket", unit=unit))
+            # Use the alias _detect_time_bucket returns (the unit, e.g. "month")
+            # so every engine names the bucket column exactly like the SQL path
+            # (`date_trunc('month', ...) AS month`). A divergent "<unit>_bucket"
+            # alias here broke cross-engine row parity.
+            dims.append(DimIntent(kind="time", column=col, alias=alias, unit=unit))
             continue
         if _AGE_PATTERN.search(token):
             source = _age_source(token)

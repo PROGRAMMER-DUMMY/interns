@@ -38,11 +38,11 @@ PROJECT_TOOL_PREFIXES = (
     "uv run prepare-kpi-blocker-panel",
     "uv run apply-kpi-panel-answer",
     "uv run validate-workspace-artifacts",
-    "uv run validate-workflow-guardrails",
+    "uv run harness workflow-guardrails",
     "uv run kpi-proof-packet",
     "uv run validate-project-harness",
     "uv run run-kpi-execution-harness",
-    "uv run run-ai-app-harness",
+    "uv run harness ai-app",
 )
 BAD_COMMAND_MARKERS = (" | head", "cat ", " --accept-option", "git reset --hard")
 RAW_DATA_MARKERS = ("/datasets/", "\\datasets\\")

@@ -1,0 +1,75 @@
+{
+  "artifact_type": "dashboard_spec",
+  "version": 2,
+  "kpi_id": "kpi_001",
+  "updated_at": "2026-06-12T17:58:07.933404+00:00",
+  "machine_defaults": {
+    "title": "What is trend for amount paid for medicare LOB across gender and payer for patients above 50 years of age",
+    "metric": "sum(PaidAmount)",
+    "y_label": "sum(PaidAmount)",
+    "chart_type": "line",
+    "x": "month",
+    "x_label": "Month",
+    "y": "sum_paidamount",
+    "agg": "sum",
+    "color": "gender",
+    "panels": [
+      {
+        "chart_type": "line",
+        "selection_reason": "one value per period (with at most a handful of series) is the canonical evolution chart (data-to-viz: time series family)",
+        "selection_source": "https://www.data-to-viz.com/",
+        "x": "month",
+        "y": "sum_paidamount",
+        "agg": "sum",
+        "title": "Sum Paidamount over Month",
+        "color": "gender"
+      },
+      {
+        "chart_type": "ranked_bar",
+        "selection_reason": "1092 distinct entities exceed the readable bar count; rank and keep the top N (data-to-viz: ordered barplot)",
+        "selection_source": "https://www.data-to-viz.com/",
+        "limit": 10,
+        "orientation": "h",
+        "x": "payorid",
+        "y": "sum_paidamount",
+        "agg": "sum",
+        "title": "Sum Paidamount by Payorid"
+      },
+      {
+        "chart_type": "bar",
+        "selection_reason": "ordinal categories (bands/buckets) carry order as information; an ordered bar preserves it where donuts/treemaps would not (data-to-viz: ordering principle)",
+        "selection_source": "https://www.data-to-viz.com/",
+        "x": "age",
+        "y": "sum_paidamount",
+        "agg": "sum",
+        "title": "Sum Paidamount by Age"
+      },
+      {
+        "chart_type": "bar",
+        "selection_reason": "few categories with distinct magnitudes: the ordered barplot is the default comparison chart (data-to-viz: barplot family)",
+        "selection_source": "https://www.data-to-viz.com/",
+        "x": "gender",
+        "y": "sum_paidamount",
+        "agg": "sum",
+        "title": "Sum Paidamount by Gender"
+      }
+    ],
+    "sql_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/solutions/kpi_001.sql",
+    "definition": {
+      "business_question": "What is trend for amount paid for medicare LOB across gender and payer for patients above 50 years of age",
+      "description": "",
+      "metric": "sum(PaidAmount)",
+      "cuts": "Month (ServiceDate), LineOfBusiness, PayorID, Gender, Age(DOB)"
+    },
+    "_column_validation": [],
+    "_result_columns": [
+      "month",
+      "lineofbusiness",
+      "payorid",
+      "gender",
+      "age",
+      "sum_paidamount"
+    ]
+  },
+  "user_overrides": {}
+}

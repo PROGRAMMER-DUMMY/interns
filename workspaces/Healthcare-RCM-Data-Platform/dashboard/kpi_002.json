@@ -1,0 +1,91 @@
+{
+  "artifact_type": "dashboard_spec",
+  "version": 2,
+  "kpi_id": "kpi_002",
+  "updated_at": "2026-06-12T17:58:08.105818+00:00",
+  "machine_defaults": {
+    "title": "What is percentage share of lives by gender, age , visit type, department",
+    "metric": "percentage of sum(distinct PatientID)     /   sum(disitnct PatientID) for departement",
+    "y_label": "percentage of sum(distinct PatientID)     /   sum(disitnct PatientID) for departement",
+    "chart_type": "ranked_bar",
+    "x": "name",
+    "x_label": "Department Name",
+    "y": "percentage_share",
+    "agg": "sum",
+    "color": "VisitType",
+    "y_format": "percent",
+    "panels": [
+      {
+        "chart_type": "ranked_bar",
+        "selection_reason": "20 distinct entities exceed the readable bar count; rank and keep the top N (data-to-viz: ordered barplot)",
+        "selection_source": "https://www.data-to-viz.com/",
+        "limit": 10,
+        "orientation": "h",
+        "x": "name",
+        "y": "percentage_share",
+        "agg": "sum",
+        "title": "Percentage Share by Name",
+        "y_format": "percent"
+      },
+      {
+        "chart_type": "bar",
+        "selection_reason": "ordinal categories (bands/buckets) carry order as information; an ordered bar preserves it where donuts/treemaps would not (data-to-viz: ordering principle)",
+        "selection_source": "https://www.data-to-viz.com/",
+        "x": "age_band",
+        "y": "percentage_share",
+        "agg": "sum",
+        "title": "Percentage Share by Age Band",
+        "y_format": "percent"
+      },
+      {
+        "chart_type": "donut",
+        "selection_reason": "a share split across a handful of categories is a composition; slices are annotated directly and sum to 100% (data-to-viz pie caveats honored: few slices, direct labels, no legend)",
+        "selection_source": "https://www.data-to-viz.com/",
+        "x": "visittype",
+        "y": "percentage_share",
+        "agg": "sum",
+        "title": "Percentage Share by Visittype",
+        "y_format": "percent"
+      },
+      {
+        "chart_type": "donut",
+        "selection_reason": "a share split across a handful of categories is a composition; slices are annotated directly and sum to 100% (data-to-viz pie caveats honored: few slices, direct labels, no legend)",
+        "selection_source": "https://www.data-to-viz.com/",
+        "x": "gender",
+        "y": "percentage_share",
+        "agg": "sum",
+        "title": "Percentage Share by Gender",
+        "y_format": "percent"
+      },
+      {
+        "chart_type": "heatmap",
+        "selection_reason": "two categorical dimensions against one measure: a heatmap shows the interaction no single-dimension panel can (data-to-viz: heatmap for two categorical variables)",
+        "selection_source": "https://www.data-to-viz.com/",
+        "x": "name",
+        "color": "age_band",
+        "y": "percentage_share",
+        "agg": "sum",
+        "title": "Percentage Share: Name x Age Band",
+        "y_format": "percent"
+      }
+    ],
+    "limit": 10,
+    "orientation": "h",
+    "sql_path": "workspaces/Healthcare-RCM-Data-Platform/interns/generated/solutions/kpi_002.sql",
+    "definition": {
+      "business_question": "What is percentage share of lives by gender, age , visit type, department",
+      "description": "",
+      "metric": "percentage of sum(distinct PatientID)     /   sum(disitnct PatientID) for departement",
+      "cuts": "Department Name, VisitType, Gender, Age (DOB)"
+    },
+    "_column_validation": [
+      "spec field 'x' = 'name' does not exist in result view columns ['__attribution_rn']",
+      "spec field 'y' = 'percentage_share' does not exist in result view columns ['__attribution_rn']",
+      "spec field 'color' = 'VisitType' does not exist in result view columns ['__attribution_rn']"
+    ],
+    "_result_columns": [
+      "__attribution_rn"
+    ]
+  },
+  "user_overrides": {}
+}

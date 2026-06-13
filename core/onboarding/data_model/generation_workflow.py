@@ -1575,10 +1575,10 @@ def _dm_conversation_skills(panel: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         {"name": "data-model-creation", "active": True,
          "why": "Design grain, keys, fact/dim, relationships, SCD; confirm joins instead of name-guessing; output ERD/SVG."},
-        {"name": "grill-requirements", "active": score < 85,
-         "why": "Interview the user to confirm entities, grain, and keys rather than infer from column names."},
-        {"name": "clarify-ambiguity", "active": score >= 60,
-         "why": "Resolve the few high-impact modeling ambiguities (e.g. unconfirmed joins) before finalizing."},
+        {"name": "grill-requirements", "active": True,
+         "why": ("Interview the user to confirm entities, grain, and keys rather than infer from column names."
+                 if score < 60 else
+                 "Clarify-ambiguity mode: resolve the few high-impact modeling ambiguities (e.g. unconfirmed joins) before finalizing.")},
         {"name": "domain-model", "active": True,
          "why": "Align table/column terms with the KPI registry and CONTEXT.md."},
         {"name": "stakeholder-memory", "active": True,

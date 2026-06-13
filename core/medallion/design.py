@@ -479,7 +479,13 @@ def _seed_proposal(inputs: dict[str, Any]) -> dict[str, Any]:
         by_logical.setdefault(logical, []).append(ds)
 
     for logical, dss in by_logical.items():
-        pii_cols = sorted({c for ds in dss for c in pii_lookup.get(_dataset_name_key(ds), [])})
+        pii_cols = sorted({
+            c
+            for ds in dss
+            for c in _sensitive_cols_for_dataset(
+                pii_lookup, _dataset_name_key(ds), ds.get("schema")
+            )
+        })
         silver_tables[logical] = {
             "primary_key": ["source_system", f"{logical}_id"],
             "type_casts": {},
@@ -561,10 +567,22 @@ def _seed_proposal(inputs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _pii_lookup_from_semantic(semantic: Any) -> dict[str, list[str]]:
+    """Map dataset_key -> sensitive column names. The ``"*"`` key holds globally
+    declared sensitive columns (no dataset attribution); callers attribute them
+    to a dataset by intersecting with that dataset's schema (see
+    :func:`_sensitive_cols_for_dataset`).
+
+    Handles the FLAT ``columns.<name>.is_sensitive`` shape the onboarder writes
+    (a dict, not a list) in addition to the nested/list shapes. Previously the
+    flat dict was silently ignored (it failed the ``isinstance(list)`` check), so
+    medallion Bronze PII tagging got nothing from a real onboarded contract.
+    Ref: core-audit ob-workspace-b.md.
+    """
     out: dict[str, list[str]] = {}
     if not isinstance(semantic, dict):
         return out
-    fields = semantic.get("fields") or semantic.get("columns") or []
+    columns_field = semantic.get("columns")
+    fields = semantic.get("fields") or columns_field or []
     if isinstance(fields, list):
         for f in fields:
             if not isinstance(f, dict):
@@ -572,6 +590,11 @@ def _pii_lookup_from_semantic(semantic: Any) -> dict[str, list[str]]:
             if f.get("pii") or f.get("is_pii"):
                 ds_key = f.get("dataset", "*")
                 out.setdefault(ds_key, []).append(f.get("name", ""))
+    # Flat onboarder shape: columns.<name>.is_sensitive (dict, not list).
+    if isinstance(columns_field, dict):
+        for name, meta in columns_field.items():
+            if isinstance(meta, dict) and (meta.get("is_sensitive") or meta.get("pii")):
+                out.setdefault("*", []).append(str(name))
     datasets = semantic.get("datasets") or {}
     if isinstance(datasets, dict):
         for k, v in datasets.items():
@@ -581,6 +604,37 @@ def _pii_lookup_from_semantic(semantic: Any) -> dict[str, list[str]]:
             if isinstance(pii_cols, list):
                 out.setdefault(k, []).extend(pii_cols)
     return out
+
+
+def _schema_column_names(schema: Any) -> dict[str, str]:
+    """Return {lowercased_name: original_name} for a dataset schema (dict or list)."""
+    names: dict[str, str] = {}
+    if isinstance(schema, dict):
+        for key in schema.keys():
+            names[str(key).lower()] = str(key)
+    elif isinstance(schema, list):
+        for col in schema:
+            if isinstance(col, dict) and col.get("name"):
+                names[str(col["name"]).lower()] = str(col["name"])
+    return names
+
+
+def _sensitive_cols_for_dataset(
+    pii_lookup: dict[str, list[str]], dataset_key: str, schema: Any
+) -> list[str]:
+    """Sensitive columns for one dataset: its dataset-keyed entries UNION any
+    globally-declared (``"*"``) sensitive column that exists in this dataset's
+    schema. The global set is how the flat onboarder contract (no per-dataset
+    attribution) maps onto each table."""
+    cols: set[str] = {c for c in pii_lookup.get(dataset_key, []) if c}
+    global_sensitive = pii_lookup.get("*", [])
+    if global_sensitive:
+        schema_names = _schema_column_names(schema)
+        for name in global_sensitive:
+            match = schema_names.get(str(name).lower())
+            if match:
+                cols.add(match)
+    return sorted(cols)
 
 
 def _dataset_name_key(ds: dict[str, Any]) -> str:
@@ -671,7 +725,7 @@ def _build_bronze_tables(inputs: dict[str, Any], *, semantic_contract: Any, repo
         schema = ds.get("schema", {}) or {}
         natural_key = _detect_natural_key(schema, logical)
         watermark = _detect_watermark(schema)
-        pii_cols = sorted(set(pii_by_ds.get(Path(path).stem, [])))
+        pii_cols = _sensitive_cols_for_dataset(pii_by_ds, Path(path).stem, schema)
         rel_path = _safe_relative_posix(Path(path), repo_root)
         out.append(BronzeTable(
             name=name,

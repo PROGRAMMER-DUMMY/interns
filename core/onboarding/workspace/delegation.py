@@ -200,7 +200,7 @@ _STAGE_BRIEFS: dict[str, dict[str, Any]] = {
             "answer the business question (semantic correctness, not just 'it ran')"
         ),
         "prompt_template": (
-            "Act as the kpi-analyst / self-grill specialist for workspace `{workspace}`. The self-grill "
+            "Act as the kpi-analyst specialist (grill-requirements self-grill mode) for workspace `{workspace}`. The self-grill "
             "gate already EXECUTED each KPI and cross-checked metric, cuts, filters, and cross-engine "
             "parity: `{verdict_status}` — {verdict_summary}. Read "
             "`interns/reports/kpi_output_verification.md`. For each KPI, judge whether the actual result "
@@ -218,17 +218,19 @@ _STAGE_BRIEFS: dict[str, dict[str, Any]] = {
 # test (tests/test_agent_skill_routing.py) fails if any agent or skill is unrouted.
 STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
     "flow_entry": {
-        "agents": ["agent-advisor-router", "workspace-flow-orchestrator"],
+        # agent-advisor-router removed (Phase 1): STAGE_ROUTING itself is the
+        # router; a meta-router agent on top of it was redundant.
+        "agents": ["workspace-flow-orchestrator"],
         "skills": ["workspace-governance", "task-onboarding", "handoff"],
     },
     "kpi_definition": {
         "agents": ["business-analyst", "kpi-analyst"],
-        "skills": ["grill-requirements", "clarify-ambiguity", "kpi-clarification",
+        "skills": ["grill-requirements", "kpi-clarification",
                    "stakeholder-memory", "to-solution-brief", "workspace-kpi-query-optimizer"],
     },
     "data_model_design": {
         "agents": ["data-engineer", "source-to-target-reviewer"],
-        "skills": ["data-model-creation", "domain-model", "grill-requirements", "clarify-ambiguity"],
+        "skills": ["data-model-creation", "domain-model", "grill-requirements"],
     },
     "relationship_review": {
         "agents": ["data-engineer"],
@@ -243,7 +245,9 @@ STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
         "skills": ["data-engineering-pipeline-design", "feature-derivation-library"],
     },
     "feature_derivation": {
-        "agents": ["feature-derivation-library"],
+        # The skill owns the pattern library; a same-named agent was a literal
+        # twin (Phase 1 consolidation). data-analyst judges the evidence.
+        "agents": ["data-analyst"],
         "skills": ["feature-derivation-library"],
     },
     "artifact_validation": {
@@ -251,7 +255,10 @@ STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
         "skills": ["workspace-governance"],
     },
     "regression_review": {
-        "agents": ["regression-sweep"],
+        # regression-sweep agent removed (Phase 1): it wrapped one CLI call
+        # (green-gate --sweep); validation-gatekeeper owns running/interpreting
+        # validation suites.
+        "agents": ["validation-gatekeeper"],
         "skills": ["green-gate"],
     },
     "parallel_kpi_completion": {
@@ -260,26 +267,30 @@ STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
     },
     "kpi_completion_review": {
         "agents": ["kpi-analyst"],
-        "skills": ["kpi-analyst", "self-grill"],
+        "skills": ["kpi-analyst", "grill-requirements"],
     },
     "kpi_output_verification": {
         "agents": ["kpi-analyst", "validation-gatekeeper"],
-        "skills": ["kpi-analyst", "self-grill"],
+        "skills": ["kpi-analyst", "grill-requirements"],
     },
     "result_review": {
         "agents": ["data-analyst"],
-        "skills": ["clarify-ambiguity"],
+        "skills": ["grill-requirements"],
     },
     "dashboard_refresh": {
         "agents": ["dashboard-engineer"],
         "skills": ["dashboard-design"],
     },
     "remote_execution": {
-        "agents": ["databricks-engineer", "databricks-access-gates"],
+        # databricks-access-gates agent removed (Phase 1): it twinned the
+        # same-named skill; databricks-engineer carries the role.
+        "agents": ["databricks-engineer"],
         "skills": ["databricks-access-gates"],
     },
     "notification": {
-        "agents": ["integration-notification-operator"],
+        # integration-notification-operator removed (Phase 1): nothing in the
+        # repo invoked it (speculative Slack/Teams bridge).
+        "agents": [],
         "skills": [],
     },
     "evolution": {

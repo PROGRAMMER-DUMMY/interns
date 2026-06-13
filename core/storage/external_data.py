@@ -53,6 +53,24 @@ def is_external_path(path: Path, repo_root: Path, policy: ExternalDataPolicy | N
     return False
 
 
+def is_within_allowed_roots(
+    path: Path, repo_root: Path, policy: ExternalDataPolicy | None = None
+) -> bool:
+    """True if ``path`` is inside the repo OR inside a configured external root.
+
+    This is the GOVERNANCE allowlist check (distinct from :func:`is_external_path`,
+    which merely classifies in-repo vs out-of-repo and returns True for *any*
+    out-of-repo path). Discovery/local-source ingestion must use THIS so an
+    arbitrary absolute host path is refused unless an operator configured it as an
+    external root. Ref: core-audit ob-sources.md (theme T8).
+    """
+    resolved = path.expanduser().resolve()
+    if _is_relative_to(resolved, repo_root.resolve()):
+        return True
+    roots = policy.configured_roots if policy else ()
+    return any(_is_relative_to(resolved, external_root) for external_root in roots)
+
+
 def bounded_external_files(root: Path, *, max_paths: int, max_seconds: float) -> tuple[list[Path], bool]:
     """Return file paths from an external root without reading contents."""
     start = time.monotonic()

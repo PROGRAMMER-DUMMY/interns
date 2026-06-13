@@ -17,6 +17,636 @@ Entry template:
 
 ---
 
+### 2026-06-11  Route result reads through ReadFile (bypass shell cap) + per-KPI forwarding
+- what: The re-read loop's mechanism is Gemini's `model.summarizeToolOutput.run_shell_command`
+  (tokenBudget 12000) + a UI "lines hidden" collapse on shell output — so a `Get-Content` of a
+  long file is capped/collapsed and the agent loops trying to get the rest. Fix targets the read
+  PATH: (1) the Active Run pointer (flow.py) now tells the agent to read each file ONCE with its
+  NATIVE file reader (ReadFile), NOT a shell command (shell is summarized/capped; ReadFile is
+  not), notes current.md is compact, and says forward the per-KPI files for many KPIs (one read
+  each, never exceeds the cap). (2) GEMINI.md "Results read discipline" updated to the same:
+  ReadFile not Get-Content; current.md is compact / current_full.md is full; per-KPI files for
+  scale.
+- why: There is no per-FILE truncation exception in Gemini config (cap is by tool+size, not path),
+  but the shell-summarization budget only applies to `run_shell_command` — so reading via ReadFile
+  sidesteps it. Combined with the compact files (prev entry), each read unit stays under the cap.
+- files: `core/onboarding/workspace/flow.py` (Active Run guidance), `GEMINI.md` (rule).
+- tests: test_workspace_flow 40 green; green-gate 434/0.
+- HONEST: this is operator guidance + a read-path change; it can't force Gemini's tool choice, but
+  it points at the path that isn't capped and keeps every unit small. NOTE: GEMINI.md carries
+  pre-existing uncommitted changes from before this session — the GEMINI.md edit is left UNSTAGED
+  to avoid committing someone else's in-progress work; it is live at runtime regardless of git.
+
+### 2026-06-11  Make the canonical results files COMPACT on disk (stop the agent re-read loop)
+- what: `reports/kpi_results/current.md` and `runs/<date>/results.md` (the files an agent
+  naively cats / the Active Run pointer targets) are now the COMPACT packet (definition +
+  table + `SQL:` link, no inlined SQL). The full inlined-SQL packet moved to `current_full.md`
+  / `runs/<date>/results_full.md`; per-KPI run files are compact too. `current_compact.md` kept
+  as a back-compat alias. `_emit_result_packet`: compact reads current.md, full reads
+  current_full.md.
+- why: Live Gemini re-test showed the operator re-reading the FULL `current.md` 6-7 times
+  (-Raw / -Encoding / -First 200 / -Head 100 …) because the long file UI-truncates and Gemini
+  misreads truncation as an incomplete read — the same loop, on the DIRECT file-read path that
+  bypasses the compact CLI output. Making the on-disk canonical file small removes the
+  truncation trigger. (The full SQL is still on disk: current_full.md + the per-KPI .sql files.)
+- HONEST limit: this reduces the trigger; it can't fully force Gemini's behavior — Gemini was
+  violating its own GEMINI.md "read results ONCE, truncation=success, don't re-read" rule.
+- files: `core/onboarding/workspace/flow.py` (`_write_result_preview` compact current.md +
+  current_full.md; `_write_runs_snapshot` compact results.md + results_full.md; `_emit_result_packet`
+  source flip), `tests/test_workspace_flow.py` (fixture -> new convention).
+- tests: test_workspace_flow 40 green; green-gate 434/0.
+- verify: green-gate 434/0; the explicit `results --full` still emits inlined SQL (current_full.md),
+  default/`results` + Active Run forward the compact file.
+
+### 2026-06-11  Fix the 3 pre-existing test_failure_contracts failures (pipeline-SQL validator)
+- what: `WorkspaceArtifactValidator._validate_pipeline_harnesses` now enforces the
+  pipeline-SQL content contract the 3 long-red tests assert: (1) empty `pipeline_layers.sql`
+  -> "generated pipeline SQL must be non-empty"; (2) raw dataset-path reads (read_csv_auto/
+  read_parquet/delta_scan/'datasets/' literal) with NO bootstrap markers -> "missing
+  BEGIN/END CATALOG BOOTSTRAP"; (3) raw paths OUTSIDE the BEGIN/END CATALOG BOOTSTRAP region
+  -> "raw dataset path references are only allowed inside CATALOG BOOTSTRAP". Added
+  `test_failure_contracts` to green-gate (now green).
+- why: These 3 were pre-existing failures parked in the backlog. The validator had the
+  pipeline harness-JSON checks but never validated the SQL content itself.
+- files: `core/onboarding/workspace/validation.py` (+content checks, `import re`),
+  `core/dev/green_gate.py` (gate test_failure_contracts).
+- tests: test_failure_contracts 14/14 green; green-gate 420 -> 434, 0 failing.
+- verify: confirmed a LEGITIMATE pipeline (raw paths INSIDE bootstrap, downstream reads the
+  view) produces NO content error — no false positive. The 3 target errors fire on the bad cases.
+
+### 2026-06-11  Quick wins: gate the new tests, fix cp1252 crash, reconcile backlog
+- what: (1) Added the 7 dashboard/token/wiki test modules to `green_gate.CURATED_MODULES`
+  (test_dashboard_inference/profile/design_md/nested/verify, test_token_report, test_wiki_writer)
+  — they passed on demand but weren't gating. (2) cp1252 fix: `workspace-flow` main() reconfigures
+  stdout/stderr to UTF-8 errors=replace, and the generated Gold-results comment uses ASCII `->`
+  instead of `→`. (3) Reconciled follow_ups.md (3 stale items checked off; cp1252 closed).
+- why: The green checkmark meant less than it should (74 tests on the bench); a non-ASCII char
+  crashed `workspace-flow results` on a piped Windows console; the backlog overstated open work.
+- also (honesty): INVESTIGATED the "kpi_002 age via CURRENT_DATE" item I'd flagged as a bug — it
+  is NOT one. The as-of-event anchor logic already exists and works (kpi_001 anchors on ServiceDate);
+  kpi_002 has NO date column in its features (PatientID/Name/VisitType/Gender/DOB), so there's no
+  event date to anchor on — CURRENT_DATE is the only/defensible option for an age-snapshot and is
+  audited via `_age_fallback`. Retracted the claim; left the code unchanged rather than force a
+  wrong anchor. Logged a possible future improvement (broaden detection to a lone date feature col).
+- files: `core/dev/green_gate.py` (+7 modules), `core/onboarding/workspace/flow.py` (stdout
+  reconfigure), `core/onboarding/kpi/sql_generator.py` (-> ASCII), `develop_spec/follow_ups.md`.
+- tests: none new (wiring + 2-line fixes); green-gate now 420 tests, 0 failing (was 346 — the
+  +74 are the newly-gated modules). Confirms the cp1252 changes broke nothing.
+- verify: `green-gate` 420/0.
+
+### 2026-06-10  DESIGN.md: consume the REAL awesome-design-md schema (was cosmetic-only)
+- what: `design_md.py` now parses the actual awesome-design-md / Stitch schema — YAML
+  frontmatter with a `colors:` map in the brand's own vocabulary + a nested `typography:`
+  block — and maps it onto our tokens via a synonym table (`primary->accent`,
+  `canvas->paper`, `canvas-soft/surface->card`, `ink->ink`, `ink-secondary->ink_soft`,
+  `hairline->rule`, `primary-deep->accent_deep`, ...). Picks body/display/mono font stacks
+  from `typography.*.fontFamily`; proprietary fonts keep their fallback stack and are NOT
+  Google-loaded. Falls back to the loose token-block parser (our own default) when there's
+  no YAML frontmatter.
+- why: The earlier Phase-1d integration adopted the DESIGN.md *concept* but invented its own
+  flat vocabulary, so dropping a real repo file (e.g. stripe/DESIGN.md) changed almost nothing
+  (only a coincidental `ink` match) — cosmetic, not functional. The user gave that repo to use.
+- files: `core/dashboard/design_md.py` (synonym map, `_parse_frontmatter`, font-stack picker;
+  parse_design_md tries YAML first), `tests/test_dashboard_design_md.py` (+3: vocabulary map,
+  card fallback, non-frontmatter fallback).
+- tests: 11 design-md tests green; green-gate 346/0.
+- verify: downloaded the live stripe/DESIGN.md -> parsed to accent #533afd (indigo) / paper
+  #ffffff / ink #0d253d (navy) / card #f6f9fc / rule #e3e8ee / accent_deep #4434d4 / sohne
+  font stack. Dropped it into the workspace, re-exported, screenshotted: dashboard genuinely
+  restyled to Stripe's white/navy/indigo (headlines indigo, was sienna). Removed it -> back to
+  editorial default. Now honors "use this repo" at the file level, not just the concept.
+
+### 2026-06-10  Dashboard correctness: categorical axis ordering (ordinal/banded + nominal)
+- what: `_figure_from_spec` now orders vertical-bar x categories generically: ORDINAL/banded
+  categories (age bands "0-9".."100-109", numeric buckets) sort by their natural leading
+  number; NOMINAL categories (departments, gender, visit type) sort by measure descending;
+  temporal/ranked unchanged. New `_categorical_order` helper + Plotly categoryorder/categoryarray.
+- why: User flagged data-ordering correctness. Browser inspection of the rendered charts showed
+  the kpi_002 "% share by Age Band" x-axis in arbitrary first-appearance order
+  (20-29, 80-89, 50-59, 0-9, ...) instead of natural 0-9, 10-19, ... — a real correctness bug;
+  nominal bars were also unsorted.
+- files: `core/dashboard/renderer.py` (`_categorical_order` + ordering in the bar path),
+  `tests/test_dashboard_inference.py` (+2: ordinal natural-number order, nominal value-desc).
+- tests: dashboard inference 34 green; green-gate 346/0.
+- verify: re-exported + browser-read the rendered axes — age bands now
+  0-9,10-19,20-29,...,100-109; visit-type/gender sorted by value. Screenshot confirms the
+  age-band chart reads as a coherent distribution. (Static export `exports/index.html` is the
+  design the user endorsed; this fixes its data ordering.)
+
+### 2026-06-10  Dashboard PRD Phase 3: wire clarify-ambiguity + self-grill (bounded) — PRD COMPLETE
+- what: Added the repo-native judgment skills to the dashboard-engineer with a bounded
+  firing policy: `clarify-ambiguity` at INPUT (only when the request is genuinely
+  ambiguous), `self-grill` at OUTPUT (advisory assumptions audit before presenting,
+  NEVER overrides the dashboard-verify gate). Added to the agent skills list + default_prompt
+  + a SKILL.md "Judgment skills (bounded firing)" section; regenerated all 3 CLI adapters.
+- why: PRD decision 6. Uses REPO skills (clarify-ambiguity / self-grill), not the plugin
+  clarify/self-score/grill-me which aren't reliably present for repo agents.
+- files: `skills/dashboard-design/agents/dashboard-team.yaml` (skills + default_prompt),
+  `skills/dashboard-design/SKILL.md` (firing-policy section); regenerated
+  `.claude`/`.gemini`/`.codex` dashboard-engineer adapters + `.agents/*` indexes.
+- tests: none (doc/config + generated adapters); regen verified all 3 adapters carry
+  "JUDGMENT SKILLS (bounded firing)" + clarify-ambiguity + self-grill. green-gate 346/0
+  (routing-coverage unaffected).
+- verify: grep across .claude/.gemini/.codex adapters = present in all.
+  DASHBOARD PRD COMPLETE (Phases 1a-1d, 2a-2e, 3). The dashboard capability is now generic,
+  data-driven, browser-verified, scale-aware, and agent-orchestrated with bounded judgment.
+
+### 2026-06-10  Dashboard PRD Phase 2d+2e: nested-KPI grouping + lazy/server-side scale
+- what: 2d — an optional generic `group` field on a KPI organizes the overview into
+  sections with inline separators (`.gsep`), while the strip stays one fit-to-viewport
+  row; KPIs ordered by (group, id). Absent group -> flat (no behavior change for the
+  sample). 2e — LAZY rendering: `build_dash_app` queries each KPI's result view ONCE for
+  its headline + panel titles but builds the heavy Plotly figures only on drill (cached in
+  `_fig_cache`); fetch capped at `_SAMPLE_CAP=5000`. Raw/large data never reaches the
+  browser — KPI views are pre-aggregated server-side (DuckDB/Delta GROUP BY), the small
+  result is sampled, and figures build per drilled KPI rather than all up front.
+- why: PRD Phase 2 scale — handle ~20 nested KPIs / 100+ features / multi-TB without
+  flooding the browser or building dozens of figures at startup.
+- files: `core/dashboard/renderer.py` (meta/lazy refactor of build_dash_app, `_panel_figure`
+  cache, `_SAMPLE_CAP`, group ordering + `.gsep`), `tests/test_dashboard_nested.py` (new).
+- tests: new nested test proves 2 group separators + 4 tiles AND zero figures built at
+  construction (lazy); full dashboard suites + green-gate 346/0.
+- verify: re-booted live app (port 8072, HTTP 200) -> dashboard-verify PASS (4/4 rendered,
+  legend, 0 overflow), confirming lazy figure-building renders correctly on drill. Phase 2
+  COMPLETE; Phase 3 (wire clarify-ambiguity + self-grill into the agent) remains.
+
+### 2026-06-10  Dashboard PRD Phase 2a-2c: live Dash app — overview+drill, controls, theme
+- what: Rebuilt `build_dash_app` from the legacy single-chart layout into an
+  overview+drill app on the data-driven panel engine + DESIGN.md theme. (2a) applies
+  `set_active_design(load_design_tokens(ws))`, renders each KPI's panels as figures
+  (`_kpi_render_data`), editorial CSS shell generated from tokens via
+  `_dash_index_string`. (2b) FIT-TO-VIEWPORT: a fixed masthead + a one-row overview
+  strip of clickable KPI tiles (headline + title) + a controls row + a flex detail
+  region (the only scroll area); `#app{height:100vh;overflow:hidden}`. (2c) controls:
+  KPI dropdown, per-panel show/hide checklist, legend-toggle + hover (Plotly native),
+  metric/cuts info line. Pattern-matching callbacks wire tile-click->select,
+  select->panel-checklist, select+checklist->detail grid, select->tile highlight.
+- why: PRD Phase 2 — the live Dash app is the real target surface (not static export).
+- files: `core/dashboard/renderer.py` (`_kpi_render_data`, `_dash_index_string`, new
+  `build_dash_app`; removed legacy `_kpi_chart_card`/`_index_card_grid`/date-filter
+  callback), `tests/test_dashboard_design_md.py` (+1 index-string structural test).
+- tests: dashboard suites green; green-gate 346/0.
+- verify: BOOTED the live app (port 8071, HTTP 200) and BROWSER-VERIFIED via
+  dashboard-verify -> PASS (4/4 panels rendered, legend, 0 overflow) + agent-browser
+  interaction proof: clicking the KPI-002 tile switched the detail to its 4 share
+  panels; unchecking "by Gender" dropped the panel (4->3). Screenshot confirms editorial
+  masthead + tiles + CVD-safe drill charts. Phase 2d (nested KPIs) + 2e (server-side
+  aggregation/lazy) + Phase 3 (agent wiring) remain.
+
+### 2026-06-10  Dashboard PRD Phase 1d: swappable DESIGN.md design language
+- what: The dashboard look (palette/fonts) now comes from a swappable DESIGN.md, not
+  hardcoded CSS. New `core/dashboard/design_md.py` (`DesignTokens` + forgiving parser +
+  resolver: `workspaces/<ws>/DESIGN.md` -> shipped `core/dashboard/default_design.md` ->
+  built-in editorial defaults). `renderer` reads active tokens (`set_active_design`,
+  module-level `_ACTIVE`) for colorway/accent/fonts/text; `export` builds the `:root` CSS
+  vars + Google-fonts link from tokens and applies them before rendering. Follows the
+  Stitch/awesome-design-md convention (prose + a machine-readable token block).
+- why: PRD decision 3 (generic, any workspace; no hardcoded styling). A workspace can carry
+  its own DESIGN.md and get a different aesthetic with zero code change.
+- files: `core/dashboard/design_md.py` (new), `core/dashboard/default_design.md` (new),
+  `core/dashboard/renderer.py` (active tokens, removed hardcoded colorway/accent),
+  `core/dashboard/export.py` (token-driven :root + fonts), `tests/test_dashboard_design_md.py`
+  (new, 8), `tests/test_dashboard_inference.py` (theme test reads tokens).
+- tests: 58 dashboard tests green; green-gate 346/0.
+- verify: default export passes the browser gate (9/9, 0 overflow/clashes). SWAP proof —
+  dropped a workspace DESIGN.md with teal accent + dark paper, re-exported: exported CSS
+  showed `--accent: #0d7d74` / `--paper: #0f1417` with NO code change (acceptance met).
+  Phase 1 (deterministic engine + gate) COMPLETE; Phase 2 (live Dash app) + 3 (agent wiring) remain.
+
+### 2026-06-10  Dashboard PRD Phase 1b + 1c: adaptive log scale + colorblind-safe palette
+- what: 1b — `profile.decide_panels` now derives log-vs-linear from the measure's
+  DISTRIBUTION: `_should_log_scale` sets `log_scale` on a breakdown panel when the
+  aggregated positive values span >=50x (~1.7 decades), so small categories aren't
+  invisible slivers next to large ones; never for share/percent (bounded 0-100) or
+  non-positive data. `renderer` applies it to the measure axis (x for ranked_bar, else
+  y). 1c — multi-series charts now use a COLORBLIND-SAFE categorical palette
+  (Okabe-Ito) instead of the near-monochrome editorial colorway; single-series keeps the
+  editorial sienna accent. The verify gate's delta-E check enforces the separation.
+- why: PRD decisions 3 (data-driven encoding, not fixed) + 4 (legibility wins within the
+  design language). Directly addresses the user's "colors not separated / monochrome" and
+  "use log when it shows the difference better" asks — both derived, generic, no knobs.
+- files: `core/dashboard/profile.py` (`_should_log_scale` + log_scale on panels),
+  `core/dashboard/renderer.py` (`_ACCENT`/`_CATEGORICAL_SAFE`, palette-by-series-count,
+  log-axis application), `tests/test_dashboard_profile.py` (+3 log tests),
+  `tests/test_dashboard_inference.py` (+3 palette/log-axis tests).
+- tests: dashboard inference/profile/services green; green-gate 346/0.
+- verify: re-exported + browser-gated PASS (9/9, 0 overflow, 0 color clashes); screenshot
+  confirms the trend's Female/Male now render CVD-safe blue+vermillion (was sienna+slate),
+  single-series breakdowns stay sienna. PRD 1d (DESIGN.md) + Phase 2 (live app) remain.
+
+### 2026-06-10  Dashboard PRD + Phase 1a: perceptual color/contrast checks in the gate
+- what: Wrote `develop_spec/dashboard_prd.md` (6 grilled decisions -> phased build).
+  Phase 1a executed: `tools/dashboard_verify.py` now extracts per-plot rendered series
+  colors + chart background from the SVG and runs PERCEPTUAL checks — pairwise CIE76
+  delta-E between multi-series colors (flags pairs below the ~16 JND band that read as
+  the same color, naming the colors) and WCAG contrast vs background (flags near-invisible
+  series). Added a distinct `blocked` status: if the gate cannot run (browser/eval fails)
+  it is BLOCKED, never silently passed (PRD decision 1). delta-E/contrast thresholds are
+  documented as human-vision constants, not tunable/workspace knobs.
+- why: The structural gate passed dashboards whose series were the same near-monochrome
+  tint (the user's "colors not separated" complaint) — DOM checks can't catch that. Now the
+  gate diagnoses color clashes deterministically and by value.
+- files: `tools/dashboard_verify.py` (sRGB->Lab delta-E + WCAG contrast + per-plot color
+  probe + blocked status), `tests/test_dashboard_verify.py` (new, 8 — parse/delta-E/contrast).
+  `develop_spec/dashboard_prd.md` (new).
+- tests: 8 verify tests green; green-gate 346/0. Live gate on the Healthcare board PASSES
+  (9/9 rendered, 1 multi-series w/ legend, 0 overflow, 0 color clashes, 0 low-contrast).
+- verify: delta-E sienna-vs-slate=75.7 (ok), near-sienna pair=2.2 (would flag); pale-on-white
+  contrast 1.3 (flags), slate-on-white 10.15 (ok). Remaining PRD phases 1b-1d + 2 + 3 open.
+
+### 2026-06-10  Interactive browser verification gate (agent-browser) + overflow fix
+- what: New `tools/dashboard_verify.py` (entry `dashboard-verify`) — an interactive
+  browser gate that drives `agent-browser` (vercel-labs CLI) to load a dashboard
+  (static file:// or live Dash URL), run in-page bounding-box checks, and FAIL (exit 1)
+  on: a plot that overflows its container, a chart that didn't render (blank), or a
+  multi-series chart missing a legend. It also captures a screenshot to view. This is the
+  "verify in a real browser before showing the user" gate.
+- caught + fixed a real defect: the gate measured 6 elements overflowing by up to 618px
+  (Plotly renders at a default pixel width and only refits its container on a resize event,
+  which never fires on a static load). Fix: `export.py` dispatches `resize` + `Plotly.Plots.resize`
+  after load (×3 for late layout/fonts) so every chart honors its cell + CSS containment
+  (`overflow:hidden`, `min-width:0`, plotly width 100% !important). Gate re-run: PASS, then
+  visually confirmed via screenshot (charts contained, trend legend present).
+- baked into the agent: SKILL.md "Visual verification" section + dashboard-team.yaml
+  default_prompt now mandate `dashboard-verify` as a blocking gate before presenting;
+  regenerated .claude/.gemini/.codex adapters (all carry it).
+- setup: `npm i -g agent-browser && agent-browser install` (one-time Chrome-for-Testing).
+- files: `tools/dashboard_verify.py` (new), `pyproject.toml` (entry), `core/dashboard/export.py`
+  (resize-dispatch + containment CSS), `skills/dashboard-design/SKILL.md` + `agents/dashboard-team.yaml`
+  (+ regenerated adapters).
+- tests: green-gate 346/0 (the gate is a runtime tool, exercised live, not a unit test).
+- verify: `dashboard-verify` on the Healthcare board -> PASS (9/9 rendered, legend present, 0 overflow).
+
+### 2026-06-10  Dashboard visual redesign: editorial "data desk" aesthetic
+- what: Replaced the plain corporate-BI shell with a distinctive financial-broadsheet
+  design (via the frontend-design skill). Masthead nameplate in Fraunces (display serif)
+  with a mono eyebrow + dateline and a heavy rule; KPI cards as editorial articles with
+  serif headlines, mono uppercase panel labels, sienna serif headline figures with tabular
+  numerals, "01/02/03" index marks, hairline section rules, a hover lift, and a staggered
+  fade-up load. Warm paper palette (cream `#f3efe6`, ink `#1b1a17`, sienna accent `#b4441c`,
+  slate `#2f4452`), SVG grain overlay, Google-fonts (Fraunces / Hanken Grotesk / Spline Sans
+  Mono). The Plotly theme was retoned to match: editorial sienna/slate colorway (passed via
+  `color_discrete_sequence` so single-series bars use it, not Plotly default blue), transparent
+  chart canvas so the warm card shows through, hairline gridlines, Hanken chart font.
+- why: User invoked frontend-design to make the dashboard distinctive/production-grade rather
+  than generic. Chose an editorial/data-desk direction — bold yet credible for a serious data
+  product (no AI-slop fonts, no purple-on-white).
+- files: `core/dashboard/export.py` (fonts link, grain, masthead, card system, CSS),
+  `core/dashboard/renderer.py` (editorial colorway/font/transparent canvas + per-px
+  color_discrete_sequence), `tests/test_dashboard_inference.py` (theme test -> editorial
+  colorway + transparent canvas).
+- tests: dashboard 45 (inference/services/profile) green; green-gate 346/0.
+- verify: screenshotted the rendered board (headless Chrome) — Fraunces masthead, sienna charts
+  cohesive with the shell, multi-panel cards readable. Two-section spec contract + data-driven
+  panels unchanged underneath the restyle.
+
+### 2026-06-10  Generic data-driven dashboard engine: panels derived from result shape
+- what: Replaced text/keyword-curated chart selection with an evidence-driven engine that
+  profiles the ACTUAL executed result rows and DERIVES the visualization. New
+  `core/dashboard/profile.py`: `profile_columns` (per-column type / distinct / temporal /
+  constant), `choose_measure`, and `decide_panels` — which emits ONE PANEL PER INFORMATIVE
+  DIMENSION (measure broken down by that dimension), ordered by how much the dimension varies
+  the measure, capped at 4. Constant (filter-pinned) columns are excluded automatically.
+  `spec.py` executes the result view at build time and stores `machine_defaults.panels`
+  (SPEC_VERSION 2; first panel mirrored to top level for back-compat; falls back to the old
+  single-chart inference when rows can't be obtained). `renderer.py` renders each panel
+  (`render_kpi_inline` returns a `panels` list; `_panel_spec`/`_panel_html`); `export.py`
+  lays panels as a sub-grid in each KPI card + detail page.
+- why: User: the dashboard wasn't good and must be GENERIC so it auto-decides per KPI. The old
+  inference keyed on KPI text and crammed a 4-dimension KPI (kpi_002: dept x visit x gender x age)
+  into one unreadable stacked bar. "Derive, don't curate": chart now emerges from the data's shape,
+  and multi-dim KPIs become several simple charts ("more charts for variation", per user).
+- also fixed (visible once panels rendered): a share metric broken down by ONE dimension must be
+  re-expressed as share-of-total (`_normalize_percent`, sums to 100%) instead of summing the
+  pre-computed share column (which showed 6000%/10000%). Percent axes now use a plain "%" suffix
+  on percent-unit (0-100) data, never tickformat ".0%" (which x100s again).
+- files: `core/dashboard/profile.py` (new), `core/dashboard/spec.py` (panels + SPEC_VERSION 2 +
+  repo_root), `core/dashboard/renderer.py` (panel rendering + _normalize_percent + percent-suffix
+  axes), `core/dashboard/export.py` (panel sub-grid + CSS), `tests/test_dashboard_profile.py` (new, 8).
+- tests: profile 8 + dashboard_inference 37 + services; green-gate 346/0.
+- verify: screenshotted kpi_002 detail — 4 clean panels (share by age band / department / visit-type /
+  gender), each correctly scaled 0-50%/0-25%/0-10% summing to 100%. kpi_001 -> 4 panels (trend +
+  breakdowns); kpi_003 -> 1 ranked top-10 (constant LOB excluded). Generic; no per-KPI rules.
+
+### 2026-06-10  Dashboard chart fixes V1-V6 (satisfy the quality defaults; visually verified)
+- what: Made the renderer meet the encoded quality defaults, verified by screenshotting the
+  rendered board (not just structure). V1 no duplicate titles (inline figures `show_title=False`
+  + axis titles dropped on compact cards). V2 line/trend aggregates the measure by the date axis
+  (`_aggregate_rows`) — one point per period, no raw-row dot-stripes. V3 share charts aggregate by
+  (x,color) so each stack is a true 0-100%, cap dense categoricals to top-12 x + top-6 series with
+  an 'Other' bucket (`_cap_categories`), and use a `%`-suffixed 0-100 axis (NOT tickformat '.0%',
+  which double-scaled to 5000%/10000%). V4 ranked/top-N ranks by the highest-cardinality NON-constant
+  categorical (`_first_non_constant_categorical`) so a filter-pinned constant no longer collapses the
+  chart to one bar; headline aligned. V5 responsive `to_html` + `automargin` + rotated x ticks so
+  labels never clip. V6 horizontal top legend (no title collision).
+- why: A screenshot of the D2 board showed it rendered badly despite valid structure (un-aggregated
+  scatter, 10000% axis, single-bar 'top 10', duplicate titles, clipped 'mon' label). Fixed each and
+  re-screenshotted until the board reads as a correct, clean corporate-BI dashboard.
+- files: `core/dashboard/renderer.py` (`_aggregate_rows`, `_first_non_constant_categorical`,
+  `_cap_categories`, `_figure_from_spec` show_title + per-type aggregation/percent/rank, theme
+  automargin/autosize, responsive to_html, headline aligned to V4), `tests/test_dashboard_inference.py`
+  (stacked-percent axis test updated to ticksuffix/range).
+- tests: dashboard 37 + services green; `green-gate` 346/0.
+- verify: screenshot of `dashboard/exports/index.html` — kpi_001 single clean line; kpi_002 0/50/100%
+  stacked bars over 12 depts + Other with tidy legend; kpi_003 top-10 ranked payers (PAYOR8395 ->
+  PAYOR4165, headline "PAYOR8395: $1.8K"). Resolves the ranked_bar dimension defect (was a follow-up).
+
+### 2026-06-10  Dashboard quality + visual-verification defaults baked into the agent
+- what: Encoded the chart-quality rules and a MANDATORY visual-verification loop as
+  durable defaults the dashboard-engineer agent auto-applies (so dashboards self-resolve
+  to a correct/readable state instead of needing per-run hand-fixing). Source of truth:
+  `skills/dashboard-design/SKILL.md` (new "Chart-quality defaults" + "Visual verification
+  (mandatory)" sections) and `skills/dashboard-design/agents/dashboard-team.yaml`
+  (`default_prompt` extended). Regenerated the native agent adapters.
+- why: A re-screenshot showed the D2 board actually rendered badly (un-aggregated trend
+  scatter, broken 5000%/10000% percent axis, single-bar 'top-N', duplicate titles, clipped
+  labels) even though structure/headline checks passed. Root lesson: structural verification
+  is not visual verification. The agent must (1) build correct-by-default charts and (2)
+  screenshot+view before claiming quality.
+- defaults encoded: no duplicate titles (header carries it; inline figures title=''); line/
+  trend aggregates measure by date axis (no raw-row scatter); share charts aggregate by
+  (x,color) -> true 0-100% + cap dense categoricals to top-N + 'Other'; ranked/top-N ranks by
+  highest-cardinality NON-constant categorical (never a filter-pinned constant); responsive
+  sizing/margins; one corporate-theme styling seam; quality-asserting regression tests.
+  verification: zero-install Chrome `--headless=new --virtual-time-budget --screenshot` of an
+  absolute `file:///C:/...` URL, then VIEW the PNG; only claim 'professional' after seeing it.
+- files: `skills/dashboard-design/SKILL.md`, `skills/dashboard-design/agents/dashboard-team.yaml`;
+  regenerated `.claude/agents/dashboard-engineer.md`, `.gemini/agents/dashboard-engineer.md`,
+  `.codex/agents/dashboard-engineer.toml` via `uv run generate-skill-adapters`.
+- tests: none (guidance/doc + generated adapters); regeneration verified all 3 adapters carry
+  the "VISUAL VERIFICATION IS MANDATORY" + "CHART-QUALITY DEFAULTS" text.
+- verify: grep confirmed both rules present in .claude/.gemini/.codex adapters. The actual chart
+  fixes (V1-V6) that satisfy these defaults are the next implementation step (tracked in follow_ups).
+
+### 2026-06-10  Dashboard professionalism pass (D2): corporate-BI theme + single-board grid
+- what: Static dashboard export is now a clean-corporate-BI product, not a dev artifact.
+  (1) Shared Plotly theme (`_apply_corporate_theme` in `renderer.py`): navy/steel-blue/grey
+  colorway, white canvas, light gridlines, consistent font/margins/legend, percent-axis
+  formatting — applied at a single styling seam to every figure. (2) `export.py` rewritten to
+  a single-board responsive CSS grid: a navy header bar (workspace + "Generated <date> · N KPIs
+  [· M blocked]"), each KPI a card with the chart inline + a headline number + chart-type badge,
+  click-through to a full detail page. (3) `render_kpi_inline` + `_kpi_headline` + `_format_measure`
+  helpers: one SQL run feeds chart + headline; headline is currency/percent/count-aware. Share
+  metrics headline a SEGMENT COUNT (summing percentages is meaningless and fraction-vs-percent
+  units can't be inferred); x-column resolved with the same fallback the figure uses when the
+  spec's `x` is a display label not present in the result columns.
+- why: User asked to make the dashboard professional (chose "clean corporate BI" + "single-board
+  grid"). The old export was a flat link list with bare default Plotly styling.
+- files: `core/dashboard/renderer.py`, `core/dashboard/export.py`, `tests/test_dashboard_inference.py`
+  (+7: CorporateThemeTests x2, HeadlineTests x5).
+- tests: dashboard 37 + services green on venv; `green-gate` 346/0.
+- verify: exported Healthcare-RCM board — header "Generated 2026-06-10 · 3 KPIs", 3 inline charts
+  (line / stacked-percent / ranked-bar) with headlines $474.2K / 20 segments / "Commercial: $1.8K".
+  user_overrides preserved; no upstream contracts edited.
+- KNOWN DEFECT surfaced (D1, not D2): kpi_003 "top 10 payers" ranks by `lineofbusiness` (constant
+  'Commercial' after the LOB filter) instead of `payorid`, so the ranked bar collapses to one bar
+  and the headline label reads "Commercial". Logged in follow_ups as a ranked_bar dimension-selection
+  fix.
+
+### 2026-06-10  Dashboard chart-type inference (D1) + Wiki lean/linked pages (W1+W2)
+- what: Two parallel subsystem refinements (built in isolated worktrees, integrated here).
+  DASHBOARD (D1): correct chart-type inference by KPI shape — date/time cut -> `line`;
+  top-N question -> `ranked_bar` (horizontal, sorted desc, limited to N); share/percentage
+  metric -> `stacked_bar_percent` (100%-stacked, percent axis); single cut -> `bar`; 2+ cuts
+  -> `grouped_bar`; no usable dimension -> `big_number` card. Measure column resolved via
+  `_MEASURE_NAME_RE`; `validate_spec_columns` keeps a spec from referencing a column the SQL
+  didn't emit (renderer falls back to a recovery card, never crashes). machine_defaults
+  rewritten each run; user_overrides preserved verbatim. WIKI (W1+W2): KPI completion pages
+  no longer inline the full generated SQL — Definition links the `.sql`, Current state shows
+  only the `<kpi>_results` result-shaping body + preview table; new Lineage and Decision
+  History sections (datasets->joins->grain->filters, grain/denominator choices, relationship
+  approvals with provenance) and `[[..]]` cross-links, all derived from workspace contracts;
+  human-authored sections preserved across regeneration.
+- why: User asked to refine the dashboard (right charts) and wiki (lean, richly-linked,
+  context-bearing) — see project plan. Both are generic (no domain vocabulary; genericity
+  guard clean).
+- files: `core/dashboard/inference.py`, `core/dashboard/spec.py`, `core/dashboard/renderer.py`,
+  `tests/test_dashboard_inference.py` (new, 22); `core/wiki/writer.py`, `core/wiki/lineage.py`
+  (new), `tests/test_wiki_writer.py` (new).
+- tests: dashboard 22 (parse/measure/trend/topN/share/categorical/card/validation + 4 renderer
+  branches, Plotly-skip aware) + dashboard_services 8; wiki_writer + wiki = 8. 38 green on the
+  venv interpreter; `green-gate` 346/0 (see follow_ups: add the 2 new modules to the gate's
+  discovery list so they gate, not just pass when run directly).
+- verify: `.venv/Scripts/python -m unittest tests.test_dashboard_inference tests.test_dashboard_services
+  tests.test_wiki_writer tests.test_wiki` -> 38 OK; green-gate all green. Two-section contract
+  (machine/user) intact in both subsystems; no upstream contracts edited.
+
+### 2026-06-10  `results` compact-by-default (+ `--full`); panel markdown never inlines SQL
+- what: `workspace-flow results` is now COMPACT by default (SQL linked, tables shown);
+  pass `--full` for inlined SQL (also always in the per-KPI .sql files). The results-stage
+  session panel markdown's `## KPI Results` block is now compact too (was a second full-SQL
+  dump that leaked `\`\`\`sql` even when the packet was compact).
+- why: Live re-run (2026-06-10) showed agents reflexively call `workspace-flow results`
+  to see results; with results full-by-default it truncated (~500 lines / 6 fences for 3
+  KPIs), so the agent re-read `current.md` repeatedly and paraphrased the final summary
+  instead of forwarding tables. Making the reflexive path compact removes the truncation
+  trigger entirely. Drill-down preserved via `--full`.
+- files: `core/onboarding/workspace/flow.py` (`results --full` arg; `_print_cli_panel`
+  stage/full -> compact logic + threading; `_render_panel_markdown` `## KPI Results` block
+  `include_sql=False`).
+- tests: updated `ResultsPanelInlineRenderTests.test_results_panel_shows_definition_table_and_sql_pointer_compact`
+  (panel markdown compact: pointer + table, no inline SQL); extended
+  `test_complete_compact_explicit_full_and_kpi_filter` (default compact / `--full` has SQL).
+  Full `test_workspace_flow` green.
+- verify: live — `results` default 77 lines / 0 sql-fences, `--full` restores SQL, `--kpi`
+  one KPI, `complete` auto 0 fences. (Honest caveat: whether the agent paraphrases its final
+  message is its presentation choice; compact-default maximally enables verbatim forwarding.)
+
+### 2026-06-09  Compact result auto-surface + single-KPI selection (right-size output)
+- what: (1) Auto-surface at `complete` / `kpi_analyst_review` now emits a COMPACT packet
+  — per-KPI definition + result table + `SQL: <path>` pointer, no inlined SQL. (2) New
+  `workspace-flow results --session <id> --kpi <kpi_id>` forwards just that KPI's per-KPI
+  run file. (3) Explicit `workspace-flow results` (no --kpi) stays FULL (SQL inlined) for
+  drill-down. Mechanics: `render_kpi_block(..., include_sql=False)`; `_render_results_markdown(compact=)`;
+  `_write_result_preview` writes a `current_compact.md` sibling; `_emit_result_packet(compact=, kpi_id=)`
+  selects source; `_print_cli_panel` picks compact by stage + threads `--kpi`; the `complete`
+  panel's `## Completed KPIs` block also renders compact (was a second full-SQL dump); the
+  run-kpi-pipeline review-gate emit is compact too.
+- why: Even after the subagent path was closed, the result PRESENTATION still failed — the
+  auto-emitted packet inlined the full catalog-bootstrap SQL for every KPI (~500 lines for 3
+  KPIs), so the CLI truncated it, the agent misread truncation as "can't display", and
+  PARAPHRASED the tables (BUG-015-style reconstruct) and/or made the user type "show results".
+  Root = oversized output causing truncation. Fix removes the cause: compact auto-surface is
+  small enough to never truncate, so the agent forwards it verbatim. Single-KPI selection serves
+  "give me just this KPI's solution" from the per-KPI files that already exist on disk.
+- files: `core/onboarding/kpi/registry_loader.py` (`include_sql`), `core/onboarding/workspace/flow.py`
+  (`_render_results_markdown` compact, `_write_result_preview` compact sibling, `_emit_result_packet`
+  compact+kpi_id, `_print_cli_panel` stage-compact + kpi_filter, `## Completed KPIs` compact, `--kpi`
+  CLI + threading, wrapper review-gate emit compact).
+- tests: new — `ResultsPanelInlineRenderTests.test_render_kpi_block_include_sql_false_*`;
+  `EmitResultPacketTests` (4: full/compact/kpi-id/not-found); `BugFixTests.test_complete_compact_explicit_full_and_kpi_filter`
+  (e2e). Existing inline-render / bug013 / bug016 stay green. Full `test_workspace_flow` green.
+- verify: compact packet 225->83 lines, 2599->1011 tok (-61%, bytes/4); auto-surfaces (complete +
+  review-gate) emit 0 inline-SQL fences; explicit `results` keeps SQL; `results --kpi kpi_001`
+  prints only that KPI.
+
+### 2026-06-09  Stop the truncation-escalation at the blocker panel + disable Gemini subagents
+- what: (1) `prepare-kpi-blocker-panel` `next_step` now carries a "truncation = success"
+  guard: render the panel ONCE, do NOT re-read in another form OR delegate to a subagent,
+  because `... first N lines hidden ...` means the read succeeded. (2) `.gemini/settings.json`
+  `experimental.enableAgents` -> false.
+- why: Re-test of a fresh workspace: onboarding + blocker panel rendered fine, then Gemini
+  misread the long panel's UI-truncation banner as an incomplete read and ESCALATED by
+  spawning a `generalist` subagent to "read it properly". That subagent can't read git-ignored
+  `interns/` via ReadFile (subagents hard-respect .gitignore; the main agent uses
+  respectGitIgnore=false), its shell fallbacks were policy-denied, so it looped until cancelled.
+  Same root cause as the first-session re-read loop (truncation-as-failure), escalating via the
+  subagent feature this time. The Active-Run "truncation=success" guard only covered
+  results/complete/review output, not the blocker panel — so the disease recurred there.
+  next_step is short and always fully visible even when the panel body truncates, so it is the
+  right carrier. enableAgents=false removes the escalation path and matches the Agent Delegation
+  Rule (subagents only when explicitly asked); the main agent handles the flow without them.
+- files: `core/onboarding/kpi/blocker_workflow.py` (next_step guard), `.gemini/settings.json`
+  (enableAgents=false + rollback note).
+- tests: `tests.test_enterprise_optimization.EnterpriseOptimizationTests`
+  `test_prepare_kpi_blocker_panel_next_step_carries_truncation_guard` (new); existing
+  prepare/apply blocker-panel tests still green. settings.json JSON re-validated.
+- verify: new test asserts the guard phrases in next_step; settings enableAgents=False.
+
+### 2026-06-09  token-report tool: generic before/after token-cost tracing
+- what: New `tools/token_report.py` (entry point `token-report`). Measures the two
+  real per-session token sinks — (1) CLI **fixed context** (the files each CLI pins
+  every turn, discovered generically from the CLI's own config: Gemini's
+  `.gemini/settings.json` `context.fileName`, Claude's `CLAUDE.md`) and (2) optional
+  **workspace run outputs** (result packet / dated run / open blocker panel). Counts
+  tokens via tiktoken when present, else a deterministic utf8-bytes/4 heuristic
+  (method recorded in every snapshot). Supports `--save <label>` + `--baseline` for a
+  before/after delta table.
+- why: The user wants token-cost tracked as a development tracing aid, and every
+  change bracketed with a before/after measurement instead of eyeballing. Complements
+  `tools/context_status.py` (workspace-state bytes for a live session) which does not
+  cover CLI fixed context, tokens, or before/after.
+- files: `tools/token_report.py` (new), `pyproject.toml` (`token-report` entry point),
+  `tests/test_token_report.py` (new).
+- tests: `tests.test_token_report` (5) — deterministic counter, file measure
+  (present/missing), generic CLI discovery (gemini found / claude skipped when absent),
+  grand-total rollup, compare delta. Green on the venv interpreter.
+- verify: real before/after of the 2026-06-08 settings.json cut — gemini fixed context
+  55,057 -> 16,336 tok (-38,721, -70%), grand total 62,378 -> 23,657 (-62.1%) on the
+  bytes/4 heuristic (excludes the also-removed includeDirectoryTree runtime cost, so
+  the true saving is larger). settings.json round-trip restored + JSON re-validated.
+
+### 2026-06-09  Auto-emit KPI result packet at the kpi-analyst review gate
+- what: The full result packet + Active Run pointer now print when the flow STOPS
+  at the `kpi_analyst_review` gate, not only on `complete`/`results`. Added
+  `kpi_analyst_review` to the emit condition in `_print_cli_panel`, and `run-kpi-pipeline`
+  now emits the packet before its review-gate `_gate_stop`. Refactored the duplicated
+  packet+pointer printing into one shared `_emit_result_packet(repo_root, workspace_rel)`.
+- why: Operator complaint — had to type "show results" to see the tables. The flow
+  stops at the enforced human review gate (BUG-014) BETWEEN generation and `complete`;
+  results are already executed by then (preview is written before the gate) but the
+  packet only printed on `complete`, so a CLI driving `workspace-flow start` saw a
+  bare gate and no rows until a separate call. The reviewer needs the SQL + rows to
+  judge intent anyway — so surface them AT the gate. (KPI Result Packet Forwarding
+  Rule: needing to ask is a bug.) The review gate itself is unchanged (still enforced).
+- files: `core/onboarding/workspace/flow.py` (`_emit_result_packet` new shared helper;
+  `_print_cli_panel` + `pipeline_main` review-gate stop call it).
+- tests: `tests.test_workspace_flow.BugFixTests.test_results_auto_emit_at_kpi_analyst_review_gate`
+  (new — `status` alone prints packet + Active Run at the gate); full `test_workspace_flow`
+  (34) green on the venv interpreter. bug013/bug016 still green (refactor parity).
+- verify: new test drives `start` -> asserts stop at `kpi_analyst_review`, then a plain
+  `status --session` prints "KPI Result Packet" + "## Active Run" + "results.md".
+
+### 2026-06-08  Active-Run surface so completion can't loop on UI truncation
+- what: Added an `## Active Run` block at the visible tail of `complete`/`results`
+  CLI output naming the stable dated surface (`interns/runs/<date>/results.md` +
+  per-KPI `kpi_*.md`) with explicit "read ONCE; `... first N lines hidden ...` means
+  the read SUCCEEDED; do not re-read with -TotalCount/-Head/-Tail/Select-String or
+  open the evidence JSON" guidance. New module helper `_active_run_paths` resolves
+  today's run dir (fallback: latest dated dir; None if no snapshot).
+- why: In the 2026-06-08 Hospital-A run the pipeline completed and wrote the packet,
+  but the CLI frontend truncated the big inline packet ("first N lines hidden"); the
+  driving agent misread truncation as a read failure and looped re-reading results in
+  many forms + opened 109KB/384KB machine JSON, never presenting (user cancelled). The
+  doc rule (GEMINI.md:180-192) already said this and still failed — so make it a
+  structural tail pointer at the always-visible end of output.
+- files: `core/onboarding/workspace/flow.py` (`_active_run_paths` + Active Run block
+  in `_print_cli_panel`).
+- tests: `tests.test_workspace_flow.ActiveRunPathsTests` (3, new) — today/fallback/none;
+  full `tests.test_workspace_flow` (33) green on the venv interpreter.
+- verify: live `workspace-flow results --session wf_20260608T145532Z` prints the Active
+  Run block with the dated runs/2026-06-08/results.md + 3 per-KPI paths. (Noted a
+  separate pre-existing cp1252 UnicodeEncodeError on `→` in generated SQL comments when
+  stdout isn't UTF-8 — logged in follow_ups.md, not fixed.)
+
+### 2026-06-08  Cut Gemini per-turn context bloat (~39k tok/turn)
+- what: Removed `TOOLS.md` (~16k) and `.agents/tools.json` (~23k) from the pinned
+  `context.fileName` array in `.gemini/settings.json` and set `includeDirectoryTree:false`.
+  Pinned context dropped from 6 files (~56k tok) to 4 files (~17k tok) loaded every turn.
+- why: Diagnosing the 2026-06-08 Hospital-A run (user-reported token burn). The visible
+  cost was a post-completion re-read loop, but the bigger silent tax was ~56k tokens of
+  fixed context carried across ~40 tool calls. TOOLS.md + tools.json are read-on-demand
+  references (GEMINI.md:4 / AGENTS.md:468) and `jitContext:true` loads them when needed —
+  pinning a 93KB machine registry into every turn was pure waste. Claude only pins
+  CLAUDE.md (~2.5k) for comparison.
+- files: `.gemini/settings.json` (context block only; fileFiltering/tools/model untouched).
+- tests: none (config-only). JSON validity re-checked with `json.load`.
+- verify: `python -c "import json; json.load(open('.gemini/settings.json'))"` -> valid;
+  pinned list now GEMINI.md / AGENTS.md / workspace-workflow-prompt.md / gemini-cli-reference.md.
+  Rollback baseline + result-forward-loop follow-up recorded in develop_spec/follow_ups.md.
+
+### 2026-06-08  Grain-blocker panel route works end-to-end (follow_ups #1 fixed)
+- what: Two coupled fixes so a share-by-continuous-cut KPI's grain decision is
+  answerable via the panel instead of looping. (1) `_load_registry_with_features`
+  (intent_contract.py) now backfills the positional `kpi_{idx:03d}` the rest of the
+  system uses, so intent questions/answers carry a real kpi_id (was "" -> question_id
+  `intent__<facet>`, decisions mirrored to `pipeline_decisions[""]` the generator never
+  read). (2) `BlockerQuestionPanelBuilder` now promotes the one HARD-blocking intent
+  facet (`grain_bucketing`, via new `_HARD_BLOCKING_INTENT_FACETS`) to `current` when
+  there are no feature-mapping blockers, so apply-kpi-panel-answer resolves it; advisory
+  facets (denominator_scope, temporal_anchor) stay set-only, preserving flow-stop design.
+- why: a Gemini run looped on the kpi_002 grain blocker -- the blocker panel reported
+  "no options" (grain was set-only + mis-keyed to ""), so apply-kpi-panel-answer /
+  workspace-flow answer errored and the agent thrashed (~7% quota). Verified live: the
+  real workspace's current.json is now the grain_bucketing question for kpi_002 with
+  options; apply-kpi-panel-answer option_a records grain_bucketing_decisions[kpi_002].
+- files: core/onboarding/kpi/intent_contract.py (kpi_id backfill),
+  core/onboarding/kpi/blocker_question_panel.py (_HARD_BLOCKING_INTENT_FACETS + current
+  selection), tests/test_kpi_intent_contract.py (3 regression tests).
+- tests: tests.test_kpi_intent_contract 52/52 (added TestRegistryWithoutKpiIdBackfill x2,
+  TestHardBlockingFacetBecomesCurrent x1 -- prior fixtures always set kpi_id, masking the
+  bug). green-gate: all green.
+- verify: .venv python -m core.dev.green_gate (all green); live apply on the RCM
+  workspace recorded grain_bucketing_decisions[kpi_002].
+
+### 2026-06-08  GEMINI.md guardrails: results-read discipline + grain-blocker routing
+- what: Added two guardrails to GEMINI.md. (1) "Results read discipline" under the KPI
+  Result Packet Forwarding Rule: read `kpi_results/current.md` ONCE, never `Get-Content` the
+  ~2000-line evidence `current.json`, never use `-Wait`, and treat "first N lines hidden" as a
+  UI truncation (read succeeded) rather than retrying. (2) New "Grain-Bucketing Blocker Rule":
+  when the execution harness blocks a share KPI on a grain decision the blocker panel has no
+  options, so route to the deterministic `apply-pipeline-decision --kpi-id <id>
+  --grain-bucketing band_continuous_cuts` + re-run, instead of looping on the broken
+  apply-kpi-panel-answer / workspace-flow answer routes.
+- why: a fresh Gemini run burned ~7% of quota in one "show me the results" turn by re-reading
+  the results ~8 ways (incl. the evidence JSON whole and a hanging `-Wait`), and separately
+  looped on the kpi_002 grain blocker via panel/answer routes that error out ("current panel
+  has no options" / "not waiting for a supported answer"). These are operator-side mitigations;
+  the underlying panel-surfacing bug stays open (follow_ups #1).
+- files: GEMINI.md
+- tests: n/a (operating-doc guidance, not platform code)
+- verify: next Gemini run should read the packet once and use apply-pipeline-decision for the
+  grain blocker; quota burn per results turn should drop sharply.
+
+### 2026-06-07  Gemini reads git-ignored interns/ artifacts (BUG-018 actually fixed)
+- what: Set `.gemini/settings.json` fileFiltering.respectGitIgnore=false +
+  respectGeminiIgnore=true, and rewrote `.geminiignore` from an (inert) negation
+  list into a self-contained denylist that hides secrets/PHI/heavy files on its own.
+  Lightweight interns/ artifacts (reports/**, generated/**, current.json|md,
+  handoffs, metadata_store) are now readable by native ReadFile/Glob/SearchText.
+- why: `.gitignore:15 workspaces/**/interns/` is a DIRECTORY exclusion, which a child
+  `!negation` cannot undo per gitignore rules -- so the old `.geminiignore` re-includes
+  never took effect. The main agent only read these files via shell Get-Content (the
+  documented context-burning workaround); the built-in read-only `generalist` subagent
+  has no shell, hit "ignored by configured ignore patterns" then "denied by policy",
+  spun, and was cancelled (observed when the operator typed "show me the results").
+  git commit behavior is UNCHANGED -- git still ignores interns/.
+- files: .gemini/settings.json, .geminiignore
+- tests: n/a (Gemini CLI config, not platform code; not covered by green-gate)
+- verify: `git check-ignore -v <interns report .md>` still matches `.gitignore:15`
+  (git unchanged); Gemini-side proof is a subagent ReadFile of
+  `workspaces/**/interns/reports/**/*.md` now succeeding.
+
 ### 2026-06-07  band_continuous_cuts now actually bands; results render inline
 - what: (1) A recorded `band_continuous_cuts` grain decision now emits banded SQL
   (`FLOOR(value / width) * width AS <cut>_band`, default width 10, overridable via

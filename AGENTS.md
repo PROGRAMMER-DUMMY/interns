@@ -16,8 +16,9 @@ rules.
 1. `README.md` for repo purpose, core layout, workspace output layout, and verification commands.
 2. `CONTEXT.md` for domain language and architecture.
 3. `config/tasks.json` for active task, workspace path, commands, contracts, and policy.
-4. `TOOLS.md` and `.agents/tools.json` for available project tools, routing, safety, and
-   evidence-order policy.
+4. The Stage index in `Tool And Evidence Discovery` (below) for available project tools; read a
+   command's `TOOLS.md` section on demand only. Do not read `TOOLS.md` / `.agents/tools.json`
+   whole.
 5. `program.md` only when the active benchmark/task refers to it.
 6. Relevant files in `core/`, `tools/`, `interns/`, `tests/`, or `workspaces/<project>/`.
 
@@ -152,10 +153,11 @@ artifact paths, and provide the next deterministic command. For `onboard-workspa
 command is usually:
 
 ```powershell
-uv run resolve-kpi-features --workspace workspaces/<project> --domain <domain> --include-candidates
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
-The `resolve-kpi-features` command writes `question_panel_path` and
+(`resolve-kpi-features` is deprecated; its default invocation now redirects to
+`prepare-kpi-blocker-panel`.) The wrapper writes `question_panel_path` and
 `question_panel_markdown_path` in its JSON output. If `blocked_kpi_count` is nonzero, the next step
 is to read `question_panel_markdown_path`; do not inspect generated contracts and invent a separate
 interview.
@@ -350,6 +352,19 @@ Review `interns/generated/contracts/source_to_target_plan.json` and
 `interns/reports/source_to_target_plan.md`. If any KPI in the plan is blocked, resolve that blocker
 before generating SQL, Polars, PySpark, or medallion pipeline code.
 
+## Workspace Data Policy (user-authored)
+
+A workspace owner may place `data_policy.json` at the workspace root (or under `docs/`) to declare
+their own data-protection rules on top of the built-in HIPAA/PCI detection:
+`sensitive_columns` (exact names), `sensitive_column_patterns` (regexes), `categories`
+(named custom categories), `not_sensitive_columns` (reviewed false-positive allowlist), and
+`tier_override` (`"phi"` forces the PHI tier). Honored by the PHI gate (`assess_workspace_phi`),
+display redaction (blocker-panel samples and previews), and the semantic contract's
+`columns.<name>.is_sensitive` map that the SQL generator masks from. The policy can only WIDEN
+display redaction; the allowlist suppresses tier findings but never un-redacts rendered surfaces.
+This file is user input like datasets: agents must never write or edit it; a malformed policy
+surfaces as `errors` in its summary and must be reported to the owner, not auto-fixed.
+
 ## Human-Gate Provenance Rule
 
 When a human answers an approval or review gate — a relationship-join approval or the kpi-analyst
@@ -391,6 +406,79 @@ under-presented and should be treated as a bug, not a normal step.
 
 (Residual from BUG-015; the completion path now auto-emits this packet, but any explicit "show
 results" turn must still forward the file, not reconstruct from memory.)
+
+### Compact vs full results
+
+Two packet variants exist; pick by what the user asked for and forward the file verbatim either way:
+
+- Default ("results", "show results", or pipeline completion): forward the COMPACT packet —
+  `interns/reports/kpi_results/current.md` (same content as `interns/runs/<date>/results.md`).
+  SQL is linked per KPI, not inlined.
+- "full results" / "entire results": forward the FULL packet —
+  `interns/reports/kpi_results/current_full.md` (same content as
+  `interns/runs/<date>/results_full.md`). SQL is inlined per KPI.
+
+Never answer a "full results" request with the compact packet, a hand-built summary table, or a
+re-authored excerpt. Even the full packet caps result previews; the complete row set lives in
+`interns/generated/evidence/kpi_results/current.json` (machine-only — query it, do not dump it).
+
+### Results read discipline (token/quota guardrail)
+
+Reading the packet must be ONE cheap read. Re-reading the results in many forms in a single turn
+has burned ~7% of a model quota in one go — do not repeat that. These rules apply in every CLI
+(Claude, Gemini, Antigravity, or other agent frontends):
+
+- Read the packet with the agent's NATIVE file-read tool, not a shell command
+  (`Get-Content` / `cat` / `type`). Shell output is summarized or capped by the CLI harness, which
+  truncates long reads and is exactly what starts the re-read loop. Native reads return the whole
+  file once.
+- Do NOT re-read the same file with `-TotalCount`, `-Head`, `-Tail`, `-Raw`, `-Encoding`,
+  `Select-String`, or `workspace-flow results --preview-rows N` back-to-back to "see more" — they
+  all return the same packet. One native read is the whole thing.
+- For many KPIs, forward the per-KPI files `interns/runs/<date>/kpi_<id>.md` (one read each, each
+  self-contained) instead of the combined file — this never exceeds a read cap.
+- NEVER use `-Wait` or any follow/stream flag on these files — it hangs until cancelled.
+- If the CLI display shows "... first N lines hidden ...", the read SUCCEEDED — that is a UI
+  truncation, not a failure. Forward what was read; do not retry with another command.
+
+## Dataset Isolation Rule
+
+When the operator scopes a workspace to a subset of its datasets (a source system, a site, a
+partner, a date range of files — any subset), persist that scope as a `dataset_allowlist` in
+`workspaces/<project>/interns/state/workspace_settings.json` BEFORE running onboarding, profiling,
+or generation:
+
+```json
+{
+  "dataset_allowlist": ["datasets/<subset-path>"]
+}
+```
+
+- All downstream stages (profiling, contracts, feature mapping, medallion ingestion, generated
+  SQL/engine code) must read only from allowlisted paths.
+- The scope is workspace state, not prose: do not rely on the conversation to remember it. If the
+  allowlist file exists, honor it in every session and every CLI without being re-told.
+- When verifying isolation, compare VALUES, not keys or row counts — sibling datasets can share
+  identical ID sets and row counts while differing in measures. A provenance check that only joins
+  on keys can silently pass for the wrong source.
+
+## Grain-Bucketing Blocker Rule
+
+When the execution harness blocks a share/percentage KPI on a grain-bucketing decision (a raw
+continuous cut fragmenting the denominator — e.g. an exact-valued numeric or date-derived
+dimension), the blocker question panel shows NO options — this is a pipeline decision, not a
+feature blocker. Do NOT loop on `apply-kpi-panel-answer` or `workspace-flow answer` (they error
+with "current panel has no options" / "not waiting for a supported answer"). Apply it
+deterministically, then re-run generation:
+
+```powershell
+uv run apply-pipeline-decision --kpi-id <kpi_id> --grain-bucketing band_continuous_cuts
+uv run workspace-flow start --workspace workspaces/<project> --intent full_kpi_sql --domain <domain>
+```
+
+Use `band_continuous_cuts:<width>` for a non-default band width (default 10), or
+`exact_value_grain` only if exact-value rows are genuinely wanted. (The panel route for this facet
+is a known open bug — see `develop_spec/follow_ups.md`.)
 
 ## Token Discipline
 
@@ -468,13 +556,38 @@ Prefer existing project tools and generated artifacts over custom one-off script
 machine-readable registry in `.agents/tools.json` for routing, safety level, inputs, and expected
 outputs.
 
+### Stage index (registry summary)
+
+This index satisfies the registry-read gate. `TOOLS.md` (~16k tokens) and `.agents/tools.json`
+(~23k tokens) must NOT be read whole as session preamble — find the stage below, then read only
+the matching `### <command>` section of `TOOLS.md` for the one command you are about to run.
+`tools.json` is machine-only (programmatic routing); never page through it.
+
+| Stage | Commands (each is a `###` section in TOOLS.md) |
+| --- | --- |
+| Workspace selection | `list-workspace-files`, `prepare-workspace-selection`, `session-snapshot` |
+| Onboarding | `onboard-workspace`, `kickstart-workspace`, `understand-data` |
+| KPI definition + blockers | `prepare-kpi-blocker-panel`, `apply-kpi-panel-answer`, `apply-kpi-definition`, `confirm-cli-agent-proposal`, `prepare-kpi-generation`, `apply-kpi-generation-answer`, `finalize-kpi-generation` (deprecated redirects: `resolve-kpi-features`, `blocker-question-panel`, `derived-feature-markdown`) |
+| Data model | `prepare-data-model-generation`, `apply-data-model-answer`, `finalize-data-model-generation`, `prepare-data-model-blocker-panel`, `apply-data-model-blocker-answer`, `parse-data-model-images`, `export-data-model-diagram` |
+| Relationships + source-to-target | `build-relationship-contracts`, `apply-relationship-answer`, `plan-source-to-target` |
+| Source catalog + external intake | `prepare-source-catalog`, `build-catalog-contract`, `build-source-family-contracts`, `discover-external-sources`, `prepare-external-source-intake`, `ingest-source-catalog` |
+| Engineering route + pipeline | `prepare-data-engineering-route`, `prepare-pipeline-plan`, `prepare-pipeline-format-panel`, `prepare-pipeline-deployment-plan`, `apply-pipeline-decision`, `generate-pipeline-sql` |
+| Generation + execution | `run-kpi-pipeline`, `workspace-flow`, `generate-kpi-sql`, `generate-kpi-engines`, `kpi-proof-packet` |
+| Validation + QA | `validate-workspace-artifacts`, `validate-project-harness`, `harness reliability`, `harness workflow-guardrails`, `harness data-quality`, `prepare-duplicate-review-panel`, `apply-duplicate-review-answer`, `harness layered-pipeline`, `harness pipeline-execution`, `validate-git-hygiene`, `validate-memory-health` |
+| Evidence + reporting | `record-workspace-trajectory`, `build-workspace-evidence-graph`, `export-kpi-registry-excel`, `export-workspace-presentation`, `prepare-wiki-memory`, `prepare-workspace-bug-report`, `record-engine-evolution` |
+| Dashboard | `workspace-dashboard` (serve / `--export` / `--screen` visual screener), `dashboard-verify` (single-page DOM/color gate) |
+| Context + budget | `context-router`, `resource-preflight`, `cleanup-workspace-references` |
+| Dev + harness | `prepare-agent-benchmark`, `harness ai-app`, `harness ai-cli`, `prepare-workspace-workflow`, `profiler.py`, `optimizer_finder.py`, `methodology_parser.py`, `generate-skill-adapters`, Databricks tools |
+
 Hard registry-read gate:
 
-- Before choosing any workflow route or next command, the active agent must have read
-  `.agents/tools.json`, `TOOLS.md`, or its generated adapter under `.agents/<tool>/SKILLS.md` in the
-  current session.
-- If the agent has not read the registry/adapter, it must stop, reread it, and restart route
+- Before choosing any workflow route or next command, the active agent must have read the Stage
+  index above (or the specific command's `###` section in `TOOLS.md`, or its generated adapter
+  under `.agents/<tool>/SKILLS.md`) in the current session.
+- If the agent has not read any of those, it must stop, read the Stage index, and restart route
   selection instead of guessing from memory.
+- Reading `TOOLS.md` or `.agents/tools.json` end-to-end as session preamble is a token-discipline
+  violation, not diligence: drill into single sections on demand.
 - For an external profiled workspace with no KPI registry entries, do not run KPI feature
   resolution first. Run `uv run build-source-family-contracts --workspace workspaces/<project>` and
   review schema drift before `prepare-data-engineering-route` or medallion planning.
@@ -562,14 +675,16 @@ Then ask exactly one high-leverage question at a time. The question should name 
 offer concrete options when possible, include a recommended answer, and explain why that answer is
 the safest or most useful default.
 
-For KPI/query blocker questions, do not ask from freehand prose or a custom terminal prompt. After
-feature resolution, generate the standardized question packet first:
+For KPI/query blocker questions, do not ask from freehand prose or a custom terminal prompt.
+Generate the standardized question packet first:
 
 ```powershell
-uv run blocker-question-panel --workspace workspaces/<project>
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
-Ask from `workspaces/<project>/interns/reports/blocker_question_panel/current.json` or `current.md`
+(`blocker-question-panel` is deprecated; its default invocation now redirects to
+`prepare-kpi-blocker-panel`.) Ask from
+`workspaces/<project>/interns/reports/blocker_question_panel/current.json` or `current.md`
 only. If those files are missing, generate them before asking. This applies to direct mappings,
 source-of-truth choices, aliases, reusable workspace definitions, and derived-feature questions.
 Run `uv run validate-workspace-artifacts --workspace workspaces/<project>` after generating the
@@ -630,16 +745,12 @@ specialty, reject those candidates in the question and ask for a direct physical
 origin rule, dictionary entry, or accepted business definition instead.
 
 Derived-column blocker options must be JSON-backed. Prose-only options are invalid. If derived
-feature options exist, run:
+feature options exist, run the wrapper, which owns derived-feature markdown, panel generation, and
+validation in one pass (`derived-feature-markdown` and `blocker-question-panel` are deprecated and
+redirect here):
 
 ```powershell
-uv run derived-feature-markdown --workspace workspaces/<project>
-```
-
-Then run:
-
-```powershell
-uv run blocker-question-panel --workspace workspaces/<project>
+uv run prepare-kpi-blocker-panel --workspace workspaces/<project> --domain <domain>
 ```
 
 Then validate:

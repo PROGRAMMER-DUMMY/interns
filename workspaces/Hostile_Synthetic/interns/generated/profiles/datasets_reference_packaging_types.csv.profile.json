@@ -1,0 +1,97 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\reference\\packaging_types.csv",
+  "format": "csv",
+  "row_count": 6,
+  "file_count": 1,
+  "size_bytes": 137,
+  "schema": {
+    "pkg_cd": "String",
+    "Name": "String",
+    "tare_kg": "Float64"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "pkg_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "PKG1",
+        "PKG2",
+        "PKG3",
+        "PKG4",
+        "PKG5",
+        "PKG6"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Name",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "Carton",
+        "Crate",
+        "Drum",
+        "Euro pallet",
+        "Half pallet",
+        "Roll cage"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "tare_kg",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        0.4,
+        8.5,
+        11.0,
+        15.0,
+        22.0,
+        28.0
+      ],
+      "sample_min": 0.4,
+      "sample_max": 28.0,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "tare_kg",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

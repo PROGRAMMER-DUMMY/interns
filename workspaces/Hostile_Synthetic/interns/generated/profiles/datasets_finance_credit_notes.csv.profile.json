@@ -1,0 +1,148 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\credit_notes.csv",
+  "format": "csv",
+  "row_count": 180,
+  "file_count": 1,
+  "size_bytes": 7175,
+  "schema": {
+    "Id": "String",
+    "inv_no": "String",
+    "Date": "String",
+    "Amount": "Float64",
+    "reason_cd": "String"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "CN7001",
+        "CN7002",
+        "CN7003",
+        "CN7004",
+        "CN7005",
+        "CN7006",
+        "CN7007",
+        "CN7008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "inv_no",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "INV-50057",
+        "INV-50078",
+        "INV-50152",
+        "INV-50164",
+        "INV-50175",
+        "INV-50216",
+        "INV-50228",
+        "INV-50329"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-01-04",
+        "2025-01-07",
+        "2025-01-08",
+        "2025-01-15",
+        "2025-01-21",
+        "2025-01-24",
+        "2025-01-25",
+        "2025-01-26"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        9.94,
+        11.19,
+        14.5,
+        16.3,
+        17.05,
+        17.1,
+        17.67,
+        20.7
+      ],
+      "sample_min": 9.94,
+      "sample_max": 319.57,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "reason_cd",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "RR1",
+        "RR2",
+        "RR3",
+        "RR4",
+        "RR5"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

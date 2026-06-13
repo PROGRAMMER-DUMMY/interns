@@ -9,6 +9,7 @@ from core.onboarding.memory.workspace_definitions import (
     append_decision_history,
     recompute_mapping_status,
 )
+from core.storage.atomic_io import read_json_or_quarantine, write_text_atomic
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -51,7 +52,7 @@ def apply_user_decision(
         raise ValueError(f"Feature not found: {kpi_id}/{feature}")
 
     recompute_mapping_status(mapping)
-    mapping_path.write_text(json.dumps(mapping, indent=2, default=str) + "\n", encoding="utf-8")
+    write_text_atomic(mapping_path, json.dumps(mapping, indent=2, default=str) + "\n")
     append_decision_history(layout, kpi_id, feature, state, evidence_note)
     append_user_decision_requirement(
         layout,
@@ -111,12 +112,9 @@ def append_user_decision_requirement(
 ) -> None:
     requirements_path = layout.requirements_dir / "requirements.json"
     requirements_path.parent.mkdir(parents=True, exist_ok=True)
-    requirements = {}
-    if requirements_path.exists():
-        try:
-            requirements = json.loads(requirements_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            requirements = {}
+    # Fail loud (quarantine + raise) on corruption rather than zeroing the audit
+    # mirror. Ref: ob-memory.md (T6).
+    requirements = read_json_or_quarantine(requirements_path, default={}) or {}
     requirements.setdefault("user_confirmed_feature_decisions", []).append(
         {
             "kpi_id": kpi_id,
@@ -127,4 +125,4 @@ def append_user_decision_requirement(
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )
-    requirements_path.write_text(json.dumps(requirements, indent=2) + "\n", encoding="utf-8")
+    write_text_atomic(requirements_path, json.dumps(requirements, indent=2) + "\n")

@@ -175,6 +175,12 @@ class ParsedKPI:
     # (e.g. ~7k rows each ~0.2%). The block proposes banding the cut into ranges
     # instead of emitting the exploded GROUP BY. None = no bucketing block.
     grain_bucketing_block: dict[str, Any] | None = None
+    # Single-attribution share: set for distinct-entity share metrics so each
+    # entity is counted in exactly ONE grain cell (shares sum to ~100% instead
+    # of >100% when entities appear in multiple cells). Keys: entity_column,
+    # order_terms (ROW_NUMBER ordering), mode ("most_recent_event" or
+    # "deterministic_cell_order"). None = no attribution CTE.
+    share_attribution: dict[str, Any] | None = None
 
     @property
     def can_compose(self) -> bool:
@@ -206,6 +212,14 @@ def _column_lookup(kpi: dict[str, Any]) -> dict[str, str]:
             continue
         label = str(feature.get("feature") or feature.get("name") or "")
         if not label:
+            continue
+        # A derived-formula feature is MATERIALIZED in the features view under
+        # its own name; its source_columns list the formula INPUTS (e.g.
+        # START/STOP for over_24_hour). Resolving the label to an input column
+        # made the result view group by the input instead of the derived
+        # column. The label resolves to itself.
+        if str(feature.get("resolution_type") or "") == "derived_formula":
+            out[label.lower()] = label
             continue
         resolved = label
         for source in feature.get("source_columns") or []:
@@ -363,6 +377,14 @@ def _resolve_group_column(
         return best_dim[1]
 
     return ""
+
+
+def _denom_is_within_scope(denominator_scope: str | None) -> bool:
+    """True when an explicit within-group denominator scope was chosen."""
+    return denominator_scope is not None and denominator_scope not in {
+        "grand_total",
+        "global_total",
+    }
 
 
 def _detect_time_bucket(token: str) -> tuple[str, str, str] | None:
@@ -768,13 +790,26 @@ def parse_kpi(
     as_of_expr = (
         f"CAST({_quote(event_date_col)} AS DATE)" if event_date_col else "CURRENT_DATE"
     )
+    if not event_date_col:
+        # Record the fallback so it is auditable in the contract AND visible in
+        # the emitted SQL (comment) + result packet, instead of silently making
+        # date arithmetic drift with the run date.
+        parsed.age_as_of_assumption = (
+            "date arithmetic anchored to CURRENT_DATE (no event-date column in "
+            "the KPI grain); values shift as the run date advances"
+        )
 
     # Mismatched-grain percentage is handled via window functions.
     # The metric reads "<agg> / <same agg> for <group>": a share-of-total by
     # <group>. The numerator is the aggregate within each group and the
     # denominator is the grand total of the same aggregate, so each row is one
     # group and its percentage of the whole (e.g. a department's distinct lives
-    # as a fraction of all distinct lives). Shares sum to ~100% across groups.
+    # as a fraction of all distinct lives). NOTE: shares sum to ~100% across
+    # groups ONLY when each entity maps to exactly one group. When the same
+    # entity appears in multiple grain cells (e.g. one patient with visits in
+    # several departments), per-cell DISTINCT counts overlap and the shares
+    # total >100%. The post-execution share-sum check in
+    # flow._write_result_preview measures and surfaces this in the packet.
     if window_intent.get("kind") == "mismatched_grain_percentage":
         partition = window_intent.get("partition", "")
         inner = _AGG_FN_PATTERN.search(metric_text)
@@ -791,7 +826,9 @@ def parse_kpi(
             # stated cuts and forced a manual SQL edit. Numerator now counts
             # within each full-grain cell; the denominator stays the grand total
             # (OVER ()), so each row is one cell and its percentage of the whole
-            # population (shares sum to ~100% across all cells). Denominator-scope
+            # population. Shares sum to ~100% across cells only when each entity
+            # belongs to one cell; overlapping membership makes the total exceed
+            # 100% (measured and flagged post-execution). Denominator-scope
             # semantics (per-group vs grand-total) are intentionally left as-is.
             emitted = _emitted_columns(lookup)
             grain_dimensions: list[Dimension] = []
@@ -837,9 +874,24 @@ def parse_kpi(
             # fallback to the cut columns) and make sure it is part of the grain.
             # A raw/aliased token must never reach PARTITION BY or the view is
             # non-executable (BUG-011).
-            partition_col = _resolve_group_column(
-                partition, lookup, kpi, tuple(cut_columns)
-            ) if partition else ""
+            # A bare TIME-GRAIN word as the group ("for year") is not a column:
+            # it names the time-bucket dimension already in the grain, and the
+            # share is within-period (each year's groups sum to ~100%). Letting
+            # it fall through to column resolution bound it to an unrelated
+            # emitted column (the metric's own id input), polluting the grain
+            # with one row per entity.
+            partition_time_expr = ""
+            partition_low = str(partition or "").strip().lower()
+            if partition_low in {"year", "quarter", "month", "week", "day"}:
+                partition_time_expr = next(
+                    (d.expression for d in grain_dimensions if d.alias == partition_low),
+                    "",
+                )
+            partition_col = ""
+            if partition and not partition_time_expr:
+                partition_col = _resolve_group_column(
+                    partition, lookup, kpi, tuple(cut_columns)
+                )
             if partition_col and partition_col in emitted:
                 _add_grain(_quote(partition_col), _norm_alias(partition_col))
 
@@ -850,6 +902,65 @@ def parse_kpi(
             # group column.
             parsed.dimensions.extend(grain_dimensions)
             grain_terms = tuple(d.expression for d in grain_dimensions)
+
+            # Single attribution for DISTINCT-entity shares: an entity that
+            # appears in multiple grain cells (one patient in several
+            # departments, one customer in several channels...) used to be
+            # counted in EVERY cell, so the shares totalled >100% (measured
+            # 229% on real data). Each entity is now attributed to exactly one
+            # cell — its most recent event when the grain has an event date,
+            # else a deterministic cell order — and the result is a plain
+            # GROUP BY whose shares sum to ~100% by construction. Row-based
+            # shares (sum / non-distinct count) already partition rows across
+            # cells and are left on the window path.
+            if distinct and column and column != "*" and grain_terms:
+                order_terms: list[str] = []
+                if event_date_col:
+                    order_terms.append(f"CAST({_quote(event_date_col)} AS DATE) DESC")
+                    attribution_mode = "most_recent_event"
+                else:
+                    attribution_mode = "deterministic_cell_order"
+                # Grain expressions as (tie)breakers make the pick fully
+                # deterministic across engines and runs.
+                order_terms.extend(grain_terms)
+                parsed.share_attribution = {
+                    "entity_column": column,
+                    "order_terms": order_terms,
+                    "mode": attribution_mode,
+                }
+                if _denom_is_within_scope(denominator_scope):
+                    _within_col = _resolve_group_column(
+                        partition, lookup, kpi, tuple(cut_columns)
+                    ) if partition else ""
+                    if _within_col and _within_col in emitted:
+                        denom_expr = (
+                            f"SUM(COUNT(*)) OVER (PARTITION BY {_quote(_within_col)})"
+                        )
+                        parsed.denominator_scope = denominator_scope
+                        parsed.denominator_scope_alternative = "grand_total"
+                    else:
+                        denom_expr = "SUM(COUNT(*)) OVER ()"
+                        parsed.denominator_scope = "grand_total"
+                else:
+                    denom_expr = "SUM(COUNT(*)) OVER ()"
+                    parsed.denominator_scope = denominator_scope or "grand_total"
+                    parsed.denominator_scope_alternative = None
+                # Plain aggregation (project=False) keeps the composer in
+                # GROUP BY mode; the share is the only emitted measure.
+                parsed.aggregations.append(
+                    Aggregation(
+                        fn="count", column="*",
+                        alias=_norm_alias(f"attributed_{column}_count"),
+                        project=False,
+                    )
+                )
+                parsed.extra_select_exprs.append(
+                    (
+                        f"CAST(COUNT(*) AS DOUBLE) / NULLIF({denom_expr}, 0) * 100",
+                        "percentage_share",
+                    )
+                )
+                return parsed
 
             # Numerator = lives within each full-grain cell (PARTITION BY grain).
             # project=False: it is inlined into percentage_share, NOT emitted as
@@ -871,7 +982,12 @@ def parse_kpi(
                 denominator_scope is not None
                 and denominator_scope not in {"grand_total", "global_total"}
             )
-            if _denom_is_within and partition_col and partition_col in emitted:
+            if partition_time_expr:
+                # "for <time-grain>" in the metric is an explicit within-period
+                # share: each period's groups sum to ~100%.
+                _denom_window = WindowSpec(partition_by=(partition_time_expr,))
+                _scope_label = f"within_{partition_low}"
+            elif _denom_is_within and partition_col and partition_col in emitted:
                 _denom_window = WindowSpec(partition_by=(_quote(partition_col),))
                 _scope_label = denominator_scope
             else:
@@ -935,6 +1051,8 @@ def parse_kpi(
                 # grand-total denominator are internal scaffolding: mark both
                 # project=False and inline them so the view emits only
                 # cuts + percent_of_total (consistent with the share-of-group path).
+                # (Filters are parsed AFTER this point; the filtered-numerator
+                # rewrite happens at the end of parse_kpi.)
                 base_agg = replace(agg, project=False)
                 total_agg = Aggregation(
                     fn=agg.fn, column=agg.column,
@@ -1150,6 +1268,42 @@ def parse_kpi(
     # HAVING — aggregate filters parsed from KPI text.
     parsed.having.extend(_detect_having(metric_text + " " + name_text, parsed.aggregations))
 
+    # Filtered percent-of-total rewrite (runs AFTER filter parsing): filters
+    # define the NUMERATOR subset ("how many X had <condition>, and what
+    # percentage of all X") — a WHERE clause would filter the denominator too
+    # and the percentage would always read 100%. Rewrite to a FILTER (WHERE
+    # ...) numerator over an unfiltered plain denominator, drop the WHERE, and
+    # also project the filtered count itself (the question's other half). Both
+    # sides become plain aggregates (the windowed denominator bound-errored
+    # without a GROUP BY anyway). Only the no-dimensions shape is rewritten.
+    if parsed.filters and not parsed.dimensions:
+        pct_idx = next(
+            (i for i, (_, alias) in enumerate(parsed.extra_select_exprs)
+             if alias == "percent_of_total"),
+            None,
+        )
+        windowed_total = next(
+            (a for a in parsed.aggregations
+             if a.window is not None and a.alias.startswith("total_")),
+            None,
+        )
+        base = next(
+            (a for a in parsed.aggregations
+             if a.window is None and not a.project),
+            None,
+        )
+        if pct_idx is not None and windowed_total is not None and base is not None:
+            filters_sql = " AND ".join(_filter_sql(f) for f in parsed.filters)
+            filtered_expr = f"{_agg_expr_no_alias(base)} FILTER (WHERE {filters_sql})"
+            total_expr = _agg_expr_no_alias(base)
+            parsed.aggregations = [a for a in parsed.aggregations if a is not windowed_total]
+            parsed.extra_select_exprs[pct_idx] = (
+                f"CAST({filtered_expr} AS DOUBLE) / NULLIF({total_expr}, 0) * 100",
+                "percent_of_total",
+            )
+            parsed.extra_select_exprs.insert(pct_idx, (filtered_expr, base.alias))
+            parsed.filters = []
+
     return parsed
 
 
@@ -1293,10 +1447,20 @@ def build_result_view_sql(
         select_terms.append(
             f"CAST({numerator.alias} AS DOUBLE) / NULLIF({denominator.alias}, 0) AS ratio"
         )
+    # T9: dedupe extra-selects by their PROJECTED ALIAS (exact), not by substring.
+    # `any(alias in term ...)` dropped a legitimately-distinct expr whenever a
+    # short alias (e.g. `age`) was a substring of another term's alias
+    # (`age_band`). Parse each term's trailing `AS <alias>` and compare exactly.
+    # Ref: core-audit ob-kpi-d.md.
+    def _emitted_alias(term: str) -> str:
+        m = re.search(r'\bAS\s+("?[\w]+"?)\s*$', term, re.IGNORECASE)
+        return m.group(1).strip('"') if m else ""
+
+    emitted_aliases = {a for a in (_emitted_alias(t) for t in select_terms) if a}
     for expr, alias in parsed.extra_select_exprs:
-        # Skip if the expr is already in select_terms (e.g., date arithmetic doubled as dimension).
-        if not any(alias in term for term in select_terms):
+        if str(alias).strip('"') not in emitted_aliases:
             select_terms.append(f"{expr} AS {alias}")
+            emitted_aliases.add(str(alias).strip('"'))
 
     where_clause = ""
     if parsed.filters:
@@ -1331,12 +1495,44 @@ def build_result_view_sql(
     # implied (design/kpi_intent_contract.md §2 "Reported" + §5).
     if parsed.denominator_scope is not None:
         lines.append(f"-- denominator_scope: {parsed.denominator_scope}")
-    lines += [
-        f"CREATE OR REPLACE VIEW {result_view} AS",
-        select_keyword,
-        "  " + ",\n  ".join(select_terms),
-        f"FROM {feature_view}",
-    ]
+    # Auditable as-of comment: emitted when date arithmetic fell back to
+    # CURRENT_DATE so the temporal anchor is visible in the generated SQL.
+    if parsed.age_as_of_assumption:
+        lines.append(f"-- as_of_assumption: {parsed.age_as_of_assumption}")
+    attribution = parsed.share_attribution
+    if attribution:
+        # Single-attribution share: ROW_NUMBER picks ONE row (= one grain cell)
+        # per entity, the outer query aggregates only those rows, so shares sum
+        # to ~100% by construction. The mode comment keeps the choice auditable.
+        lines.append(
+            f"-- share_attribution: single ({attribution['mode']}); "
+            "each entity counted in exactly one grain cell"
+        )
+        entity_q = _quote(attribution["entity_column"])
+        order_sql = ", ".join(attribution["order_terms"])
+        lines += [
+            f"CREATE OR REPLACE VIEW {result_view} AS",
+            "WITH __attributed AS (",
+            "  SELECT *,",
+            f"    ROW_NUMBER() OVER (PARTITION BY {entity_q} ORDER BY {order_sql})"
+            " AS __attribution_rn",
+            f"  FROM {feature_view}",
+            ")",
+            select_keyword,
+            "  " + ",\n  ".join(select_terms),
+            "FROM __attributed",
+        ]
+        rn_filter = "__attribution_rn = 1"
+        where_clause = (
+            where_clause + f" AND {rn_filter}" if where_clause else f"WHERE {rn_filter}"
+        )
+    else:
+        lines += [
+            f"CREATE OR REPLACE VIEW {result_view} AS",
+            select_keyword,
+            "  " + ",\n  ".join(select_terms),
+            f"FROM {feature_view}",
+        ]
     if where_clause:
         lines.append(where_clause)
     if group_by_clause:

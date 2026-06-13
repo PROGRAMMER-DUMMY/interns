@@ -103,6 +103,20 @@ def recommend(kpi_id: str, signals: ComplexitySignals, *, local_blocked: bool = 
         recommended = "sql"
         reasons.append("small data and a simple shape → SQL is the simplest, fastest, most portable choice")
 
+    # T3 (remediation decision): only SQL and Polars are parity-certified — their
+    # cross-engine row/aggregate equality is actually executed in the live results
+    # path. PySpark is never run there, and hybrid leans on it, so neither is
+    # verified. Do NOT recommend an uncertified engine: route to the certified
+    # Polars engine and record that distributed execution is deferred until
+    # PySpark parity is wired. Ref: core-audit ob-kpi-b.md.
+    if recommended in ("pyspark", "hybrid"):
+        reasons.append(
+            f"`{recommended}` is not parity-certified in the live results path "
+            "(PySpark is not cross-checked); recommending the certified Polars "
+            "engine instead until PySpark parity is wired"
+        )
+        recommended = "polars"
+
     if recommended != "sql":
         reasons.append("SQL remains the correctness baseline; switch only for the performance win above")
 

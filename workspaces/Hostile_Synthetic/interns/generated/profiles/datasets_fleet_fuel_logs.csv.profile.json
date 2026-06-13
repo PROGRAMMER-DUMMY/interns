@@ -1,0 +1,164 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\fleet\\fuel_logs.csv",
+  "format": "csv",
+  "row_count": 900,
+  "file_count": 1,
+  "size_bytes": 35547,
+  "schema": {
+    "Id": "String",
+    "vin": "String",
+    "Date": "String",
+    "litres": "Float64",
+    "Amount": "Float64"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "FL00001",
+        "FL00002",
+        "FL00003",
+        "FL00004",
+        "FL00005",
+        "FL00006",
+        "FL00007",
+        "FL00008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "vin",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "VIN100",
+        "VIN101",
+        "VIN102",
+        "VIN103",
+        "VIN104",
+        "VIN105",
+        "VIN106",
+        "VIN107"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-01-01",
+        "2025-01-03",
+        "2025-01-04",
+        "2025-01-05",
+        "2025-01-06",
+        "2025-01-07",
+        "2025-01-08",
+        "2025-01-09"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "litres",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        20.1,
+        20.2,
+        20.5,
+        20.7,
+        20.8,
+        20.9,
+        21.0,
+        21.3
+      ],
+      "sample_min": 20.1,
+      "sample_max": 239.6,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        30.35,
+        30.64,
+        30.75,
+        31.33,
+        31.54,
+        31.94,
+        32.13,
+        32.87
+      ],
+      "sample_min": 30.35,
+      "sample_max": 379.9,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "litres",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    },
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

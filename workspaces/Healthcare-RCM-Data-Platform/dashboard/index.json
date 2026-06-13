@@ -1,0 +1,26 @@
+{
+  "artifact_type": "dashboard_index",
+  "version": 2,
+  "workspace": "Healthcare-RCM-Data-Platform",
+  "updated_at": "2026-06-12T17:58:08.226658+00:00",
+  "machine_defaults": {
+    "kpis": [
+      {
+        "kpi_id": "kpi_001",
+        "title": "What is trend for amount paid for medicare LOB across gender and payer for patients above 50 years of age",
+        "spec_path": "dashboard/kpi_001.json"
+      },
+      {
+        "kpi_id": "kpi_002",
+        "title": "What is percentage share of lives by gender, age , visit type, department",
+        "spec_path": "dashboard/kpi_002.json"
+      },
+      {
+        "kpi_id": "kpi_003",
+        "title": "What are top 10 payers in Commercial LOB w.r.t. amount paid",
+        "spec_path": "dashboard/kpi_003.json"
+      }
+    ]
+  },
+  "user_overrides": {}
+}

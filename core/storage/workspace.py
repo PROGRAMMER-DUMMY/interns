@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Union
@@ -33,12 +34,26 @@ class Workspace:
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
             
-        self.conn = sqlite3.connect(self.db_path)
+        # P4c (T6): the loop, telemetry backend, and dashboard share one
+        # Workspace against the same DB. The default check_same_thread=True +
+        # single connection raises ProgrammingError across threads, and without
+        # WAL/timeout concurrent processes get immediate "database is locked".
+        # Allow cross-thread use (guarded by self._lock), enable WAL, and give a
+        # busy timeout so contending writers wait instead of erroring.
+        # Ref: core-audit storage.md.
+        self._lock = threading.RLock()
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
         self.conn.row_factory = sqlite3.Row
+        if self.db_path != ":memory:":
+            try:
+                self.conn.execute("PRAGMA journal_mode=WAL;")
+                self.conn.execute("PRAGMA busy_timeout=30000;")
+            except sqlite3.Error:
+                pass
         self._init_db()
 
     def _init_db(self) -> None:
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.executescript('''
                 CREATE TABLE IF NOT EXISTS experiments (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,7 +169,7 @@ class Workspace:
 
     def log_experiment(self, run_id: str, results: str, status: str, metrics: str) -> None:
         """Replaces results.tsv logging"""
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 "INSERT INTO experiments (run_id, results, status, metrics) VALUES (?, ?, ?, ?)",
                 (run_id, results, status, metrics)
@@ -162,7 +177,7 @@ class Workspace:
 
     def append_run_log(self, content: str) -> None:
         """Replaces run.log appending"""
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 "INSERT INTO logs (log_type, content) VALUES (?, ?)",
                 ("run_log", self.redact_keys(content))
@@ -170,7 +185,7 @@ class Workspace:
 
     def write_session_report(self, report: str) -> None:
         """Replaces session_report.md writing"""
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 "INSERT INTO logs (log_type, content) VALUES (?, ?)",
                 ("session_report", self.redact_keys(report))
@@ -178,7 +193,7 @@ class Workspace:
 
     def save_ideas(self, ideas: str) -> None:
         """Replaces ideas.md writing"""
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 "INSERT INTO logs (log_type, content) VALUES (?, ?)",
                 ("ideas", self.redact_keys(ideas))
@@ -187,7 +202,7 @@ class Workspace:
     def log_intern_activity(self, intern_name: str, activity: str, details: Any) -> None:
         """Replaces intern_log.jsonl appending"""
         details_str = json.dumps(details) if not isinstance(details, str) else details
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 "INSERT INTO intern_activity (intern_name, activity, details) VALUES (?, ?, ?)",
                 (intern_name, activity, self.redact_keys(details_str))
@@ -195,7 +210,7 @@ class Workspace:
 
     def save_loop_status(self, status: dict) -> None:
         """Replaces loop_status.json saving"""
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 "INSERT INTO logs (log_type, content) VALUES (?, ?)",
                 ("loop_status", json.dumps(status))
@@ -214,7 +229,7 @@ class Workspace:
     # --- Optimization Memory ---
 
     def log_optimization_memory(self, record: dict) -> None:
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 """
                 INSERT INTO optimization_memory (
@@ -289,7 +304,7 @@ class Workspace:
     # --- Governance decisions and alerts ---
 
     def log_governance_decision(self, decision: dict) -> None:
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 """
                 INSERT INTO governance_decisions (

@@ -1,0 +1,97 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\reference\\fx_rates.csv",
+  "format": "csv",
+  "row_count": 148,
+  "file_count": 1,
+  "size_bytes": 3426,
+  "schema": {
+    "Date": "String",
+    "ccy": "String",
+    "rate_to_gbp": "Float64"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-01-01",
+        "2025-01-08",
+        "2025-01-15",
+        "2025-01-22",
+        "2025-01-29",
+        "2025-02-05",
+        "2025-02-12",
+        "2025-02-19"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "ccy",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "EUR",
+        "USD"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "rate_to_gbp",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        0.7405,
+        0.7421,
+        0.743,
+        0.7472,
+        0.7489,
+        0.7493,
+        0.7498,
+        0.7518
+      ],
+      "sample_min": 0.7405,
+      "sample_max": 0.8975,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "rate_to_gbp",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

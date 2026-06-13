@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -147,6 +148,18 @@ class AutoBootstrap:
                 active=False,
                 execution=db_cfg.execution,
                 message="databricks_enabled_but_credentials_missing",
+            )
+        # P2 (T7): the live health_check() is a network call. This runs inside the
+        # local-safe bootstrap currency check on EVERY loop iteration, before any
+        # remote-execution approval. Gate it behind the same human-set approval
+        # env the execution backend uses; without it, report "not active" with no
+        # network round-trip. Ref: core-audit ob-workspace-b.md.
+        if os.environ.get("AUTORESEARCH_ALLOW_REMOTE_EXECUTION") != "1":
+            return DatabricksReadiness(
+                configured=True,
+                active=False,
+                execution=db_cfg.execution,
+                message="databricks_health_check_skipped_local_safe",
             )
         try:
             from core.execution.databricks_client import DatabricksClient

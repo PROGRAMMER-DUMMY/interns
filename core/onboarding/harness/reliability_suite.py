@@ -75,6 +75,25 @@ class ReliabilitySuite:
         self.layout.ensure_runtime_dirs()
         checks = [
             self._run_workflow_guardrails(),
+            # P7: validate the harness EVIDENCE artifacts so a failed/malformed/
+            # missing-when-required harness blocks the suite (it previously only
+            # ran guardrails + evidence-graph + project-harness, so a recorded
+            # harness failure went undetected). Ref: ob-harness.md.
+            self._run_harness_artifact_check(
+                "run-layered-pipeline-harness",
+                "interns/generated/evidence/layered_pipeline_harness/current.json",
+                required=self._has_contract("pipeline_plan.json"),
+            ),
+            self._run_harness_artifact_check(
+                "pipeline-execution-harness",
+                "interns/generated/evidence/pipeline_execution_harness/current.json",
+                required=self._has_contract("pipeline_plan.json"),
+            ),
+            self._run_harness_artifact_check(
+                "data-quality-harness",
+                "interns/generated/evidence/data_quality_harness/current.json",
+                required=self._has_contract("catalog_contract.json"),
+            ),
             self._run_evidence_graph(),
             self._run_project_harness(),
         ]
@@ -215,6 +234,60 @@ class ReliabilitySuite:
         except Exception as exc:
             return _failed_check("validate-project-harness", exc)
 
+    def _has_contract(self, name: str) -> bool:
+        return (self.layout.contracts_dir / name).exists()
+
+    def _run_harness_artifact_check(
+        self, name: str, artifact_rel: str, *, required: bool
+    ) -> dict[str, Any]:
+        """Validate a harness evidence artifact: ok=True -> passed; ok=False or
+        malformed (no `ok`) -> failed; missing -> failed when required else
+        skipped. Surfaces passed/failed counts from the artifact summary."""
+        path = self.workspace / artifact_rel
+        if not path.exists():
+            if required:
+                return _check(
+                    name, "failed", False,
+                    f"required harness artifact missing: {artifact_rel}",
+                    {"missing_artifact": artifact_rel, "required": True},
+                )
+            return _check(
+                name, "skipped", True,
+                "harness not run (artifact absent and not required)",
+                {"artifact": artifact_rel, "required": False},
+            )
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            return _check(
+                name, "failed", False,
+                f"harness artifact unreadable/malformed: {type(exc).__name__}",
+                {"artifact": artifact_rel, "error": type(exc).__name__},
+            )
+        # Harness artifacts spell the success flag either `ok` (data-quality) or
+        # `pass` (pipeline-execution). Neither present -> malformed.
+        if not isinstance(data, dict) or ("ok" not in data and "pass" not in data):
+            return _check(
+                name, "failed", False,
+                "harness artifact malformed (missing `ok`/`pass`)",
+                {"artifact": artifact_rel, "malformed": True},
+            )
+        summary = data.get("summary") or {}
+        details = {
+            "passed": summary.get("passed_count"),
+            "failed": summary.get("failed_count"),
+            "artifact": artifact_rel,
+        }
+        ok = bool(data["ok"] if "ok" in data else data["pass"])
+        return _check(
+            name,
+            "passed" if ok else "failed",
+            ok,
+            "harness passed" if ok else f"harness reported failure ({data.get('status', 'failed')})",
+            details,
+            artifacts=[artifact_rel],
+        )
+
     def _missing_project_harness_artifacts(self) -> list[str]:
         return [
             item
@@ -233,12 +306,12 @@ class ReliabilitySuite:
                 elif check["name"] == "build-workspace-evidence-graph":
                     commands.append(f"uv run build-workspace-evidence-graph --workspace {self.workspace_rel}")
                 else:
-                    commands.append(f"uv run validate-workflow-guardrails --workspace {self.workspace_rel}")
+                    commands.append(f"uv run harness workflow-guardrails --workspace {self.workspace_rel}")
             for command in (check.get("details") or {}).get("next_commands") or []:
                 if isinstance(command, str):
                     commands.append(command)
         if not commands:
-            commands.append(f"uv run run-reliability-suite --workspace {self.workspace_rel} --domain {self.domain}")
+            commands.append(f"uv run harness reliability --workspace {self.workspace_rel} --domain {self.domain}")
         return _dedupe(commands)
 
 

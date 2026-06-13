@@ -9,6 +9,16 @@ from pathlib import Path
 from typing import Any
 
 from core.onboarding.kpi.feature_resolver import READY_STATES
+from core.onboarding.kpi.sensitive_masking import (
+    is_feature_sensitive,
+    load_sensitive_columns,
+    mask_sql_expr,
+)
+from core.sql_safety import validate_expression_safe
+from core.onboarding.relationships.base_source_selector import (
+    BASE_SOURCE_DECISIONS_KEY,
+    select_base_source,
+)
 from core.onboarding.relationships.contracts import (
     find_executable_relationship,
     load_relationship_contracts,
@@ -98,32 +108,23 @@ class DuckDBKPISQLGenerator:
             relationships,
         )
         select_items = []
-        # Load sensitive columns from semantic contract
-        contract_path = self.layout.contracts_dir / "semantic_contract.json"
-        sensitive_cols = set()
-        if contract_path.exists():
-            try:
-                contract_data = json.loads(contract_path.read_text(encoding="utf-8"))
-                columns = contract_data.get("columns", {})
-                for col_name, col_meta in columns.items():
-                    if col_meta.get("is_sensitive"):
-                        sensitive_cols.add(col_name.lower())
-            except Exception:
-                pass
+        # Sensitive-column masking is single-sourced in sensitive_masking so all
+        # three engines agree on WHICH columns are sensitive and mask IDENTICALLY
+        # (SHA-256 hex). Ref: core-audit ob-kpi-b.md (T2).
+        sensitive_cols = load_sensitive_columns(self.layout)
 
         for feature in kpi.get("features", []):
             column = self._feature_expression(feature, source_aliases, profile_map)
             if column:
                 res_type = feature.get("resolution_type")
                 feat_name = feature['feature']
-                
-                # Apply masking if column is sensitive
+
+                # Mask when the feature's SOURCE COLUMN metadata says it is
+                # sensitive — not by string-splitting the rendered expression
+                # (which mis-detected derived formulas). Ref: ob-kpi-b.md:126.
                 expr = column
-                if feat_name.lower() in sensitive_cols or column.split('.')[-1].strip('"').lower() in sensitive_cols:
-                    if self.dialect == "duckdb":
-                        expr = f"hash({column})" # Simple hash for DuckDB
-                    elif self.dialect == "databricks":
-                        expr = f"sha2({column}, 256)"
+                if is_feature_sensitive(feature, sensitive_cols):
+                    expr = mask_sql_expr(column, self.dialect)
 
                 if res_type == "derived_formula":
                     select_items.append(
@@ -244,10 +245,19 @@ class DuckDBKPISQLGenerator:
             try:
                 from core.onboarding.kpi.local_warehouse import warehouse_table_name
                 mapping = self._load_mapping()
+                wh_relationships = load_relationship_contracts(
+                    self.repo_root, _rel(self.workspace, self.repo_root)
+                )
                 for kpi in mapping.get("kpis", []):
                     refs = [r for f in kpi.get("features", [])
                             for r in _feature_source_refs(f, self.repo_root)]
-                    base = _choose_base_source(refs, profile_map)
+                    base = _choose_base_source(
+                        refs,
+                        profile_map,
+                        wh_relationships,
+                        grain_dimensions=_grain_dimensions(kpi),
+                        pinned=self._pinned_base_source(kpi),
+                    )
                     if base:
                         fact_sources.add(base)
             except Exception:
@@ -270,7 +280,7 @@ class DuckDBKPISQLGenerator:
                 f"-- Warehouse: {_rel(warehouse_path, self.repo_root)}\n"
                 f"-- Staging views below proxy to registered fact/dim tables.\n"
                 f"-- Run this SQL inside the warehouse:\n"
-                f"--   uv run warehouse query --workspace {_rel(self.workspace, self.repo_root)} --sql @kpi.sql\n\n"
+                f"--   uv run kpi-local-warehouse query --workspace {_rel(self.workspace, self.repo_root)} --sql @kpi.sql\n\n"
             )
         else:
             header = "INSTALL delta;\nLOAD delta;\n\n"
@@ -280,7 +290,7 @@ class DuckDBKPISQLGenerator:
         """Emit COPY statement to write Gold results to Parquet (delta written via Python)."""
         gold_path = self.layout.gold_dir / f"{kpi_id}_results"
         return "\n".join([
-            "-- Gold results → Parquet (use deltalake Python lib to wrap as Delta)",
+            "-- Gold results -> Parquet (use deltalake Python lib to wrap as Delta)",
             f"-- COPY (SELECT * FROM {self.quote_ident(kpi_id + '_results')})",
             f"--   TO '{gold_path.as_posix()}/data.parquet' (FORMAT PARQUET);",
         ])
@@ -413,7 +423,13 @@ class DuckDBKPISQLGenerator:
             for ref in _feature_source_refs(feature, self.repo_root)
         ]
         feature_refs.extend(self._derived_formula_refs(kpi, "", profile_map))
-        base_source = _choose_base_source(feature_refs, profile_map)
+        base_source = _choose_base_source(
+            feature_refs,
+            profile_map,
+            relationships,
+            grain_dimensions=_grain_dimensions(kpi),
+            pinned=self._pinned_base_source(kpi),
+        )
         if not base_source:
             return [], {}
 
@@ -464,7 +480,13 @@ class DuckDBKPISQLGenerator:
             for ref in _feature_source_refs(feature, self.repo_root)
         ]
         feature_refs.extend(self._derived_formula_refs(kpi, "", profile_map))
-        base_source = _choose_base_source(feature_refs, profile_map)
+        base_source = _choose_base_source(
+            feature_refs,
+            profile_map,
+            relationships,
+            grain_dimensions=_grain_dimensions(kpi),
+            pinned=self._pinned_base_source(kpi),
+        )
         if not base_source:
             return "FROM all_workspace_rows", {}
         required_refs = [
@@ -547,29 +569,12 @@ class DuckDBKPISQLGenerator:
         all_refs: list[dict[str, str]],
         profile_map: dict[str, dict[str, Any]],
     ) -> dict[str, str] | None:
-        refs = _feature_source_refs(feature, self.repo_root)
-        feature_name = str(feature.get("feature") or "")
-        if refs:
-            for ref in refs:
-                if ref["dataset"] == base_source:
-                    return ref
-            base_schema = _schema(profile_map.get(base_source, {}))
-            for ref in refs:
-                if ref["column"] in base_schema:
-                    return {"dataset": base_source, "column": ref["column"]}
-            base_group = _source_group(base_source)
-            for ref in refs:
-                if _source_group(ref["dataset"]) == base_group:
-                    return ref
-            return refs[0]
-        base_schema = _schema(profile_map.get(base_source, {}))
-        for candidate in [feature_name, *_formula_inputs(feature)]:
-            if candidate in base_schema:
-                return {"dataset": base_source, "column": candidate}
-        for ref in all_refs:
-            if ref["column"] == feature_name:
-                return ref
-        return None
+        # Canonical per-feature resolution shared with the engine generators
+        # (choose_feature_ref module function) so every engine reads the same
+        # sources.
+        return choose_feature_ref(
+            feature, base_source, all_refs, profile_map, self.repo_root
+        )
 
     def _feature_expression(
         self,
@@ -581,10 +586,39 @@ class DuckDBKPISQLGenerator:
             formula = _derived_formula(feature)
             if not formula:
                 return None
+            # T4: the formula body is workspace-owned text inlined verbatim into
+            # executable SQL. Reject statement terminators / comment sequences /
+            # DDL-DML keywords before inlining so a hostile derivation rule cannot
+            # inject SQL. Legitimate arithmetic/function formulas pass unchanged.
+            validate_expression_safe(formula, context="derived KPI formula")
+            # A formula may reference a SOURCE TABLE by its raw name
+            # (`FROM "encounters" p` in a self-join). The script only creates
+            # catalog views, so map known dataset stems to their view names —
+            # the author of a custom rule cannot know generator-internal names.
+            for source in profile_map:
+                stem = _safe_name(Path(source).stem)
+                view = (
+                    self.quote_ident(f"catalog_raw_{stem}")
+                    if self.dialect == "duckdb"
+                    else self.table_ident(stem)
+                )
+                formula = re.sub(
+                    rf'(?i)(\b(?:FROM|JOIN)\s+)"{re.escape(stem)}"',
+                    lambda m, v=view: m.group(1) + v,
+                    formula,
+                )
             for column in sorted(_formula_inputs(feature), key=len, reverse=True):
                 qualified = self._qualified_column(column, source_aliases, profile_map)
                 if qualified:
-                    formula = re.sub(rf"\b{re.escape(column)}\b", qualified, formula)
+                    # Consume an already-quoted occurrence ("START") whole so
+                    # qualification cannot nest quotes (s0."START"" bug), and
+                    # never rewrite alias-prefixed references (p."START" inside
+                    # a self-join formula belongs to the formula's own alias).
+                    formula = re.sub(
+                        rf'(?<![.\w"])(?:"{re.escape(column)}"|{re.escape(column)}\b)(?!")',
+                        qualified,
+                        formula,
+                    )
             return formula
         ref = self._choose_feature_ref(
             feature,
@@ -687,6 +721,13 @@ class DuckDBKPISQLGenerator:
                 self._pipeline_decisions_cache = {}
         return self._pipeline_decisions_cache
 
+    def _pinned_base_source(self, kpi: dict[str, Any]) -> str | None:
+        """Human-recorded base-source decision for this KPI, if any."""
+        decisions = self._pipeline_decisions().get(BASE_SOURCE_DECISIONS_KEY)
+        if not isinstance(decisions, dict):
+            return None
+        return str(decisions.get(str(kpi.get("kpi_id") or "")) or "") or None
+
     def quote_ident(self, value: str) -> str:
         if self.dialect == "databricks":
             return "`" + str(value).replace("`", "``") + "`"
@@ -756,33 +797,125 @@ def _formula_inputs(feature: dict[str, Any]) -> list[str]:
 def _choose_base_source(
     refs: list[dict[str, str]],
     profile_map: dict[str, dict[str, Any]],
+    relationships: list[dict[str, Any]] | None = None,
+    *,
+    grain_dimensions: list[str] | tuple[str, ...] = (),
+    pinned: str | None = None,
 ) -> str:
-    # Pick the base/fact source from workspace evidence, not hardcoded table names:
-    #   - ref count: how many of the KPI's features map to the source;
-    #   - size: the largest referenced table by row count is the fact (high-volume
-    #     transaction/event table that dimensions join into) — this replaces the old
-    #     domain-noun bonus with a structural, workspace-agnostic signal;
-    #   - profile membership: a light tiebreaker.
-    ref_counts: dict[str, int] = {}
-    for ref in refs:
-        source = ref["dataset"]
-        ref_counts[source] = ref_counts.get(source, 0) + 1
-    if not ref_counts:
-        return ""
+    # Relationship-graph scoring (coverage, grain, fan-out safety, evidence);
+    # row count is a final tiebreak only. Every engine and the planner delegate
+    # to the same selector so they all anchor the identical base. A near-tie is
+    # resolved deterministically here (top score) — the source-to-target
+    # planner is the gate that turns a near-tie into a blocker-panel question.
+    selection = select_base_source(
+        refs,
+        profile_map,
+        relationships,
+        grain_dimensions=grain_dimensions,
+        pinned=pinned,
+    )
+    return selection.base_source
 
-    def _rows(source: str) -> int:
-        return int((profile_map.get(source) or {}).get("row_count") or 0)
 
-    max_rows = max((_rows(source) for source in ref_counts), default=0)
-    scores: dict[str, int] = {}
-    for source, count in ref_counts.items():
-        score = count
-        if source in profile_map:
-            score += 1
-        if max_rows > 0 and _rows(source) == max_rows:
-            score += 3  # the largest referenced table is the fact
-        scores[source] = score
-    return sorted(scores, key=lambda source: (-scores[source], -_rows(source), source))[0]
+def choose_feature_ref(
+    feature: dict[str, Any],
+    base_source: str,
+    all_refs: list[dict[str, str]],
+    profile_map: dict[str, dict[str, Any]],
+    repo_root: Path,
+) -> dict[str, str] | None:
+    """Pick the ONE source ref this feature resolves to, preferring the base.
+
+    Order: a ref already on the base source -> the same column present in the
+    base schema -> a ref in the base's source group -> the first ref. This is
+    the canonical per-feature resolution every engine must share; unioning ALL
+    candidate refs instead pulled in datasets with no executable relationship
+    (the cross-engine parity skips/failures).
+    """
+    refs = _feature_source_refs(feature, repo_root)
+    feature_name = str(feature.get("feature") or "")
+    if refs:
+        for ref in refs:
+            if ref["dataset"] == base_source:
+                return ref
+        base_schema = _schema(profile_map.get(base_source, {}))
+        for ref in refs:
+            if ref["column"] in base_schema:
+                return {"dataset": base_source, "column": ref["column"]}
+        base_group = _source_group(base_source)
+        for ref in refs:
+            if _source_group(ref["dataset"]) == base_group:
+                return ref
+        return refs[0]
+    base_schema = _schema(profile_map.get(base_source, {}))
+    for candidate in [feature_name, *_formula_inputs(feature)]:
+        if candidate in base_schema:
+            return {"dataset": base_source, "column": candidate}
+    for ref in all_refs:
+        if ref["column"] == feature_name:
+            return ref
+    return None
+
+
+def plan_required_sources(
+    kpi: dict[str, Any],
+    profile_map: dict[str, dict[str, Any]],
+    repo_root: Path,
+    relationships: list[dict[str, Any]] | None = None,
+    *,
+    pinned: str | None = None,
+) -> tuple[str, list[str], list[dict[str, str]]]:
+    """The canonical source plan for a KPI: (base_source, required_sources, refs).
+
+    Single source of truth for WHICH datasets a KPI reads and joins. The SQL
+    generator derives its FROM/JOIN chain from this; the Polars and PySpark
+    generators MUST consume the same plan so cross-engine parity starts from
+    identical sources. ``refs`` is the chosen one-ref-per-feature list
+    (including derived-formula inputs); ``base_source`` is "" when no plan can
+    be made. ``relationships``/``pinned`` feed the relationship-graph base
+    selector; pass them identically from every engine.
+    """
+    feature_refs = [
+        ref
+        for feature in kpi.get("features", [])
+        for ref in _feature_source_refs(feature, repo_root)
+    ]
+    base_source = _choose_base_source(
+        feature_refs,
+        profile_map,
+        relationships,
+        grain_dimensions=_grain_dimensions(kpi),
+        pinned=pinned,
+    )
+    if not base_source:
+        return "", [], []
+    required_refs = [
+        choose_feature_ref(feature, base_source, feature_refs, profile_map, repo_root)
+        for feature in kpi.get("features", [])
+    ]
+    for feature in kpi.get("features", []):
+        if feature.get("resolution_type") != "derived_formula":
+            continue
+        for column in _formula_inputs(feature):
+            source = _source_for_column(column, base_source, profile_map)
+            if source:
+                required_refs.append({"dataset": source, "column": column})
+    chosen = [ref for ref in required_refs if ref and ref.get("dataset")]
+    required_sources = _unique_preserve_order(
+        [base_source]
+        + [ref["dataset"] for ref in chosen if ref["dataset"] != base_source]
+    )
+    return base_source, required_sources, chosen
+
+
+def _grain_dimensions(kpi: dict[str, Any]) -> list[str]:
+    """KPI cut tokens for grain-compatibility scoring (mirrors the planner's
+    cuts split so every engine scores grain identically)."""
+    return [
+        part.strip()
+        for part in re.split(r"[,;]", str(kpi.get("cuts") or ""))
+        if part.strip()
+    ]
 
 
 def _source_for_column(

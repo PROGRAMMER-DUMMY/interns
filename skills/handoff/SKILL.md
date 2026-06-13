@@ -105,9 +105,9 @@ A bulleted list of skills the next agent should plan to invoke. For
 each, one line of WHY.
 
 ```markdown
-- `/clarify-ambiguity` — the open decision about `denied_claim_status`
+- `/grill-requirements` — the open decision about `denied_claim_status`
   needs the user's preferred denial taxonomy before we propose mapping.
-- `/self-grill` — before recommending the final SQL dialect choice.
+- `/grill-requirements` — before recommending the final SQL dialect choice.
 - `kpi-analyst` (auto-loaded) — fires when `apply-kpi-panel-answer` runs.
 ```
 

@@ -41,6 +41,7 @@ from core.onboarding.kpi.result_view_builder import (
     _split_cuts,
     parse_kpi,
 )
+from core.onboarding.kpi.pii_redaction import redact_table_rows, workspace_redaction_patterns
 from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -379,9 +380,9 @@ class KPIOutputVerifier:
         warehouse_path = self.layout.state_dir / "warehouse.duckdb"
         use_warehouse = bool(_WAREHOUSE_TABLE_REF.search(sql)) and warehouse_path.exists()
 
-        import os
+        from core.storage.atomic_io import pushd
 
-        old_cwd = Path.cwd()
+        cwd_cm = None  # thread-safe cwd guard, only for the in-memory branch
         conn = None
         try:
             if use_warehouse:
@@ -393,7 +394,9 @@ class KPIOutputVerifier:
                     pass
             else:
                 conn = duckdb.connect(":memory:")
-                os.chdir(self.repo_root)  # so read_csv_auto('workspaces/...') resolves
+                # so read_csv_auto('workspaces/...') resolves; serialized via pushd
+                cwd_cm = pushd(self.repo_root)
+                cwd_cm.__enter__()
             conn.execute(sql)
             record.executed = True
             views = {
@@ -413,6 +416,10 @@ class KPIOutputVerifier:
             record.row_count = int(
                 conn.execute(f'SELECT COUNT(*) FROM "{record.result_view}"').fetchone()[0]
             )
+            # Redact PHI/PCI in the verifier's sample table — it is rendered into
+            # the self-grill report surfaced to the operator. Ref: ob-kpi-d.md.
+            _patterns = workspace_redaction_patterns(self.workspace)
+            rows = redact_table_rows(record.columns, rows, patterns=_patterns)
             record.sample_output_table = render_markdown_table(record.columns, rows)
             if not record.columns:
                 record.errors.append(f"result view `{record.result_view}` has no columns")
@@ -427,8 +434,8 @@ class KPIOutputVerifier:
         finally:
             if conn is not None:
                 conn.close()
-            if not use_warehouse:
-                os.chdir(old_cwd)
+            if cwd_cm is not None:
+                cwd_cm.__exit__(None, None, None)
 
     # ── cross-engine parity (executes Polars, compares to SQL) ────────────────
 
@@ -556,9 +563,9 @@ class KPIOutputVerifier:
             return None, None
         warehouse_path = self.layout.state_dir / "warehouse.duckdb"
         use_warehouse = bool(_WAREHOUSE_TABLE_REF.search(sql)) and warehouse_path.exists()
-        import os
+        from core.storage.atomic_io import pushd
 
-        old_cwd = Path.cwd()
+        cwd_cm = None
         conn = None
         try:
             if use_warehouse:
@@ -569,7 +576,8 @@ class KPIOutputVerifier:
                     pass
             else:
                 conn = duckdb.connect(":memory:")
-                os.chdir(self.repo_root)
+                cwd_cm = pushd(self.repo_root)
+                cwd_cm.__enter__()
             conn.execute(sql)
             rows = int(conn.execute(f'SELECT COUNT(*) FROM "{result_view}"').fetchone()[0])
             cols = {
@@ -586,8 +594,8 @@ class KPIOutputVerifier:
         finally:
             if conn is not None:
                 conn.close()
-            if not use_warehouse:
-                os.chdir(old_cwd)
+            if cwd_cm is not None:
+                cwd_cm.__exit__(None, None, None)
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -628,7 +636,7 @@ class KPIOutputVerifier:
 
 def _render_report(result: VerifyResult) -> str:
     lines = [
-        "# KPI Output Verification (self-grill)",
+        "# KPI Output Verification (grill-requirements self-grill mode)",
         "",
         f"- Workspace: `{result.workspace}`",
         f"- Verdict: `{'PASSED' if result.ok else 'BLOCKED'}`",

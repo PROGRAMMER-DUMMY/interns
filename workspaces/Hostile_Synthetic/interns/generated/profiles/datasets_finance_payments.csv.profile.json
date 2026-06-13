@@ -1,0 +1,147 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\finance\\payments.csv",
+  "format": "csv",
+  "row_count": 2280,
+  "file_count": 1,
+  "size_bytes": 98726,
+  "schema": {
+    "Id": "String",
+    "inv_no": "String",
+    "Date": "String",
+    "Amount": "Float64",
+    "method": "String"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "PMT60001",
+        "PMT60002",
+        "PMT60003",
+        "PMT60004",
+        "PMT60005",
+        "PMT60006",
+        "PMT60007",
+        "PMT60008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "inv_no",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "INV-50002",
+        "INV-50003",
+        "INV-50004",
+        "INV-50006",
+        "INV-50007",
+        "INV-50009",
+        "INV-50010",
+        "INV-50011"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-01-01",
+        "2025-01-02",
+        "2025-01-03",
+        "2025-01-04",
+        "2025-01-05",
+        "2025-01-06",
+        "2025-01-07",
+        "2025-01-08"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Amount",
+      "dtype": "Float64",
+      "nullable": null,
+      "sample_values": [
+        20.59,
+        20.66,
+        20.68,
+        21.08,
+        21.28,
+        22.21,
+        23.24,
+        23.93
+      ],
+      "sample_min": 20.59,
+      "sample_max": 1499.92,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": 0,
+      "source": "sample_profile"
+    },
+    {
+      "name": "method",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "BACS",
+        "CARD",
+        "CHEQUE",
+        "DD"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": [
+    {
+      "column": "Amount",
+      "current_dtype": "Float64",
+      "recommended_dtype": null,
+      "decision": "approval_required",
+      "reason": "Float/decimal downcast can change precision and requires explicit approval.",
+      "requires_approval": true,
+      "evidence": {
+        "min": null,
+        "max": null,
+        "exact_bounds": false
+      }
+    }
+  ]
+}

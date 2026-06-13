@@ -20,7 +20,7 @@
       "command": "uv run prepare-workspace-selection --workspace <workspace>",
       "required_skills": [
         "workspace-governance",
-        "clarify-ambiguity"
+        "grill-requirements"
       ]
     },
     {
@@ -208,7 +208,7 @@
       "required_skills": [
         "workspace-governance",
         "data-engineering-pipeline-design",
-        "clarify-ambiguity"
+        "grill-requirements"
       ]
     },
     {
@@ -315,7 +315,6 @@
       "command": "uv run prepare-data-model-blocker-panel --workspace <workspace>",
       "required_skills": [
         "domain-model",
-        "clarify-ambiguity",
         "grill-requirements"
       ]
     },
@@ -372,12 +371,12 @@
     },
     {
       "tool": "resolve-kpi-features",
-      "command": "uv run resolve-kpi-features --workspace <workspace> --domain <domain> --include-candidates",
+      "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
       "required_skills": [
         "domain-model",
         "feature-derivation-library",
         "workspace-kpi-query-optimizer",
-        "clarify-ambiguity"
+        "grill-requirements"
       ]
     },
     {
@@ -396,7 +395,7 @@
         "domain-model",
         "feature-derivation-library",
         "workspace-kpi-query-optimizer",
-        "clarify-ambiguity"
+        "grill-requirements"
       ]
     },
     {
@@ -467,7 +466,7 @@
       "command": "uv run prepare-pipeline-format-panel --workspace <workspace>",
       "required_skills": [
         "data-engineering-pipeline-design",
-        "clarify-ambiguity"
+        "grill-requirements"
       ]
     },
     {
@@ -532,7 +531,7 @@
     },
     {
       "tool": "derived-feature-markdown",
-      "command": "uv run derived-feature-markdown --workspace <workspace>",
+      "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
       "required_skills": [
         "feature-derivation-library",
         "workspace-kpi-query-optimizer"
@@ -540,11 +539,17 @@
     },
     {
       "tool": "blocker-question-panel",
-      "command": "uv run blocker-question-panel --workspace <workspace>",
+      "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
       "required_skills": [
-        "clarify-ambiguity",
         "grill-requirements",
         "workspace-kpi-query-optimizer"
+      ]
+    },
+    {
+      "tool": "workspace-dashboard",
+      "command": "uv run workspace-dashboard --workspace <workspace> --screen",
+      "required_skills": [
+        "workspace-governance"
       ]
     },
     {

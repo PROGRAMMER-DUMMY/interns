@@ -129,7 +129,11 @@ def derive_op_signals(command: str, payload: dict[str, Any]) -> OpSignals:
         and _as_int(question_count) == 0
         and blocked_count > 0
     )
-    stuck = empty_panel or (blocked and unresolved == 0 and question_count == 0)
+    # Normalize question_count before comparing: a raw "0" (str) or None made the
+    # second branch silently never fire. _as_int is already used by empty_panel.
+    # Ref: core-audit governance.md.
+    _qc = _as_int(question_count) if question_count is not None else None
+    stuck = empty_panel or (blocked and unresolved == 0 and _qc == 0)
     confidence = _scan_confidence(payload)
     ambiguous = bool(payload.get("ambiguous")) or status in {"ambiguous", "awaiting_user_answer"}
 
@@ -174,12 +178,12 @@ def signals_to_skills(signals: OpSignals) -> list[dict[str, Any]]:
         )
 
     if signals.ambiguous:
-        _add("clarify-ambiguity", "business-analyst",
+        _add("grill-requirements", "business-analyst",
              "the result is ambiguous/underspecified; resolve before proceeding")
     if signals.empty_panel or signals.stuck:
         _add("kpi-analyst", "kpi-analyst",
              "the pipeline is blocked but surfaced no answerable question (dead-end)")
-        _add("self-grill", "kpi-analyst",
+        _add("grill-requirements", "kpi-analyst",
              "interrogate the stuck state with evidence before assuming it is resolved")
     if signals.confidence is not None and signals.confidence < _LOW_CONFIDENCE:
         _add("kpi-analyst", "kpi-analyst",

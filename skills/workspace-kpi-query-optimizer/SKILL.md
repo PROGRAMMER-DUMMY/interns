@@ -138,7 +138,7 @@ Use the repo skills as an ordered workflow, not as isolated documents:
 3. `feature-derivation-library`: search reusable derivation patterns for blocked derived features;
    treat returned patterns as candidates, not proof.
 4. `task-onboarding`: create or refresh profiles, contracts, requirements, and baseline artifacts.
-5. `clarify-ambiguity`: ask one targeted question when a mapping or derivation cannot be proven
+5. `grill-requirements`: ask one targeted question when a mapping or derivation cannot be proven
    from files, metadata, dictionaries, catalog evidence, or a previously accepted user decision.
 6. `grill-requirements`: when several business-valid interpretations exist, interview the user/team
    one decision at a time and save accepted answers.

@@ -1,0 +1,127 @@
+{
+  "path": "C:\\Users\\shubh\\OneDrive\\Desktop\\interns\\workspaces\\Hostile_Synthetic\\datasets\\customer\\complaints.csv",
+  "format": "csv",
+  "row_count": 260,
+  "file_count": 1,
+  "size_bytes": 10107,
+  "schema": {
+    "Id": "String",
+    "acct": "String",
+    "Date": "String",
+    "channel": "String",
+    "Status": "String"
+  },
+  "sources_used": [
+    "sample_profile",
+    "duckdb_pushdown"
+  ],
+  "warnings": [],
+  "columns": [
+    {
+      "name": "Id",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "CP0001",
+        "CP0002",
+        "CP0003",
+        "CP0004",
+        "CP0005",
+        "CP0006",
+        "CP0007",
+        "CP0008"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "acct",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "P-1002",
+        "P-1004",
+        "P-1005",
+        "P-1006",
+        "P-1007",
+        "P-1009",
+        "P-1010",
+        "P-1011"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Date",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "2025-01-04",
+        "2025-01-06",
+        "2025-01-07",
+        "2025-01-10",
+        "2025-01-11",
+        "2025-01-12",
+        "2025-01-19",
+        "2025-01-21"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "channel",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "EMAIL",
+        "PHONE",
+        "PORTAL"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    },
+    {
+      "name": "Status",
+      "dtype": "String",
+      "nullable": null,
+      "sample_values": [
+        "CLOSED",
+        "NEW",
+        "WORKING"
+      ],
+      "sample_min": null,
+      "sample_max": null,
+      "exact_min": null,
+      "exact_max": null,
+      "metadata_min": null,
+      "metadata_max": null,
+      "null_count": null,
+      "source": "sample_profile"
+    }
+  ],
+  "downcast_recommendations": []
+}

@@ -25,6 +25,7 @@ from core.onboarding.data_model.data_understanding import (
 from core.onboarding.data_quality import DataQualityHarness, DuplicateDecisionRecorder, DuplicateReviewPanel
 from core.onboarding.harness.trajectory_recorder import record_trajectory_event_safe
 from core.onboarding.kpi.blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
+from core.onboarding.kpi.engine_parity import PARITY_MODE_ROW, run_polars_parity
 from core.onboarding.kpi.execution_harness import KPIExecutionHarness
 from core.onboarding.kpi.generation_workflow import KPIGenerationWorkflow
 from core.onboarding.kpi.registry_loader import load_kpi_definitions, render_kpi_block
@@ -55,6 +56,7 @@ from core.onboarding.workspace.validation import WorkspaceArtifactValidator
 from core.onboarding.workspace.workflow import MODES as ORCHESTRATION_MODES
 from core.onboarding.workspace.workflow import WorkspaceWorkflowOrchestrator
 from core.presentation.console_tables import render_markdown_table, render_query_result_table
+from core.onboarding.kpi.pii_redaction import redact_table_rows, workspace_redaction_patterns
 from core.storage.workspace_layout import WorkspaceLayout
 from tools.artifact_inventory import (
     gitignore_patterns as artifact_gitignore_patterns,
@@ -536,6 +538,28 @@ class WorkspaceFlow:
                 cmd for cmd in recovery_commands
                 if cmd.get("command") and not (cmd["command"] in seen_cmds or seen_cmds.add(cmd["command"]))
             ]
+            if not recovery_commands:
+                # Dead-end guard (the #13/#15 family): a blocked panel with an
+                # EMPTY recovery list strands the operator. Name the standard
+                # re-resolution chain instead of going silent.
+                recovery_commands = [
+                    {
+                        "command": (
+                            f"uv run prepare-kpi-blocker-panel --workspace {self.workspace_rel} "
+                            f"--domain {self.domain}"
+                        ),
+                        "reason": (
+                            "No per-KPI recovery command was derivable; re-resolve features and "
+                            "surface the current blocker panel (definitions may have changed)."
+                        ),
+                    },
+                    {
+                        "command": (
+                            f"uv run workspace-flow status --workspace {self.workspace_rel} --diff --quiet"
+                        ),
+                        "reason": "Confirm the per-KPI gap list after re-resolution.",
+                    },
+                ]
             suggested_skills = [
                 {"name": "data-engineering-pipeline-design", "why": "Source-to-target blockers need pipeline-design judgment."},
                 {"name": "workspace-governance", "why": "Recovery commands mutate workspace contracts."},
@@ -699,8 +723,29 @@ class WorkspaceFlow:
         preview = self._write_result_preview(preview_rows=PREVIEW_ROW_CAP)
         self._record_step(state, "preview_kpi_results", "ok", preview)
         kpi_entries = preview.get("kpis") or []
+        # Wiki notes stay an OPT-IN side output (Phase 1 decision: untracked
+        # surprises nobody asked for). The dashboard, by explicit user request
+        # (2026-06-12), is DEFAULT-ON at KPI completion: refresh specs, export
+        # static HTML, and open it. Opt out with AUTORESEARCH_DASHBOARD=0.
+        import os as _os
+
+        _side = _os.environ.get("AUTORESEARCH_SIDE_OUTPUTS", "")
+        _wiki_on = _side == "1" or _os.environ.get("AUTORESEARCH_WIKI", "") == "1"
+        _dash_flag = _os.environ.get("AUTORESEARCH_DASHBOARD", "")
+        _dash_on = _dash_flag != "0" and _side != "0"
+        if not _wiki_on:
+            self._record_step(
+                state, "upsert_kpi_wiki_notes", "skipped",
+                {"reason": "opt-in side output (set AUTORESEARCH_WIKI=1 or AUTORESEARCH_SIDE_OUTPUTS=1)"},
+            )
+        if not _dash_on:
+            self._record_step(
+                state, "refresh_workspace_dashboard", "skipped",
+                {"reason": "dashboard disabled (AUTORESEARCH_DASHBOARD=0)"},
+            )
         wiki_paths: list[str] = []
-        try:
+        if _wiki_on:
+          try:
             wiki_layout = WikiLayout(project_root=self.workspace)
             for entry in kpi_entries:
                 kpi_id = str(entry.get("kpi_id") or "")
@@ -709,38 +754,114 @@ class WorkspaceFlow:
                 scaffold = build_kpi_completion_scaffold(kpi_id=kpi_id, entry=entry)
                 note_path = upsert_kpi_note(wiki_layout, kpi_id, scaffold)
                 wiki_paths.append(_rel(note_path, self.repo_root))
-        except Exception as exc:
+          except Exception as exc:
             self._record_step(
                 state,
                 "upsert_kpi_wiki_notes",
                 "failed",
                 {"error": str(exc), "count": len(wiki_paths)},
             )
-        else:
+          else:
             self._record_step(
                 state,
                 "upsert_kpi_wiki_notes",
                 "ok",
                 {"count": len(wiki_paths), "notes": wiki_paths},
             )
-        try:
+        if _dash_on:
+          try:
             dash_summary = refresh_workspace_dashboard(
                 self.layout, completed_kpi_entries=kpi_entries
             )
-        except Exception as exc:
+          except Exception as exc:
             self._record_step(
                 state,
                 "refresh_workspace_dashboard",
                 "failed",
                 {"error": str(exc)},
             )
-        else:
+          else:
+            # Export static HTML and show it: KPI completion ends with the
+            # dashboard in front of the user, not just files on disk. Outside
+            # test runs the SCREENER wraps the export: every page is
+            # screenshotted and checked (render failures, blank pages, missing
+            # data viewer, redaction, palette) and its findings ride into the
+            # step record as warnings — visualization defects surface at
+            # completion instead of waiting for a manual look. Opt out with
+            # AUTORESEARCH_SCREEN_DASHBOARD=0.
+            import sys as _sys
+
+            dash_index_path = ""
+            _screen_ok = (
+                _os.environ.get("AUTORESEARCH_SCREEN_DASHBOARD", "") != "0"
+                and "unittest" not in _sys.modules
+                and "pytest" not in _sys.modules
+            )
+            try:
+                if _screen_ok:
+                    from core.dashboard.screener import screen_dashboard
+
+                    screen_summary = screen_dashboard(self.repo_root, self.workspace_rel)
+                    dash_summary = {**dash_summary, "screener": screen_summary}
+                    if not screen_summary.get("ok"):
+                        dash_summary["screener_warning"] = (
+                            f"{screen_summary.get('error_count')} visual finding(s); "
+                            f"see {screen_summary.get('report_md')} and review the "
+                            "staged screenshots"
+                        )
+                    export_dir = "dashboard/exports"
+                else:
+                    from core.dashboard.export import export_static_html
+
+                    export_summary = export_static_html(self.repo_root, self.workspace_rel)
+                    dash_summary = {**dash_summary, "export": export_summary}
+                    export_dir = export_summary["export_dir"]
+                dash_index_path = f"{self.workspace_rel}/{export_dir}/index.html"
+                dash_summary = {**dash_summary, "dashboard_index": dash_index_path}
+            except Exception as exc:
+                dash_summary = {**dash_summary, "export_error": str(exc)}
             self._record_step(
                 state,
                 "refresh_workspace_dashboard",
                 "ok",
                 dash_summary,
             )
+            if dash_index_path:
+                # The result packet ends with the dashboard link so the
+                # completion output always shows where the dashboard lives.
+                # current.md and runs/<date>/results.md are verbatim-forward
+                # twins (BUG-015 contract) — append to BOTH or neither.
+                link_line = f"\n**Dashboard:** `{dash_index_path}`\n"
+                packet_paths = [
+                    self.workspace / "interns" / "reports" / "kpi_results" / "current.md"
+                ]
+                runs_dir = self.workspace / "interns" / "runs"
+                if runs_dir.is_dir():
+                    dated = sorted(d for d in runs_dir.iterdir() if d.is_dir())
+                    if dated:
+                        packet_paths.append(dated[-1] / "results.md")
+                try:
+                    for packet_path in packet_paths:
+                        if packet_path.exists():
+                            content = packet_path.read_text(encoding="utf-8")
+                            if "**Dashboard:**" not in content:
+                                packet_path.write_text(
+                                    content + link_line, encoding="utf-8"
+                                )
+                except OSError:
+                    pass
+            import sys as _sys
+
+            _open_flag = _os.environ.get("AUTORESEARCH_OPEN_DASHBOARD", "")
+            _in_test_run = "unittest" in _sys.modules or "pytest" in _sys.modules
+            _open_ok = _open_flag == "1" or (_open_flag != "0" and not _in_test_run)
+            if dash_index_path and _open_ok:
+                try:
+                    import webbrowser
+
+                    webbrowser.open((self.repo_root / dash_index_path).resolve().as_uri())
+                except Exception:
+                    pass  # showing the path in the packet is the fallback
             self._delegate_and_record(
                 state,
                 agent="dashboard-engineer",
@@ -905,6 +1026,21 @@ class WorkspaceFlow:
         gate_provenance = _collect_gate_provenance(state, self.layout)
         agent_gate_count = sum(1 for g in gate_provenance if g.get("source") != "human")
         completion_headline = _gate_provenance_headline(gate_provenance)
+        # P0 (core-audit): regenerate the artifact MANIFEST on completion so its
+        # presence counts never lag the actual run. The manifest previously went
+        # stale (claimed "Present 17/29" after kpi_results already existed) because
+        # nothing refreshed it after onboarding. Non-fatal: a manifest write
+        # failure is recorded but must never block a finished workflow.
+        try:
+            manifest_paths = write_artifact_manifest(self.layout)
+            self._record_step(state, "write_artifact_manifest", "ok", manifest_paths)
+        except Exception as exc:  # noqa: BLE001 - report, never block completion
+            self._record_step(
+                state,
+                "write_artifact_manifest",
+                "blocked",
+                {"error": type(exc).__name__, "detail": str(exc)},
+            )
         return self._save_panel(
             state,
             panel={
@@ -937,7 +1073,7 @@ class WorkspaceFlow:
                     "completion_headline": completion_headline,
                     "suggested_skills": [
                         {"name": "kpi-analyst", "why": "Validate generated SQL and result samples against KPI intent."},
-                        {"name": "self-grill", "why": "EXECUTED — see summary.self_grill and the delegation brief for kpi_output_verification."},
+                        {"name": "grill-requirements", "why": "self-grill mode EXECUTED — see summary.self_grill and the delegation brief for kpi_output_verification."},
                     ],
                     "required_specialists": [
                         "data-engineer",
@@ -1122,6 +1258,49 @@ class WorkspaceFlow:
             "available_modes": sorted(ORCHESTRATION_MODES),
         }
 
+    # Result columns that look like a share of a total (percentage_share, pct_*,
+    # *_percent...). Intentionally excludes "ratio" (not necessarily on a 0-100
+    # scale).
+    _SHARE_COLUMN_PATTERN = re.compile(r"(percent|share|pct)", re.IGNORECASE)
+
+    @classmethod
+    def _share_sum_check(cls, conn: Any, view: str) -> dict[str, Any] | None:
+        """Generic share-sum invariant for percentage-share KPI results.
+
+        If the result view has exactly one share-like column, sum it across all
+        rows. A partition of a total sums to ~100%; a materially different total
+        means overlapping group membership (one entity counted in several grain
+        cells) or a non-grand-total denominator scope. Returns None when the
+        check does not apply, else {column, sum, status} with status "ok" or
+        "not_a_partition". Workspace- and domain-agnostic: driven only by the
+        emitted result schema, never by column semantics from any one dataset.
+
+        Parity-mode independence: this check aggregates IN SQL over the result
+        view; it never consumes the materialized parity rows, so it works
+        identically whether engine parity ran in row_parity or
+        aggregate_parity mode. Any future check that NEEDS the materialized
+        rows must say so explicitly instead of silently passing when parity
+        runs in aggregate mode.
+        """
+        try:
+            description = conn.execute(f'SELECT * FROM "{view}" LIMIT 0').description or []
+            share_cols = [col[0] for col in description if cls._SHARE_COLUMN_PATTERN.search(str(col[0]))]
+            if len(share_cols) != 1:
+                return None
+            row_count = conn.execute(f'SELECT COUNT(*) FROM "{view}"').fetchone()[0]
+            if int(row_count) <= 1:
+                # A single-row percent (e.g. percent-of-total with a filtered
+                # numerator) is one share of a whole, not a partition — the
+                # sum-to-100 expectation does not apply.
+                return None
+            column = share_cols[0]
+            total = conn.execute(f'SELECT ROUND(SUM("{column}"), 2) FROM "{view}"').fetchone()[0]
+            total_value = float(total)
+        except Exception:
+            return None
+        status = "ok" if abs(total_value - 100.0) <= 0.5 else "not_a_partition"
+        return {"column": column, "sum": total_value, "status": status}
+
     def _write_result_preview(self, *, preview_rows: int) -> dict[str, Any]:
         import duckdb
 
@@ -1133,12 +1312,33 @@ class WorkspaceFlow:
         evidence_dir.mkdir(parents=True, exist_ok=True)
         kpi_definitions = load_kpi_definitions(self.layout)
         entries = []
-        conn = duckdb.connect(":memory:")
-        old_cwd = Path.cwd()
-        try:
-            import os
+        # Cross-runtime parity (Polars vs the canonical DuckDB rows). Cached by
+        # sql_sha256 so unchanged KPIs never re-run the subprocess; disable with
+        # KPI_ENGINE_PARITY=0. Generic: no per-workspace logic.
+        import os as _os
 
-            os.chdir(self.repo_root)
+        parity_enabled = _os.environ.get("KPI_ENGINE_PARITY", "1").lower() not in {"0", "off", "false"}
+        parity_cache_path = self.layout.evidence_dir / "engine_parity" / "current.json"
+        parity_cache: dict[str, Any] = {}
+        if parity_enabled and parity_cache_path.exists():
+            try:
+                parity_cache = json.loads(parity_cache_path.read_text(encoding="utf-8")).get("kpis", {})
+            except (json.JSONDecodeError, OSError):
+                parity_cache = {}
+        conn = duckdb.connect(":memory:")
+        # Deterministic temporal semantics: CAST(timestamp AS DATE) uses the
+        # SESSION timezone, so the same SQL yields different year/date buckets
+        # on differently-configured machines (and diverges from engines that
+        # bucket in UTC). Pin UTC for reproducible, engine-parity-stable rows.
+        try:
+            conn.execute("SET TimeZone='UTC'")
+        except Exception:
+            pass
+        from core.storage.atomic_io import pushd
+
+        cwd_cm = pushd(self.repo_root)
+        cwd_cm.__enter__()
+        try:
             for sql_file in sql_files:
                 kpi_id = sql_file.stem
                 sql_text = sql_file.read_text(encoding="utf-8")
@@ -1159,7 +1359,20 @@ class WorkspaceFlow:
                     view = _result_view(conn, kpi_id)
                     if view:
                         cursor = conn.execute(f'SELECT * FROM "{view}" LIMIT {int(preview_rows)}')
-                        preview_md = render_query_result_table(cursor)
+                        # Redact PHI/PCI before rendering the canonical result packet —
+                        # this is the highest-traffic display surface (CLAUDE.md says
+                        # forward current.md verbatim) and previously emitted raw rows.
+                        # Ref: core-audit ob-kpi-d.md.
+                        _cols = [str(d[0]) for d in cursor.description or []]
+                        _rows = cursor.fetchall()
+                        _patterns = workspace_redaction_patterns(self.layout.project_root)
+                        _rows = redact_table_rows(_cols, _rows, patterns=_patterns)
+                        if not _cols:
+                            preview_md = "(query returned no tabular result)"
+                        elif not _rows:
+                            preview_md = render_markdown_table(_cols, []) + "\n\n(no rows)"
+                        else:
+                            preview_md = render_markdown_table(_cols, _rows)
                         # Append truncation note when total rows exceed the preview cap.
                         try:
                             total_rows = conn.execute(
@@ -1177,6 +1390,77 @@ class WorkspaceFlow:
                                 )
                         except Exception:
                             pass
+                        # Share-sum invariant: a share/percentage result that is a
+                        # true partition of its total sums to ~100%. Overlapping
+                        # group membership silently breaks that expectation, so
+                        # measure it and say so in the packet instead of letting
+                        # the reader discover it by adding rows up.
+                        share_check = self._share_sum_check(conn, view)
+                        if share_check:
+                            entry["share_sum_check"] = share_check
+                            if share_check["status"] != "ok":
+                                preview_md = (
+                                    preview_md
+                                    + f"\n\n[~] share check: `{share_check['column']}` sums to "
+                                    f"{share_check['sum']}% across all result rows (a partition "
+                                    "of the total would sum to ~100%). One entity counted in "
+                                    "multiple groups (overlapping cuts) or a non-grand-total "
+                                    "denominator scope both cause this; verify intent before "
+                                    "presenting these shares as portions of a whole."
+                                )
+                        # Cross-runtime parity: same KPI, generated Polars
+                        # variant, compared against the rows just produced.
+                        if parity_enabled:
+                            cached = parity_cache.get(kpi_id) or {}
+                            # Cache only short-circuits a prior MATCH for the same
+                            # SQL: mismatch/skip/error re-run every time so a fix
+                            # on the engine-generator side self-heals (the cache
+                            # key cannot see non-SQL changes).
+                            if (
+                                cached.get("sql_sha256") == entry["sql_sha256"]
+                                and (cached.get("parity") or {}).get("status") == "match"
+                            ):
+                                parity = dict(cached.get("parity") or {})
+                                parity["cached"] = True
+                                # Cache entries written before aggregate mode
+                                # existed predate the `mode` key; a cached
+                                # match was necessarily a row-level compare.
+                                parity.setdefault("mode", PARITY_MODE_ROW)
+                            else:
+                                try:
+                                    # Above the parity row cap run_polars_parity
+                                    # switches to aggregate-signature mode
+                                    # instead of skipping, so every result keeps
+                                    # cross-engine protection.
+                                    cursor_all = conn.execute(f'SELECT * FROM "{view}"')
+                                    all_columns = [col[0] for col in cursor_all.description]
+                                    all_rows = cursor_all.fetchall()
+                                    parity = run_polars_parity(
+                                        self.repo_root, self.workspace_rel, kpi_id,
+                                        all_columns, all_rows,
+                                    )
+                                except Exception as exc:
+                                    parity = {
+                                        "engine": "polars",
+                                        "kpi_id": kpi_id,
+                                        "status": "error",
+                                        "reason": str(exc),
+                                    }
+                                parity_cache[kpi_id] = {
+                                    "sql_sha256": entry["sql_sha256"],
+                                    "parity": {k: v for k, v in parity.items() if k != "cached"},
+                                }
+                            entry["engine_parity"] = parity
+                            parity_marker = "[ok]" if parity.get("status") == "match" else "[~]"
+                            # Surface the assurance level (row_parity vs
+                            # aggregate_parity), not just pass/fail, so the
+                            # kpi-analyst review gate sees what it got.
+                            parity_mode = parity.get("mode") or "unknown_mode"
+                            preview_md = (
+                                preview_md
+                                + f"\n\n{parity_marker} engine parity (polars vs sql, {parity_mode}): "
+                                f"{parity.get('status')} - {parity.get('reason')}"
+                            )
                         entry["preview_markdown"] = preview_md
                         entry["result_view"] = view
                     else:
@@ -1188,10 +1472,28 @@ class WorkspaceFlow:
                     entry["error"] = str(exc)
                 entries.append(entry)
         finally:
-            import os
-
-            os.chdir(old_cwd)
+            cwd_cm.__exit__(None, None, None)
             conn.close()
+
+        if parity_enabled:
+            try:
+                parity_cache_path.parent.mkdir(parents=True, exist_ok=True)
+                parity_cache_path.write_text(
+                    json.dumps(
+                        {
+                            "artifact_type": "engine_parity/current.json",
+                            "workspace": self.workspace_rel,
+                            "generated_at": _now(),
+                            "kpis": parity_cache,
+                        },
+                        indent=2,
+                        default=str,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
 
         json_path = evidence_dir / "current.json"
         md_path = result_dir / "current.md"
@@ -1204,24 +1506,40 @@ class WorkspaceFlow:
             "kpis": entries,
         }
         json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
-        results_markdown = _render_results_markdown(payload)
-        md_path.write_text(results_markdown, encoding="utf-8")
-        self._write_runs_snapshot(payload, results_markdown)
+        # `current.md` (the canonical file an agent naively cats and the doc rule says
+        # to forward verbatim) is the COMPACT packet: definition + result table + a
+        # `SQL:` link, no inlined SQL. Small enough not to trip CLI/UI truncation, which
+        # agents misread as a failed read and then re-read 6-7x (the observed loop).
+        # The full inlined-SQL packet lives in `current_full.md` for drill-down.
+        compact_markdown = _render_results_markdown(payload, compact=True)
+        full_markdown = _render_results_markdown(payload)
+        md_path.write_text(compact_markdown, encoding="utf-8")
+        full_md_path = result_dir / "current_full.md"
+        full_md_path.write_text(full_markdown, encoding="utf-8")
+        # Back-compat alias (older callers/tools referenced current_compact.md).
+        (result_dir / "current_compact.md").write_text(compact_markdown, encoding="utf-8")
+        self._write_runs_snapshot(payload, compact_markdown, full_markdown)
         return {
             "json_path": _rel(json_path, self.repo_root),
             "markdown_path": _rel(md_path, self.repo_root),
+            "full_markdown_path": _rel(full_md_path, self.repo_root),
             "kpi_count": len(entries),
             "error_count": sum(1 for item in entries if item.get("status") != "ok"),
             "kpis": entries,
         }
 
-    def _write_runs_snapshot(self, payload: dict[str, Any], results_markdown: str) -> None:
+    def _write_runs_snapshot(
+        self, payload: dict[str, Any], compact_markdown: str, full_markdown: str
+    ) -> None:
         """Mirror the just-executed results into a dated runs/<date>/ snapshot.
 
         The snapshot is written here — by the executor that re-runs the on-disk
         SQL — so the dated record always reflects what was actually executed,
-        not what the generator first emitted. Per-KPI files plus a combined
-        results.md, both overwritten on each run (no append graveyard).
+        not what the generator first emitted. Per-KPI files (compact, SQL linked)
+        plus a combined `results.md` (compact — the Active Run forward target) and
+        `results_full.md` (inlined SQL). All overwritten each run (no graveyard).
+        The combined file is compact so following the Active Run pointer doesn't hit
+        a long, UI-truncating file.
         """
         run_dir = self.layout.runs_dir / date.today().isoformat()
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -1229,9 +1547,10 @@ class WorkspaceFlow:
             kpi_id = entry.get("kpi_id")
             if not kpi_id:
                 continue
-            section = "\n".join(render_kpi_block(entry, heading_level=2)).rstrip() + "\n"
+            section = "\n".join(render_kpi_block(entry, heading_level=2, include_sql=False)).rstrip() + "\n"
             (run_dir / f"{kpi_id}.md").write_text(section, encoding="utf-8")
-        (run_dir / "results.md").write_text(results_markdown, encoding="utf-8")
+        (run_dir / "results.md").write_text(compact_markdown, encoding="utf-8")
+        (run_dir / "results_full.md").write_text(full_markdown, encoding="utf-8")
 
     def _base_state(self, intent: str) -> dict[str, Any]:
         return {
@@ -1419,7 +1738,7 @@ def _compact_panel(
         panel["suggested_skills"] = [
             {"name": "kpi-analyst", "why": "Interpret the KPI question and validate proposed mappings."},
             {"name": "feature-derivation-library", "why": "Choose between direct and derived feature options."},
-            {"name": "clarify-ambiguity", "why": "Flag missing context before applying an answer."},
+            {"name": "grill-requirements", "why": "Clarify-ambiguity mode: flag missing context before applying an answer."},
         ]
     if orchestration_context:
         panel["orchestration_context"] = orchestration_context
@@ -1517,9 +1836,14 @@ def _render_panel_markdown(panel: dict[str, Any]) -> str:
     summary = panel.get("summary") or {}
     completed_kpis = summary.get("completed_kpis") or []
     if completed_kpis:
+        # Compact at completion: SQL is linked per KPI, not inlined. The full SQL +
+        # tables are emitted right after by the `## KPI Result Packet` (compact) and
+        # remain in the .sql files / runs snapshot. Inlining SQL here too produced a
+        # double full-SQL dump that made the completion output UI-truncate (which
+        # agents misread as a failed read and then re-read/paraphrase).
         lines.extend(["## Completed KPIs", ""])
         for entry in completed_kpis:
-            lines.extend(render_kpi_block(entry, heading_level=3))
+            lines.extend(render_kpi_block(entry, heading_level=3, include_sql=False))
     else:
         # The `results` stage carries per-KPI previews under `summary.kpis`
         # (definition + SQL + result table), not `completed_kpis`. Render them
@@ -1528,9 +1852,14 @@ def _render_panel_markdown(panel: dict[str, Any]) -> str:
         # presenter forwards the rendered tables automatically.
         result_kpis = summary.get("kpis") or []
         if result_kpis:
+            # Compact: definition + table + SQL pointer, no inlined SQL. Full SQL is
+            # delivered by `workspace-flow results --full` (the full packet) and lives
+            # in the per-KPI .sql files. Keeping it compact here means the session panel
+            # markdown never UI-truncates (the truncation that agents misread as a
+            # failed read -> re-read loop / paraphrase).
             lines.extend(["## KPI Results", ""])
             for entry in result_kpis:
-                lines.extend(render_kpi_block(entry, heading_level=3))
+                lines.extend(render_kpi_block(entry, heading_level=3, include_sql=False))
     recovery_commands = (panel.get("summary") or {}).get("recovery_commands") or panel.get("recovery_commands") or []
     if recovery_commands:
         lines.extend(["## Recovery Commands", ""])
@@ -1945,7 +2274,7 @@ def _render_data_understanding_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _render_results_markdown(payload: dict[str, Any]) -> str:
+def _render_results_markdown(payload: dict[str, Any], *, compact: bool = False) -> str:
     lines = [
         "# KPI Query Results",
         "",
@@ -1953,8 +2282,14 @@ def _render_results_markdown(payload: dict[str, Any]) -> str:
         f"- KPI count: {len(payload.get('kpis', []))}",
         "",
     ]
+    if compact:
+        lines.append(
+            "- Compact view: SQL is linked per KPI (`SQL:` line), not inlined. "
+            "Full SQL is in the linked `.sql` file and the combined packet."
+        )
+        lines.append("")
     for entry in payload.get("kpis", []):
-        lines.extend(render_kpi_block(entry, heading_level=2))
+        lines.extend(render_kpi_block(entry, heading_level=2, include_sql=not compact))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -2113,6 +2448,70 @@ def latest_open_session(repo_root: Path, workspace_rel: str, *, max_age_hours: i
         return None
     candidates.sort(reverse=True)
     return candidates[0][1]
+
+
+def latest_session(repo_root: Path, workspace_rel: str) -> str | None:
+    """Return the most recent workflow_session id for a workspace, any status.
+
+    Unlike `latest_open_session` this does not filter on status or age:
+    `results` / `review` / `status` legitimately target sessions that are
+    already complete. Sorted by `updated_at` (session dir mtime as fallback).
+    """
+    layout = WorkspaceLayout(project_root=(Path(repo_root) / workspace_rel).resolve())
+    sessions_dir = layout.workflow_sessions_dir
+    if not sessions_dir.exists():
+        return None
+    candidates: list[tuple[datetime, str]] = []
+    for session_path in sessions_dir.iterdir():
+        if not session_path.is_dir():
+            continue
+        state_file = session_path / "session.json"
+        if not state_file.exists():
+            continue
+        updated_dt: datetime | None = None
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+            updated_dt = datetime.fromisoformat(str(data.get("updated_at") or ""))
+        except (json.JSONDecodeError, OSError, ValueError):
+            updated_dt = None
+        if updated_dt is None:
+            try:
+                updated_dt = datetime.fromtimestamp(state_file.stat().st_mtime, tz=timezone.utc)
+            except OSError:
+                continue
+        if updated_dt.tzinfo is None:
+            updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+        candidates.append((updated_dt, session_path.name))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def _resolve_session_id(repo_root: Path, session: str, workspace: str, cmd: str) -> str:
+    """Resolve the target session for a session-bound subcommand.
+
+    Explicit `--session` wins. Otherwise `--workspace` resolves to that
+    workspace's most recent session (any status). Errors with the exact
+    accepted forms instead of a bare `--session is required`, so a driving
+    agent can self-correct in one step instead of flailing through flag
+    permutations.
+    """
+    if session:
+        return session
+    if workspace:
+        resolved = latest_session(repo_root, workspace)
+        if resolved:
+            return resolved
+        raise SystemExit(
+            f"workspace-flow {cmd}: no workflow sessions found under "
+            f"{workspace}/interns/state/workflow_sessions/. "
+            f"Run `workspace-flow start --workspace {workspace}` first."
+        )
+    raise SystemExit(
+        f"workspace-flow {cmd}: pass --session <id>, or --workspace <path> "
+        f"to target that workspace's latest session."
+    )
 
 
 def write_session_handoff(repo_root: Path, workspace_rel: str, session_id: str) -> str | None:
@@ -2511,7 +2910,144 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
+def _active_run_paths(
+    repo_root: Path, workspace_rel: str
+) -> tuple[str, list[str]] | None:
+    """Resolve the dated ``runs/<date>/`` snapshot to advertise as the active run.
+
+    Prefers today's directory (how ``_write_runs_snapshot`` names it) and falls
+    back to the most recent dated directory that has a ``results.md``. Returns
+    ``(results.md rel path, [kpi_*.md rel paths])`` or ``None`` if no run snapshot
+    exists. Used to print one stable, single-file surface a driving CLI can read
+    and forward verbatim — instead of re-reading a UI-truncated inline packet.
+    """
+    runs_base = repo_root / workspace_rel / "interns" / "runs"
+    if not runs_base.is_dir():
+        return None
+    candidate = runs_base / date.today().isoformat()
+    if not (candidate / "results.md").exists():
+        dated = sorted(
+            (
+                p
+                for p in runs_base.iterdir()
+                if p.is_dir() and (p / "results.md").exists()
+            ),
+            key=lambda p: p.name,
+        )
+        if not dated:
+            return None
+        candidate = dated[-1]
+    results_rel = _rel(candidate / "results.md", repo_root)
+    kpi_rels = [_rel(p, repo_root) for p in sorted(candidate.glob("kpi_*.md"))]
+    return results_rel, kpi_rels
+
+
+def _emit_result_packet(
+    repo_root: Path,
+    workspace_rel: str,
+    *,
+    compact: bool = False,
+    kpi_id: str = "",
+) -> bool:
+    """Print the KPI Result Packet + Active Run pointer for a workspace.
+
+    Source selection (first match wins):
+      * ``kpi_id`` set -> the per-KPI file ``runs/<date>/<kpi_id>.md`` (full, with
+        SQL): "give me just this KPI's solution". Falls back to the combined packet
+        with a note if that KPI file is absent.
+      * ``compact`` -> ``reports/kpi_results/current_compact.md`` (SQL linked, not
+        inlined; falls back to the full ``current.md`` for runs predating it). Used
+        by the auto-surface at completion/review so the emitted output stays small
+        enough not to trip CLI truncation (which agents misread as a failed read).
+      * otherwise -> the full ``reports/kpi_results/current.md``.
+
+    Then prints the ``## Active Run`` tail pointer naming the dated ``runs/<date>/``
+    files. Returns ``True`` if a packet was emitted.
+
+    Shared by the ``workspace-flow`` panel printer and the ``run-kpi-pipeline``
+    review-gate stop so the SQL + result rows surface automatically the moment the
+    flow stops — no separate "show results" call (the rule: having to ask is a bug).
+    """
+    reports = repo_root / workspace_rel / "interns" / "reports" / "kpi_results"
+    note = ""
+    md_path: Path | None = None
+    if kpi_id:
+        active = _active_run_paths(repo_root, workspace_rel)
+        if active:
+            _results_rel, kpi_rels = active
+            match = next((r for r in kpi_rels if Path(r).stem == kpi_id), "")
+            if match:
+                md_path = repo_root / match
+        if md_path is None:
+            note = f"[~] {kpi_id} not found in the latest run — showing the combined packet."
+    if md_path is None and compact:
+        # current.md IS the compact packet now; current_compact.md kept as alias.
+        md_path = reports / "current.md"
+        if not md_path.exists():
+            md_path = reports / "current_compact.md"
+    if md_path is None:
+        # Full packet (explicit `results --full`): current_full.md; fall back to
+        # current.md for runs predating the split.
+        full_path = reports / "current_full.md"
+        md_path = full_path if full_path.exists() else reports / "current.md"
+    if not md_path.exists():
+        return False
+    # Packet integrity (BUG-015/BUG-024 follow-on): warn loudly if the on-disk SQL
+    # changed after this packet was generated, so the rows are not mistaken for
+    # results that still match the SQL.
+    stale_kpis = _result_packet_stale_kpis(repo_root, workspace_rel)
+    print("")
+    print("## KPI Result Packet" + (f": {kpi_id}" if kpi_id else ""))
+    print("")
+    if note:
+        print(note)
+        print("")
+    if stale_kpis:
+        print(f"[x] STALE — on-disk SQL changed after this packet was built for: {', '.join(stale_kpis)}.")
+        print("    Re-run `workspace-flow results` to regenerate; the rows below may not match the current SQL.")
+        print("")
+    print(md_path.read_text(encoding="utf-8").rstrip())
+    print("")
+    # Active-run surface (token/loop guardrail): name the stable, dated results file
+    # as the ONE thing to read and forward. The packet printed above can be UI-
+    # truncated by a CLI frontend ("... first N lines hidden ..."); agents have
+    # misread that truncation as a read FAILURE and looped re-reading the results in
+    # many forms (-TotalCount/-Head/-Tail/Select-String) plus opening the heavy
+    # evidence JSON — burning quota and never presenting. Printing the dated file at
+    # the visible tail gives any driving CLI a single cheap surface to forward.
+    active_run = _active_run_paths(repo_root, workspace_rel)
+    if active_run:
+        run_rel, kpi_rels = active_run
+        print("")
+        print("## Active Run")
+        print("")
+        print(f"- Results (combined): `{run_rel}`")
+        for kpi_rel in kpi_rels:
+            print(f"- Per-KPI: `{kpi_rel}`")
+        print("")
+        print(
+            "- To present: read each file ONCE with your NATIVE file reader (ReadFile / "
+            "read_file), NOT a shell command (Get-Content/cat) — shell output is summarized/"
+            "capped per the CLI's tokenBudget, which truncates a long read and makes agents "
+            "loop re-reading it. These files are compact (SQL is linked, not inlined) so one "
+            "read returns the whole file."
+        )
+        print(
+            "- A `... first N lines hidden ...` notice means the read SUCCEEDED (UI display "
+            "truncation, not a failure). Do NOT re-read with -TotalCount/-Head/-Tail/-Raw/"
+            "-Encoding/Select-String, and do not open the evidence JSON."
+        )
+        print(
+            "- Forwarding many KPIs: forward the `Per-KPI` files (one read each, each self-"
+            "contained) rather than the combined file — this never exceeds the read cap "
+            "regardless of KPI count."
+        )
+    return True
+
+
+def _print_cli_panel(
+    repo_root: Path, result: WorkspaceFlowResult, *, kpi_filter: str = "", full: bool = False
+) -> None:
     panel_path = repo_root / result.current_panel_path if result.current_panel_path else None
     panel_payload: dict[str, Any] = {}
     delegations: list[dict[str, Any]] = []
@@ -2572,36 +3108,22 @@ def _print_cli_panel(repo_root: Path, result: WorkspaceFlowResult) -> None:
     # kpi_results packet so any driving agent sees KPI + SQL + result rows without
     # needing a separate call.  For `results` stage the packet IS the point of the
     # command; for `complete` it surfaces automatically so agents driving via the
-    # CLI see rows immediately after the workflow finishes.
-    if result.stage in ("complete", "results") and result.workspace:
-        kpi_results_paths = (panel_payload.get("artifact_paths") or [])
-        kpi_results_md: str | None = None
-        # Look for the kpi_results current.md among the artifact paths first.
-        for ap in kpi_results_paths:
-            if ap.endswith("kpi_results/current.md"):
-                candidate = repo_root / ap
-                if candidate.exists():
-                    kpi_results_md = candidate.read_text(encoding="utf-8")
-                    break
-        if kpi_results_md is None:
-            # Fallback: derive path from workspace.
-            fallback = repo_root / result.workspace / "interns" / "reports" / "kpi_results" / "current.md"
-            if fallback.exists():
-                kpi_results_md = fallback.read_text(encoding="utf-8")
-        if kpi_results_md:
-            # Packet integrity (BUG-015/BUG-024 follow-on): warn loudly if the
-            # on-disk SQL changed after this packet was generated, so the rows
-            # below are not mistaken for results that still match the SQL.
-            stale_kpis = _result_packet_stale_kpis(repo_root, result.workspace)
-            print("")
-            print("## KPI Result Packet")
-            print("")
-            if stale_kpis:
-                print(f"[x] STALE — on-disk SQL changed after this packet was built for: {', '.join(stale_kpis)}.")
-                print("    Re-run `workspace-flow results` to regenerate; the rows below may not match the current SQL.")
-                print("")
-            print(kpi_results_md.rstrip())
-            print("")
+    # CLI see rows immediately after the workflow finishes. The `kpi_analyst_review`
+    # gate is included because results are already executed by then (preview is
+    # written before the gate) and the reviewer needs the SQL + rows to judge intent
+    # — so the packet auto-surfaces when the flow STOPS for review, with no separate
+    # "show results" call (KPI Result Packet Forwarding Rule: having to ask is a bug).
+    if result.stage in ("complete", "results", "kpi_analyst_review") and result.workspace:
+        # Compact everywhere by default so the emitted output never UI-truncates (a
+        # truncation banner is what agents misread as a failed read -> re-read loop /
+        # paraphrase). The auto-surfaces (complete / review gate) are always compact;
+        # the explicit `results` command is compact unless `--full` is passed (full SQL
+        # also always lives in the per-KPI .sql files). `--kpi` forwards one KPI's file.
+        if result.stage == "results":
+            compact = not full
+        else:
+            compact = True
+        _emit_result_packet(repo_root, result.workspace, compact=compact, kpi_id=kpi_filter)
     print("")
     print("## Next Step")
     print("")
@@ -2705,6 +3227,25 @@ def _kpi_review_signature(completed_kpis: list[dict[str, Any]]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _utf8_safe_stdio() -> None:
+    """Make stdout/stderr UTF-8 tolerant on cp1252 consoles.
+
+    Result packets / generated SQL can contain non-ASCII (em-dash, arrow),
+    which crashes a Windows cp1252 console with UnicodeEncodeError when piped.
+    `errors="replace"` degrades gracefully instead of aborting mid-output
+    (which derails a driving CLI). Shared by every CLI entry point that prints
+    packets — main() AND pipeline_main() (the latter crashed on '→' when
+    only main() had the guard).
+    """
+    import sys
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except (AttributeError, ValueError):
+            pass
+
+
 _SUBCOMMANDS: frozenset[str] = frozenset(
     {"start", "status", "answer", "results", "review", "artifacts",
      "handoff", "context-status", "skill-excerpt", "gc"}
@@ -2726,13 +3267,18 @@ def _args_before_subcommand(argv: list[str]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _utf8_safe_stdio()
     # BUG-019: --quiet must be accepted both at the top level
     # (workspace-flow --quiet status --diff) AND after the subcommand
     # (workspace-flow status --diff --quiet).
     # Strategy: parse the raw argv for a pre-subcommand --quiet first, then
     # add --quiet to every subparser.  After parse_args we OR the two values
     # so either placement is honoured without either overriding the other.
+    # `--json` gets the same treatment: driving agents naturally append it
+    # after the subcommand, and "unrecognized arguments: --json" triggers a
+    # retry/flail loop.
     _toplevel_quiet: bool = bool(argv and "--quiet" in _args_before_subcommand(argv))
+    _toplevel_json: bool = bool(argv and "--json" in _args_before_subcommand(argv))
 
     parser = argparse.ArgumentParser(prog="workspace-flow")
     parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
@@ -2750,6 +3296,19 @@ def main(argv: list[str] | None = None) -> int:
             help="Print a compact summary + artifact paths instead of full JSON.",
         )
 
+    def _add_session_or_workspace(p: argparse.ArgumentParser) -> None:
+        """Session-bound subcommands accept --session OR --workspace.
+
+        --workspace resolves to that workspace's most recent session, so a
+        driving agent that only knows the workspace path never errors on a
+        missing --session.
+        """
+        p.add_argument("--session", default="", help="Workflow session id (e.g. wf_...).")
+        p.add_argument(
+            "--workspace", default="",
+            help="Workspace path; targets its latest session when --session is omitted.",
+        )
+
     start = sub.add_parser("start")
     _add_quiet(start)
     start.add_argument("--workspace", required=True)
@@ -2764,8 +3323,7 @@ def main(argv: list[str] | None = None) -> int:
 
     status = sub.add_parser("status")
     _add_quiet(status)
-    status.add_argument("--session", default="")
-    status.add_argument("--workspace", default="")
+    _add_session_or_workspace(status)
     status.add_argument(
         "--diff",
         action="store_true",
@@ -2774,19 +3332,28 @@ def main(argv: list[str] | None = None) -> int:
 
     answer = sub.add_parser("answer")
     _add_quiet(answer)
-    answer.add_argument("--session", required=True)
+    _add_session_or_workspace(answer)
     answer.add_argument("--answer", required=True)
     answer.add_argument("--custom-definition", default="")
     answer.add_argument("--evidence-note", default="")
 
     results = sub.add_parser("results")
     _add_quiet(results)
-    results.add_argument("--session", required=True)
+    _add_session_or_workspace(results)
     results.add_argument("--preview-rows", type=int, default=PREVIEW_ROW_CAP)
+    results.add_argument(
+        "--kpi", default="",
+        help="Emit only this KPI's packet (e.g. kpi_002), forwarding its per-KPI run file.",
+    )
+    results.add_argument(
+        "--full", action="store_true",
+        help="Inline the full SQL per KPI (default is compact: SQL linked, tables shown). "
+             "Full SQL also always lives in the per-KPI .sql files.",
+    )
 
     review_p = sub.add_parser("review")
     _add_quiet(review_p)
-    review_p.add_argument("--session", required=True)
+    _add_session_or_workspace(review_p)
     review_p.add_argument(
         "--verdict", choices=["ok", "blocked"], required=True,
         help="kpi-analyst's semantic verdict: ok = every KPI answers its intent; blocked = at least one does not.",
@@ -2877,10 +3444,19 @@ def main(argv: list[str] | None = None) -> int:
         help="Rotate trajectory.jsonl / events.jsonl when over this size.",
     )
 
+    # Accept --json after any subcommand name (same BUG-019 rationale as --quiet).
+    for _subparser in sub.choices.values():
+        if not any(action.dest == "json" for action in _subparser._actions):
+            _subparser.add_argument(
+                "--json", action="store_true",
+                help="Print the machine-readable result summary only.",
+            )
+
     args = parser.parse_args(argv)
-    # BUG-019: merge top-level --quiet (pre-subcommand) with subparser --quiet
-    # (post-subcommand) so both orderings are honoured.
+    # BUG-019: merge top-level --quiet/--json (pre-subcommand) with subparser
+    # values (post-subcommand) so both orderings are honoured.
     args.quiet = bool(args.quiet) or _toplevel_quiet
+    args.json = bool(getattr(args, "json", False)) or _toplevel_json
     if args.cmd == "start":
         repo_root_path = Path(args.repo_root).resolve()
         workspace_layout = WorkspaceLayout(
@@ -2957,22 +3533,32 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(json.dumps(diff, indent=2))
             return 0
-        if not args.session:
-            raise SystemExit("workspace-flow status requires --session (or use --diff with --workspace)")
-        result = WorkspaceFlow.from_session(args.repo_root, args.session).status()
+        session_id = _resolve_session_id(
+            Path(args.repo_root).resolve(), args.session, args.workspace, args.cmd
+        )
+        result = WorkspaceFlow.from_session(args.repo_root, session_id).status()
     elif args.cmd == "answer":
-        result = WorkspaceFlow.from_session(args.repo_root, args.session).answer(
+        session_id = _resolve_session_id(
+            Path(args.repo_root).resolve(), args.session, args.workspace, args.cmd
+        )
+        result = WorkspaceFlow.from_session(args.repo_root, session_id).answer(
             answer=args.answer,
             custom_definition=args.custom_definition,
             evidence_note=args.evidence_note,
         )
     elif args.cmd == "results":
-        result = WorkspaceFlow.from_session(args.repo_root, args.session).results(
+        session_id = _resolve_session_id(
+            Path(args.repo_root).resolve(), args.session, args.workspace, args.cmd
+        )
+        result = WorkspaceFlow.from_session(args.repo_root, session_id).results(
             preview_rows=args.preview_rows,
         )
     elif args.cmd == "review":
         per_kpi = json.loads(args.kpi_notes) if args.kpi_notes else []
-        result = WorkspaceFlow.from_session(args.repo_root, args.session).review(
+        session_id = _resolve_session_id(
+            Path(args.repo_root).resolve(), args.session, args.workspace, args.cmd
+        )
+        result = WorkspaceFlow.from_session(args.repo_root, session_id).review(
             verdict=args.verdict,
             summary=args.summary,
             per_kpi=per_kpi,
@@ -3104,7 +3690,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(result.summary(), indent=2))
     else:
-        _print_cli_panel(Path(args.repo_root).resolve(), result)
+        _print_cli_panel(
+            Path(args.repo_root).resolve(),
+            result,
+            kpi_filter=getattr(args, "kpi", ""),
+            full=getattr(args, "full", False),
+        )
     return 0
 
 
@@ -3141,6 +3732,8 @@ def pipeline_main(argv: list[str] | None = None) -> int:
         run-kpi-pipeline --workspace workspaces/<project> --domain <domain> --new-session
     """
     import sys
+
+    _utf8_safe_stdio()
 
     parser = argparse.ArgumentParser(prog="run-kpi-pipeline")
     parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
@@ -3408,6 +4001,11 @@ def pipeline_main(argv: list[str] | None = None) -> int:
     if result.status == "needs_specialist_review" and result.stage == "kpi_analyst_review":
         panel_data = _read_json(repo_root / result.current_panel_path) if result.current_panel_path else {}
         session_id = result.session_id
+        # Surface the result rows AT the gate (results are already executed by now):
+        # the reviewer needs them to judge intent, and the operator never has to type
+        # "show results". Compact (SQL linked, not inlined) so the gate output does not
+        # UI-truncate; full SQL stays in the .sql files / runs snapshot.
+        _emit_result_packet(repo_root, workspace_rel, compact=True)
         return _gate_stop(
             headline="KPI-analyst semantic review required before the workflow can complete.",
             details=[
