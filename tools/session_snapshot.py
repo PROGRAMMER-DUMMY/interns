@@ -137,7 +137,7 @@ def start_named_session(
     safe_name = _slug(name)
     if not safe_name:
         raise SystemExit("--name must contain at least one letter or number")
-    session_dir = SESSION_ROOT / _timestamped_dir_name(safe_name)
+    session_dir = _session_root_for(repo_root) / _timestamped_dir_name(safe_name)
     _write_named_session_pointer(repo_root, safe_name, session_dir)
     return start_session(
         repo_root,
@@ -1001,17 +1001,29 @@ def _timestamped_dir_name(name: str) -> str:
     return f"{stamp}-{name}"
 
 
+# Named-session storage is resolved RELATIVE TO repo_root (the CLI passes the
+# invocation cwd) rather than the import-time PROJECT_ROOT, so a session started
+# from another working tree lands there. The module-level SESSION_ROOT/ALIAS_DIR
+# constants remain the defaults for the in-process API.
+def _session_root_for(repo_root: Path) -> Path:
+    return repo_root / ".agents" / "sessions"
+
+
+def _alias_dir_for(repo_root: Path) -> Path:
+    return _session_root_for(repo_root) / "_aliases"
+
+
 def _write_named_session_pointer(repo_root: Path, name: str, session_dir: Path) -> None:
     rel = _rel(session_dir, repo_root)
-    _write_text(ALIAS_DIR / f"{name}.txt", rel + "\n")
-    _write_text(CURRENT_SESSION_POINTER, rel + "\n")
+    _write_text(_alias_dir_for(repo_root) / f"{name}.txt", rel + "\n")
+    _write_text(_session_root_for(repo_root) / "current_session.txt", rel + "\n")
 
 
 def _resolve_named_session_dir(repo_root: Path, name: str) -> Path:
     safe_name = _slug(name)
     if not safe_name:
         raise SystemExit("--name must contain at least one letter or number")
-    pointer = ALIAS_DIR / f"{safe_name}.txt"
+    pointer = _alias_dir_for(repo_root) / f"{safe_name}.txt"
     if not pointer.exists():
         raise SystemExit(f"session name not found: {safe_name}. Run `session-snapshot start --name {safe_name}` first.")
     value = pointer.read_text(encoding="utf-8").strip()
@@ -1119,7 +1131,10 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     args = parser.parse_args(argv)
-    repo_root = PROJECT_ROOT
+    # Resolve session storage relative to the invocation cwd so the CLI records
+    # sessions in the working tree it is run from (named-session paths derive
+    # from this). The in-process API still defaults to PROJECT_ROOT.
+    repo_root = Path.cwd()
 
     if args.action == "start":
         if args.name and not args.session_dir:
