@@ -14,6 +14,7 @@ from core.onboarding.kpi.sensitive_masking import (
     load_sensitive_columns,
     mask_sql_expr,
 )
+from core.sql_safety import validate_expression_safe
 from core.onboarding.relationships.base_source_selector import (
     BASE_SOURCE_DECISIONS_KEY,
     select_base_source,
@@ -585,6 +586,11 @@ class DuckDBKPISQLGenerator:
             formula = _derived_formula(feature)
             if not formula:
                 return None
+            # T4: the formula body is workspace-owned text inlined verbatim into
+            # executable SQL. Reject statement terminators / comment sequences /
+            # DDL-DML keywords before inlining so a hostile derivation rule cannot
+            # inject SQL. Legitimate arithmetic/function formulas pass unchanged.
+            validate_expression_safe(formula, context="derived KPI formula")
             # A formula may reference a SOURCE TABLE by its raw name
             # (`FROM "encounters" p` in a self-join). The script only creates
             # catalog views, so map known dataset stems to their view names —

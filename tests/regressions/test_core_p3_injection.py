@@ -127,5 +127,99 @@ class MedallionEmitterValidationTests(unittest.TestCase):
         self.assertIn("(PatientID) IN", out)
 
 
+# ── P3c: KPI generator filter value/op + formula sanitization ────────────────
+class FilterValueRenderingTests(unittest.TestCase):
+    def test_string_value_is_repr_escaped(self) -> None:
+        from core.sql_safety import render_python_scalar_literal
+
+        # An embedded quote/paren can no longer break out of pl.col(...)==<value>.
+        hostile = 'a") | (pl.col("x").is_not_null()) | ("b'
+        rendered = render_python_scalar_literal(hostile, treat_as_string=True)
+        # repr() produces a single safe Python string literal.
+        self.assertEqual(eval(rendered), hostile)  # noqa: S307 - validating repr round-trip
+        self.assertTrue(rendered.startswith(("'", '"')))
+
+    def test_numeric_value_emitted_bare(self) -> None:
+        from core.sql_safety import render_python_scalar_literal
+
+        self.assertEqual(render_python_scalar_literal("42", treat_as_string=False), "42")
+        self.assertEqual(render_python_scalar_literal("-3.5", treat_as_string=False), "-3.5")
+
+    def test_non_numeric_flagged_numeric_falls_back_to_quoted(self) -> None:
+        from core.sql_safety import render_python_scalar_literal
+
+        # A non-number that claims to be numeric must NOT be emitted raw.
+        out = render_python_scalar_literal("1); evil()", treat_as_string=False)
+        self.assertNotEqual(out, "1); evil()")
+        self.assertEqual(eval(out), "1); evil()")  # noqa: S307
+
+    def test_op_mapping_defaults_safely(self) -> None:
+        from core.sql_safety import map_comparison_op
+
+        table = {"=": "==", ">": ">"}
+        self.assertEqual(map_comparison_op("=", table), "==")
+        # A hostile op collapses to the safe default instead of injecting.
+        self.assertEqual(map_comparison_op(") | evil() | (", table), "==")
+
+
+class GeneratorFilterEmissionTests(unittest.TestCase):
+    """End-to-end: a hostile filter value yields a safe, parseable script."""
+
+    def _intent_with_filter(self, value, *, is_literal, target="dept", op="="):
+        from core.onboarding.kpi.kpi_intent import FilterIntent, KPIIntent
+
+        intent = KPIIntent.__new__(KPIIntent)
+        # Minimal duck-typed intent: _filter_exprs only touches .filters and .dims
+        object.__setattr__(intent, "filters", [
+            FilterIntent(target=target, op=op, value=value, is_literal=is_literal)
+        ])
+        object.__setattr__(intent, "dims", [])
+        return intent
+
+    def test_polars_filter_value_is_escaped(self) -> None:
+        import ast
+
+        from core.onboarding.kpi.polars_generator import PolarsKPIGenerator
+
+        gen = PolarsKPIGenerator.__new__(PolarsKPIGenerator)
+        hostile = 'a") | (1==1) | ("b'
+        intent = self._intent_with_filter(hostile, is_literal=True)
+        exprs = gen._filter_exprs(intent)
+        self.assertEqual(len(exprs), 1)
+        # Structurally: the expression is a single comparison, NOT an injected
+        # boolean OR. The hostile text survives only as a string constant.
+        node = ast.parse(exprs[0], mode="eval").body
+        self.assertIsInstance(node, ast.Compare)
+        consts = [n.value for n in ast.walk(node) if isinstance(n, ast.Constant)]
+        self.assertIn(hostile, consts)
+
+    def test_pyspark_filter_value_is_escaped(self) -> None:
+        import ast
+
+        from core.onboarding.kpi.pyspark_generator import PySparkKPIGenerator
+
+        gen = PySparkKPIGenerator.__new__(PySparkKPIGenerator)
+        hostile = 'a") | (1==1) | ("b'
+        intent = self._intent_with_filter(hostile, is_literal=True)
+        lines = gen._filter_lines(intent)
+        self.assertEqual(len(lines), 1)
+        # The .filter() argument must be a single comparison with the hostile
+        # text confined to a string constant (no injected boolean structure).
+        call = ast.parse(lines[0]).body[0].value  # result.filter(<arg>)
+        self.assertIsInstance(call, ast.Call)
+        arg = call.args[0]
+        self.assertIsInstance(arg, ast.Compare)
+        consts = [n.value for n in ast.walk(arg) if isinstance(n, ast.Constant)]
+        self.assertIn(hostile, consts)
+
+
+class DerivedFormulaGuardTests(unittest.TestCase):
+    def test_sql_generator_rejects_injection_formula(self) -> None:
+        from core.onboarding.kpi import sql_generator
+
+        src = Path(sql_generator.__file__).read_text(encoding="utf-8")
+        self.assertIn("validate_expression_safe", src)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,11 @@ from typing import Any
 from core.onboarding.kpi.feature_resolver import READY_STATES
 from core.onboarding.kpi.kpi_intent import KPIIntent, parse_intent
 from core.onboarding.kpi.sensitive_masking import load_sensitive_columns
+from core.sql_safety import (
+    is_safe_identifier,
+    map_comparison_op,
+    render_python_scalar_literal,
+)
 from core.onboarding.relationships.contracts import (
     find_executable_relationship,
     load_relationship_contracts,
@@ -566,12 +571,23 @@ class PySparkKPIGenerator:
         exprs = []
         age_alias = next((d.alias for d in intent.dims if d.kind == "age"), None)
         for filt in intent.filters:
+            # T4: map the op through _SPARK_OPS and render the value as a safe
+            # Python literal (repr for strings) — never inline a raw op/value into
+            # the generated, subprocess-executed script. is_literal=True means the
+            # value is a (non-numeric) string.
+            op = map_comparison_op(filt.op, _SPARK_OPS)
             if filt.target == "__age__":
                 if age_alias:
-                    exprs.append(f'(F.col("{age_alias}") {filt.op} {filt.value})')
+                    value = render_python_scalar_literal(
+                        filt.value, treat_as_string=filt.is_literal
+                    )
+                    exprs.append(f'(F.col("{age_alias}") {op} {value})')
                 continue
-            op = _SPARK_OPS.get(filt.op, "==")
-            value = f'"{filt.value}"' if filt.is_literal else filt.value
+            if not is_safe_identifier(filt.target):
+                continue
+            value = render_python_scalar_literal(
+                filt.value, treat_as_string=filt.is_literal
+            )
             exprs.append(f'(F.col("{filt.target}") {op} {value})')
         return ["result = result.filter(" + " & ".join(exprs) + ")"] if exprs else []
 

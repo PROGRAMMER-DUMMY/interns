@@ -32,6 +32,9 @@ _DANGEROUS_KEYWORDS: frozenset[str] = frozenset(
 )
 
 
+_NUMERIC_RE = re.compile(r"-?\d+(?:\.\d+)?$")
+
+
 class UnsafeIdentifierError(ValueError):
     """Raised when an identifier fails the safe-identifier check."""
 
@@ -101,6 +104,32 @@ def is_expression_safe(expression: object) -> bool:
         return False
 
 
+def render_python_scalar_literal(value: object, *, treat_as_string: bool) -> str:
+    """Render a filter value as a SAFE Python literal for emitted Polars/PySpark.
+
+    Both generators emit Python source, so ``repr()`` is the correct escape for a
+    string value (an embedded quote/backslash/paren can no longer break out of
+    the expression — the prior ``f'"{value}"'`` was the injection surface). A
+    value flagged numeric is emitted bare only if it really matches a number;
+    anything else falls back to a quoted string literal rather than raw text.
+    Ref: core-audit ob-kpi-b.md (theme T4).
+    """
+    text = str(value)
+    if not treat_as_string and _NUMERIC_RE.match(text.strip()):
+        return text.strip()
+    return repr(text)
+
+
+def map_comparison_op(op: object, op_table: dict, *, default: str = "==") -> str:
+    """Map a comparison operator through an engine op-table, defaulting safely.
+
+    Ensures an operator from workspace text can never be interpolated raw into
+    emitted code (the age-filter branch did exactly that): an unknown/hostile op
+    collapses to ``default`` instead of injecting tokens.
+    """
+    return op_table.get(str(op), default)
+
+
 __all__ = [
     "UnsafeExpressionError",
     "UnsafeIdentifierError",
@@ -108,7 +137,9 @@ __all__ = [
     "escape_sql_literal",
     "is_expression_safe",
     "is_safe_identifier",
+    "map_comparison_op",
     "quote_ident_backtick",
     "quote_ident_sql",
+    "render_python_scalar_literal",
     "validate_expression_safe",
 ]

@@ -22,6 +22,11 @@ from core.onboarding.kpi.sensitive_masking import (
     load_sensitive_columns,
     polars_mask_helper_lines,
 )
+from core.sql_safety import (
+    is_safe_identifier,
+    map_comparison_op,
+    render_python_scalar_literal,
+)
 from core.onboarding.relationships.contracts import (
     find_executable_relationship,
     load_relationship_contracts,
@@ -590,12 +595,25 @@ class PolarsKPIGenerator:
         exprs = []
         age_alias = next((d.alias for d in intent.dims if d.kind == "age"), None)
         for filt in intent.filters:
+            # T4: map the op through _PL_OPS (never inline a raw op) and render
+            # the value as a safe Python literal (repr for strings) so a crafted
+            # value/op cannot inject code into the generated, subprocess-executed
+            # script. is_literal=True means the value is a (non-numeric) string.
+            op = map_comparison_op(filt.op, _PL_OPS)
             if filt.target == "__age__":
                 if age_alias:
-                    exprs.append(f'(pl.col("{age_alias}") {filt.op} {filt.value})')
+                    value = render_python_scalar_literal(
+                        filt.value, treat_as_string=filt.is_literal
+                    )
+                    exprs.append(f'(pl.col("{age_alias}") {op} {value})')
                 continue
-            op = _PL_OPS.get(filt.op, "==")
-            value = f'"{filt.value}"' if filt.is_literal else filt.value
+            if not is_safe_identifier(filt.target):
+                # A filter target must be a real column; skip rather than inline
+                # an unvalidated token into pl.col("...").
+                continue
+            value = render_python_scalar_literal(
+                filt.value, treat_as_string=filt.is_literal
+            )
             exprs.append(f'(pl.col("{filt.target}") {op} {value})')
         return exprs
 
