@@ -39,7 +39,9 @@ from core.onboarding.databricks.deploy_gates import (
     REMOTE_ENV,
     check_plan_freshness,
     check_remote_approval,
+    run_deploy_gates,
 )
+from core.failures import remote_denied
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -513,11 +515,40 @@ def run_deployment(
     spec_path: str | Path | None = None,
     apply: bool = False,
     confirm_remote_mutation: bool = False,
+    confirmed_by: str = "",
 ) -> DatabricksWorkspaceDeploymentResult:
     planner = DatabricksWorkspaceDeploymentPlanner(repo_root, workspace, spec_path=spec_path)
     plan = planner.build_plan()
     if apply:
         _require_remote_approval(confirm_remote_mutation)
+        # P2 (T7): the Genie lane previously mutated Databricks with ONLY the
+        # confirm flag + env + PHI gate, bypassing the deploy gates entirely —
+        # so G3 human-provenance never ran and a remote apply could happen with
+        # no human-attributed approval (Human-Gate Provenance Rule violation).
+        # Run the gate set, record all verdicts on the plan, and HARD-BLOCK on
+        # G3 human-provenance. (G4 plan-freshness binds to the medallion
+        # deploy_plan, not the Genie spec, so it is recorded but not enforced
+        # here.) Ref: core-audit ob-databricks.md.
+        gate_verdicts = run_deploy_gates(
+            planner.repo_root,
+            _rel(planner.layout.project_root, planner.repo_root),
+            confirmed_by=confirmed_by,
+        )
+        plan["deploy_gates"] = [v.to_dict() for v in gate_verdicts]
+        g3 = next((v for v in gate_verdicts if v.gate == "G3_human_provenance"), None)
+        if g3 is None or not g3.ok:
+            raise WorkflowBlockedError(
+                remote_denied(
+                    "databricks_workspace_deploy.human_provenance",
+                    "Genie-lane apply refused: deployment approval is not "
+                    "human-attributed (G3 human-provenance failed). "
+                    + (g3.blocking_reason if g3 else "G3 gate did not run"),
+                    next_command=(
+                        "Re-run with --confirmed-by \"<reviewer name>\" so the "
+                        "remote apply is recorded as source: human."
+                    ),
+                )
+            )
         cfg = load_config()
         # Sensitive-data gate: refuse to upload identifiable PHI to a
         # non-HIPAA-covered target or cardholder data to a non-PCI target.
@@ -1300,6 +1331,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Required with --apply to confirm remote Databricks mutation.",
     )
+    parser.add_argument(
+        "--confirmed-by",
+        default="",
+        help="Human reviewer name; required for --apply (G3 human-provenance).",
+    )
     args = parser.parse_args(argv)
     result = run_deployment(
         args.repo_root,
@@ -1307,6 +1343,7 @@ def main(argv: list[str] | None = None) -> int:
         spec_path=args.spec_path,
         apply=args.apply,
         confirm_remote_mutation=args.confirm_remote_mutation,
+        confirmed_by=args.confirmed_by,
     )
     print(json.dumps(result.summary(), indent=2))
     return 0
