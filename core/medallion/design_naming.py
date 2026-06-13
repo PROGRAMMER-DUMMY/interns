@@ -13,15 +13,16 @@ def dataset_name_key(dataset: dict[str, Any]) -> str:
 def logical_entity_from_path(path: str) -> str:
     """Derive a logical entity name from a dataset path. Workspace-agnostic.
 
-    Strips trailing `_data` (a common generic suffix) and a trailing `s`
-    plural marker. Does NOT apply domain-specific stem cleanup — callers
-    that need to strip workspace-specific source-system prefixes from the
-    stem should normalize the path before calling.
+    Strips trailing `_data` (a common generic suffix), then takes the first
+    underscore-delimited segment as the entity (dropping any trailing
+    source-system qualifiers), then singularizes a trailing `s` plural
+    marker. Workspace-agnostic: no domain-specific tokens are referenced.
     """
     stem = Path(path).stem.lower()
     stem = re.sub(r"_data$", "", stem)
-    stem = stem.rstrip("s") if stem.endswith("s") else stem
-    return stem or "entity"
+    entity = stem.split("_", 1)[0] if "_" in stem else stem
+    entity = entity[:-1] if entity.endswith("s") else entity
+    return entity or "entity"
 
 
 def source_system_from_path(path: str) -> str:
@@ -29,11 +30,18 @@ def source_system_from_path(path: str) -> str:
 
     Uses the parent directory name as the source system. For paths like
     `workspaces/<ws>/datasets/<source_system>/<table>.csv` this returns
-    `<source_system>`. Falls back to `default` for shallow paths.
+    `<source_system>`. When the parent name is hyphen-delimited, the last
+    two hyphen segments are joined by `_` (dropping vendor/prefix noise);
+    if it has fewer than two segments, the whole name is normalized.
+    Falls back to `default` for shallow paths. Workspace-agnostic.
     """
     parts = Path(path).parts
     if len(parts) >= 2:
-        return parts[-2].lower().replace("-", "_").replace(" ", "_")
+        parent = parts[-2].lower().replace(" ", "_")
+        segments = [seg for seg in parent.split("-") if seg]
+        if len(segments) >= 2:
+            return "_".join(segments[-2:])
+        return parent.replace("-", "_")
     return "default"
 
 
