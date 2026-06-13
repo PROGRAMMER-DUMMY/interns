@@ -219,19 +219,32 @@ external_source_discovery (draft source_catalog_id), session_snapshot (cwd-relat
 named sessions), workflow_guard x3 (external-source governance, stage time budget,
 panel-output-not-read, cp/mv/rm/ln unsupported).
 
-### Remaining 4 baseline failures — DEFERRED with cause (each a deep feature-build / design call)
-1. `test_kpi_pipeline_wrapper` relationship gate — **deliberate non-fix.** The test wants
-   pipeline_main to hard-block when any candidate relationship exists; the existing code
-   intentionally does NOT (reasoned comment), because that would block legitimate
-   single-dataset KPIs that need no join (e.g. "count encounters"). Honoring the test would
-   degrade real behavior. The per-KPI join-proof gate in `start` is the correct stop.
-2. `test_data_model_image_parser` — OCR-text -> schema-candidate extraction (Fact/Dim_*);
-   a real OCR/NLP parsing feature.
-3. `test_kpi_proof_packet` — needs a new `data_engineering_evidence` packet section
-   aggregating catalog/route/pipeline/layered+exec+DQ harness + duplicate-review + blockers
-   + markdown. A sizable evidence-wiring feature.
-4. `test_result_view_builder` mismatched-grain percentage — emit a window function
-   (`PARTITION BY`) instead of the single-attribution fallback; deep share-SQL generation.
+### Final 4 baseline failures — ALL RESOLVED (branch `fix/core-finish-2`, off `fix/core-finish`)
+Full gate now **1644 passed / 0 failed** (2 skipped). Two were product calls made WITH the
+user; two were genuine feature/heuristic builds.
+1. `test_kpi_pipeline_wrapper` relationship gate — **won't-fix, test replaced (user decision).**
+   The wrapper deliberately does NOT hard-block on candidate-relationship count (reasoned
+   comment at the STEP-3 block); blocking on raw count over-blocks legitimate single-dataset
+   KPIs. The over-broad test (which contradicted its own fixture's "candidates are advisory"
+   policy) was replaced by `test_pipeline_main_does_not_gate_on_advisory_candidate_relationships`,
+   locking the correct NON-blocking contract. Commit `4e19cd9`.
+2. `test_data_model_image_parser` — **fixed producer.** Table extraction + star-schema detection
+   already worked; only FK `DeptID` mis-resolved to `Dim_Diagnosis`. `_compatible_dimension_root`
+   now matches a contraction to its full word via a first-char-anchored subsequence (min len 4):
+   `dept` -> `department`, `prov` -> `provider`; rejects `icd`/`diagnosis`, `npi`/`provider`. No
+   hardcoded synonym dict. Commit `b433a03`.
+3. `test_kpi_proof_packet` — **fixed producer.** Added a `data_engineering_evidence` packet block
+   (read-only aggregation of catalog/route/pipeline_plan/layered+exec+DQ harness + duplicate-review
+   + union blockers), surfaced the new artifacts under `payload["artifacts"]` with exists flags,
+   and rendered a "Data Engineering Evidence" markdown section. Missing artifacts degrade to
+   empty/zero (section skipped). Commit `084aa5a`.
+4. `test_result_view_builder` mismatched-grain percentage — **test retargeted (user decision).**
+   The window path (`PARTITION BY`) is correct for ROW-BASED (non-distinct) shares; DISTINCT-entity
+   shares deliberately take the single-attribution path (human-confirmed; they summed to 229%
+   otherwise). The failing test fed a `sum(distinct PatientID)` metric but demanded the window
+   output, contradicting that decision and the sibling passing test on identical input. Retargeted
+   it to a non-distinct (`sum(total_amount)`) share — passes against the existing producer, no
+   producer change. Commit `d856362`.
 
 ## Progress ledger (update as phases land)
 | Phase | Branch | PR | Status | Tests added | Notes |

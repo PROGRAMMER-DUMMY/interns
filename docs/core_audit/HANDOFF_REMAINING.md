@@ -1,5 +1,12 @@
 # Handoff — core/ remediation: the last 4 baseline test failures
 
+> **STATUS: COMPLETE (2026-06-13, branch `fix/core-finish-2` off `fix/core-finish`).**
+> All 4 resolved; full gate **1644 passed / 0 failed** (2 skipped). Items 1 and 4 were product
+> decisions made WITH the user (test won't-fix/retarget); items 2 and 3 were producer builds.
+> Commits: `4e19cd9` (item 1), `d856362` (item 4), `b433a03` (item 2), `084aa5a` (item 3). See
+> `REMEDIATION_PLAN.md` > "Final 4 baseline failures — ALL RESOLVED" for the per-item record.
+> The detail below is retained as the original contract.
+
 **For a fresh session.** The core/ audit + remediation P0–P8 are done. The full suite is at
 **4 failed / 1640 passed** (was 24 failed at the P0 baseline). This doc is the contract for
 finishing those 4. Read this, then the per-item detail below. You do **not** need to re-read the
