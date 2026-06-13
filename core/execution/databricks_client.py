@@ -226,7 +226,15 @@ class DatabricksClient:
             ):
                 output = client.jobs.get_run_output(run_id)
                 log = output.logs or ""
-                result_state = str(state.result_state) if state.result_state else "FAILED"
+                # Return the BARE enum name ("SUCCESS"), not str(enum) which
+                # renders "RunResultState.SUCCESS" and never == "SUCCESS" at the
+                # call sites, recording successful jobs as exit_code=1. Ref:
+                # core-audit execution.md (T9-class).
+                rs = state.result_state
+                if rs is None:
+                    result_state = "FAILED"
+                else:
+                    result_state = getattr(rs, "name", None) or str(rs).split(".")[-1]
                 return result_state, log
 
             if time.time() - start > hard_timeout:

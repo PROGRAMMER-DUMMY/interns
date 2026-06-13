@@ -287,7 +287,7 @@ class JobsBackend(ExecutionBackend):
         metric = parser.parse_metric(log_content, task.get("metric_key", "primary_metric"))
         all_metrics = parser.parse_all_metrics(log_content)
 
-        exit_code = 0 if result_state == "SUCCESS" else 1
+        exit_code = 0 if str(result_state).upper().endswith("SUCCESS") else 1
         return ExecutionResult(
             exit_code=exit_code,
             log_content=log_content,
@@ -428,7 +428,7 @@ class StrictJobsBackend(JobsBackend):
         parser = RegexLogParser()
         metric = parser.parse_metric(log_content, task.get("metric_key", "primary_metric"))
         all_metrics = parser.parse_all_metrics(log_content)
-        exit_code = 0 if result_state == "SUCCESS" else 1
+        exit_code = 0 if str(result_state).upper().endswith("SUCCESS") else 1
         return ExecutionResult(
             exit_code=exit_code,
             log_content=log_content,
