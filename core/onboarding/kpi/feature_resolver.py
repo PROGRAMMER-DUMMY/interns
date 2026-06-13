@@ -1216,12 +1216,11 @@ def _contextual_score(
         if not (feature_norm and feature_norm in column_norm):
             score -= 30.0
             reasons.append("column is a key/ID column not matching the feature")
-    if feature_norm == "procedure" and column_norm == "description":
-        score += 4.0
-        reasons.append("procedure grouping can use the procedure description label")
-    elif feature_norm == "procedure" and column_norm == "code":
-        score += 3.0
-        reasons.append("procedure grouping can use the procedure code")
+    # T12: a hardcoded healthcare `procedure`->`description`/`code` scoring branch
+    # was removed here. The generic, workspace-derived rules below (data-dictionary
+    # description mentions the feature; context/description token overlap) cover the
+    # same "a feature can use a co-located descriptive/label column" case for ANY
+    # domain, from evidence — not a curated vocabulary. Ref: SUMMARY.md T12.
     if feature_norm and any(feature_norm in normalize_blocker(token) for token in description_tokens):
         score += 3.0
         reasons.append("data dictionary description mentions the feature")
