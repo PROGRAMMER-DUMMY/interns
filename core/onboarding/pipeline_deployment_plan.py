@@ -52,6 +52,7 @@ class PipelineDeploymentPlanner:
             )
         self.layout.ensure_runtime_dirs()
         status = "planned_apply" if self.mode == "apply" else "dry_run_ready"
+        deployment_actions = self._deployment_actions()
         payload = {
             "artifact_type": "pipeline_deployment_plan.json",
             "target": self.target,
@@ -62,6 +63,7 @@ class PipelineDeploymentPlanner:
                 "no_actual_remote_mutation": self.mode == "dry-run",
                 "remote_mutation_performed": False,
             },
+            "deployment_actions": deployment_actions,
             "remote_approval_env": REMOTE_APPROVAL_ENV,
         }
         json_path = self.layout.contracts_dir / "pipeline_deployment_plan.json"
@@ -70,12 +72,49 @@ class PipelineDeploymentPlanner:
         md_path.write_text(f"# Pipeline Deployment Plan\n\nStatus: `{status}`\n", encoding="utf-8")
         return PipelineDeploymentPlanResult(_rel(json_path, self.repo_root), _rel(md_path, self.repo_root), status, self.target, self.mode)
 
+    def _deployment_actions(self) -> list[dict[str, Any]]:
+        """Build per-layer deployment actions from the pipeline plan. In dry-run
+        mode every action records mutation="none" (nothing is executed); in apply
+        mode the action carries its operation as the mutation kind. Derived from
+        the plan contract — no remote call. Ref: core-audit onboarding-root.md."""
+        plan_path = self.layout.contracts_dir / "pipeline_plan.json"
+        plan = _load_json(plan_path)
+        mutation = "none" if self.mode == "dry-run" else "apply"
+        actions: list[dict[str, Any]] = []
+        for layer in plan.get("layers") or []:
+            if not isinstance(layer, dict):
+                continue
+            operation = str(layer.get("operation") or layer.get("layer") or "layer")
+            for obj in layer.get("objects") or [{}]:
+                target_object = ""
+                if isinstance(obj, dict):
+                    target_object = str(obj.get("target_object") or obj.get("logical_name") or "")
+                actions.append(
+                    {
+                        "layer": str(layer.get("layer") or ""),
+                        "operation": operation,
+                        "target_object": target_object,
+                        "mutation": mutation,
+                    }
+                )
+        return actions
+
 
 def _rel(path: Path, root: Path) -> str:
     try:
         return path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def main(argv: list[str] | None = None) -> int:
