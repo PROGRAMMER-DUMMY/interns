@@ -1447,10 +1447,20 @@ def build_result_view_sql(
         select_terms.append(
             f"CAST({numerator.alias} AS DOUBLE) / NULLIF({denominator.alias}, 0) AS ratio"
         )
+    # T9: dedupe extra-selects by their PROJECTED ALIAS (exact), not by substring.
+    # `any(alias in term ...)` dropped a legitimately-distinct expr whenever a
+    # short alias (e.g. `age`) was a substring of another term's alias
+    # (`age_band`). Parse each term's trailing `AS <alias>` and compare exactly.
+    # Ref: core-audit ob-kpi-d.md.
+    def _emitted_alias(term: str) -> str:
+        m = re.search(r'\bAS\s+("?[\w]+"?)\s*$', term, re.IGNORECASE)
+        return m.group(1).strip('"') if m else ""
+
+    emitted_aliases = {a for a in (_emitted_alias(t) for t in select_terms) if a}
     for expr, alias in parsed.extra_select_exprs:
-        # Skip if the expr is already in select_terms (e.g., date arithmetic doubled as dimension).
-        if not any(alias in term for term in select_terms):
+        if str(alias).strip('"') not in emitted_aliases:
             select_terms.append(f"{expr} AS {alias}")
+            emitted_aliases.add(str(alias).strip('"'))
 
     where_clause = ""
     if parsed.filters:

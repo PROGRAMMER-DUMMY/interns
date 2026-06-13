@@ -275,16 +275,24 @@ def _score_grain(
         return
     schema = _schema(profile or {})
     normalized_schema = {_norm(column) for column in schema}
+    # T9: token-boundary matching instead of raw substring. `_norm` strips
+    # underscores ("patient_id"->"patientid"), so the old `token in column`
+    # substring test made a 2-char grain token like `id` match `paid`/`district`,
+    # flipping the fact-table pick. Match a grain token only when it equals a full
+    # normalized column OR one of a column's delimiter-split word tokens.
+    # Ref: core-audit relationships (T9).
+    column_word_tokens: set[str] = set()
+    for column in schema:
+        for word in re.split(r"[^a-z0-9]+", str(column).lower()):
+            normed = _norm(word)
+            if normed:
+                column_word_tokens.add(normed)
     matches = []
     for token in grain_tokens:
         token_norm = _norm(_strip_function_wrappers(token))
         if not token_norm:
             continue
-        if token_norm in normalized_schema or any(
-            token_norm in column or column in token_norm
-            for column in normalized_schema
-            if column
-        ):
+        if token_norm in normalized_schema or token_norm in column_word_tokens:
             matches.append(token)
     candidate.grain_matches = matches
     candidate.grain_ratio = len(matches) / len(grain_tokens)

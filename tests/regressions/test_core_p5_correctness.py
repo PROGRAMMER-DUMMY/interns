@@ -53,5 +53,37 @@ class OptimizationConvergenceTests(unittest.TestCase):
         self.assertEqual(strat.decide(0.9, {"best_metric": 0.5}, {"direction": "lower"}), "discard")
 
 
+# ── P5b: substring -> token matching (T9) ────────────────────────────────────
+class SubstringTokenMatchingTests(unittest.TestCase):
+    def test_extra_select_alias_dedupe_is_exact(self) -> None:
+        # `age` must NOT be dropped just because `age_band` is already projected.
+        import re
+
+        select_terms = ['FLOOR(age/10)*10 AS age_band', 'COUNT(*) AS n']
+
+        def _emitted_alias(term: str) -> str:
+            m = re.search(r'\bAS\s+("?[\w]+"?)\s*$', term, re.IGNORECASE)
+            return m.group(1).strip('"') if m else ""
+
+        emitted = {a for a in (_emitted_alias(t) for t in select_terms) if a}
+        self.assertIn("age_band", emitted)
+        self.assertNotIn("age", emitted)  # age is NOT emitted; must be addable
+
+    def test_base_source_grain_token_no_substring_false_match(self) -> None:
+        from types import SimpleNamespace
+
+        from core.onboarding.relationships.base_source_selector import _score_grain
+
+        # 'id' must NOT match a table whose only columns are 'paid'/'amount'
+        # (old bug: 'id' substring of 'paid'); it MUST match 'patient_id'.
+        cand_paid = SimpleNamespace(grain_matches=[], grain_ratio=0.0)
+        _score_grain(cand_paid, {"schema": {"paid": "int", "amount": "double"}}, ["id"])
+        self.assertEqual(cand_paid.grain_matches, [])
+
+        cand_pid = SimpleNamespace(grain_matches=[], grain_ratio=0.0)
+        _score_grain(cand_pid, {"schema": {"patient_id": "int", "amount": "double"}}, ["id"])
+        self.assertEqual(cand_pid.grain_matches, ["id"])
+
+
 if __name__ == "__main__":
     unittest.main()
