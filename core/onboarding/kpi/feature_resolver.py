@@ -8,7 +8,6 @@ never executable proof.
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import re
 from dataclasses import dataclass
@@ -50,6 +49,11 @@ from core.onboarding.features.derivation_search import (
     DerivationSearchInput,
 )
 from core.onboarding.kpi.blocker_question_panel import BlockerQuestionPanelBuilder
+from core.onboarding.documents.dictionary_reconciliation import (
+    apply_conflicts_to_mapping as apply_dictionary_conflicts_to_mapping,
+    load_data_dictionary_rows,
+    write_dictionary_conflicts_contract,
+)
 from core.storage.metadata_store import build_metadata_store
 from core.storage.workspace_layout import WorkspaceLayout
 from core.contracts.versioning import register_contract
@@ -180,6 +184,11 @@ class KPIFeatureResolver:
         if definitions.get("definitions"):
             apply_workspace_definitions_to_mapping(mapping, definitions)
         _label_kpis_without_supporting_evidence(mapping, kpis, schema_index, definitions)
+        # Dictionary-vs-profile reconciliation: documented claims that profile
+        # evidence contradicts become structured `dictionary_conflicts`, and a
+        # proven feature standing on a contradicted column is demoted to an
+        # answerable blocker BEFORE clusters/summary/panel are computed.
+        self._reconcile_dictionary_claims(mapping)
         mapping["blocker_clusters"] = prioritize_blockers(mapping)
         summary = summarize_mapping(mapping)
         mapping["summary"] = summary
@@ -608,6 +617,8 @@ class KPIFeatureResolver:
     def _schema_index(self) -> dict[str, list[dict[str, str]]]:
         schema_index = load_schema_index(self.layout.profiles_dir / "profile_index.json")
         dictionaries = self._load_data_dictionaries()
+        # Cached for the post-resolution dictionary reconciliation pass.
+        self._dictionary_rows = dictionaries
         if dictionaries:
             enrich_schema_index_with_dictionaries(schema_index, dictionaries)
         return schema_index
@@ -649,51 +660,52 @@ class KPIFeatureResolver:
             raise ValueError(f"workspace must be inside repo root: {self.workspace}")
 
     def _load_data_dictionaries(self) -> list[dict[str, Any]]:
-        paths: list[Path] = []
-        inventory_path = self.layout.requirements_dir / "input_inventory.json"
-        if inventory_path.exists():
-            try:
-                inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                inventory = {}
-            for item in inventory.get("data_models") or []:
-                path = (self.repo_root / str(item)).resolve()
-                if path.suffix.lower() == ".csv" and "dictionary" in path.stem.lower():
-                    paths.append(path)
-        paths.extend(
-            path
-            for path in self.workspace.rglob("*dictionary*.csv")
-            if path.is_file() and "/interns/" not in path.as_posix()
+        return load_data_dictionary_rows(self.workspace, self.repo_root, self.layout)
+
+    def _reconcile_dictionary_claims(self, mapping: dict[str, Any]) -> None:
+        """Cross-check dictionary claims against profiles; block tainted KPIs.
+
+        Writes ``contracts/dictionary_conflicts.json`` (only when the workspace
+        actually has a data dictionary AND profile evidence -- absence of
+        either means there is nothing to reconcile) and applies the conflicts
+        to the mapping: error-severity conflicts demote proven features to an
+        answerable ``dictionary_conflict`` blocker; ``user_confirmed`` human
+        decisions are never demoted.
+        """
+        rows = getattr(self, "_dictionary_rows", None)
+        if rows is None:
+            rows = self._load_data_dictionaries()
+        if not rows:
+            return
+        profile_index_path = self.layout.profiles_dir / "profile_index.json"
+        if not profile_index_path.exists():
+            return
+        try:
+            profiles = json.loads(profile_index_path.read_text(encoding="utf-8")).get(
+                "profiles"
+            )
+        except json.JSONDecodeError:
+            return
+        if not isinstance(profiles, list) or not profiles:
+            return
+        payload = write_dictionary_conflicts_contract(
+            self.layout,
+            self.repo_root,
+            _rel(self.workspace, self.repo_root),
+            rows,
+            profiles,
+            generated_by="resolve-kpi-features",
         )
-        rows: list[dict[str, Any]] = []
-        for path in sorted(set(paths)):
-            try:
-                with path.open("r", encoding="utf-8-sig", newline="") as handle:
-                    reader = csv.DictReader(handle)
-                    fieldnames = {str(name).strip().lower(): name for name in (reader.fieldnames or [])}
-                    table_key = _first_present(fieldnames, ["table", "entity", "dataset", "file"])
-                    field_key = _first_present(fieldnames, ["field", "column", "name"])
-                    description_key = _first_present(fieldnames, ["description", "definition", "meaning"])
-                    if not table_key or not field_key:
-                        continue
-                    for row in reader:
-                        table = str(row.get(table_key) or "").strip()
-                        field = str(row.get(field_key) or "").strip()
-                        if not table or not field:
-                            continue
-                        rows.append(
-                            {
-                                "table": table,
-                                "field": field,
-                                "description": str(row.get(description_key) or "").strip()
-                                if description_key
-                                else "",
-                                "path": _rel(path, self.repo_root),
-                            }
-                        )
-            except OSError:
-                continue
-        return rows
+        self._store_metadata("contracts", "dictionary_conflicts", payload)
+        conflicts = payload.get("conflicts") or []
+        mapping["dictionary_conflicts"] = {
+            "contract_path": _rel(
+                self.layout.contracts_dir / "dictionary_conflicts.json", self.repo_root
+            ),
+            **(payload.get("summary") or {}),
+        }
+        if conflicts:
+            apply_dictionary_conflicts_to_mapping(mapping, conflicts)
 
 
 def _dictionary_context_choice(
@@ -1278,13 +1290,6 @@ def _kpi_context(kpi: dict[str, Any]) -> str:
             kpi.get("refinement_required"),
         ]
     )
-
-
-def _first_present(mapping: dict[str, str], candidates: list[str]) -> str | None:
-    for candidate in candidates:
-        if candidate in mapping:
-            return mapping[candidate]
-    return None
 
 
 def _requires_kpi_definition(
