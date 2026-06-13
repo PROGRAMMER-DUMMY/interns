@@ -112,5 +112,43 @@ class PushdTests(unittest.TestCase):
             self.assertNotIn("os.chdir(", src, f"{mod.__name__} still uses bare os.chdir")
 
 
+# ── P4c: SQLite is WAL + cross-thread safe ───────────────────────────────────
+class SqliteConcurrencyTests(unittest.TestCase):
+    def test_cross_thread_writes_do_not_raise(self) -> None:
+        from core.storage.workspace import Workspace
+
+        with TemporaryDirectory() as tmp:
+            db = Path(tmp) / "state" / "workspace.db"
+            ws = Workspace(db_path=db, work_dir=Path(tmp))
+            errors: list[BaseException] = []
+
+            def writer(n: int) -> None:
+                try:
+                    for i in range(20):
+                        ws.log_experiment(
+                            run_id=f"r{n}-{i}", results="{}", status="ok", metrics="{}"
+                        )
+                except BaseException as exc:  # noqa: BLE001
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=writer, args=(n,)) for n in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            ws.conn.close()  # release the file so TemporaryDirectory can clean up (Windows)
+            self.assertEqual(errors, [], f"cross-thread writes raised: {errors}")
+
+    def test_wal_mode_enabled(self) -> None:
+        from core.storage.workspace import Workspace
+
+        with TemporaryDirectory() as tmp:
+            db = Path(tmp) / "state" / "workspace.db"
+            ws = Workspace(db_path=db, work_dir=Path(tmp))
+            mode = ws.conn.execute("PRAGMA journal_mode;").fetchone()[0]
+            ws.conn.close()  # release the file (Windows temp cleanup)
+            self.assertEqual(str(mode).lower(), "wal")
+
+
 if __name__ == "__main__":
     unittest.main()
