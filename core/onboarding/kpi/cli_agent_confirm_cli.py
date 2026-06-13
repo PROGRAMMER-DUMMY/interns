@@ -29,6 +29,7 @@ from core.onboarding.memory.workspace_definitions import (
     workspace_definitions_path,
 )
 from core.onboarding.workspace.cli_runner import run_workspace_command
+from core.storage.atomic_io import write_text_atomic
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -122,9 +123,10 @@ def confirm_cli_agent_proposal(
     )
 
     definitions["updated_at"] = timestamp
-    definitions_path.write_text(
-        json.dumps(definitions, indent=2, default=str) + "\n",
-        encoding="utf-8",
+    # P4d (T6): atomic writes so an interrupted confirm can't corrupt the
+    # definitions/mapping stores. Ref: core-audit ob-kpi-c.md, storage.md.
+    write_text_atomic(
+        definitions_path, json.dumps(definitions, indent=2, default=str) + "\n"
     )
 
     mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
@@ -168,10 +170,7 @@ def confirm_cli_agent_proposal(
     # status so the mapping summary reflects the new state.
     apply_workspace_definitions_to_mapping(mapping, definitions)
     recompute_mapping_status(mapping)
-    mapping_path.write_text(
-        json.dumps(mapping, indent=2, default=str) + "\n",
-        encoding="utf-8",
-    )
+    write_text_atomic(mapping_path, json.dumps(mapping, indent=2, default=str) + "\n")
 
     return ConfirmResult(
         workspace=str(workspace),

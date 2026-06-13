@@ -707,19 +707,27 @@ class SourceCatalogManager:
         return {"status": "metadata_exported", "metadata_path": _rel(out, self.repo_root)}
 
     def _register_external_allowlist(self, path: Path, source_id: str) -> None:
+        # P4d (T6): take the workspace lock around the settings read-modify-write
+        # and re-read UNDER the lock, so concurrent local-stage of multiple
+        # sources can't lose allowlist entries (last-writer-wins). Atomic write.
+        # Ref: core-audit ob-sources.md, storage.md.
+        from core.storage.atomic_io import write_text_atomic
+        from core.storage.workspace_lock import workspace_lock
+
         self.layout.state_dir.mkdir(parents=True, exist_ok=True)
-        settings = self.layout.load_settings()
-        entries = settings.setdefault("dataset_allowlist", [])
-        normalized = str(path)
-        if not any(str(item.get("path")) == normalized for item in entries if isinstance(item, dict)):
-            entries.append(
-                {
-                    "type": "external_absolute" if path.is_absolute() else "workspace_relative",
-                    "path": normalized,
-                    "reason": f"source_catalog:{source_id}",
-                }
-            )
-        self.layout.workspace_settings.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+        with workspace_lock(self.layout.project_root):
+            settings = self.layout.load_settings()
+            entries = settings.setdefault("dataset_allowlist", [])
+            normalized = str(path)
+            if not any(str(item.get("path")) == normalized for item in entries if isinstance(item, dict)):
+                entries.append(
+                    {
+                        "type": "external_absolute" if path.is_absolute() else "workspace_relative",
+                        "path": normalized,
+                        "reason": f"source_catalog:{source_id}",
+                    }
+                )
+            write_text_atomic(self.layout.workspace_settings, json.dumps(settings, indent=2))
 
     def _write_plan(
         self,
