@@ -686,17 +686,45 @@ def _semantic_key_root(column_norm: str) -> str:
 
 
 def _compatible_dimension_root(key_root: str, dim_suffix: str) -> bool:
-    """Compare dimension key roots.
+    """Compare a foreign-key root against a dimension's name suffix.
 
-    Generic equality only. Workspace-specific synonyms (e.g. dept↔department,
-    diagnosis↔icd) used to live in a hardcoded healthcare-leaning dict; they
-    should now come from the workspace lexicon (via
-    `workspace_feature_definitions.json` or accepted aliases in
-    `workspace_vocabulary.json`). Image-parsed relationships still require
-    user review, so a missed alias here lands as a blocker panel — the
+    Two structural, workspace-agnostic rules:
+    1. Equality — ``provider`` == ``provider``.
+    2. Abbreviation — the shorter root is a first-character-anchored
+       SUBSEQUENCE of the longer, and that shorter root is at least 4
+       characters. This catches contractions that drop interior letters, so
+       ``dept`` matches ``department`` (d-e-p-...-t) and ``prov`` matches
+       ``provider`` — a prefix test alone would miss ``dept`` because the 4th
+       letter of ``department`` is ``a``, not ``t``. Anchoring on the first
+       letter plus the length guard keeps short tokens (``id``, ``sk``,
+       ``npi``) and unrelated roots (``icd`` vs ``diagnosis``) off this path.
+
+    Both rules are purely lexical. Workspace-specific SYNONYMS (e.g.
+    diagnosis↔icd) deliberately do NOT live here — they used to sit in a
+    hardcoded healthcare-leaning dict and should instead come from the
+    workspace lexicon (`workspace_feature_definitions.json` or accepted
+    aliases in `workspace_vocabulary.json`). Image-parsed relationships still
+    require user review, so a missed synonym lands as a blocker panel — the
     correct behavior — not as silently-wrong inference.
     """
-    return key_root == dim_suffix
+    if key_root == dim_suffix:
+        return True
+    shorter, longer = sorted((key_root, dim_suffix), key=len)
+    if len(shorter) >= 4 and _is_anchored_subsequence(shorter, longer):
+        return True
+    return False
+
+
+def _is_anchored_subsequence(short: str, long: str) -> bool:
+    """True when ``short`` is a subsequence of ``long`` sharing the first char.
+
+    Lets a contraction match its full word (``dept`` -> ``department``) without
+    matching unrelated roots that merely share scattered letters.
+    """
+    if not short or not long or short[0] != long[0]:
+        return False
+    it = iter(long)
+    return all(ch in it for ch in short)
 
 
 def _canonical_key_for_dimension(dimension: str, fallback_column: str) -> str:
