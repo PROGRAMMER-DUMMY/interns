@@ -21,12 +21,13 @@ Section-by-section deep read of `core/` (227 files, ~86.9k lines). Each package 
 | optimization | core/optimization | 6 | 730 | **done** — BUG:2 NP:4 INT:1 MISS:1 DUP:1 | `optimization.md` |
 | orchestration | core/orchestration | 4 | 1039 | **done** — BUG:2 INT:2 NP:5 MISS:1 DEAD:2 DUP:1 | `orchestration.md` |
 | execution | core/execution | 3 | 909 | pending | `execution.md` |
-| context | core/context | 5 | 1060 | pending | `context.md` |
-| wiki | core/wiki | 6 | 928 | pending | `wiki.md` |
-| dashboard | core/dashboard | 9 | 3773 | pending | `dashboard.md` |
+| context | core/context | 5 | 1060 | **done** — BUG:2 INT:1 NP:2 DEAD:1 DUP:1 MISS:1 | `context.md` |
+| wiki | core/wiki | 6 | 928 | **done** — BUG:5 INT:1 NP:2 MISS:2 DEAD:1 DUP:2 | `wiki.md` |
+| dashboard | core/dashboard | 9 | 3773 | **done** — BUG:6 NP:8 DEAD:2 MISS:1 | `dashboard.md` |
 | medallion-A | core/medallion (design/build/schema) | ~16 | ~3600 | pending | `medallion-a.md` |
 | medallion-B | core/medallion (lineage/emit/deploy) | ~15 | ~3000 | pending | `medallion-b.md` |
-| small-combo | contracts+dev+resource+presentation+profiling+skills+observability | 23 | ~3500 | pending | `small-combo.md` |
+| execution | core/execution | 3 | 909 | **done** — BUG:4 NP:7 MISS:1 DEAD:1 DUP:2 | `execution.md` |
+| small-combo | contracts+dev+resource+presentation+profiling+skills+observability | 23 | ~3500 | **done** — BUG:2 INT:2 NP:6 MISS:1 DEAD:3 DUP:1 | `small-combo.md` |
 | onboarding-root | core/onboarding/*.py | 12 | ~3800 | pending | `onboarding-root.md` |
 | ob-kpi-A | onboarding/kpi (intent/resolve/derive) | ~10 | ~7000 | pending | `ob-kpi-a.md` |
 | ob-kpi-B | onboarding/kpi (engines/parity/exec) | ~8 | ~4000 | pending | `ob-kpi-b.md` |
