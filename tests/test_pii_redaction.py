@@ -297,6 +297,26 @@ class GateRedactionSyncTests(unittest.TestCase):
             self.assertIsNotNone(pci_identifier_category(col), col)
             self.assertTrue(is_pii_column(col), col)
 
+    def test_display_pci_patterns_are_full_set_equal_to_gate(self) -> None:
+        """Full-set equality, not a spot-check: the PCI patterns the display
+        redactor uses must equal the flattened phi_gate source of truth, so they
+        can never drift (the old copy had silently dropped cid/magstripe/exp/swift).
+        """
+        from core.governance.phi_gate import PCI_IDENTIFIER_PATTERNS
+        from core.onboarding.kpi import pii_redaction
+
+        gate_pci = {
+            p for patterns in PCI_IDENTIFIER_PATTERNS.values() for p in patterns
+        }
+        display_pci = set(pii_redaction._PCI_COLUMN_PATTERNS)
+        self.assertEqual(display_pci, gate_pci)
+        self.assertTrue(gate_pci.issubset(set(pii_redaction.DEFAULT_PII_COLUMN_PATTERNS)))
+
+    def test_previously_drifted_columns_now_redacted(self) -> None:
+        """The exact columns the audit found gated-but-not-redacted."""
+        for col in ("cid", "magstripe", "magstripe_data", "exp_month", "exp_year", "swift_code"):
+            self.assertTrue(is_pii_column(col), col)
+
 
 if __name__ == "__main__":
     unittest.main()

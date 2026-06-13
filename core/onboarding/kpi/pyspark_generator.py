@@ -21,6 +21,7 @@ from typing import Any
 
 from core.onboarding.kpi.feature_resolver import READY_STATES
 from core.onboarding.kpi.kpi_intent import KPIIntent, parse_intent
+from core.onboarding.kpi.sensitive_masking import load_sensitive_columns
 from core.onboarding.relationships.contracts import (
     find_executable_relationship,
     load_relationship_contracts,
@@ -144,10 +145,15 @@ class PySparkKPIGenerator:
             except (json.JSONDecodeError, OSError):
                 band_width = None
 
+        # Sensitive columns to mask (SHA-256 hex) so PySpark never writes raw
+        # PHI/PCI to Silver/Gold and stays parity-consistent with SQL/Polars.
+        # Single-sourced in sensitive_masking. Ref: core-audit ob-kpi-b.md (T2).
+        sensitive_cols = load_sensitive_columns(self.layout)
+
         code = self._emit_script(
             kpi, kpi_id, intent, required_sources, source_aliases, base_source,
             relationships, needed_by_source=needed_by_source, join_keys=join_keys,
-            band_width=band_width,
+            band_width=band_width, sensitive_cols=sensitive_cols,
         )
         suffix = "" if self.dialect == "local" else f"_{self.dialect}"
         out = self.layout.solutions_dir / f"{kpi_id}_pyspark{suffix}.py"
@@ -170,9 +176,11 @@ class PySparkKPIGenerator:
         needed_by_source: dict[str, set[str]] | None = None,
         join_keys: dict[str, tuple[str, str]] | None = None,
         band_width: int | None = None,
+        sensitive_cols: set[str] | None = None,
     ) -> str:
         needed_by_source = needed_by_source or {}
         join_keys = join_keys or {}
+        sensitive_cols = sensitive_cols or set()
         lines: list[str] = [
             "# PySpark KPI script — generated from feature mappings + shared KPI intent.",
             f"# KPI: {kpi.get('name', kpi_id)}",
@@ -343,6 +351,24 @@ class PySparkKPIGenerator:
             lines.append("# ── Keep only the columns this KPI needs ─────────────────────────────────")
             cols = ", ".join(f'"{c}"' for c in needed)
             lines.append(f"features = features.select({cols})")
+            lines.append("")
+
+        # Mask sensitive columns BEFORE the result is computed (mirrors the SQL
+        # _features view + the Polars path), with SHA-256 hex so masked values
+        # match DuckDB sha256(CAST(col AS VARCHAR)) for the same string input.
+        frame_cols = needed if needed else sorted(
+            set().union(*needed_by_source.values()) if needed_by_source else set()
+        )
+        sensitive_present = [
+            c for c in frame_cols if isinstance(c, str) and c.lower() in sensitive_cols
+        ]
+        if sensitive_present:
+            lines.append("# ── Mask sensitive columns (SHA-256, parity-consistent with SQL) ──────────")
+            for col in sensitive_present:
+                lines.append(
+                    f'features = features.withColumn("{col}", '
+                    f'F.sha2(F.col("{col}").cast("string"), 256))'
+                )
             lines.append("")
 
         lines.append("# ── KPI result ───────────────────────────────────────────────────────────")

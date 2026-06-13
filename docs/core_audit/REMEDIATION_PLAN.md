@@ -215,7 +215,7 @@ independently shippable; P0 first.
 | Phase | Branch | PR | Status | Tests added | Notes |
 | --- | --- | --- | --- | --- | --- |
 | P0 hygiene | fix/core-p0-hygiene | (pending) | done (code) | tests/regressions/ scaffold + P0_BASELINE.md | gitignore mlruns/+mlflow.db; MANIFEST regen wired into `complete` (17->23/29); baseline 24 failed / 1552 passed (pre-existing, see P0_BASELINE.md) |
-| P1 PII | - | - | not started | - | highest risk |
+| P1 PII | fix/core-p1-pii | (pending) | done (code) | tests/regressions/test_core_p1_pii.py (20) + test_pii_redaction full-set | masking parity (SHA-256 all 3 engines, new sensitive_masking module, line-126 fix); packet+verifier redaction; sensitivity-shape unified (validator+medallion read flat is_sensitive); PCI single-sourced from phi_gate; phi_gate stale fails closed; backend phi-gate fail-closed. Net: 24->23 baseline failures (PreviewRowCap now passes; no new failures) |
 | P2 gates | - | - | not started | - | |
 | P3 injection | - | - | not started | - | |
 | P4 concurrency | - | - | not started | - | |

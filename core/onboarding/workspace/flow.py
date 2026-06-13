@@ -56,6 +56,7 @@ from core.onboarding.workspace.validation import WorkspaceArtifactValidator
 from core.onboarding.workspace.workflow import MODES as ORCHESTRATION_MODES
 from core.onboarding.workspace.workflow import WorkspaceWorkflowOrchestrator
 from core.presentation.console_tables import render_markdown_table, render_query_result_table
+from core.onboarding.kpi.pii_redaction import redact_table_rows, workspace_redaction_patterns
 from core.storage.workspace_layout import WorkspaceLayout
 from tools.artifact_inventory import (
     gitignore_patterns as artifact_gitignore_patterns,
@@ -1358,7 +1359,20 @@ class WorkspaceFlow:
                     view = _result_view(conn, kpi_id)
                     if view:
                         cursor = conn.execute(f'SELECT * FROM "{view}" LIMIT {int(preview_rows)}')
-                        preview_md = render_query_result_table(cursor)
+                        # Redact PHI/PCI before rendering the canonical result packet —
+                        # this is the highest-traffic display surface (CLAUDE.md says
+                        # forward current.md verbatim) and previously emitted raw rows.
+                        # Ref: core-audit ob-kpi-d.md.
+                        _cols = [str(d[0]) for d in cursor.description or []]
+                        _rows = cursor.fetchall()
+                        _patterns = workspace_redaction_patterns(self.layout.project_root)
+                        _rows = redact_table_rows(_cols, _rows, patterns=_patterns)
+                        if not _cols:
+                            preview_md = "(query returned no tabular result)"
+                        elif not _rows:
+                            preview_md = render_markdown_table(_cols, []) + "\n\n(no rows)"
+                        else:
+                            preview_md = render_markdown_table(_cols, _rows)
                         # Append truncation note when total rows exceed the preview cap.
                         try:
                             total_rows = conn.execute(

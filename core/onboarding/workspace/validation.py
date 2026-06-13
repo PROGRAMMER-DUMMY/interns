@@ -1184,8 +1184,18 @@ def _looks_like_local_absolute_path(value: str) -> bool:
 
 
 def _collect_pii_columns_from_sc(sc: dict[str, Any]) -> set[str]:
-    """Return a set of 'dataset.column' strings marked pii=True in semantic_contract."""
+    """Return a set of 'dataset.column' (or bare 'column') strings marked
+    sensitive in semantic_contract, across BOTH shapes the platform uses.
+
+    The onboarder writes the FLAT shape ``columns.<name>.is_sensitive`` (no
+    ``datasets`` key); other producers/readers used the NESTED
+    ``datasets[].columns[].pii`` / ``datasets[].pii_columns`` shape. Reading only
+    the nested shape made the anti-PII-in-Silver invariant collect zero columns
+    on a real onboarded workspace (it could never fire). Read both.
+    Ref: core-audit ob-workspace-b.md.
+    """
     pii: set[str] = set()
+    # Nested shape: datasets[].columns[].pii / datasets[].pii_columns
     for ds in sc.get("datasets", []) or []:
         ds_name = ds.get("name", ds.get("path", "unknown"))
         for col, meta in (ds.get("columns") or {}).items():
@@ -1193,6 +1203,12 @@ def _collect_pii_columns_from_sc(sc: dict[str, Any]) -> set[str]:
                 pii.add(f"{ds_name}.{col}")
         for col in ds.get("pii_columns", []) or []:
             pii.add(f"{ds_name}.{col}")
+    # Flat shape the onboarder actually writes: columns.<name>.is_sensitive
+    flat_columns = sc.get("columns")
+    if isinstance(flat_columns, dict):
+        for col, meta in flat_columns.items():
+            if isinstance(meta, dict) and (meta.get("is_sensitive") or meta.get("pii")):
+                pii.add(str(col))
     return pii
 
 

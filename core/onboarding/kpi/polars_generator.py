@@ -17,6 +17,11 @@ from typing import Any
 
 from core.onboarding.kpi.feature_resolver import READY_STATES
 from core.onboarding.kpi.kpi_intent import KPIIntent, parse_intent
+from core.onboarding.kpi.sensitive_masking import (
+    POLARS_MASK_HELPER,
+    load_sensitive_columns,
+    polars_mask_helper_lines,
+)
 from core.onboarding.relationships.contracts import (
     find_executable_relationship,
     load_relationship_contracts,
@@ -132,10 +137,15 @@ class PolarsKPIGenerator:
         # result grains diverge (sql age_band vs polars exact age).
         band_width = self._grain_band_width(kpi_id)
 
+        # Sensitive columns to mask (SHA-256 hex) so this engine never writes raw
+        # PHI/PCI to Silver/Gold and stays parity-consistent with SQL. Single-
+        # sourced in sensitive_masking. Ref: core-audit ob-kpi-b.md (T2).
+        sensitive_cols = load_sensitive_columns(self.layout)
+
         code = self._emit_script(
             kpi, kpi_id, intent, required_sources, source_aliases, base_source,
             relationships, needed_by_source=needed_by_source, join_keys=join_keys,
-            band_width=band_width,
+            band_width=band_width, sensitive_cols=sensitive_cols,
         )
         suffix = "" if self.dialect == "local" else f"_{self.dialect}"
         out = self.layout.solutions_dir / f"{kpi_id}_polars{suffix}.py"
@@ -178,9 +188,11 @@ class PolarsKPIGenerator:
         needed_by_source: dict[str, set[str]] | None = None,
         join_keys: dict[str, tuple[str, str]] | None = None,
         band_width: int | None = None,
+        sensitive_cols: set[str] | None = None,
     ) -> str:
         needed_by_source = needed_by_source or {}
         join_keys = join_keys or {}
+        sensitive_cols = sensitive_cols or set()
         lines: list[str] = [
             "# Polars KPI script — generated from feature mappings + shared KPI intent.",
             f"# KPI: {kpi.get('name', kpi_id)}",
@@ -189,6 +201,7 @@ class PolarsKPIGenerator:
             f"# Generated: {date.today().isoformat()}",
             "# Streaming-capable via lazy API. Paths are anchored on __file__ (portable).",
             "",
+            "import hashlib",
             "import sys",
             "import polars as pl",
             "from datetime import date",
@@ -222,6 +235,10 @@ class PolarsKPIGenerator:
             "    )",
             "",
         ]
+        # SHA-256 masking helper (matches DuckDB/Spark), used to scrub sensitive
+        # columns before Silver/Gold writes. Emitted unconditionally; harmless if
+        # the KPI has no sensitive columns.
+        lines.extend(polars_mask_helper_lines())
 
         lines.append("# ── Source readers (lazy) ─────────────────────────────────────────────────")
         for source in required_sources:
@@ -277,6 +294,21 @@ class PolarsKPIGenerator:
             lines.append("# ── Keep only the columns this KPI needs ─────────────────────────────────")
             cols = ", ".join(f'"{c}"' for c in needed)
             lines.append(f"features = features.select([{cols}])")
+            lines.append("")
+
+        # Mask sensitive columns BEFORE the result is computed (mirrors the SQL
+        # path, which masks in the _features view that the result view reads), so
+        # grouping/aggregation operate on the masked hex exactly like SQL.
+        frame_cols = needed if needed else sorted(
+            set().union(*needed_by_source.values()) if needed_by_source else set()
+        )
+        sensitive_present = [
+            c for c in frame_cols if isinstance(c, str) and c.lower() in sensitive_cols
+        ]
+        if sensitive_present:
+            lines.append("# ── Mask sensitive columns (SHA-256, parity-consistent with SQL) ──────────")
+            mask_exprs = ", ".join(f'{POLARS_MASK_HELPER}("{c}")' for c in sensitive_present)
+            lines.append(f"features = features.with_columns([{mask_exprs}])")
             lines.append("")
 
         lines.append("# ── KPI result ───────────────────────────────────────────────────────────")

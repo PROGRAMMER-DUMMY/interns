@@ -7,7 +7,14 @@ used to rewrite SQL, mutate upstream profile artifacts, or alter the values
 that the executor sends to the warehouse. SQL execution always operates on
 the unredacted source data; only the rendered surface is redacted.
 
-Dependency-free by design: stdlib only, no imports from ``core.*``.
+The PCI cardholder-data patterns are NOT hand-copied here — they are derived at
+import time from the single source of truth, ``phi_gate.PCI_IDENTIFIER_PATTERNS``,
+so the enforced upstream gate and this display-time redactor can never drift
+(previously they did: phi_gate added ``cid``/``magstripe``/``exp_month``/``swift``
+patterns this copy lacked, so those columns were gated upstream but rendered raw).
+The only ``core.*`` dependency is that pattern import; ``phi_gate`` itself depends
+only on ``core.failures`` at module load, so importing it here is cheap and
+acyclic.
 """
 
 from __future__ import annotations
@@ -15,8 +22,18 @@ from __future__ import annotations
 import re
 from typing import Pattern
 
+from core.governance.phi_gate import PCI_IDENTIFIER_PATTERNS
 
-DEFAULT_PII_COLUMN_PATTERNS: tuple[str, ...] = (
+# Flatten the canonical PCI pattern map (category -> patterns) into the tuple
+# shape this module matches against. Sorted for a stable, deterministic order.
+_PCI_COLUMN_PATTERNS: tuple[str, ...] = tuple(
+    sorted({p for patterns in PCI_IDENTIFIER_PATTERNS.values() for p in patterns})
+)
+
+# Display-only HIPAA-ish identifier patterns (name/contact/DOB/address). These
+# scrub the most common person-identifier columns on rendered surfaces. The PCI
+# subset below is single-sourced from phi_gate and appended.
+_DISPLAY_HIPAA_PATTERNS: tuple[str, ...] = (
     # Case-insensitive regex patterns matched against column names.
     # Anchored with ^ and $ so only exact column names are redacted —
     # ``Patient_FirstName`` is intentionally NOT matched by ``^first_name$``.
@@ -35,25 +52,9 @@ DEFAULT_PII_COLUMN_PATTERNS: tuple[str, ...] = (
     r"^dob$",
     r"^date[_ ]?of[_ ]?birth$",
     r"^birth[_ ]?date$",
-    # PCI cardholder data and adjacent bank-account identifiers. Mirrors
-    # PCI_IDENTIFIER_PATTERNS in core.governance.phi_gate (kept in sync by
-    # tests; duplicated here because this module is dependency-free).
-    r"^pan$",
-    r"^primary[_ ]?account[_ ]?number$",
-    r"^(credit[_ ]?|debit[_ ]?)?card[_ ]?(no|num|number)$",
-    r"^cc[_ ]?(no|num|number)$",
-    r"^credit[_ ]?card$",
-    r"^cvv2?$",
-    r"^cvc2?$",
-    r"^card[_ ]?verification([_ ]?(code|value|no|number))?$",
-    r"^security[_ ]?code$",
-    r"^card[_ ]?expir(y|ation)([_ ]?(date|month|year))?$",
-    r"^card[_ ]?holder([_ ]?name)?$",
-    r"^track[12]?[_ ]?data$",
-    r"^iban$",
-    r"^routing[_ ]?(no|num|number)$",
-    r"^bank[_ ]?account([_ ]?(no|num|number))?$",
 )
+
+DEFAULT_PII_COLUMN_PATTERNS: tuple[str, ...] = _DISPLAY_HIPAA_PATTERNS + _PCI_COLUMN_PATTERNS
 
 REDACTION_PLACEHOLDER: str = "<redacted-pii>"
 
@@ -196,6 +197,59 @@ def redact_rows(
     ]
 
 
+def workspace_redaction_patterns(workspace_path: object) -> tuple[str, ...]:
+    """Effective display-redaction patterns for a workspace: the built-in
+    defaults PLUS any user-authored ``data_policy.json`` declared patterns.
+
+    The data policy can only ADD coverage on rendered surfaces — its allowlist
+    never narrows what is hidden when displaying values. Loading the policy must
+    never break a render, so failures fall back to the defaults.
+    """
+    if workspace_path is None:
+        return DEFAULT_PII_COLUMN_PATTERNS
+    try:
+        from core.governance.data_policy import (
+            load_workspace_data_policy,
+            policy_redaction_patterns,
+        )
+
+        extras = policy_redaction_patterns(load_workspace_data_policy(workspace_path))
+    except Exception:
+        extras = ()
+    if not extras:
+        return DEFAULT_PII_COLUMN_PATTERNS
+    return DEFAULT_PII_COLUMN_PATTERNS + tuple(extras)
+
+
+def redact_table_rows(
+    columns: list,
+    rows: list,
+    *,
+    patterns: tuple[str, ...] = DEFAULT_PII_COLUMN_PATTERNS,
+    placeholder: str = REDACTION_PLACEHOLDER,
+) -> list[list]:
+    """Redact row-major rows (tuples/lists) by column for tabular DISPLAY.
+
+    For each column index: PII columns -> ``placeholder`` (None preserved), age
+    columns -> Safe-Harbor bucketed. Non-sensitive columns pass through. Returns
+    new row lists; never mutates the input. Used by the result packet and the
+    verifier sample tables so the highest-traffic display surfaces redact too.
+    """
+    col_names = [str(c) for c in columns]
+    pii_flags = [is_pii_column(c, patterns=patterns) for c in col_names]
+    age_flags = [is_age_column(c) for c in col_names]
+    out: list[list] = []
+    for row in rows:
+        new_row = list(row)
+        for idx in range(min(len(new_row), len(col_names))):
+            if pii_flags[idx]:
+                new_row[idx] = None if new_row[idx] is None else placeholder
+            elif age_flags[idx]:
+                new_row[idx] = bucket_age_value(new_row[idx])
+        out.append(new_row)
+    return out
+
+
 __all__ = [
     "AGE_OVERFLOW_LABEL",
     "AGE_SAFE_HARBOR_MAX",
@@ -208,4 +262,6 @@ __all__ = [
     "redact_row_dict",
     "redact_rows",
     "redact_sample_values",
+    "redact_table_rows",
+    "workspace_redaction_patterns",
 ]

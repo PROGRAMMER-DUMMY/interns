@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from core.onboarding.kpi.feature_resolver import READY_STATES
+from core.onboarding.kpi.sensitive_masking import (
+    is_feature_sensitive,
+    load_sensitive_columns,
+    mask_sql_expr,
+)
 from core.onboarding.relationships.base_source_selector import (
     BASE_SOURCE_DECISIONS_KEY,
     select_base_source,
@@ -102,32 +107,23 @@ class DuckDBKPISQLGenerator:
             relationships,
         )
         select_items = []
-        # Load sensitive columns from semantic contract
-        contract_path = self.layout.contracts_dir / "semantic_contract.json"
-        sensitive_cols = set()
-        if contract_path.exists():
-            try:
-                contract_data = json.loads(contract_path.read_text(encoding="utf-8"))
-                columns = contract_data.get("columns", {})
-                for col_name, col_meta in columns.items():
-                    if col_meta.get("is_sensitive"):
-                        sensitive_cols.add(col_name.lower())
-            except Exception:
-                pass
+        # Sensitive-column masking is single-sourced in sensitive_masking so all
+        # three engines agree on WHICH columns are sensitive and mask IDENTICALLY
+        # (SHA-256 hex). Ref: core-audit ob-kpi-b.md (T2).
+        sensitive_cols = load_sensitive_columns(self.layout)
 
         for feature in kpi.get("features", []):
             column = self._feature_expression(feature, source_aliases, profile_map)
             if column:
                 res_type = feature.get("resolution_type")
                 feat_name = feature['feature']
-                
-                # Apply masking if column is sensitive
+
+                # Mask when the feature's SOURCE COLUMN metadata says it is
+                # sensitive — not by string-splitting the rendered expression
+                # (which mis-detected derived formulas). Ref: ob-kpi-b.md:126.
                 expr = column
-                if feat_name.lower() in sensitive_cols or column.split('.')[-1].strip('"').lower() in sensitive_cols:
-                    if self.dialect == "duckdb":
-                        expr = f"hash({column})" # Simple hash for DuckDB
-                    elif self.dialect == "databricks":
-                        expr = f"sha2({column}, 256)"
+                if is_feature_sensitive(feature, sensitive_cols):
+                    expr = mask_sql_expr(column, self.dialect)
 
                 if res_type == "derived_formula":
                     select_items.append(

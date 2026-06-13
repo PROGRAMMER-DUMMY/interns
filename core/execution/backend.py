@@ -584,8 +584,26 @@ def _phi_gate_failure_for_task(task: dict, cfg):
             return None
         layout = WorkspaceLayout(project_root=ws)
         return enforce_remote_sensitive_gate(layout, cfg, operation="remote_execute")
-    except Exception:
-        return None
+    except Exception as exc:
+        # A security gate must FAIL CLOSED. If the PHI/PCI gate itself errors
+        # (bad import, malformed profile, layout fault) we cannot prove the
+        # workspace is safe to upload, so we refuse the remote run rather than
+        # let identifiable data through on a swallowed exception. Log the error
+        # type/message only (phi_gate never reads raw values, so no PHI leaks
+        # here). Ref: core-audit execution.md (fail-open PHI gate).
+        print(
+            f"[phi_gate] gate evaluation failed ({type(exc).__name__}: {exc}); "
+            "failing closed and denying remote execution",
+            file=sys.stderr,
+        )
+        return remote_denied(
+            "remote_execute_phi_gate_error",
+            "PHI/PCI gate could not be evaluated; remote execution denied (fail-closed).",
+            next_command=(
+                "Re-profile the workspace (uv run onboard-workspace) and re-run; "
+                "the gate must succeed before remote upload is allowed."
+            ),
+        )
 
 
 def _resource_decision_for_task(task: dict) -> ResourceDecision | None:

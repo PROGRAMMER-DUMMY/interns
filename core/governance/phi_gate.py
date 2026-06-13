@@ -149,6 +149,11 @@ class PHIAssessment:
     tier: str  # "none" | "phi"
     findings: list[PHIFinding] = field(default_factory=list)
     datasets: list[str] = field(default_factory=list)
+    # True when the profile_index the assessment was built from is stale
+    # relative to the underlying dataset files (a dataset changed after it was
+    # profiled). A stale profile cannot be trusted to list every sensitive
+    # column, so remote gates fail closed on it. Ref: core-audit governance.md.
+    stale: bool = False
 
     @property
     def is_phi(self) -> bool:
@@ -158,6 +163,7 @@ class PHIAssessment:
         return {
             "tier": self.tier,
             "is_phi": self.is_phi,
+            "stale": self.stale,
             "finding_count": len(self.findings),
             "datasets": sorted(self.datasets),
             "findings": [f.to_dict() for f in self.findings],
@@ -222,6 +228,83 @@ def _workspace_root(layout: Any) -> Any:
     return getattr(layout, "project_root", None)
 
 
+# Profile mtime can legitimately predate the index write by a fraction of a
+# second (profiling reads the dataset, then writes the index). Require a real
+# gap before declaring staleness so normal runs are never flagged.
+_FRESHNESS_TOLERANCE_SECONDS: float = 2.0
+_DIR_SCAN_FILE_LIMIT: int = 5000
+
+
+def _newest_mtime_in_dir(path: Path) -> float | None:
+    """Return the newest file mtime under ``path`` (bounded scan), or None."""
+    newest: float | None = None
+    count = 0
+    try:
+        for child in path.rglob("*"):
+            if count >= _DIR_SCAN_FILE_LIMIT:
+                break
+            try:
+                if child.is_file():
+                    count += 1
+                    mtime = child.stat().st_mtime
+                    if newest is None or mtime > newest:
+                        newest = mtime
+            except OSError:
+                continue
+    except OSError:
+        return None
+    return newest
+
+
+def _profile_is_stale(layout: Any, profile_index: dict[str, Any]) -> bool:
+    """True if any profiled dataset changed after ``profile_index.json`` was written.
+
+    Compares each profiled dataset's current mtime/size against the index file's
+    own mtime. A dataset modified after profiling means the cached schema (the
+    only thing the PHI gate reads) may be missing a newly-added identifier
+    column — so the gate must not trust it. Detects modified/resized profiled
+    files; wholesale *new* datasets are caught by the onboarder's input
+    fingerprint (re-profiling), not here. Never raises.
+    """
+    try:
+        # Resolve the index path the same way _load_profile_index does, so any
+        # layout (incl. lightweight stubs that expose only profiles_dir) works.
+        index_path = layout.profiles_dir / "profile_index.json"
+        index_mtime = index_path.stat().st_mtime
+    except (OSError, AttributeError):
+        return False
+    threshold = index_mtime + _FRESHNESS_TOLERANCE_SECONDS
+    for profile in profile_index.get("profiles") or []:
+        if not isinstance(profile, dict):
+            continue
+        raw = profile.get("path") or profile.get("dataset")
+        if not raw:
+            continue
+        path = Path(str(raw))
+        try:
+            is_dir = path.is_dir()
+        except OSError:
+            continue
+        if is_dir:
+            newest = _newest_mtime_in_dir(path)
+            if newest is not None and newest > threshold:
+                return True
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            # Recorded path is gone / unstatable: a removed file is not an
+            # upload risk, and an unportable absolute path would false-positive,
+            # so skip rather than over-block.
+            continue
+        if stat.st_mtime > threshold:
+            return True
+        recorded_size = profile.get("size_bytes")
+        if isinstance(recorded_size, int) and recorded_size >= 0 and stat.st_size != recorded_size:
+            return True
+    return False
+
+
 def _apply_data_policy(
     findings: list[PHIFinding],
     profile_index: dict[str, Any],
@@ -276,6 +359,7 @@ def assess_workspace_phi(layout: Any) -> PHIAssessment:
     profile_index = _load_profile_index(layout)
     if profile_index is None:
         return PHIAssessment(tier="none")
+    stale = _profile_is_stale(layout, profile_index)
     findings = detect_phi_columns(profile_index)
     findings, tier = _apply_data_policy(
         findings, profile_index, layout, base_tier_when_found="phi"
@@ -285,6 +369,7 @@ def assess_workspace_phi(layout: Any) -> PHIAssessment:
         tier=tier,
         findings=findings,
         datasets=datasets,
+        stale=stale,
     )
 
 
@@ -297,6 +382,7 @@ def assess_workspace_pci(layout: Any) -> PHIAssessment:
     profile_index = _load_profile_index(layout)
     if profile_index is None:
         return PHIAssessment(tier="none")
+    stale = _profile_is_stale(layout, profile_index)
     findings = detect_pci_columns(profile_index)
     # The workspace data policy's allowlist applies (owner-reviewed false
     # positives); custom policy categories do NOT create PCI findings — they
@@ -313,6 +399,7 @@ def assess_workspace_pci(layout: Any) -> PHIAssessment:
         tier="pci" if findings else "none",
         findings=findings,
         datasets=datasets,
+        stale=stale,
     )
 
 
@@ -356,6 +443,24 @@ def enforce_remote_phi_gate(
     Determination) and BAA-covered targets are allowed.
     """
     assessment = assess_workspace_phi(layout)
+    # Fail closed on a stale profile: we cannot certify the column list is
+    # complete, so a newly-added PHI column could otherwise slip through to a
+    # non-covered target. A covered target / de-identified data are still fine.
+    if assessment.stale and not deidentified and not databricks_phi_covered(cfg):
+        return remote_denied(
+            f"phi_gate.{operation}.stale_profile",
+            (
+                "PHI gate: refused — the workspace profile is STALE (a dataset "
+                "changed after it was profiled), so the gate cannot certify that "
+                "every PHI column is known, and the configured Databricks target "
+                "is NOT HIPAA-covered. Refusing rather than risk uploading an "
+                "unprofiled identifier column."
+            ),
+            next_command=(
+                "Re-profile the workspace (uv run onboard-workspace --workspace "
+                "<ws>) so the profile matches the data, then re-run."
+            ),
+        )
     if not assessment.is_phi:
         return None
     if deidentified:
@@ -399,6 +504,22 @@ def enforce_remote_pci_gate(
     data is not de-identified (tokenized/truncated per PCI DSS).
     """
     assessment = assess_workspace_pci(layout)
+    # Fail closed on a stale profile (see enforce_remote_phi_gate): a changed
+    # dataset may have added a cardholder-data column the cached profile misses.
+    if assessment.stale and not deidentified and not databricks_pci_covered(cfg):
+        return remote_denied(
+            f"pci_gate.{operation}.stale_profile",
+            (
+                "PCI gate: refused — the workspace profile is STALE (a dataset "
+                "changed after it was profiled), so the gate cannot certify that "
+                "every cardholder-data column is known, and the configured "
+                "Databricks target is NOT an attested PCI DSS environment."
+            ),
+            next_command=(
+                "Re-profile the workspace (uv run onboard-workspace --workspace "
+                "<ws>) so the profile matches the data, then re-run."
+            ),
+        )
     if assessment.tier != "pci":
         return None
     if deidentified:
