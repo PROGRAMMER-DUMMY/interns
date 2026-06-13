@@ -12,6 +12,7 @@ from pathlib import Path
 from core.medallion.manifest import BronzeTable, SilverTable, GoldTable
 from core.medallion.pii import pii_hash_spark_expr
 from core.medallion.silver_contract import SilverContract
+from core.sql_safety import assert_safe_identifier, validate_expression_safe
 
 
 def uc_schema_for(workspace: str, layer: str) -> str:
@@ -80,9 +81,15 @@ def emit_silver_spark(
     bronze_schema = uc_schema_for(workspace_name, "bronze")
     target = f"{silver_schema}.{table.name}"
 
-    # PK merge condition
+    # PK merge condition. Validate every PK name as a bare identifier so a
+    # malformed/hostile contract cannot inject SQL into the emitted MERGE
+    # (T4). Valid names pass through unchanged; bad names fail the build.
+    pk_cols = [
+        assert_safe_identifier(col, context="silver PK column")
+        for col in table.primary_key
+    ]
     pk_condition = " AND ".join(
-        f"tgt.{col} = src.{col}" for col in table.primary_key
+        f"tgt.{col} = src.{col}" for col in pk_cols
     ) or "tgt._load_ts = src._load_ts"
 
     # Source tables
@@ -98,11 +105,22 @@ def emit_silver_spark(
         for dname, dc in tc.derived_columns.items():
             spark_expr = dc.formula_templates.spark_sql or ""
             if spark_expr:
-                derived_lines += f'\nsource_df = source_df.withColumn("{dname}", F.expr("{spark_expr}"))'
+                # Validate the derived column name as an identifier and the
+                # workspace-owned formula body for injection markers, then embed
+                # the body via repr() so any embedded quote/backslash cannot
+                # break out of the F.expr(...) string (T4).
+                assert_safe_identifier(dname, context="derived column name")
+                validate_expression_safe(spark_expr, context="derived spark_sql formula")
+                derived_lines += (
+                    f'\nsource_df = source_df.withColumn("{dname}", F.expr({spark_expr!r}))'
+                )
 
     pii_lines = ""
     if tc:
         for col in tc.pii_hash_columns:
+            # Validate the column name; the hash expression is generated from it
+            # by pii_hash_spark_expr, so a validated name yields a safe expr.
+            assert_safe_identifier(col, context="pii hash column")
             pii_lines += (
                 f'\nsource_df = source_df.withColumn('
                 f'"{col}", F.expr("{pii_hash_spark_expr(col)}")'

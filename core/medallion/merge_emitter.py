@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from core.sql_safety import assert_safe_identifier
+
 
 def emit_silver_merge(
     table_name: str,
@@ -37,8 +39,16 @@ def emit_silver_merge(
             + p0_sql
         )
 
-    pk_tuple = ", ".join(primary_key)
-    fqn = f"silver.{table_name}"
+    # Validate the table name + every PK column as bare identifiers so a hostile
+    # contract cannot inject SQL into the emitted DELETE/INSERT MERGE (T4).
+    # Valid names pass through unchanged; bad names fail the build.
+    safe_table = assert_safe_identifier(table_name, context="silver merge table")
+    pk_cols = [
+        assert_safe_identifier(col, context="silver merge PK column")
+        for col in primary_key
+    ]
+    pk_tuple = ", ".join(pk_cols)
+    fqn = f"silver.{safe_table}"
 
     return (
         f"-- P1 MERGE: create {fqn} schema on first run\n"

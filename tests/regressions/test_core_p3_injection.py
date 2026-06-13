@@ -74,5 +74,58 @@ class WriteDeltaParameterizationTests(unittest.TestCase):
         self.assertIn("assert_safe_identifier", src)
 
 
+# ── P3b: medallion emitters validate identifiers / expressions ───────────────
+class MedallionEmitterValidationTests(unittest.TestCase):
+    def _silver_table(self, pk):
+        from core.medallion.manifest import SilverTable
+
+        return SilverTable(
+            name="patients",
+            derived_from=["bronze.patients__hospital_a"],
+            primary_key=pk,
+        )
+
+    def test_silver_spark_rejects_hostile_pk(self) -> None:
+        import tempfile
+
+        from core.medallion.delta_emitter import emit_silver_spark
+        from core.medallion.silver_contract import SilverContract
+        from core.sql_safety import UnsafeIdentifierError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            table = self._silver_table(['PatientID); DROP TABLE x; --'])
+            contract = SilverContract(workspace="demo", tables={})
+            with self.assertRaises(UnsafeIdentifierError):
+                emit_silver_spark(table, Path(tmp), "demo-workspace", contract)
+
+    def test_silver_spark_accepts_valid_pk(self) -> None:
+        import tempfile
+
+        from core.medallion.delta_emitter import emit_silver_spark
+        from core.medallion.silver_contract import SilverContract
+
+        with tempfile.TemporaryDirectory() as tmp:
+            table = self._silver_table(["PatientID"])
+            contract = SilverContract(workspace="demo", tables={})
+            path = emit_silver_spark(table, Path(tmp), "demo-workspace", contract)
+            self.assertIn("tgt.PatientID = src.PatientID", path.read_text(encoding="utf-8"))
+
+    def test_merge_emitter_rejects_hostile_pk(self) -> None:
+        from core.medallion.merge_emitter import emit_silver_merge
+        from core.sql_safety import UnsafeIdentifierError
+
+        p0 = "CREATE OR REPLACE TABLE silver.x AS SELECT 1 AS a;"
+        with self.assertRaises(UnsafeIdentifierError):
+            emit_silver_merge("x", ['a) IN (SELECT 1); DROP TABLE y; --'], p0)
+
+    def test_merge_emitter_accepts_valid(self) -> None:
+        from core.medallion.merge_emitter import emit_silver_merge
+
+        p0 = "CREATE OR REPLACE TABLE silver.patients AS SELECT 1 AS PatientID;"
+        out = emit_silver_merge("patients", ["PatientID"], p0)
+        self.assertIn("DELETE FROM silver.patients", out)
+        self.assertIn("(PatientID) IN", out)
+
+
 if __name__ == "__main__":
     unittest.main()
