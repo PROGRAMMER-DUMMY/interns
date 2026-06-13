@@ -86,14 +86,25 @@ class MetadataStoreTests(unittest.TestCase):
                 else:
                     os.environ["AUTORESEARCH_MONGO_URI"] = old_uri
 
-    def test_build_metadata_store_defaults_to_delta(self):
+    def test_build_metadata_store_defaults_to_local_and_delta_is_opt_in(self):
+        # Audited contract (storage.md): default is LOCAL (Delta emits hundreds of
+        # KB per workspace and is pure overhead unless Databricks/Spark is the
+        # downstream). Delta is opt-in via delta_enabled / metadata_backend.
         with tempfile.TemporaryDirectory() as tmp:
             old_backend = os.environ.get("AUTORESEARCH_METADATA_BACKEND")
             try:
                 os.environ.pop("AUTORESEARCH_METADATA_BACKEND", None)
                 layout = WorkspaceLayout(project_root=Path(tmp) / "workspaces" / "demo")
                 layout.ensure_runtime_dirs()
+                # No env, no settings -> local default.
+                self.assertIsInstance(build_metadata_store(layout), LocalMetadataStore)
+                # Explicit delta env -> Delta backend.
+                os.environ["AUTORESEARCH_METADATA_BACKEND"] = "delta"
                 self.assertIsInstance(build_metadata_store(layout), DeltaMetadataStore)
+                # Unknown backend fails loud (no silent fallback to Delta).
+                os.environ["AUTORESEARCH_METADATA_BACKEND"] = "bogus"
+                with self.assertRaises(ValueError):
+                    build_metadata_store(layout)
             finally:
                 if old_backend is None:
                     os.environ.pop("AUTORESEARCH_METADATA_BACKEND", None)

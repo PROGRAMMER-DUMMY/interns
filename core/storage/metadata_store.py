@@ -246,7 +246,11 @@ def build_metadata_store(layout, *, repo_root: str | Path | None = None) -> Meta
     if backend == "delta":
         return DeltaMetadataStore(layout.state_dir / "delta_metadata", local_fallback=local_store)
     if backend != "mongo":
-        return DeltaMetadataStore(layout.state_dir / "delta_metadata", local_fallback=local_store)
+        # Fail loud on an unknown backend string rather than silently becoming
+        # Delta (the old dead branch). Ref: core-audit storage.md.
+        raise ValueError(
+            f"unknown metadata backend {backend!r}; expected local | delta | mongo"
+        )
     uri = os.environ.get("AUTORESEARCH_MONGO_URI", "").strip()
     if not uri:
         return DeltaMetadataStore(layout.state_dir / "delta_metadata", local_fallback=local_store)
