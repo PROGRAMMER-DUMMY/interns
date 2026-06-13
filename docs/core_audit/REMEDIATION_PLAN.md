@@ -201,10 +201,20 @@ independently shippable; P0 first.
 
 ---
 
+## Resolved open decisions (confirmed by user 2026-06-13)
+1. **gitignore mlruns/ + mlflow.db** -> YES, ignore both. (`mlflow.db` already matched by `*.db`;
+   explicit MLflow section added.) [DONE in P0]
+2. **LLM provider (P7 agents)** -> Make routing **honor `main_agent`** and use the orchestrating
+   CLI agent's LLM (per "LLM via CLI agent, not SDK"); do **not** build a direct Claude SDK engine.
+3. **PySpark parity (P5/T3)** -> **Stop recommending** pyspark/hybrid until certified:
+   `engine_recommender` must not route to pyspark/hybrid, and the parity badge only appears for
+   engines actually executed. (Smaller P5 footprint — no live PySpark wiring.)
+4. **flow.py decomposition (P8)** -> **Defer** until P1-P7 are green.
+
 ## Progress ledger (update as phases land)
 | Phase | Branch | PR | Status | Tests added | Notes |
 | --- | --- | --- | --- | --- | --- |
-| P0 hygiene | - | - | not started | - | gitignore decision pending user |
+| P0 hygiene | fix/core-p0-hygiene | (pending) | done (code) | tests/regressions/ scaffold + P0_BASELINE.md | gitignore mlruns/+mlflow.db; MANIFEST regen wired into `complete` (17->23/29); baseline 24 failed / 1552 passed (pre-existing, see P0_BASELINE.md) |
 | P1 PII | - | - | not started | - | highest risk |
 | P2 gates | - | - | not started | - | |
 | P3 injection | - | - | not started | - | |

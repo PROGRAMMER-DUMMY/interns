@@ -1025,6 +1025,21 @@ class WorkspaceFlow:
         gate_provenance = _collect_gate_provenance(state, self.layout)
         agent_gate_count = sum(1 for g in gate_provenance if g.get("source") != "human")
         completion_headline = _gate_provenance_headline(gate_provenance)
+        # P0 (core-audit): regenerate the artifact MANIFEST on completion so its
+        # presence counts never lag the actual run. The manifest previously went
+        # stale (claimed "Present 17/29" after kpi_results already existed) because
+        # nothing refreshed it after onboarding. Non-fatal: a manifest write
+        # failure is recorded but must never block a finished workflow.
+        try:
+            manifest_paths = write_artifact_manifest(self.layout)
+            self._record_step(state, "write_artifact_manifest", "ok", manifest_paths)
+        except Exception as exc:  # noqa: BLE001 - report, never block completion
+            self._record_step(
+                state,
+                "write_artifact_manifest",
+                "blocked",
+                {"error": type(exc).__name__, "detail": str(exc)},
+            )
         return self._save_panel(
             state,
             panel={
