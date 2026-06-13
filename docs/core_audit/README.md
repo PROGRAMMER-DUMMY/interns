@@ -33,11 +33,11 @@ Section-by-section deep read of `core/` (227 files, ~86.9k lines). Each package 
 | ob-kpi-B | onboarding/kpi (engines/parity/exec) | ~8 | ~4000 | **done** — BUG:9 NP:2 INT:1 MISS:1 DUP:1 | `ob-kpi-b.md` |
 | ob-kpi-C | onboarding/kpi (panels/blockers) | ~7 | ~5000 | **done** — BUG:4 NP:3 MISS:2 INT:2 DUP:1 DEAD:1 | `ob-kpi-c.md` |
 | ob-kpi-D | onboarding/kpi (results/proof/generation) | ~9 | ~5000 | **done** — BUG:7 NP:3 INT:2 DUP:2 | `ob-kpi-d.md` |
-| ob-workspace-A | onboarding/workspace/flow.py | 1 | 4068 | pending | `ob-workspace-a.md` |
-| ob-workspace-B | onboarding/workspace (onboarding/validation/bootstrap) | ~4 | ~4500 | pending | `ob-workspace-b.md` |
-| ob-workspace-C | onboarding/workspace (runner/idempotency/misc) | ~10 | ~3000 | pending | `ob-workspace-c.md` |
-| ob-harness | onboarding/harness | 11 | ~5000 | pending | `ob-harness.md` |
-| ob-data_model | onboarding/data_model | 5 | ~5000 | pending | `ob-data_model.md` |
+| ob-workspace-A | onboarding/workspace/flow.py | 1 | 4068 | **done** — BUG:3 INT:3 NP:4 MISS:1 DEAD:2 DUP:2 | `ob-workspace-a.md` |
+| ob-workspace-B | onboarding/workspace (onboarding/validation/bootstrap) | ~4 | ~4500 | **done** — BUG:4 NP:7 MISS:2 DUP:1 | `ob-workspace-b.md` |
+| ob-workspace-C | onboarding/workspace (runner/idempotency/misc) | ~10 | ~3000 | **done** — BUG:3 INT:3 NP:2 DUP:2 DEAD:2 MISS:1 | `ob-workspace-c.md` |
+| ob-harness | onboarding/harness | 11 | ~5000 | **done** — BUG:6 NP:5 INT:2 DUP:1 DEAD:1 | `ob-harness.md` |
+| ob-data_model | onboarding/data_model | 5 | ~5000 | **done** — INT:2 NP:4 BUG:2 DUP:1 DEAD:1 | `ob-data_model.md` |
 | ob-relationships | onboarding/relationships | 4 | ~3500 | **done** — BUG:7 INT:4 MISS:2 DUP:1 NP:1 | `ob-relationships.md` |
 | ob-documents | onboarding/documents | 5 | ~2500 | **done** — BUG:4 NP:5 INT:2 MISS:1 DUP:1 | `ob-documents.md` |
 | ob-databricks | onboarding/databricks | 4 | ~2500 | pending | `ob-databricks.md` |
