@@ -323,6 +323,83 @@ def _classify_columns(
     return dimensions, measures, date_cols
 
 
+# --- Drill-down model (Phase 2) -------------------------------------------
+# Clicking a category bar (e.g. an age band) re-renders the detail to show the
+# WITHIN-category breakdown by the OTHER dimensions, filtered to the clicked
+# value. The drill hierarchy is workspace-agnostic: the `by` axis is whatever
+# categorical the clicked panel charts, and the `into` dimensions are derived
+# from the result columns' dtypes (the other non-measure, non-date categoricals).
+# A spec MAY pin an explicit `drill: {"by": <col>, "into": [<col>, ...]}` to
+# override the default derivation; absent/invalid fields fall back to derivation.
+
+
+def _drill_into(rows: list[dict[str, Any]], by: str) -> list[str]:
+    """The OTHER categorical dimensions to break a drilled category down by.
+
+    Generic: every non-measure, non-date dimension except `by`, in result-column
+    order, that actually varies WITHIN the clicked slice's natural scope (kept
+    here as all dims; the caller filters rows then renders, so a degenerate
+    single-value dim simply renders one slice). No domain assumptions.
+    """
+    if not rows or not by:
+        return []
+    dims, _measures, _dates = _classify_columns(rows)
+    return [d for d in dims if d != by]
+
+
+def _drill_model(
+    spec: DashboardSpec, rows: list[dict[str, Any]], by: str = ""
+) -> dict[str, Any]:
+    """Resolve the drill hierarchy for a click on the `by` category.
+
+    Honors an optional `spec.config['drill'] = {"by": col, "into": [cols]}`:
+    a pinned `by` (when the caller doesn't pass one) and/or a pinned `into`
+    list are used when their columns exist in the live rows; otherwise both are
+    derived from the data shape. Returns ``{"by": str, "into": list[str]}`` with
+    `into` excluding `by` and any column absent from the rows.
+    """
+    present = set(rows[0].keys()) if rows else set()
+    cfg = spec.config.get("drill") if isinstance(spec.config, dict) else None
+    cfg = cfg if isinstance(cfg, dict) else {}
+    if not by:
+        cfg_by = str(cfg.get("by") or "")
+        by = cfg_by if cfg_by in present else ""
+        if not by:
+            dims, _m, _d = _classify_columns(rows)
+            by = dims[0] if dims else ""
+    into_cfg = [c for c in (cfg.get("into") or []) if c in present and c != by]
+    into = into_cfg if into_cfg else _drill_into(rows, by)
+    return {"by": by, "into": into}
+
+
+def _filter_rows_by_value(
+    rows: list[dict[str, Any]], column: str, value: Any
+) -> list[dict[str, Any]]:
+    """Rows whose `column` equals the clicked `value` (string-compared so a
+    numeric/category click matches regardless of dtype). Empty column or value
+    returns the rows unchanged."""
+    if not column:
+        return rows
+    target = str(value)
+    return [r for r in rows if str(r.get(column)) == target]
+
+
+def _drill_panels(by: str, value: Any, into: list[str]) -> list[dict[str, Any]]:
+    """Panel specs for a drilled category: one breakdown per `into` dimension,
+    of the measure within the clicked `value`. Chart type is a donut for a
+    low-cardinality composition (the within-category share reads at a glance);
+    `_figure_from_spec` aggregates and the donut sums to 100% over the filtered
+    rows. `y`/`y_format` are filled by the caller from the KPI's own spec."""
+    panels: list[dict[str, Any]] = []
+    for dim in into:
+        panels.append({
+            "chart_type": "donut",
+            "x": dim,
+            "title": f"By {dim.replace('_', ' ').title()}",
+        })
+    return panels
+
+
 # Chart types the Explore pane can build from a transient spec. Each maps to a
 # branch in `_figure_from_spec`. Kept generic (no domain assumptions) and ordered
 # from most-common to least so the dropdown reads sensibly.
@@ -928,6 +1005,10 @@ def _dash_index_string(t: DesignTokens) -> str:
         ".explore{flex:0 0 auto;border-top:1px solid var(--rule);padding:.4rem 1.2rem .8rem;background:var(--card);}"
         ".explore>summary{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.14em;color:var(--accent-deep);cursor:pointer;user-select:none;padding:.3rem 0;}"
         ".explore[open]{max-height:48vh;overflow:auto;}"
+        ".drill-bar{display:flex;align-items:center;gap:.7rem;margin:0 0 .5rem;}"
+        ".drill-back{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.12em;cursor:pointer;background:var(--card);color:var(--accent-deep);border:1px solid var(--rule);border-radius:6px;padding:.25rem .6rem;}"
+        ".drill-back:hover{border-color:var(--ink);}"
+        ".drill-crumb{font-family:var(--mono);font-size:.7rem;letter-spacing:.06em;color:var(--ink-soft);}"
     )
     return (
         "<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>"
@@ -986,6 +1067,9 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             "group": str(defn.get("group") or definition.get("group") or ""),
             "panels_cfg": panels_cfg,
             "panel_titles": [str(p.get("title") or f"View {i + 1}") for i, p in enumerate(panels_cfg)],
+            # Phase 2 drill: each panel's x column tells a click which dimension
+            # it is drilling BY (the clicked bar's category lives on that axis).
+            "panel_x": [str(p.get("x") or "") for p in panels_cfg],
         }
 
     ready_ids = sorted(meta, key=lambda k: (meta[k]["group"], k))  # group together
@@ -1071,14 +1155,61 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
                      html.H1(workspace.name.replace("-", " "))], className="mast"),
         html.Div(strip_children or [html.Div("No KPIs registered yet.", className="n")], className="strip"),
         controls,
+        # Phase 2 drill state: {kpi_id, by, value} when a category is drilled,
+        # else None. A click on a panel bar sets it; "← back" clears it.
+        dcc.Store(id="drill-store"),
         html.Div(id="kpi-detail", className="detail"),
         explore,
     ], id="app")
 
-    def _detail_children(kpi_id: str, visible_idxs: list[int] | None) -> Any:
+    def _drill_detail_children(kpi_id: str, by: str, value: Any) -> Any:
+        """Phase 2 sub-panel view: the WITHIN-category breakdown for a clicked
+        bar. Reuses `_figure_from_spec` on rows filtered to the clicked value,
+        one donut per OTHER dimension. "← back" clears the drill state."""
+        m = meta[kpi_id]
+        spec = m["spec"]
+        model = _drill_model(spec, m["rows"], by=by)
+        into = model["into"]
+        filtered = _filter_rows_by_value(m["rows"], by, value)
+        y_col = str(spec.config.get("y") or "")
+        y_format = str(spec.config.get("y_format") or "")
+        cells = []
+        for panel in _drill_panels(by, value, into):
+            p = dict(panel)
+            if y_col:
+                p["y"] = y_col
+            if y_format:
+                p["y_format"] = y_format
+            fig = _figure_from_spec(_panel_spec(spec, p), filtered, show_title=False)
+            cells.append(html.Div([
+                html.Div(p["title"], className="pt"),
+                dcc.Graph(figure=fig,
+                          config={"displaylogo": False, "responsive": True},
+                          style={"height": "300px"}),
+            ], className="pane"))
+        if not cells:
+            cells = [html.Div("No further breakdown for this category.", className="dm")]
+        by_label = by.replace("_", " ").title()
+        return [
+            html.Div([
+                html.Button("← back", id="drill-back", n_clicks=0, className="drill-back"),
+                html.Span(f"{by_label}: {value}", className="drill-crumb"),
+            ], className="drill-bar"),
+            html.H2(m["title"], className="dh"),
+            html.Div(f"Within {by_label} = {value}", className="dm"),
+            html.Div(cells, className="dgrid"),
+            _data_view_component(workspace, kpi_id, filtered),
+        ]
+
+    def _detail_children(
+        kpi_id: str, visible_idxs: list[int] | None, drill: dict[str, Any] | None = None
+    ) -> Any:
         m = meta.get(kpi_id)
         if not m:
             return html.Div("Select a KPI above.", className="dm")
+        # Drill active for THIS KPI -> render the within-category sub-panels.
+        if drill and drill.get("kpi_id") == kpi_id and drill.get("by"):
+            return _drill_detail_children(kpi_id, str(drill["by"]), drill.get("value"))
         n = len(m["panel_titles"])
         idxs = visible_idxs if visible_idxs is not None else list(range(n))
         cells = []
@@ -1088,6 +1219,8 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             cells.append(html.Div([
                 html.Div(m["panel_titles"][i], className="pt"),
                 dcc.Graph(figure=_panel_figure(kpi_id, i),  # built lazily + cached
+                          id={"role": "kpi-panel", "kpi_id": kpi_id, "idx": i,
+                              "x": m["panel_x"][i]},
                           config={"displaylogo": False, "responsive": True},
                           style={"height": "300px"}),
             ], className="pane"))
@@ -1126,9 +1259,59 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             Output("kpi-detail", "children"),
             Input("kpi-pick", "value"),
             Input("panel-pick", "value"),
+            Input("drill-store", "data"),
         )
-        def _render_detail(kpi_id, visible):
-            return _detail_children(kpi_id, list(visible) if visible is not None else None)
+        def _render_detail(kpi_id, visible, drill):
+            return _detail_children(
+                kpi_id,
+                list(visible) if visible is not None else None,
+                drill if isinstance(drill, dict) else None,
+            )
+
+        # --- Drill-down (Phase 2) -----------------------------------------
+        # A click on any rendered panel bar sets the drill state to the clicked
+        # category; selecting a different KPI or hitting "← back" clears it.
+        @app.callback(
+            Output("drill-store", "data"),
+            Input({"role": "kpi-panel", "kpi_id": ALL, "idx": ALL, "x": ALL}, "clickData"),
+            Input("kpi-pick", "value"),
+            prevent_initial_call=True,
+        )
+        def _set_drill(_clicks, _kpi_id):
+            trig = ctx.triggered_id
+            # KPI changed (or any non-panel trigger) -> clear drill.
+            if not (isinstance(trig, dict) and trig.get("role") == "kpi-panel"):
+                return None
+            by = str(trig.get("x") or "")
+            if not by:
+                return no_update
+            # Find which panel's clickData fired and read the clicked category.
+            point = None
+            for entry in (ctx.triggered or []):
+                val = entry.get("value")
+                if val and isinstance(val, dict) and val.get("points"):
+                    point = val["points"][0]
+                    break
+            if not point:
+                return no_update
+            # The clicked category is on the axis that holds the `by` dimension.
+            # For vertical bars it is x; ranked/horizontal bars put it on y.
+            value = point.get("x")
+            if value is None or value == "":
+                value = point.get("y")
+            if value is None or value == "":
+                value = point.get("label")  # donut/pie slice
+            if value is None:
+                return no_update
+            return {"kpi_id": str(trig.get("kpi_id") or ""), "by": by, "value": value}
+
+        @app.callback(
+            Output("drill-store", "data", allow_duplicate=True),
+            Input("drill-back", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def _clear_drill(n_clicks):
+            return None if n_clicks else no_update
 
         @app.callback(
             Output({"role": "kpi-tile", "kpi_id": ALL}, "className"),
@@ -1451,4 +1634,8 @@ __all__ = [
     "_classify_columns",
     "_explore_figure",
     "_explore_chart_options",
+    "_drill_model",
+    "_drill_into",
+    "_drill_panels",
+    "_filter_rows_by_value",
 ]
