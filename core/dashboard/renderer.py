@@ -983,10 +983,57 @@ def _kpi_blocker_card(kpi_id: str, gap: dict[str, Any]) -> dbc.Card:
     )
 
 
+# A panel's information value, by chart family: charts that encode MORE of the
+# KPI at once (two categorical dims, or a trend with a series) carry more value
+# than a single-dimension slice. Used to pick the 1-2 default panels per KPI so a
+# dashboard of 20 KPIs is not a wall of 100 charts — the Explore pane gives the
+# user every other comparison on demand. Workspace-agnostic (reads only the spec).
+_PANEL_VALUE_RANK: dict[str, int] = {
+    "heatmap": 6,            # two categorical dims x measure — the richest single view
+    "stacked_bar_percent": 5,
+    "stacked_area": 5,
+    "grouped_bar": 5,
+    "line": 4,              # trend over time
+    "bubble_map": 4,
+    "ranked_bar": 4,        # ranks the primary entity dimension
+    "scatter": 3,
+    "lollipop": 3,
+    "treemap": 3,
+    "bar": 2,
+    "donut": 2,             # single-dimension composition
+    "histogram": 2,
+    "big_number": 1,
+}
+
+
+def _panel_value_score(panel: dict[str, Any]) -> int:
+    """Higher = shows more of the KPI at once. A second encoded dimension
+    (color/series) adds one point so a split chart beats its flat sibling."""
+    score = _PANEL_VALUE_RANK.get(str(panel.get("chart_type") or "bar"), 2)
+    if panel.get("color"):
+        score += 1
+    return score
+
+
+def _default_panel_idxs(panels_cfg: list[dict[str, Any]], *, cap: int = 2) -> list[int]:
+    """Indices of the top-``cap`` highest-value panels, in original display order.
+
+    The KPI shows its 1-2 best (most information-dense) views by default instead
+    of every derived panel; ties keep the earlier panel (the data-to-viz priority
+    order the inference step already chose). Returns at least one index when any
+    panel exists."""
+    n = len(panels_cfg)
+    if n <= cap:
+        return list(range(n))
+    ranked = sorted(range(n), key=lambda i: (_panel_value_score(panels_cfg[i]), -i), reverse=True)
+    return sorted(ranked[:cap])
+
+
 def _dash_index_string(t: DesignTokens) -> str:
-    """Editorial CSS shell for the live app, generated from DESIGN.md tokens.
-    Overview strip + drill detail are sized to fit the viewport (no page scroll;
-    the detail grid is the only scroll region when a KPI has many panels)."""
+    """Claude-style CSS shell for the live app, generated from DESIGN.md tokens.
+    A slim header, a clickable KPI rail, a prominent Explore card, then the KPI's
+    1-2 highest-value panels. Colors come from the workspace tokens (the same
+    tokens drive the Plotly palette, so chart colors are untouched)."""
     fams = "&".join(f"family={f}" for f in t.font_families)
     fonts = (f'<link href="https://fonts.googleapis.com/css2?{fams}&display=swap" rel="stylesheet">'
              if fams else "")
@@ -995,38 +1042,52 @@ def _dash_index_string(t: DesignTokens) -> str:
         f"--paper:{t.paper};--card:{t.card};--ink:{t.ink};--ink-soft:{t.ink_soft};"
         f"--rule:{t.rule};--rule-soft:{t.rule_soft};--accent:{t.accent};--accent-deep:{t.accent_deep};"
         f"--serif:{t.serif};--sans:{t.sans};--mono:{t.mono};"
-        "}"
+        "--shadow:0 1px 2px rgba(40,33,28,.04),0 6px 20px rgba(40,33,28,.06);"
+        "--radius:14px;}"
         "*{box-sizing:border-box;}"
-        "html,body{margin:0;height:100%;font-family:var(--sans);color:var(--ink);background:var(--paper);}"
+        "html,body{margin:0;height:100%;font-family:var(--sans);color:var(--ink);"
+        "background:var(--paper);-webkit-font-smoothing:antialiased;}"
         "#app{display:flex;flex-direction:column;height:100vh;overflow:hidden;}"
-        ".mast{border-bottom:2px solid var(--ink);padding:.7rem 1.2rem;}"
-        ".mast .ey{font-family:var(--mono);font-size:.62rem;letter-spacing:.26em;text-transform:uppercase;color:var(--accent);margin:0;}"
-        ".mast h1{font-family:var(--serif);font-weight:900;font-size:1.5rem;margin:.1rem 0 0;letter-spacing:-.02em;}"
-        ".strip{display:flex;gap:.6rem;overflow-x:auto;padding:.7rem 1.2rem;border-bottom:1px solid var(--rule);flex:0 0 auto;}"
-        ".tile{flex:0 0 auto;min-width:150px;background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:.5rem .7rem;cursor:pointer;transition:border-color .2s,transform .2s;}"
-        ".tile:hover{border-color:var(--ink);transform:translateY(-2px);}"
-        ".tile.sel{border-color:var(--accent);box-shadow:-3px 4px 0 rgba(180,68,28,.12);}"
-        ".tile .t{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-soft);}"
-        ".tile .h{font-family:var(--serif);font-weight:900;font-size:1.15rem;color:var(--accent);}"
-        ".tile .n{font-size:.7rem;color:var(--ink-soft);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
-        ".tile .st{font-family:var(--mono);font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-deep);margin-top:.2rem;}"
-        ".gsep{flex:0 0 auto;align-self:center;writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--mono);font-size:.58rem;letter-spacing:.18em;color:var(--accent-deep);padding:.2rem 0;border-left:2px solid var(--accent-deep);margin-left:.3rem;}"
-        ".ctl{display:flex;gap:1rem;align-items:center;padding:.5rem 1.2rem;border-bottom:1px solid var(--rule-soft);flex:0 0 auto;flex-wrap:wrap;}"
-        ".ctl .lab{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-soft);}"
-        ".detail{flex:1 1 auto;overflow:auto;padding:1rem 1.2rem;}"
-        ".dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:1rem;}"
-        ".pane{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:.5rem .7rem;min-width:0;overflow:hidden;}"
-        ".pane .pt{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.12em;color:var(--accent-deep);margin:.1rem 0 .2rem;}"
-        ".dh{font-family:var(--serif);font-size:1.1rem;margin:0 0 .2rem;}"
-        ".dm{font-family:var(--mono);font-size:.68rem;color:var(--ink-soft);margin-bottom:.6rem;}"
+        # Slim, calm header — no heavy rule, just a soft hairline.
+        ".mast{padding:1rem 1.6rem .9rem;border-bottom:1px solid var(--rule-soft);}"
+        ".mast .ey{font-family:var(--mono);font-size:.62rem;letter-spacing:.24em;text-transform:uppercase;color:var(--accent);margin:0;}"
+        ".mast h1{font-family:var(--serif);font-weight:600;font-size:1.5rem;margin:.15rem 0 0;letter-spacing:-.015em;color:var(--ink);}"
+        # KPI rail — soft rounded pills.
+        ".strip{display:flex;gap:.7rem;overflow-x:auto;padding:1rem 1.6rem;flex:0 0 auto;}"
+        ".tile{flex:0 0 auto;min-width:160px;background:var(--card);border:1px solid var(--rule-soft);"
+        "border-radius:var(--radius);padding:.7rem .9rem;cursor:pointer;box-shadow:var(--shadow);"
+        "transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;}"
+        ".tile:hover{transform:translateY(-2px);border-color:var(--accent);}"
+        ".tile.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),var(--shadow);}"
+        ".tile .t{font-family:var(--mono);font-size:.58rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-soft);}"
+        ".tile .h{font-family:var(--serif);font-weight:700;font-size:1.25rem;color:var(--accent);margin-top:.1rem;}"
+        ".tile .n{font-size:.72rem;color:var(--ink-soft);max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:.15rem;}"
+        ".tile .st{font-family:var(--mono);font-size:.56rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-deep);margin-top:.3rem;}"
+        ".gsep{flex:0 0 auto;align-self:center;writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--mono);font-size:.56rem;letter-spacing:.18em;color:var(--accent-deep);}"
+        # Scroll region holds Explore card + the value panels.
+        ".scroll{flex:1 1 auto;overflow:auto;padding:.2rem 1.6rem 1.6rem;}"
+        # Explore — the promoted customization card, sits at the top.
+        ".explore{background:var(--card);border:1px solid var(--rule-soft);border-radius:var(--radius);"
+        "box-shadow:var(--shadow);padding:1rem 1.1rem;margin-bottom:1.2rem;}"
+        ".explore .xh{display:flex;align-items:baseline;gap:.6rem;margin:0 0 .7rem;}"
+        ".explore .xh b{font-family:var(--serif);font-weight:600;font-size:1.02rem;color:var(--ink);}"
+        ".explore .xh span{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);}"
+        ".ctl{display:flex;gap:.9rem;align-items:center;flex-wrap:wrap;}"
+        ".ctl .lab{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-soft);}"
+        # KPI detail header + value panels.
+        ".dhwrap{margin:.2rem 0 .8rem;}"
+        ".dh{font-family:var(--serif);font-weight:600;font-size:1.2rem;margin:0;letter-spacing:-.01em;}"
+        ".dm{font-family:var(--mono);font-size:.66rem;color:var(--ink-soft);margin-top:.25rem;}"
+        ".dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:1.2rem;}"
+        ".pane{background:var(--card);border:1px solid var(--rule-soft);border-radius:var(--radius);"
+        "box-shadow:var(--shadow);padding:.8rem 1rem;min-width:0;overflow:hidden;}"
+        ".pane .pt{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.12em;color:var(--accent-deep);margin:0 0 .3rem;}"
         ".js-plotly-plot,.plot-container{width:100%!important;}"
-        ".explore{flex:0 0 auto;border-top:1px solid var(--rule);padding:.4rem 1.2rem .8rem;background:var(--card);}"
-        ".explore>summary{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.14em;color:var(--accent-deep);cursor:pointer;user-select:none;padding:.3rem 0;}"
-        ".explore[open]{max-height:48vh;overflow:auto;}"
-        ".drill-bar{display:flex;align-items:center;gap:.7rem;margin:0 0 .5rem;}"
-        ".drill-back{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.12em;cursor:pointer;background:var(--card);color:var(--accent-deep);border:1px solid var(--rule);border-radius:6px;padding:.25rem .6rem;}"
-        ".drill-back:hover{border-color:var(--ink);}"
-        ".drill-crumb{font-family:var(--mono);font-size:.7rem;letter-spacing:.06em;color:var(--ink-soft);}"
+        ".drill-bar{display:flex;align-items:center;gap:.7rem;margin:0 0 .7rem;}"
+        ".drill-back{font-family:var(--mono);font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;cursor:pointer;background:var(--card);color:var(--accent-deep);border:1px solid var(--rule);border-radius:8px;padding:.3rem .7rem;}"
+        ".drill-back:hover{border-color:var(--accent);}"
+        ".drill-crumb{font-family:var(--mono);font-size:.68rem;letter-spacing:.05em;color:var(--ink-soft);}"
+        ".hidden{display:none!important;}"
     )
     return (
         "<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>"
@@ -1136,22 +1197,26 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             className="tile",
         ))
 
-    controls = html.Div([
-        html.Span("KPI", className="lab"),
-        dcc.Dropdown(id="kpi-pick", options=[{"label": meta[k]["title"], "value": k} for k in ready_ids],
-                     value=first, clearable=False, style={"minWidth": "320px"}),
-        html.Span("Views", className="lab"),
-        dcc.Checklist(id="panel-pick", inline=True, style={"display": "flex", "gap": ".5rem", "flexWrap": "wrap"}),
-    ], className="ctl") if ready_ids else html.Div()
+    # The KPI selector is now driven entirely by clicking a tile in the rail, so
+    # the old "KPI | <title> | Views" control row is gone (it read as noise). The
+    # dropdown is KEPT but HIDDEN — it is the single source of "current KPI" that
+    # the detail/explore/drill callbacks all read, and tile clicks write to it.
+    kpi_state = dcc.Dropdown(
+        id="kpi-pick",
+        options=[{"label": meta[k]["title"], "value": k} for k in ready_ids],
+        value=first, clearable=False, className="hidden",
+    ) if ready_ids else dcc.Dropdown(id="kpi-pick", className="hidden")
 
-    # Explore pane (Phase 1): per-KPI ad-hoc comparison. The four dropdowns are
-    # populated from the SELECTED KPI's own result columns (classified by dtype),
-    # and a callback rebuilds the figure via a transient spec -> `_figure_from_spec`.
-    # Fixed IDs (only one KPI's detail is shown at a time) keep the callback graph
-    # simple; options refresh whenever the KPI changes.
+    # Explore — promoted to a prominent card at the TOP of the scroll region (it is
+    # the comparison/customization surface the board asked for). The four dropdowns
+    # populate from the SELECTED KPI's own result columns (classified by dtype) and
+    # a callback rebuilds the figure via a transient spec -> `_figure_from_spec`.
     _dd = {"minWidth": "170px", "fontSize": ".8rem"}
-    explore = html.Details([
-        html.Summary("Explore"),
+    explore = html.Div([
+        html.Div([
+            html.B("Explore"),
+            html.Span("compare any columns for this KPI", className=""),
+        ], className="xh"),
         html.Div([
             html.Span("X", className="lab"),
             dcc.Dropdown(id="explore-x", clearable=False, style=_dd),
@@ -1162,22 +1227,24 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             html.Span("Chart", className="lab"),
             dcc.Dropdown(id="explore-chart", options=_explore_chart_options(),
                          clearable=False, style=_dd),
-        ], className="ctl", style={"border": "none", "paddingLeft": 0}),
+        ], className="ctl"),
         dcc.Graph(id="explore-graph",
                   config={"displaylogo": False, "responsive": True},
                   style={"height": "340px"}),
-    ], id="explore-pane", className="explore", open=False) if ready_ids else html.Div()
+    ], id="explore-pane", className="explore") if ready_ids else html.Div()
 
     app.layout = html.Div([
         html.Header([html.P("Workspace Intelligence", className="ey"),
                      html.H1(workspace.name.replace("-", " "))], className="mast"),
         html.Div(strip_children or [html.Div("No KPIs registered yet.", className="n")], className="strip"),
-        controls,
+        kpi_state,
         # Phase 2 drill state: {kpi_id, by, value} when a category is drilled,
         # else None. A click on a panel bar sets it; "← back" clears it.
         dcc.Store(id="drill-store"),
-        html.Div(id="kpi-detail", className="detail"),
-        explore,
+        html.Div([
+            explore,
+            html.Div(id="kpi-detail"),
+        ], className="scroll"),
     ], id="app")
 
     def _drill_detail_children(kpi_id: str, by: str, value: Any) -> Any:
@@ -1229,7 +1296,10 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         if drill and drill.get("kpi_id") == kpi_id and drill.get("by"):
             return _drill_detail_children(kpi_id, str(drill["by"]), drill.get("value"))
         n = len(m["panel_titles"])
-        idxs = visible_idxs if visible_idxs is not None else list(range(n))
+        # Default = the 1-2 highest-value panels (not every derived view). Explore
+        # + drill give the user the rest on demand. `visible_idxs` (if a future
+        # caller passes one) still overrides.
+        idxs = visible_idxs if visible_idxs is not None else _default_panel_idxs(m["panels_cfg"])
         cells = []
         for i in idxs:
             if i < 0 or i >= n:
@@ -1240,11 +1310,13 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
                           id={"role": "kpi-panel", "kpi_id": kpi_id, "idx": i,
                               "x": m["panel_x"][i]},
                           config={"displaylogo": False, "responsive": True},
-                          style={"height": "300px"}),
+                          style={"height": "320px"}),
             ], className="pane"))
         return [
-            html.H2(m["title"], className="dh"),
-            html.Div((m["metric"] + ("  ·  cuts: " + m["cuts"] if m["cuts"] else "")) or "", className="dm"),
+            html.Div([
+                html.H2(m["title"], className="dh"),
+                html.Div((m["metric"] + ("  ·  cuts: " + m["cuts"] if m["cuts"] else "")) or "", className="dm"),
+            ], className="dhwrap"),
             html.Div(cells, className="dgrid"),
             _data_view_component(workspace, kpi_id, m["rows"]),
         ]
@@ -1262,27 +1334,14 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             return no_update
 
         @app.callback(
-            Output("panel-pick", "options"),
-            Output("panel-pick", "value"),
-            Input("kpi-pick", "value"),
-        )
-        def _panels_for_kpi(kpi_id):
-            m = meta.get(kpi_id)
-            if not m:
-                return [], []
-            opts = [{"label": t, "value": i} for i, t in enumerate(m["panel_titles"])]
-            return opts, [o["value"] for o in opts]  # all visible by default
-
-        @app.callback(
             Output("kpi-detail", "children"),
             Input("kpi-pick", "value"),
-            Input("panel-pick", "value"),
             Input("drill-store", "data"),
         )
-        def _render_detail(kpi_id, visible, drill):
+        def _render_detail(kpi_id, drill):
             return _detail_children(
                 kpi_id,
-                list(visible) if visible is not None else None,
+                None,  # default = the KPI's top-2 value panels
                 drill if isinstance(drill, dict) else None,
             )
 
