@@ -1674,7 +1674,11 @@ def render_kpi_inline(
     rows = _execute_sql_view(repo_root, sql_path, view_name) if sql_path else []
     definition = spec.config.get("definition") or {}
 
-    panels = spec.config.get("panels") or []
+    all_panels = spec.config.get("panels") or []
+    # Show only the 1-2 highest-value panels by default — same cap as the live app
+    # (`_default_panel_idxs`) so the static export is a faithful proxy and a 20-KPI
+    # board isn't a wall of 100 charts. The Explore preview below covers the rest.
+    panels = [all_panels[i] for i in _default_panel_idxs(all_panels)] if all_panels else []
     if panels:
         # Smaller per-panel height when there are multiple, so the card stays compact.
         per_h = height if len(panels) == 1 else max(220, int(height * 0.8))
