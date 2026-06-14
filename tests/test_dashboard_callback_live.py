@@ -364,6 +364,98 @@ class TestDrillDownCallback:
         assert all(f is not None for _, f in figs)
 
 
+# ---------------------------------------------------------------------------
+# Phase B/C — Data surface: the governed SSRM grid wired into the live app.
+# Build the app over a synthetic workspace that has a raw dataset with a PII
+# column, then drive the grid callbacks directly (no browser): source-change
+# builds redaction-aware coldefs, and getRowsResponse serves paginated/grouped
+# rows with the PII column excluded. Workspace-agnostic fixtures.
+# ---------------------------------------------------------------------------
+
+
+def _make_workspace_with_grid_dataset(tmp_path: Path) -> tuple[Path, str]:
+    repo_root = tmp_path
+    workspace_rel = "workspaces/synthetic_grid_dashboard"
+    workspace = repo_root / workspace_rel
+    (workspace / "datasets").mkdir(parents=True)
+    layout = WorkspaceLayout(project_root=workspace)
+    layout.ensure_runtime_dirs()
+    # "patient_name" is PII (matches a default redaction pattern); department is a
+    # group dim; revenue is a numeric measure.
+    (workspace / "datasets" / "facts.csv").write_text(
+        "patient_name,department,revenue\n"
+        "Alice,Cardiology,100\n"
+        "Bob,Oncology,250\n"
+        "Carol,Cardiology,300\n"
+        "Dave,Neurology,50\n",
+        encoding="utf-8",
+    )
+    layout.kpi_registry_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.kpi_registry_path.write_text(json.dumps({"kpis": []}), encoding="utf-8")
+    return repo_root, workspace_rel
+
+
+def _find_callback(app, output_id: str, output_prop: str):
+    """Return the registered callback function whose output targets output_id.prop."""
+    target = f"{output_id}.{output_prop}"
+    for key, entry in app.callback_map.items():
+        if target in key:
+            return entry["callback"]
+    raise AssertionError(f"callback for {target} not registered; keys={list(app.callback_map)}")
+
+
+@pytest.mark.skipif(not _HAS_DASHBOARD, reason="dashboard extra not installed")
+def test_grid_get_rows_callback_excludes_pii_and_paginates(tmp_path):
+    duckdb = pytest.importorskip("duckdb", reason="duckdb not installed")  # noqa: F841
+    pytest.importorskip("dash_ag_grid", reason="dash-ag-grid not installed")
+
+    repo_root, workspace_rel = _make_workspace_with_grid_dataset(tmp_path)
+    app = build_dash_app(repo_root, workspace_rel)
+
+    # The build itself is the build-check: the app constructs and the grid
+    # callbacks are registered.
+    src_cb = _find_callback(app, "data-grid", "columnDefs")
+    rows_cb = _find_callback(app, "data-grid", "getRowsResponse")
+
+    # Source id is derived from the dataset stem: ds_facts.
+    from core.dashboard import grid_backend as gb
+
+    sources = gb.grid_sources(repo_root / workspace_rel)
+    src_ids = {s["id"] for s in sources}
+    assert "ds_facts" in src_ids
+    source_id = "ds_facts"
+
+    # Source-change callback -> coldefs exclude the PII column.
+    coldefs, group_opts, measure_opts = src_cb(source_id)
+    fields = {d["field"] for d in coldefs}
+    assert "patient_name" not in fields
+    assert {"department", "revenue"} <= fields
+    assert {o["value"] for o in measure_opts} == {"revenue"}      # numeric only
+
+    # getRowsResponse (flat block): no PII, full count, paginated block.
+    req = {"startRow": 0, "endRow": 2, "filterModel": {}, "sortModel": []}
+    out = rows_cb(req, source_id, None)
+    assert out["rowCount"] == 4
+    assert len(out["rowData"]) == 2                                # only the block
+    for row in out["rowData"]:
+        assert "patient_name" not in row
+
+    # getRowsResponse (grouped via the pivot store): GROUP BY department, SUM revenue.
+    pivot = {
+        "rowGroupCols": [{"id": "department", "field": "department"}],
+        "valueCols": [{"field": "revenue", "aggFunc": "sum"}],
+    }
+    greq = {"startRow": 0, "endRow": 100, "filterModel": {}, "sortModel": [],
+            "rowGroupCols": pivot["rowGroupCols"], "valueCols": pivot["valueCols"],
+            "groupKeys": []}
+    gout = rows_cb(greq, source_id, pivot)
+    by_dept = {r["department"]: r["revenue"] for r in gout["rowData"]}
+    assert by_dept["Cardiology"] == 400
+    assert gout["rowCount"] == 3
+    for row in gout["rowData"]:
+        assert "patient_name" not in row
+
+
 def test_global_date_filter_changes_chart_via_browser(tmp_path):
     """Browser-driven assertion. Skipped when dash[testing] / selenium / webdriver missing."""
     dash_testing = pytest.importorskip("dash.testing", reason="dash[testing] not installed")
