@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import hmac
 import json
 import os
 import re
@@ -4901,13 +4902,158 @@ def _govern_refresh(_n):
 
     return intern_feed, git_log, decisions, alerts_body, ideas, results_body
 
+# ── Security helpers ──────────────────────────────────────────────────────────
+
+# Environment-variable names for production security controls.
+_ENV_DEBUG    = "AUTORESEARCH_DASHBOARD_DEBUG"
+_ENV_HOST     = "AUTORESEARCH_DASHBOARD_HOST"
+_ENV_AUTH_USER = "AUTORESEARCH_DASHBOARD_AUTH_USER"
+_ENV_AUTH_PASS = "AUTORESEARCH_DASHBOARD_AUTH_PASSWORD"
+_ENV_AUTH_TOK  = "AUTORESEARCH_DASHBOARD_AUTH_TOKEN"
+
+
+def _resolve_debug() -> bool:
+    """Return True only when AUTORESEARCH_DASHBOARD_DEBUG=1 is explicitly set.
+
+    The Werkzeug interactive debugger allows arbitrary Python execution on the
+    server.  It must NEVER be enabled on a network-reachable host.  Debug mode
+    is therefore off by default and requires an explicit environment opt-in.
+    """
+    return os.environ.get(_ENV_DEBUG, "").strip() == "1"
+
+
+def _resolve_host() -> str:
+    """Return the host to bind to.
+
+    Default: 127.0.0.1 (loopback only).
+    Set AUTORESEARCH_DASHBOARD_HOST=0.0.0.0 (or any non-loopback address) to
+    expose on the network — a stderr warning is printed when this is done.
+    """
+    host = os.environ.get(_ENV_HOST, "127.0.0.1").strip() or "127.0.0.1"
+    return host
+
+
+def _setup_auth(flask_app) -> bool:  # type: ignore[type-arg]
+    """Attach HTTP Basic Auth to *flask_app* when auth env vars are set.
+
+    Activation (any one of):
+      AUTORESEARCH_DASHBOARD_AUTH_USER + AUTORESEARCH_DASHBOARD_AUTH_PASSWORD
+      AUTORESEARCH_DASHBOARD_AUTH_TOKEN   (Bearer / ?token= query-param)
+
+    When neither is configured, auth is NOT enforced (local dev convenience)
+    but a warning is emitted.
+
+    Returns True when auth was activated, False otherwise.
+    """
+    auth_user = os.environ.get(_ENV_AUTH_USER, "").strip()
+    auth_pass = os.environ.get(_ENV_AUTH_PASS, "").strip()
+    auth_tok  = os.environ.get(_ENV_AUTH_TOK,  "").strip()
+
+    if not auth_user and not auth_pass and not auth_tok:
+        return False
+
+    def _check_basic(incoming_user: str, incoming_pass: str) -> bool:
+        """Constant-time comparison for Basic Auth credentials."""
+        user_ok = hmac.compare_digest(
+            incoming_user.encode(), auth_user.encode()
+        ) if auth_user else False
+        pass_ok = hmac.compare_digest(
+            incoming_pass.encode(), auth_pass.encode()
+        ) if auth_pass else False
+        return user_ok and pass_ok
+
+    def _check_token(incoming_tok: str) -> bool:
+        """Constant-time comparison for Bearer/query token."""
+        if not auth_tok:
+            return False
+        return hmac.compare_digest(incoming_tok.encode(), auth_tok.encode())
+
+    def _unauthorized():
+        from flask import Response  # local to avoid top-level circular risk
+        return Response(
+            "Unauthorized — provide valid credentials.",
+            status=401,
+            headers={"WWW-Authenticate": 'Basic realm="Autoresearch Dashboard"'},
+        )
+
+    @flask_app.before_request
+    def _auth_gate():
+        # --- Bearer token / query-param token ---
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token_val = auth_header[7:].strip()
+            if _check_token(token_val):
+                return None
+            return _unauthorized()
+
+        q_token = request.args.get("token", "")
+        if q_token:
+            if _check_token(q_token):
+                return None
+            return _unauthorized()
+
+        # --- HTTP Basic Auth ---
+        creds = request.authorization
+        if creds and auth_user and auth_pass:
+            if _check_basic(creds.username or "", creds.password or ""):
+                return None
+            return _unauthorized()
+
+        # No usable credentials supplied — reject.
+        return _unauthorized()
+
+    return True
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import argparse
-    p = argparse.ArgumentParser()
-    p.add_argument("--port",  type=int, default=int(os.environ.get("DASH_PORT", 8050)))
-    p.add_argument("--debug", action="store_true")
+    p = argparse.ArgumentParser(description="Autoresearch Control Plane dashboard.")
+    p.add_argument("--port", type=int, default=int(os.environ.get("DASH_PORT", 8050)))
+    # --debug is accepted for CLI ergonomics but ONLY takes effect when
+    # AUTORESEARCH_DASHBOARD_DEBUG=1 is also set; it cannot bypass the env gate.
+    p.add_argument(
+        "--debug",
+        action="store_true",
+        help=(
+            "Request debug mode. Has NO effect unless "
+            "AUTORESEARCH_DASHBOARD_DEBUG=1 is also set in the environment."
+        ),
+    )
     a = p.parse_args()
-    print(f"\n  Autoresearch Control Plane  ->  http://localhost:{a.port}\n")
-    app.run(debug=a.debug, port=a.port)
+
+    debug = _resolve_debug()
+    host  = _resolve_host()
+
+    # --- Debug warning ---
+    if debug:
+        print(
+            "[SECURITY WARNING] Werkzeug debug mode is ENABLED. "
+            "The interactive debugger allows arbitrary Python code execution on "
+            "the server. NEVER use this on a network-reachable host.",
+            file=sys.stderr,
+        )
+
+    # --- Host warning ---
+    _loopback_addrs = {"127.0.0.1", "localhost", "::1"}
+    if host not in _loopback_addrs:
+        print(
+            f"[SECURITY WARNING] Dashboard is binding to {host!r} (non-loopback). "
+            "This exposes potentially sensitive KPI/PHI data to the network. "
+            "Ensure auth is configured and access is restricted.",
+            file=sys.stderr,
+        )
+
+    # --- Auth setup ---
+    auth_active = _setup_auth(app.server)
+    if not auth_active:
+        print(
+            "[SECURITY NOTICE] Dashboard is running WITHOUT authentication. "
+            "Keep it on localhost or set AUTORESEARCH_DASHBOARD_AUTH_USER/"
+            "AUTORESEARCH_DASHBOARD_AUTH_PASSWORD (or AUTORESEARCH_DASHBOARD_AUTH_TOKEN).",
+            file=sys.stderr,
+        )
+
+    print(f"\n  Autoresearch Control Plane  ->  http://{host}:{a.port}\n")
+    app.run(debug=debug, host=host, port=a.port)

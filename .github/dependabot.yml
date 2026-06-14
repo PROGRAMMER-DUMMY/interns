@@ -1,0 +1,19 @@
+# Dependabot configuration — weekly automated dependency updates.
+# Covers Python packages (pip) and GitHub Actions versions.
+
+version: 2
+
+updates:
+  # Python / pip dependencies declared in pyproject.toml / uv.lock
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # GitHub Actions used across .github/workflows/
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10

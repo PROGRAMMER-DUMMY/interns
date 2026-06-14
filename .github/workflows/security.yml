@@ -1,0 +1,87 @@
+# Security scanning workflow — runs alongside ci.yml (does NOT replace it).
+# Triggers: every push to main and every pull request.
+#
+# Jobs and blocking behaviour:
+#   dep-audit  — dependency CVE scan via pip-audit   [ADVISORY: continue-on-error]
+#   sast       — static analysis via bandit           [BLOCKING: fails on medium+ severity/confidence]
+#   secret-scan — secret detection via gitleaks       [BLOCKING: fails if secrets found]
+
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Dependency vulnerability audit (ADVISORY — transitive CVEs are often
+  #    unfixable, so we surface the report without gating merges).
+  # ---------------------------------------------------------------------------
+  dep-audit:
+    name: Dependency CVE audit (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Install the project so pip-audit sees the resolved dependency tree.
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      # Run pip-audit against the installed environment.
+      # continue-on-error: true keeps the job advisory — output is still
+      # visible in the Actions log and the step is marked failed/passed.
+      - name: pip-audit (CVE scan)
+        run: pip install pip-audit && pip-audit
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # 2. Static Application Security Testing — bandit over core/ and tools/.
+  #    -r  : recursive
+  #    -ll : medium+ severity  (skips low-severity noise)
+  #    -ii : medium+ confidence (skips speculative findings)
+  #    BLOCKING: a non-zero exit code fails the build.
+  # ---------------------------------------------------------------------------
+  sast:
+    name: SAST — bandit (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install bandit
+        run: pip install bandit
+
+      # Scan core/ and tools/ at medium+ severity AND medium+ confidence.
+      # This exits non-zero (fails the job) if any such finding is detected.
+      - name: bandit SAST scan
+        run: bandit -r core tools -ll -ii
+
+  # ---------------------------------------------------------------------------
+  # 3. Secret scanning — gitleaks (BLOCKING).
+  #    Uses the official gitleaks-action which exits non-zero if secrets are
+  #    detected, failing the build and preventing the secret from being merged.
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: Secret scan — gitleaks (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so gitleaks can scan all commits in a PR diff,
+          # not just the tip commit.
+          fetch-depth: 0
+
+      - name: gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
