@@ -264,13 +264,15 @@ class PythonOptimizer:
 
     def _profile_memory(self, path: str) -> list[dict]:
         # Run tracemalloc in a child process to avoid contaminating the main heap.
-        wrapper = (
-            "import tracemalloc, json, sys; "
+        # The target path is passed via an environment variable (OPTIMIZER_FINDER_TARGET)
+        # so it is never interpolated into the code string — this prevents code injection
+        # when the path contains single quotes or other shell/Python-significant characters.
+        code = (
+            "import tracemalloc, json, sys, os; "
             "tracemalloc.start(); "
-            f"code = compile(open(r'{path}', encoding='utf-8').read(), r'{path}', 'exec'); "
-            "exec(code, {'__name__': '__main__', '__file__': r'" + path + "'});"
-        )
-        collect = (
+            "_target = os.environ['OPTIMIZER_FINDER_TARGET']; "
+            "code = compile(open(_target, encoding='utf-8').read(), _target, 'exec'); "
+            "exec(code, {'__name__': '__main__', '__file__': _target}); "
             "snap = tracemalloc.take_snapshot(); "
             "stats = snap.statistics('lineno')[:15]; "
             "total = sum(s.size for s in stats) or 1; "
@@ -281,12 +283,14 @@ class PythonOptimizer:
             "'pct': round(s.size/total*100, 1)"
             "} for s in stats]))"
         )
-        full = wrapper + collect
+        child_env = os.environ.copy()
+        child_env["OPTIMIZER_FINDER_TARGET"] = path
 
         try:
             res = subprocess.run(
-                [sys.executable, "-c", full],
-                capture_output=True, text=True, timeout=self.TIMEOUT
+                [sys.executable, "-c", code],
+                capture_output=True, text=True, timeout=self.TIMEOUT,
+                env=child_env,
             )
             out = res.stdout.strip()
             if out:
