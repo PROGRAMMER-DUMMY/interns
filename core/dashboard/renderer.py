@@ -434,9 +434,124 @@ _EXPLORE_CHART_TYPES: tuple[tuple[str, str], ...] = (
 )
 
 
-def _explore_chart_options() -> list[dict[str, str]]:
-    """Dropdown options for the Explore chart-type picker (label/value pairs)."""
-    return [{"label": label, "value": value} for label, value in _EXPLORE_CHART_TYPES]
+def _explore_chart_options(
+    *, recommended: str = "", fit: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """Dropdown options for the Explore chart-type picker.
+
+    Soft guidance (not enforcement): the recommended chart is marked, and charts
+    that are a poor fit for the current X/measure/series shape are badged ``(not
+    ideal)`` — every option stays selectable so the user can still force any chart.
+    """
+    fit = fit or {}
+    opts: list[dict[str, Any]] = []
+    for label, value in _EXPLORE_CHART_TYPES:
+        verdict = fit.get(value, "ok")
+        if value == recommended:
+            label = f"★ {label}"
+        elif verdict == "poor":
+            label = f"{label} (not ideal)"
+        opts.append({"label": label, "value": value})
+    return opts
+
+
+def _pretty_label(col: str) -> str:
+    """Human axis/label for a result column: drop the agg prefix, de-snake, Title
+    Case, and render a share/percent measure as ``… (%)``. Generic — no workspace
+    vocabulary (``sum_paidamount`` -> ``Paidamount``; ``percentage_share`` ->
+    ``Percentage Share (%)``; ``department_name`` -> ``Department Name``)."""
+    if not col:
+        return ""
+    name = str(col)
+    low = name.lower()
+    for pre in ("sum_", "avg_", "mean_", "count_", "distinct_", "total_"):
+        if low.startswith(pre):
+            name = name[len(pre):]
+            low = name.lower()
+            break
+    pretty = name.replace("_", " ").strip().title()
+    if any(t in low for t in ("percent", "share", "ratio", "rate", "pct")):
+        if "%" not in pretty:
+            pretty = f"{pretty} (%)"
+    return pretty
+
+
+def _distinct_count(rows: list[dict[str, Any]], col: str) -> int:
+    """Distinct non-null values of ``col`` across rows."""
+    if not col:
+        return 0
+    return len({str(r.get(col)) for r in rows if r.get(col) is not None})
+
+
+def _explore_recommendation(
+    rows: list[dict[str, Any]], x: str, series: str | None, measure: str
+) -> tuple[str, str, dict[str, str]]:
+    """Recommend a chart for the chosen X/Breakdown/Measure using the data-to-viz
+    chart-knowledge brain, and rate every chart's FIT for that shape.
+
+    Returns ``(recommended_chart_type, reason, fit)`` where ``fit`` maps each
+    chart_type -> ``"best" | "ok" | "poor"``. This is what makes Explore not
+    "shallow": the same principled selection the KPI panels use now drives the
+    ad-hoc chart picker, so a line-over-departments or a 10-slice donut is flagged
+    instead of silently rendered.
+    """
+    from core.dashboard import chart_knowledge as ck
+
+    if not rows or not x:
+        return "bar", "", {}
+    _dims, measures, date_cols = _classify_columns(rows)
+    is_date = x in (date_cols or [])
+    is_share = any(t in (measure or "").lower() for t in ("percent", "share", "ratio", "rate", "pct"))
+    has_series = bool(series and series != x and series in (rows[0] if rows else {}))
+    distinct_x = _distinct_count(rows, x)
+    x_vals = [r.get(x) for r in rows if r.get(x) is not None]
+    is_ordinal = ck.is_ordinal_categories(x_vals)
+
+    # 1) Pick the recommended chart from the data shape (data-to-viz families).
+    if is_date:
+        choice = ck.choose_trend_chart(
+            series_count=_distinct_count(rows, series) if has_series else 1,
+            is_share=is_share,
+        )
+    elif has_series:
+        choice = ck.choose_two_categorical_chart(
+            distinct_a=distinct_x, distinct_b=_distinct_count(rows, series)
+        ) or ck.ChartChoice(
+            "grouped_bar",
+            "two categorical dimensions with a wide axis read better side-by-side "
+            "than as a heatmap (data-to-viz: grouped bar)",
+        )
+    else:
+        choice = ck.choose_categorical_chart(
+            distinct=distinct_x, is_share=is_share, is_ordinal=is_ordinal
+        )
+    recommended = choice.chart_type
+    reason = choice.reason
+
+    # 2) Rate every selectable chart's fit for this shape (best / ok / poor).
+    fit: dict[str, str] = {}
+    for _label, ct in _EXPLORE_CHART_TYPES:
+        if ct == recommended:
+            fit[ct] = "best"
+            continue
+        verdict = "ok"
+        time_only = ct in ("line", "stacked_area")
+        if time_only and not is_date:
+            verdict = "poor"                                  # a trend chart needs time
+        elif ct == "donut" and (is_date or has_series or is_ordinal or distinct_x > ck.DONUT_CARDINALITY):
+            verdict = "poor"                                  # pie caveat: few non-ordinal slices
+        elif ct == "treemap" and (is_date or has_series or distinct_x > ck.TREEMAP_CARDINALITY):
+            verdict = "poor"
+        elif ct == "heatmap" and not has_series:
+            verdict = "poor"                                  # heatmap needs two categoricals
+        elif ct in ("grouped_bar", "stacked_bar_percent") and not has_series:
+            verdict = "poor"                                  # nothing to split without a breakdown
+        elif ct == "ranked_bar" and is_date:
+            verdict = "poor"
+        elif ct == "bar" and is_date:
+            verdict = "poor"                                  # over time -> line
+        fit[ct] = verdict
+    return recommended, reason, fit
 
 
 def _explore_default_chart_type(x: str, date_cols: list[str], series: str | None) -> str:
@@ -829,6 +944,16 @@ def _figure_from_spec(
     if chart_type in ("bar", "grouped_bar", "stacked_bar_percent"):
         fig.update_xaxes(tickangle=-35, automargin=True)
         fig.update_yaxes(automargin=True)
+    # Human axis titles: raw result columns (`sum_paidamount`) read as code on an
+    # executive chart. Prettify for axis-based families (the measure/category live
+    # on an axis); heatmap/donut/treemap/maps encode via color/slice, not an axis.
+    if chart_type not in ("heatmap", "donut", "treemap", "bubble_map", "big_number"):
+        if chart_type in ("ranked_bar", "lollipop"):
+            fig.update_xaxes(title_text=_pretty_label(y_col))
+            fig.update_yaxes(title_text=_pretty_label(x_col))
+        else:
+            fig.update_xaxes(title_text=_pretty_label(x_col))
+            fig.update_yaxes(title_text=_pretty_label(y_col))
     return _apply_corporate_theme(fig)
 
 
@@ -1072,10 +1197,27 @@ def _dash_index_string(t: DesignTokens) -> str:
         ".explore .xh{display:flex;align-items:baseline;gap:.6rem;margin:0 0 .7rem;}"
         ".explore .xh b{font-family:var(--serif);font-weight:600;font-size:1.02rem;color:var(--ink);}"
         ".explore .xh span{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);}"
-        ".ctl{display:flex;gap:.9rem;align-items:center;flex-wrap:wrap;}"
-        ".ctl .lab{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-soft);}"
+        ".ctl{display:flex;gap:.7rem .9rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem;}"
+        # Each label+dropdown reads as one grouped control, not loose tokens.
+        ".ctl .lab{font-family:var(--mono);font-size:.58rem;text-transform:uppercase;letter-spacing:.12em;"
+        "color:var(--ink-soft);align-self:center;margin-left:.2rem;}"
+        ".ctl .lab:first-child{margin-left:0;}"
+        # The data-to-viz 'why this chart' note under the Explore controls.
+        ".why{font-family:var(--sans);font-size:.74rem;color:var(--ink-soft);line-height:1.4;"
+        "margin:.1rem 0 .6rem;padding:.4rem .6rem;background:rgba(180,68,28,.05);"
+        "border-left:2px solid var(--accent);border-radius:0 6px 6px 0;}"
+        ".why .why-k{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;color:var(--accent-deep);}"
         # KPI detail header + value panels.
-        ".dhwrap{margin:.2rem 0 .8rem;}"
+        ".dhwrap{margin:.2rem 0 .8rem;display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;}"
+        # Card toolbar — small pill buttons top-right (Table / Export).
+        ".toolbar{display:flex;gap:.5rem;flex:0 0 auto;}"
+        ".tbtn{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;"
+        "cursor:pointer;background:var(--card);color:var(--accent-deep);border:1px solid var(--rule);"
+        "border-radius:8px;padding:.35rem .7rem;transition:border-color .18s,background .18s;}"
+        ".tbtn:hover{border-color:var(--accent);}"
+        ".tbtn.active{background:var(--accent);color:#fff;border-color:var(--accent);}"
+        ".datawrap{background:var(--card);border:1px solid var(--rule-soft);border-radius:var(--radius);"
+        "box-shadow:var(--shadow);padding:.8rem 1rem;margin-top:1rem;}"
         ".dh{font-family:var(--serif);font-weight:600;font-size:1.2rem;margin:0;letter-spacing:-.01em;}"
         ".dm{font-family:var(--mono);font-size:.66rem;color:var(--ink-soft);margin-top:.25rem;}"
         ".dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:1.2rem;}"
@@ -1120,6 +1262,9 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
     set_active_design(tokens)
 
     app = dash.Dash(__name__, title=f"Dashboard — {workspace.name}")
+    # The detail toolbar (Table/Export) lives inside the dynamically-rendered
+    # kpi-detail, so its callbacks reference ids not present in the initial layout.
+    app.config.suppress_callback_exceptions = True
     app.index_string = _dash_index_string(tokens)
 
     definitions = load_kpi_definitions(layout)
@@ -1249,6 +1394,8 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             dcc.Dropdown(id="explore-filter-vals", multi=True,
                          placeholder="(all)", style={"minWidth": "260px", "fontSize": ".8rem"}),
         ], className="ctl"),
+        # Why this chart — the data-to-viz reason for the recommendation.
+        html.Div(id="explore-reason", className="why"),
         dcc.Graph(id="explore-graph",
                   config={"displaylogo": False, "responsive": True},
                   style={"height": "360px"}),
@@ -1262,6 +1409,7 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         # Phase 2 drill state: {kpi_id, by, value} when a category is drilled,
         # else None. A click on a panel bar sets it; "← back" clears it.
         dcc.Store(id="drill-store"),
+        dcc.Download(id="detail-download"),
         html.Div([
             explore,
             html.Div(id="kpi-detail"),
@@ -1335,11 +1483,19 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             ], className="pane"))
         return [
             html.Div([
-                html.H2(m["title"], className="dh"),
-                html.Div((m["metric"] + ("  ·  cuts: " + m["cuts"] if m["cuts"] else "")) or "", className="dm"),
+                html.Div([
+                    html.H2(m["title"], className="dh"),
+                    html.Div((m["metric"] + ("  ·  cuts: " + m["cuts"] if m["cuts"] else "")) or "", className="dm"),
+                ]),
+                # Card toolbar (top-right): toggle the data table / export it.
+                html.Div([
+                    html.Button("Table", id="detail-table-btn", n_clicks=0, className="tbtn"),
+                    html.Button("Export CSV", id="detail-export-btn", n_clicks=0, className="tbtn"),
+                ], className="toolbar"),
             ], className="dhwrap"),
             html.Div(cells, className="dgrid"),
-            _data_view_component(workspace, kpi_id, m["rows"]),
+            html.Div(_data_view_table(workspace, m["rows"]),
+                     id="detail-data", className="datawrap hidden"),
         ]
 
     if ready_ids:
@@ -1427,20 +1583,17 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             Output("explore-series", "value"),
             Output("explore-measure", "options"),
             Output("explore-measure", "value"),
-            Output("explore-chart", "value"),
             Output("explore-filter-col", "options"),
             Output("explore-filter-col", "value"),
             Input("kpi-pick", "value"),
         )
         def _explore_options(kpi_id):
-            """Refill the Explore dropdowns from the selected KPI's columns.
-
-            Defaults seed from the KPI's own primary spec: x/measure from the
-            spec, then a sensible chart (date X -> line). The slice field offers
-            the dimension columns; it starts empty (no slice)."""
+            """Refill the Explore X/Breakdown/Measure/Slice dropdowns from the
+            selected KPI's columns. The CHART picker is owned by the recommend
+            callback (data-to-viz driven), so it is not set here."""
             m = meta.get(kpi_id)
             if not m:
-                return [], None, [], None, [], None, "bar", [], None
+                return [], None, [], None, [], None, [], None
             dims, measures, date_cols = _classify_columns(m["rows"])
             x_cols = date_cols + dims  # date candidates first (timeline-friendly)
             x_opts = [{"label": c, "value": c} for c in x_cols]
@@ -1450,14 +1603,43 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             # Seed X/measure from the spec when those columns are real candidates.
             x_default = cfg.get("x") if cfg.get("x") in x_cols else (x_cols[0] if x_cols else None)
             m_default = cfg.get("y") if cfg.get("y") in measures else (measures[0] if measures else None)
-            chart_default = _explore_default_chart_type(x_default or "", date_cols, None)
             return (
                 x_opts, x_default,
                 series_opts, None,
                 measure_opts, m_default,
-                chart_default,
                 series_opts, None,   # slice field options (dims), start unset
             )
+
+        @app.callback(
+            Output("explore-chart", "options"),
+            Output("explore-chart", "value"),
+            Output("explore-reason", "children"),
+            Input("kpi-pick", "value"),
+            Input("explore-x", "value"),
+            Input("explore-series", "value"),
+            Input("explore-measure", "value"),
+            Input("explore-filter-col", "value"),
+            Input("explore-filter-vals", "value"),
+        )
+        def _explore_recommend(kpi_id, x, series, measure, filter_col, filter_vals):
+            """Recommend a chart for the chosen X/Breakdown/Measure (data-to-viz),
+            badge each chart's fit, and set the picker to the recommendation. The
+            chart dropdown is NOT an input, so a manual chart pick is never reset.
+            Recomputes after a slice (the kept rows can change the recommendation)."""
+            m = meta.get(kpi_id)
+            if not m:
+                return _explore_chart_options(), "bar", ""
+            rows = _slice_rows(m["rows"], str(filter_col or ""), list(filter_vals or []))
+            recommended, reason, fit = _explore_recommendation(
+                rows, str(x or ""), str(series) if series else None, str(measure or "")
+            )
+            opts = _explore_chart_options(recommended=recommended, fit=fit)
+            why = (
+                [html.Span("Recommended: ", className="why-k"),
+                 html.Span(f"{recommended.replace('_', ' ')} — {reason}")]
+                if reason else ""
+            )
+            return opts, recommended, why
 
         @app.callback(
             Output("explore-filter-vals", "options"),
@@ -1502,6 +1684,43 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
                 x=str(x or ""), series=str(series) if series else None,
                 measure=str(measure or ""), chart_type=str(chart_type or ""),
             )
+
+        # --- Card toolbar: Data table toggle + CSV export -----------------
+        @app.callback(
+            Output("detail-data", "className"),
+            Output("detail-table-btn", "className"),
+            Input("detail-table-btn", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def _toggle_data_table(n_clicks):
+            """Show/hide the KPI's data table from the card toolbar."""
+            shown = bool(n_clicks) and (n_clicks % 2 == 1)
+            return (
+                "datawrap" if shown else "datawrap hidden",
+                "tbtn active" if shown else "tbtn",
+            )
+
+        @app.callback(
+            Output("detail-download", "data"),
+            Input("detail-export-btn", "n_clicks"),
+            State("kpi-pick", "value"),
+            prevent_initial_call=True,
+        )
+        def _export_data_csv(n_clicks, kpi_id):
+            """Export the KPI's redacted result rows as CSV (never raw PII)."""
+            m = meta.get(kpi_id)
+            if not n_clicks or not m or not m["rows"]:
+                return no_update
+            import csv as _csv
+            import io as _io
+
+            rows = _redacted_display_rows(workspace, m["rows"])
+            cols = list(rows[0].keys())
+            buf = _io.StringIO()
+            writer = _csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+            return dict(content=buf.getvalue(), filename=f"{kpi_id}_data.csv")
 
     return app
 
@@ -1646,14 +1865,9 @@ def load_kpi_statuses(workspace: Path) -> dict[str, str]:
 _DATA_VIEW_ROWS_LIVE = 200
 
 
-def _data_view_component(workspace: Path, kpi_id: str, rows: list[dict[str, Any]]):
-    """Collapsible Data table for the live app's detail region.
-
-    Rendered surface -> display redaction applies (default PII patterns
-    widened by the workspace's data_policy.json), rows capped.
-    """
-    if not rows:
-        return html.Div()
+def _redacted_display_rows(workspace: Path, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The display-redacted, row-capped view of a KPI's result rows (the only form
+    ever shown or exported — PII patterns + data_policy widening + age Safe Harbor)."""
     from core.governance.data_policy import (
         load_workspace_data_policy,
         policy_redaction_patterns,
@@ -1667,11 +1881,21 @@ def _data_view_component(workspace: Path, kpi_id: str, rows: list[dict[str, Any]
     patterns = DEFAULT_PII_COLUMN_PATTERNS + tuple(
         policy_redaction_patterns(load_workspace_data_policy(workspace))
     )
-    shown = redact_rows(
+    return redact_rows(
         rows[:_DATA_VIEW_ROWS_LIVE],
         patterns=patterns,
         aggregate_ages=workspace_aggregate_ages(workspace),
     )
+
+
+def _data_view_table(workspace: Path, rows: list[dict[str, Any]]):
+    """The Data table itself (no toolbar/disclosure — the card supplies those).
+
+    A rendered surface, so values pass through display redaction first.
+    """
+    if not rows:
+        return html.Div("(no rows)", className="dm")
+    shown = _redacted_display_rows(workspace, rows)
     columns = list(shown[0].keys())
 
     def cell(value: Any) -> str:
@@ -1681,18 +1905,17 @@ def _data_view_component(workspace: Path, kpi_id: str, rows: list[dict[str, Any]
 
     note = (
         f"{len(shown)} of {len(rows)}{'+' if len(rows) > len(shown) else ''} rows"
-        " · PII display-redacted · sortable · export = redacted view"
+        " · PII display-redacted"
     )
     records = [{c: cell(r.get(c)) for c in columns} for r in shown]
     from dash import dash_table
 
     table = dash_table.DataTable(
         data=records,
-        columns=[{"name": c, "id": c} for c in columns],
+        columns=[{"name": _pretty_label(c), "id": c} for c in columns],
         sort_action="native",
-        export_format="csv",  # exports the redacted records above, never raw rows
-        page_size=25,
-        style_table={"maxHeight": "420px", "overflowY": "auto"},
+        page_size=20,
+        style_table={"maxHeight": "360px", "overflowY": "auto"},
         style_cell={
             "fontFamily": "var(--sans)", "fontSize": "0.78rem",
             "textAlign": "left", "padding": "0.3rem 0.6rem",
@@ -1704,10 +1927,7 @@ def _data_view_component(workspace: Path, kpi_id: str, rows: list[dict[str, Any]
             "backgroundColor": "transparent", "fontWeight": "600",
         },
     )
-    return html.Details(
-        [html.Summary("Data"), html.Div(note, className="dm"), table],
-        className="dataview",
-    )
+    return html.Div([html.Div(note, className="dm"), table])
 
 
 def render_kpi_inline(
