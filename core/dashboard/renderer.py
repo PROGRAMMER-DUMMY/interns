@@ -384,19 +384,37 @@ def _filter_rows_by_value(
     return [r for r in rows if str(r.get(column)) == target]
 
 
-def _drill_panels(by: str, value: Any, into: list[str]) -> list[dict[str, Any]]:
+_DRILL_DONUT_MAX = 8
+
+
+def _drill_panels(
+    by: str, value: Any, into: list[str], rows: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
     """Panel specs for a drilled category: one breakdown per `into` dimension,
-    of the measure within the clicked `value`. Chart type is a donut for a
-    low-cardinality composition (the within-category share reads at a glance);
-    `_figure_from_spec` aggregates and the donut sums to 100% over the filtered
-    rows. `y`/`y_format` are filled by the caller from the KPI's own spec."""
+    of the measure within the clicked `value`.
+
+    Chart type is data-driven by the dimension's cardinality WITHIN the drilled
+    slice: a low-cardinality breakdown is a donut (the composition reads at a
+    glance and sums to 100% over the filtered rows), while a high-cardinality one
+    is a ranked bar (a donut of 30 slivers is unreadable — data-to-viz). When
+    `rows` is omitted the default is a donut. `y`/`y_format` are filled by the
+    caller from the KPI's own spec."""
     panels: list[dict[str, Any]] = []
     for dim in into:
-        panels.append({
-            "chart_type": "donut",
+        chart = "donut"
+        if rows is not None:
+            distinct = len({str(r.get(dim)) for r in rows if dim in r})
+            if distinct > _DRILL_DONUT_MAX:
+                chart = "ranked_bar"
+        panel: dict[str, Any] = {
+            "chart_type": chart,
             "x": dim,
             "title": f"By {dim.replace('_', ' ').title()}",
-        })
+        }
+        if chart == "ranked_bar":
+            panel["orientation"] = "h"
+            panel["limit"] = 12
+        panels.append(panel)
     return panels
 
 
@@ -1174,7 +1192,7 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         y_col = str(spec.config.get("y") or "")
         y_format = str(spec.config.get("y_format") or "")
         cells = []
-        for panel in _drill_panels(by, value, into):
+        for panel in _drill_panels(by, value, into, filtered):
             p = dict(panel)
             if y_col:
                 p["y"] = y_col
