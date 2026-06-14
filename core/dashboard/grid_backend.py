@@ -28,7 +28,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.sql_safety import assert_safe_identifier, is_safe_identifier, quote_ident_sql
+from core.sql_safety import (
+    assert_safe_identifier,
+    escape_sql_literal,
+    is_safe_identifier,
+    quote_ident_sql,
+)
 
 # DuckDB type family -> AG Grid column filter. Anything unrecognized falls back to
 # text so the grid still offers a (safe) filter.
@@ -379,11 +384,20 @@ def serve_rows(
     allowed = {c: t for c, t in visible_columns(con, relation, workspace_root=workspace_root)}
     if not allowed:
         return {"rowData": [], "rowCount": 0}
-    # Phase C: a grouping/pivot request (rowGroupCols present, allow-listed) goes
-    # through the GROUP BY builder — but only while grouping levels remain to
-    # expand. Once every level is opened the leaf rows are flat (build_rows_query).
+    # Phase C: a grouping/pivot request (allow-listed rowGroupCols present) goes
+    # through the GROUP BY builder. build_group_query expands one un-opened level,
+    # or — when every level is already opened (groupKeys) — returns the leaf rows
+    # filtered to those open keys. A request with NO allow-listed rowGroupCols is a
+    # plain flat read.
     next_cols, _value_aggs, _keys = _group_request(request, allowed)
-    if next_cols:
+    raw_group = request.get("rowGroupCols") or []
+    is_grouping = bool(next_cols) or (
+        bool(_keys) and any(
+            (g.get("id") if isinstance(g, dict) else g) in allowed for g in raw_group
+            if isinstance(g, (dict, str))
+        )
+    )
+    if is_grouping:
         rows_sql, params, count_sql, count_params = build_group_query(relation, request, allowed)
     else:
         rows_sql, params, count_sql, count_params = build_rows_query(relation, request, allowed)
@@ -498,25 +512,32 @@ def register_source(con: Any, source: dict[str, str], *, repo_root: object = Non
     * ``kpi``            -> execute the KPI's generated SQL (which itself registers
       ``<kpi>_results``), then alias it to the source ``id``.
 
-    The relation name is asserted safe; the PATH is bound as a ``?`` parameter, so
-    a hostile path can never inject SQL. KPI SQL uses absolute read paths and is
-    trusted, generated text — executed under repo_root cwd like the renderer."""
+    The relation name is asserted safe. DuckDB cannot bind a ``?`` parameter inside
+    a table function in a ``CREATE VIEW``, so the PATH is rendered as a quote-escaped
+    SQL string LITERAL (``escape_sql_literal``) — an embedded quote can no longer
+    break out. Paths come from filesystem discovery (``grid_sources``), not client
+    input. KPI SQL is trusted generated text, executed under repo_root cwd like the
+    renderer."""
     rel = source.get("id") or ""
     assert_safe_identifier(rel, context="grid source relation")
     qrel = quote_ident_sql(rel)
     kind = source.get("kind")
     fmt = source.get("fmt")
     if kind == "dataset" and fmt == "csv":
-        con.execute(f"CREATE OR REPLACE VIEW {qrel} AS SELECT * FROM read_csv_auto(?)",
-                    [source.get("path")])
+        path_lit = escape_sql_literal(source.get("path"))
+        con.execute(
+            f"CREATE OR REPLACE VIEW {qrel} AS SELECT * FROM read_csv_auto({path_lit})"
+        )
         return rel
     if kind == "dataset" and fmt == "delta":
         try:
             con.execute("INSTALL delta; LOAD delta;")
         except Exception:
             pass
-        con.execute(f"CREATE OR REPLACE VIEW {qrel} AS SELECT * FROM delta_scan(?)",
-                    [source.get("path")])
+        path_lit = escape_sql_literal(source.get("path"))
+        con.execute(
+            f"CREATE OR REPLACE VIEW {qrel} AS SELECT * FROM delta_scan({path_lit})"
+        )
         return rel
     if kind == "kpi":
         from pathlib import Path

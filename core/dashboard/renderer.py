@@ -16,6 +16,7 @@ from typing import Any
 from datetime import date, datetime
 
 import dash
+import dash_ag_grid as dag
 import dash_bootstrap_components as dbc
 import plotly.express as px
 import plotly.graph_objs as go
@@ -1087,6 +1088,13 @@ def _dash_index_string(t: DesignTokens) -> str:
         ".drill-back{font-family:var(--mono);font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;cursor:pointer;background:var(--card);color:var(--accent-deep);border:1px solid var(--rule);border-radius:8px;padding:.3rem .7rem;}"
         ".drill-back:hover{border-color:var(--accent);}"
         ".drill-crumb{font-family:var(--mono);font-size:.68rem;letter-spacing:.05em;color:var(--ink-soft);}"
+        # Data surface — the governed slice-and-dice grid card.
+        ".datacard{background:var(--card);border:1px solid var(--rule-soft);border-radius:var(--radius);"
+        "box-shadow:var(--shadow);padding:1rem 1.1rem;margin-bottom:1.2rem;}"
+        ".datacard .xh{display:flex;align-items:baseline;gap:.6rem;margin:0 0 .7rem;}"
+        ".datacard .xh b{font-family:var(--serif);font-weight:600;font-size:1.02rem;color:var(--ink);}"
+        ".datacard .xh span{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);}"
+        ".datacard .note{font-family:var(--mono);font-size:.6rem;color:var(--ink-soft);margin:.5rem 0 0;}"
         ".hidden{display:none!important;}"
     )
     return (
@@ -1095,6 +1103,54 @@ def _dash_index_string(t: DesignTokens) -> str:
         + f"<style>{css}</style>{{%favicon%}}{{%css%}}</head>"
         + "<body><div id=\"app\">{%app_entry%}</div><footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>"
     )
+
+
+# --- Data surface (Phase B/C): governed SSRM grid ------------------------------
+# A "Data" card lets the user slice-and-dice ANY raw dataset or KPI result view
+# through a license-free AG Grid Server-Side Row Model: infinite scroll + server
+# filter/sort, plus a DuckDB GROUP BY pivot (row dims + measure + agg). The grid
+# is a rendered surface, so redacted/PII columns are excluded by grid_backend —
+# they never reach the coldefs, the projection, the filter/sort, or the grouping.
+
+_GRID_DEFAULT_COL_DEF: dict[str, Any] = {
+    "sortable": True,
+    "resizable": True,
+    "filter": True,
+    "floatingFilter": True,        # per-column quick filter row
+    "menuTabs": ["filterMenuTab", "generalMenuTab", "columnsMenuTab"],  # pin/hide
+    "enableValue": True,
+    "enableRowGroup": True,
+}
+
+_GRID_OPTIONS: dict[str, Any] = {
+    "rowModelType": "infinite",
+    "cacheBlockSize": 100,         # SSRM block size (matches the callback paging)
+    "maxBlocksInCache": 20,
+    "blockLoadDebounceMillis": 120,
+    "animateRows": True,
+    "suppressMenuHide": True,
+}
+
+
+def _grid_register_connection(repo_root: Path, source: dict[str, Any]):
+    """Open a DuckDB connection and register the chosen source as a view on it.
+
+    A fresh in-memory connection per request keeps the SSRM callback stateless and
+    thread-safe (Dash callbacks can run concurrently). Returns (con, relation) or
+    (None, "") on any failure — the grid then shows no rows rather than crashing.
+    """
+    try:
+        import duckdb
+    except Exception:
+        return None, ""
+    from core.dashboard import grid_backend as gb
+
+    try:
+        con = duckdb.connect(":memory:")
+        relation = gb.register_source(con, source, repo_root=repo_root)
+        return con, relation
+    except Exception:
+        return None, ""
 
 
 def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
@@ -1233,6 +1289,51 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
                   style={"height": "340px"}),
     ], id="explore-pane", className="explore") if ready_ids else html.Div()
 
+    # --- Data surface (Phase B/C): the governed slice-and-dice grid ----------
+    from core.dashboard import grid_backend as gb
+
+    sources = gb.grid_sources(workspace)
+    source_by_id = {s["id"]: s for s in sources}
+    source_opts = [{"label": s["label"], "value": s["id"]} for s in sources]
+    first_source = sources[0]["id"] if sources else None
+
+    data_surface = html.Div([
+        html.Div([
+            html.B("Data"),
+            html.Span("slice & dice any source — infinite scroll, filter, sort, pivot", className=""),
+        ], className="xh"),
+        html.Div([
+            html.Span("Source", className="lab"),
+            dcc.Dropdown(id="grid-source", options=source_opts, value=first_source,
+                         clearable=False, style={"minWidth": "300px", "fontSize": ".8rem"}),
+            html.Span("Group by", className="lab"),
+            dcc.Dropdown(id="grid-group", multi=True, placeholder="(no grouping)",
+                         style={"minWidth": "240px", "fontSize": ".8rem"}),
+            html.Span("Measure", className="lab"),
+            dcc.Dropdown(id="grid-measure", clearable=True, placeholder="(measure)",
+                         style={"minWidth": "180px", "fontSize": ".8rem"}),
+            html.Span("Agg", className="lab"),
+            dcc.Dropdown(id="grid-agg",
+                         options=[{"label": a.upper(), "value": a}
+                                  for a in ("sum", "avg", "min", "max", "count")],
+                         value="sum", clearable=False,
+                         style={"minWidth": "120px", "fontSize": ".8rem"}),
+        ], className="ctl"),
+        # Pivot state -> read by the getRows callback to build rowGroupCols/valueCols.
+        dcc.Store(id="grid-pivot-store"),
+        dag.AgGrid(
+            id="data-grid",
+            columnDefs=[],
+            defaultColDef=_GRID_DEFAULT_COL_DEF,
+            dashGridOptions=_GRID_OPTIONS,
+            rowModelType="infinite",
+            style={"height": "460px", "width": "100%"},
+            className="ag-theme-alpine",
+        ),
+        html.Div("Rendered surface — PII/redacted columns are excluded server-side "
+                 "and cannot be grouped, filtered, or sorted.", className="note"),
+    ], id="data-pane", className="datacard") if sources else html.Div()
+
     app.layout = html.Div([
         html.Header([html.P("Workspace Intelligence", className="ey"),
                      html.H1(workspace.name.replace("-", " "))], className="mast"),
@@ -1244,6 +1345,7 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         html.Div([
             explore,
             html.Div(id="kpi-detail"),
+            data_surface,
         ], className="scroll"),
     ], id="app")
 
@@ -1451,6 +1553,87 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
                 x=str(x or ""), series=str(series) if series else None,
                 measure=str(measure or ""), chart_type=str(chart_type or ""),
             )
+
+    # --- Data surface (Phase B/C): governed SSRM grid callbacks --------------
+    # These register whenever the workspace has at least one grid source (raw
+    # dataset or KPI view) — independent of whether any KPI is "ready".
+    if sources:
+        @app.callback(
+            Output("data-grid", "columnDefs"),
+            Output("grid-group", "options"),
+            Output("grid-measure", "options"),
+            Input("grid-source", "value"),
+        )
+        def _grid_source_changed(source_id):
+            """On source change: build coldefs from the live schema (redacted
+            columns excluded) and fill the pivot dropdowns. Group dims = all
+            visible columns; measures = numeric visible columns only."""
+            source = source_by_id.get(source_id)
+            if not source:
+                return [], [], []
+            con, relation = _grid_register_connection(repo_root, source)
+            if con is None:
+                return [], [], []
+            try:
+                coldefs = gb.generate_column_defs(con, relation, workspace_root=workspace)
+                visible = gb.visible_columns(con, relation, workspace_root=workspace)
+            finally:
+                con.close()
+            group_opts = [{"label": c, "value": c} for c, _t in visible]
+            measure_opts = [
+                {"label": c, "value": c} for c, t in visible if gb._is_numeric_type(t)
+            ]
+            return coldefs, group_opts, measure_opts
+
+        @app.callback(
+            Output("grid-pivot-store", "data"),
+            Input("grid-group", "value"),
+            Input("grid-measure", "value"),
+            Input("grid-agg", "value"),
+        )
+        def _grid_pivot_state(group_cols, measure, agg):
+            """Translate the pivot controls into AG-Grid-shaped grouping config the
+            getRows callback merges into each request."""
+            cols = [c for c in (group_cols or []) if c]
+            data: dict[str, Any] = {}
+            if cols:
+                data["rowGroupCols"] = [{"id": c, "field": c} for c in cols]
+                if measure:
+                    data["valueCols"] = [{"field": measure, "aggFunc": str(agg or "sum")}]
+            return data
+
+        @app.callback(
+            Output("data-grid", "getRowsResponse"),
+            Input("data-grid", "getRowsRequest"),
+            State("grid-source", "value"),
+            State("grid-pivot-store", "data"),
+            prevent_initial_call=True,
+        )
+        def _grid_get_rows(request, source_id, pivot):
+            """SSRM block handler: register the source, merge any pivot config into
+            the request, and call the governed grid_backend.serve_rows."""
+            if not request:
+                return no_update
+            source = source_by_id.get(source_id)
+            if not source:
+                return {"rowData": [], "rowCount": 0}
+            req = dict(request)
+            if isinstance(pivot, dict) and pivot.get("rowGroupCols"):
+                req["rowGroupCols"] = pivot["rowGroupCols"]
+                if pivot.get("valueCols"):
+                    req["valueCols"] = pivot["valueCols"]
+                # The grid's own groupKeys (expanded levels) ride along on request.
+                req.setdefault("groupKeys", request.get("groupKeys") or [])
+            con, relation = _grid_register_connection(repo_root, source)
+            if con is None:
+                return {"rowData": [], "rowCount": 0}
+            try:
+                out = gb.serve_rows(con, relation, req, workspace_root=workspace)
+            except Exception:
+                out = {"rowData": [], "rowCount": 0}
+            finally:
+                con.close()
+            return out
 
     return app
 
