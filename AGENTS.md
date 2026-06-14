@@ -639,8 +639,9 @@ repeat it in the response; state that sensitive output was suppressed.
 
 Use the repo skills in `skills/` as operating policies:
 
-- `clarify-ambiguity`: ask one targeted question only when ambiguity materially matters.
-- `grill-requirements`: interview users/teams to discover goals, constraints, and guardrails.
+- `grill-requirements`: interview users/teams to discover goals, constraints, and guardrails;
+  includes the merged "Clarify Ambiguity" mode (ask one targeted question only when ambiguity
+  materially matters).
 - `stakeholder-memory`: store user/team preferences and decision style.
 - `domain-model`: align terms with KPI registry, data model, and `CONTEXT.md`.
 - `data-engineering-pipeline-design`: design source-to-target, ETL/ELT, medallion, SQL, Polars,
@@ -814,7 +815,7 @@ workspace-governance
   -> feature-derivation-library for reusable derived-feature candidates
   -> task-onboarding / workspace-kpi-query-optimizer
   -> databricks-access-gates before or after Databricks remote execution/mutation
-  -> clarify-ambiguity only for unresolved high-impact mappings
+  -> grill-requirements (clarify-ambiguity mode) only for unresolved high-impact mappings
   -> grill-requirements when business interpretation must be chosen
   -> stakeholder-memory for accepted preferences and definitions
   -> to-solution-brief for implementation direction

@@ -157,7 +157,7 @@ readiness gates, generated SQL when present, output previews when present, and s
 Dependency-free AI application tests can run from workspace-scoped JSONL datasets:
 
 ```powershell
-uv run run-ai-app-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_harness/datasets/happy_path.jsonl
+uv run harness ai-app --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_harness/datasets/happy_path.jsonl
 ```
 
 The default path is local and CI-safe. Cases can target `local_stub` or `http_ai`; HTTP cases are
@@ -169,7 +169,7 @@ KPI suite rows are in `config/ai_harness.kpi_suite.example.jsonl`.
 Workflow guardrails can be checked with:
 
 ```powershell
-uv run validate-workflow-guardrails --workspace workspaces/<project>
+uv run harness workflow-guardrails --workspace workspaces/<project>
 ```
 
 This catches workflow failures around the tools themselves: invented generic KPI features, blocker
@@ -183,7 +183,7 @@ uv run record-workspace-trajectory --workspace workspaces/<project> --event-type
 ```
 
 The append-only trajectory is written to `interns/state/trajectory.jsonl` and summarized under
-`interns/reports/trajectory/`. `validate-workflow-guardrails` consumes it by default when present.
+`interns/reports/trajectory/`. `harness workflow-guardrails` consumes it by default when present.
 Controlled tools such as `workspace-flow`, `prepare-kpi-blocker-panel`, and
 `apply-kpi-panel-answer` also record best-effort trajectory events automatically.
 
@@ -213,7 +213,7 @@ uv run python dashboard.py
 CLI agents can be regression-tested against the governed workflow with:
 
 ```powershell
-uv run run-ai-cli-harness --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl
+uv run harness ai-cli --workspace workspaces/<project> --dataset workspaces/<project>/interns/ai_cli_harness/datasets/governed_suite.jsonl
 ```
 
 Real subprocess execution of tools such as Claude, Gemini, or Codex is blocked unless
@@ -445,8 +445,8 @@ remain in manifest/open-question form.
 
 ## CLI Workflow Reference
 
-For agent-led conversations on the checked-in RCM workspace and fresh-start scenarios, see
-`workspace_scenarios.md`.
+The sections below are the agent-led workflow reference for both the checked-in workspace and
+fresh-start scenarios.
 
 ### 1. Workspace Selection
 

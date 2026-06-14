@@ -40,6 +40,16 @@
 - `core/agents/`: intern routing, registry, and LLM engine abstractions.
 - `core/observability/`: metric parsing and telemetry backends.
 - `core/storage/`: SQLite/Git workspace state.
+- `core/onboarding/`: primary KPI pipeline — workspace onboarding, blocker resolution, KPI generation, medallion harness, and Databricks deployment gates.
+- `core/medallion/`: bronze/silver/gold layer design, lineage, Delta/Spark emit, incremental build, and medallion deploy plan.
+- `core/context/`: doc retrieval and context routing for agent knowledge queries.
+- `core/contracts/`: artifact versioning and contract schema utilities.
+- `core/dashboard/`: dashboard spec inference, rendering, and export.
+- `core/presentation/`: console tables and artifact export helpers.
+- `core/resource/`: resource manager and CLI for repo-level asset access.
+- `core/skills/`: skill adapter generator that writes `.agents/<tool>/SKILLS.md` outputs.
+- `core/dev/`: development harness CLI and green-gate checks.
+- `core/wiki/`: wiki layout, reader, writer, and lineage helpers.
 
 Project-specific runtime output belongs under `workspaces/<project>/interns/`,
 not directly in the project root. The loop stores task-scoped `workspace.db`,
