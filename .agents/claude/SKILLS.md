@@ -571,6 +571,11 @@ Use the narrowest role that fits the task and keep write access limited to imple
 
 ## Available Skills
 
+### dashboard-agent
+
+- Path: `skills/dashboard-agent/SKILL.md`
+- Description: Named conversational DashboardAgent. Triggered by "DashboardAgent, <request>", it turns a natural-language plot request into a per-workspace dashboard spec edit + verify loop. An advisor + editor that knows the spec contract (machine_defaults vs user_overrides), the renderer chart types and axes, the live KPI result columns, and display redaction/governance. Wraps the dashboard-engineer subagent and the dashboard-design skill. Use whenever the user names "DashboardAgent" or asks in plain language to add, change, or remove a plot/panel on a workspace dashboard.
+
 ### dashboard-design
 
 - Path: `skills/dashboard-design/SKILL.md`
