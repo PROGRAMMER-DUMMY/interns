@@ -247,6 +247,169 @@ def _first_non_constant_categorical(
     return preferred or next(iter(rows[0]), "")
 
 
+def _as_year(value: Any) -> int | None:
+    """Return a plausible 4-digit year (1900-2100) from an int/float/str, else None.
+
+    Lets a date-named column holding bare years ("2021", 2021) read as a timeline
+    axis. Generic — no workspace assumptions, just a sane calendar-year window."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        n = int(value)
+    else:
+        text = str(value).strip()
+        if not text.lstrip("-").isdigit():
+            return None
+        n = int(text)
+    return n if 1900 <= n <= 2100 else None
+
+
+def _classify_columns(
+    rows: list[dict[str, Any]],
+) -> tuple[list[str], list[str], list[str]]:
+    """Split a KPI result's columns into (dimensions, measures, date_cols) by dtype.
+
+    Workspace-agnostic: classification is purely structural, derived from the
+    VALUES in the live result rows plus a date-name hint, never from any
+    workspace's domain vocabulary.
+
+    * date_cols  — values coerce to a date, OR the column name is date-like and
+      every present value coerces to a date. These are timeline X candidates.
+    * measures   — values are numeric (int/float, non-bool) and the column is not
+      a date column. These are Y / measure candidates.
+    * dimensions — everything else (categorical / text / mixed). These are the
+      X / breakdown candidates.
+
+    A date column is NOT also listed as a measure (a year stored as an int still
+    reads as a timeline, not a quantity to sum). The returned lists preserve the
+    column order of the first row so dropdowns are stable.
+    """
+    if not rows:
+        return [], [], []
+    columns = list(rows[0].keys())
+    dimensions: list[str] = []
+    measures: list[str] = []
+    date_cols: list[str] = []
+    for col in columns:
+        present = [r.get(col) for r in rows if r.get(col) is not None]
+        if not present:
+            # All-null column: treat as a (weak) dimension so it stays selectable.
+            dimensions.append(col)
+            continue
+        name_is_date = bool(_DATE_NAME_RE.search(col))
+        # Numeric? booleans are ints in Python but read as categories, not measures.
+        numeric = [
+            v for v in present if isinstance(v, (int, float)) and not isinstance(v, bool)
+        ]
+        all_numeric = len(numeric) == len(present)
+        # Date? a value-level coercion test (handles string/date/datetime values).
+        coerces_date = sum(1 for v in present if _coerce_date(v) is not None)
+        looks_date = coerces_date == len(present) and (
+            name_is_date or not all_numeric
+        )
+        # A date-NAMED column of bare year values ("2021", 2021) is a timeline
+        # axis, not a quantity to sum — _coerce_date can't parse a lone year, so
+        # detect it here (every value is an int-like year in a plausible range).
+        if not looks_date and name_is_date:
+            years = [_as_year(v) for v in present]
+            if all(y is not None for y in years):
+                looks_date = True
+        if looks_date:
+            date_cols.append(col)
+        elif all_numeric:
+            measures.append(col)
+        else:
+            dimensions.append(col)
+    return dimensions, measures, date_cols
+
+
+# Chart types the Explore pane can build from a transient spec. Each maps to a
+# branch in `_figure_from_spec`. Kept generic (no domain assumptions) and ordered
+# from most-common to least so the dropdown reads sensibly.
+_EXPLORE_CHART_TYPES: tuple[tuple[str, str], ...] = (
+    ("Bar", "bar"),
+    ("Grouped bar", "grouped_bar"),
+    ("Stacked 100%", "stacked_bar_percent"),
+    ("Line / timeline", "line"),
+    ("Ranked bar (top-N)", "ranked_bar"),
+    ("Donut", "donut"),
+    ("Treemap", "treemap"),
+    ("Heatmap", "heatmap"),
+    ("Stacked area", "stacked_area"),
+)
+
+
+def _explore_chart_options() -> list[dict[str, str]]:
+    """Dropdown options for the Explore chart-type picker (label/value pairs)."""
+    return [{"label": label, "value": value} for label, value in _EXPLORE_CHART_TYPES]
+
+
+def _explore_default_chart_type(x: str, date_cols: list[str], series: str | None) -> str:
+    """Pick a sensible default chart for an X/series choice.
+
+    A date X -> line (timeline). Otherwise a breakdown -> grouped bar; a plain
+    single categorical -> bar.
+    """
+    if x and x in (date_cols or []):
+        return "line"
+    if series:
+        return "grouped_bar"
+    return "bar"
+
+
+def _explore_figure(
+    spec: DashboardSpec,
+    rows: list[dict[str, Any]],
+    *,
+    x: str,
+    series: str | None,
+    measure: str,
+    chart_type: str,
+) -> go.Figure:
+    """Build an Explore figure by assembling a TRANSIENT spec from the dropdown
+    choices and reusing `_figure_from_spec` (the single chart-quality seam).
+
+    Guards invalid/empty combos: an unknown X/measure (not in the live rows)
+    falls back to the first real dimension / measure so the pane never renders a
+    blank or crashes. A date X with a non-line chart still defaults sensibly via
+    the caller; here we only ensure the columns exist and the share/percent flag
+    is derived from the measure name so percent charts read 0-100%.
+    """
+    if not rows:
+        return _figure_from_spec(
+            _panel_spec(spec, {"chart_type": chart_type or "bar", "title": ""}), rows,
+            show_title=False,
+        )
+    dims, measures, date_cols = _classify_columns(rows)
+    present = set(rows[0].keys())
+    # Resolve X: keep the choice if it's a real column, else first dimension/date.
+    if x not in present:
+        x = (dims or date_cols or list(present))[0]
+    # Resolve measure: keep if real & numeric, else first measure, else any column.
+    if measure not in present or measure not in measures:
+        measure = measures[0] if measures else (list(present)[-1])
+    # Series is optional; drop it if it doesn't exist or duplicates X.
+    color = series if (series and series in present and series != x) else ""
+    if not chart_type:
+        chart_type = _explore_default_chart_type(x, date_cols, color or None)
+    # Percent intent is derived from the measure name (generic share vocabulary),
+    # so a share measure renders as a true 0-100% composition.
+    name = (measure or "").lower()
+    y_format = "percent" if any(
+        t in name for t in ("percent", "share", "ratio", "rate", "pct")
+    ) else ""
+    panel = {
+        "chart_type": chart_type,
+        "x": x,
+        "y": measure,
+        "color": color,
+        "title": "",
+    }
+    if y_format:
+        panel["y_format"] = y_format
+    return _figure_from_spec(_panel_spec(spec, panel), rows, show_title=False)
+
+
 def _cap_categories(
     rows: list[dict[str, Any]], x_col: str, color_col: str | None, y_col: str,
     *, max_x: int = 12, max_series: int = 6,
@@ -762,6 +925,9 @@ def _dash_index_string(t: DesignTokens) -> str:
         ".dh{font-family:var(--serif);font-size:1.1rem;margin:0 0 .2rem;}"
         ".dm{font-family:var(--mono);font-size:.68rem;color:var(--ink-soft);margin-bottom:.6rem;}"
         ".js-plotly-plot,.plot-container{width:100%!important;}"
+        ".explore{flex:0 0 auto;border-top:1px solid var(--rule);padding:.4rem 1.2rem .8rem;background:var(--card);}"
+        ".explore>summary{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.14em;color:var(--accent-deep);cursor:pointer;user-select:none;padding:.3rem 0;}"
+        ".explore[open]{max-height:48vh;overflow:auto;}"
     )
     return (
         "<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>"
@@ -876,12 +1042,37 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         dcc.Checklist(id="panel-pick", inline=True, style={"display": "flex", "gap": ".5rem", "flexWrap": "wrap"}),
     ], className="ctl") if ready_ids else html.Div()
 
+    # Explore pane (Phase 1): per-KPI ad-hoc comparison. The four dropdowns are
+    # populated from the SELECTED KPI's own result columns (classified by dtype),
+    # and a callback rebuilds the figure via a transient spec -> `_figure_from_spec`.
+    # Fixed IDs (only one KPI's detail is shown at a time) keep the callback graph
+    # simple; options refresh whenever the KPI changes.
+    _dd = {"minWidth": "170px", "fontSize": ".8rem"}
+    explore = html.Details([
+        html.Summary("Explore"),
+        html.Div([
+            html.Span("X", className="lab"),
+            dcc.Dropdown(id="explore-x", clearable=False, style=_dd),
+            html.Span("Breakdown", className="lab"),
+            dcc.Dropdown(id="explore-series", clearable=True, placeholder="(none)", style=_dd),
+            html.Span("Measure", className="lab"),
+            dcc.Dropdown(id="explore-measure", clearable=False, style=_dd),
+            html.Span("Chart", className="lab"),
+            dcc.Dropdown(id="explore-chart", options=_explore_chart_options(),
+                         clearable=False, style=_dd),
+        ], className="ctl", style={"border": "none", "paddingLeft": 0}),
+        dcc.Graph(id="explore-graph",
+                  config={"displaylogo": False, "responsive": True},
+                  style={"height": "340px"}),
+    ], id="explore-pane", className="explore", open=False) if ready_ids else html.Div()
+
     app.layout = html.Div([
         html.Header([html.P("Workspace Intelligence", className="ey"),
                      html.H1(workspace.name.replace("-", " "))], className="mast"),
         html.Div(strip_children or [html.Div("No KPIs registered yet.", className="n")], className="strip"),
         controls,
         html.Div(id="kpi-detail", className="detail"),
+        explore,
     ], id="app")
 
     def _detail_children(kpi_id: str, visible_idxs: list[int] | None) -> Any:
@@ -946,6 +1137,60 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         )
         def _highlight_tile(kpi_id, ids):
             return ["tile sel" if (i or {}).get("kpi_id") == kpi_id else "tile" for i in ids]
+
+        # --- Explore pane (Phase 1) ---------------------------------------
+        @app.callback(
+            Output("explore-x", "options"),
+            Output("explore-x", "value"),
+            Output("explore-series", "options"),
+            Output("explore-series", "value"),
+            Output("explore-measure", "options"),
+            Output("explore-measure", "value"),
+            Output("explore-chart", "value"),
+            Input("kpi-pick", "value"),
+        )
+        def _explore_options(kpi_id):
+            """Refill the Explore dropdowns from the selected KPI's columns.
+
+            Defaults seed from the KPI's own primary spec: x/measure from the
+            spec, then a sensible chart (date X -> line)."""
+            m = meta.get(kpi_id)
+            if not m:
+                return [], None, [], None, [], None, "bar"
+            dims, measures, date_cols = _classify_columns(m["rows"])
+            x_cols = date_cols + dims  # date candidates first (timeline-friendly)
+            x_opts = [{"label": c, "value": c} for c in x_cols]
+            series_opts = [{"label": c, "value": c} for c in dims]
+            measure_opts = [{"label": c, "value": c} for c in measures]
+            cfg = m["spec"].config
+            # Seed X/measure from the spec when those columns are real candidates.
+            x_default = cfg.get("x") if cfg.get("x") in x_cols else (x_cols[0] if x_cols else None)
+            m_default = cfg.get("y") if cfg.get("y") in measures else (measures[0] if measures else None)
+            chart_default = _explore_default_chart_type(x_default or "", date_cols, None)
+            return (
+                x_opts, x_default,
+                series_opts, None,
+                measure_opts, m_default,
+                chart_default,
+            )
+
+        @app.callback(
+            Output("explore-graph", "figure"),
+            Input("kpi-pick", "value"),
+            Input("explore-x", "value"),
+            Input("explore-series", "value"),
+            Input("explore-measure", "value"),
+            Input("explore-chart", "value"),
+        )
+        def _explore_render(kpi_id, x, series, measure, chart_type):
+            m = meta.get(kpi_id)
+            if not m:
+                return go.Figure()
+            return _explore_figure(
+                m["spec"], m["rows"],
+                x=str(x or ""), series=str(series) if series else None,
+                measure=str(measure or ""), chart_type=str(chart_type or ""),
+            )
 
     return app
 
@@ -1203,4 +1448,7 @@ __all__ = [
     "set_active_design",
     "build_dash_app",
     "render_kpi_html",
+    "_classify_columns",
+    "_explore_figure",
+    "_explore_chart_options",
 ]
