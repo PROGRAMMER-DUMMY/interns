@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.governance.audit_chain import append_audit_record
 from core.paths import PROJECT_ROOT
 from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
@@ -92,6 +93,15 @@ class WorkspaceTrajectoryRecorder:
         self.trajectory_path.parent.mkdir(parents=True, exist_ok=True)
         with self.trajectory_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+
+        # Additive: also append to the tamper-evident audit chain.
+        # Failures here MUST NOT break trajectory recording — degrade silently.
+        try:
+            _audit_chain_path = self.trajectory_path.parent / "audit_chain.jsonl"
+            append_audit_record(_audit_chain_path, record)
+        except Exception:  # noqa: BLE001
+            pass
+
         return self.render()
 
     def render(self) -> TrajectoryRecordResult:
