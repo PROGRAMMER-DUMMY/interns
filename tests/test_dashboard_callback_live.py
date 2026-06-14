@@ -125,6 +125,105 @@ def test_coerce_date_accepts_common_formats():
     assert _coerce_date("garbage-not-a-date") is None
 
 
+# ---------------------------------------------------------------------------
+# Phase 1 — Explore pane: the callback body (`_explore_figure`) is exercised
+# directly over representative rows so the X/measure/series/chart-type behavior
+# is locked in without needing a browser (the browser path auto-skips below).
+# ---------------------------------------------------------------------------
+
+try:  # pragma: no cover - import guard mirrors the other dashboard test modules
+    import plotly  # noqa: F401
+
+    from core.dashboard.renderer import (
+        _classify_columns,
+        _explore_default_chart_type,
+        _explore_figure,
+    )
+    from core.dashboard.spec import DashboardSpec
+
+    _HAS_DASHBOARD = True
+except Exception:  # pragma: no cover
+    _HAS_DASHBOARD = False
+
+
+def _explore_spec() -> "DashboardSpec":
+    cfg = {"chart_type": "bar", "x": "region", "y": "sum_amount", "title": "Explore KPI"}
+    return DashboardSpec(
+        kpi_id="kpi_explore", config=cfg, machine_defaults=cfg,
+        user_overrides={}, spec_path="dashboard/kpi_explore.json",
+    )
+
+
+_EXPLORE_ROWS = [
+    {"order_month": "2024-01-01", "region": "north", "segment": "a", "sum_amount": 100, "share_pct": 40.0},
+    {"order_month": "2024-01-01", "region": "south", "segment": "b", "sum_amount": 150, "share_pct": 60.0},
+    {"order_month": "2024-02-01", "region": "north", "segment": "a", "sum_amount": 200, "share_pct": 55.0},
+    {"order_month": "2024-02-01", "region": "south", "segment": "b", "sum_amount": 250, "share_pct": 45.0},
+]
+
+
+@pytest.mark.skipif(not _HAS_DASHBOARD, reason="dashboard extra (plotly) not installed")
+class TestExploreFigureCallback:
+    """≥3 X/measure/series/chart-type combinations through the callback body."""
+
+    def test_combo_bar_region_by_amount(self):
+        fig = _explore_figure(
+            _explore_spec(), _EXPLORE_ROWS,
+            x="region", series=None, measure="sum_amount", chart_type="bar",
+        )
+        assert len(fig.data) >= 1
+        # One value per region after aggregation (north=300, south=400).
+        assert fig.data[0].type in ("bar",)
+
+    def test_combo_grouped_bar_region_by_segment(self):
+        fig = _explore_figure(
+            _explore_spec(), _EXPLORE_ROWS,
+            x="region", series="segment", measure="sum_amount", chart_type="grouped_bar",
+        )
+        # A breakdown -> one trace per series value.
+        assert fig.layout.barmode == "group"
+        assert len(fig.data) >= 2
+
+    def test_combo_date_x_defaults_to_line_timeline(self):
+        # When chart_type is left blank and X is a date column -> timeline (line).
+        _, _, date_cols = _classify_columns(_EXPLORE_ROWS)
+        assert "order_month" in date_cols
+        assert _explore_default_chart_type("order_month", date_cols, None) == "line"
+        fig = _explore_figure(
+            _explore_spec(), _EXPLORE_ROWS,
+            x="order_month", series=None, measure="sum_amount", chart_type="",
+        )
+        assert fig.data[0].type == "scatter"  # px.line -> scatter trace w/ mode lines
+        assert "lines" in (fig.data[0].mode or "")
+
+    def test_combo_stacked_percent_share_measure_is_0_100(self):
+        fig = _explore_figure(
+            _explore_spec(), _EXPLORE_ROWS,
+            x="region", series="segment", measure="share_pct",
+            chart_type="stacked_bar_percent",
+        )
+        assert fig.layout.barmode == "stack"
+        assert fig.layout.barnorm == "percent"
+        # Share measure -> percent axis, 0-100 range (not double-scaled).
+        assert fig.layout.yaxis.ticksuffix == "%"
+        assert tuple(fig.layout.yaxis.range) == (0, 100)
+
+    def test_invalid_x_falls_back_without_crashing(self):
+        # X references a column absent from the rows -> resolves to a real one.
+        fig = _explore_figure(
+            _explore_spec(), _EXPLORE_ROWS,
+            x="not_a_column", series=None, measure="sum_amount", chart_type="bar",
+        )
+        assert len(fig.data) >= 1
+
+    def test_empty_rows_returns_a_figure(self):
+        fig = _explore_figure(
+            _explore_spec(), [],
+            x="region", series=None, measure="sum_amount", chart_type="bar",
+        )
+        assert fig is not None
+
+
 def test_global_date_filter_changes_chart_via_browser(tmp_path):
     """Browser-driven assertion. Skipped when dash[testing] / selenium / webdriver missing."""
     dash_testing = pytest.importorskip("dash.testing", reason="dash[testing] not installed")
