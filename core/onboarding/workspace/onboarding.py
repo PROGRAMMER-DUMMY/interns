@@ -1994,7 +1994,17 @@ def _extract_tabular_kpis(
 def _read_xlsx_xml_kpis(path: Path) -> list[KpiDefinition]:
     ns = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     with zipfile.ZipFile(path) as zf:
-        root = ET.fromstring(zf.read("xl/worksheets/sheet1.xml"))
+        _sheet_xml = zf.read("xl/worksheets/sheet1.xml")
+    # The .xlsx is untrusted (customer-uploaded). A worksheet sheet never
+    # legitimately carries a DTD or entity declaration, so reject any before
+    # parsing -- this neutralizes XXE / billion-laughs entity expansion. The
+    # ET.fromstring below is therefore safe on this pre-screened input.
+    if b"<!DOCTYPE" in _sheet_xml or b"<!ENTITY" in _sheet_xml:
+        raise ValueError(
+            "xlsx worksheet XML contains a DTD/entity declaration; refusing to "
+            "parse (possible XXE)."
+        )
+    root = ET.fromstring(_sheet_xml)  # nosec B314 - DTD/ENTITY rejected above
     rows = []
     for row in root.findall("main:sheetData/main:row", ns):
         values = []

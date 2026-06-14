@@ -59,7 +59,10 @@ def acquire_lock(state_dir: Path, *, stale_after_seconds: int = 3600):
 
 
 def new_run_id(manifest_hash: str) -> str:
-    suffix = hashlib.sha1(manifest_hash.encode()).hexdigest()[:8]
+    # Non-security fingerprint: shortens an already-computed manifest hash into a
+    # human-readable run-id suffix. usedforsecurity=False documents that collision
+    # resistance is not relied on here (and satisfies SAST).
+    suffix = hashlib.sha1(manifest_hash.encode(), usedforsecurity=False).hexdigest()[:8]
     return f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{suffix}"
 
 
