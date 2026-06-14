@@ -311,21 +311,20 @@ class GridSourceDiscoveryTests(unittest.TestCase):
                             workspace_root=self.ws)
         self.assertIn("rowCount", out)
 
-    def test_build_dash_app_registers_grid_callbacks(self):
-        """Build-check (read-only): the live app constructs and the Data-surface
-        grid callbacks (columnDefs + getRowsResponse) are registered."""
+    def test_build_dash_app_registers_explore_slice_callbacks(self):
+        """Build-check (read-only): the live app constructs and the Explore slice
+        wiring (filter-value options + the chart figure) is registered. The
+        slice-and-dice happens IN the Explore chart, not a separate data grid."""
         from pathlib import Path
 
-        try:
-            import dash_ag_grid  # noqa: F401
-        except Exception:
-            self.skipTest("dash-ag-grid not installed")
         from core.dashboard.renderer import build_dash_app
 
         app = build_dash_app(Path("."), self.WORKSPACE)
         keys = list(app.callback_map)
-        self.assertTrue(any("data-grid.columnDefs" in k for k in keys), keys)
-        self.assertTrue(any("data-grid.getRowsResponse" in k for k in keys), keys)
+        self.assertTrue(any("explore-graph.figure" in k for k in keys), keys)
+        self.assertTrue(any("explore-filter-vals.options" in k for k in keys), keys)
+        # The removed data-grid surface must NOT be present.
+        self.assertFalse(any("data-grid" in k for k in keys), keys)
 
 
 if __name__ == "__main__":

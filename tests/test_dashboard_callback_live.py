@@ -373,99 +373,28 @@ class TestDrillDownCallback:
 # ---------------------------------------------------------------------------
 
 
-def _make_workspace_with_grid_dataset(tmp_path: Path) -> tuple[Path, str]:
-    repo_root = tmp_path
-    workspace_rel = "workspaces/synthetic_grid_dashboard"
-    workspace = repo_root / workspace_rel
-    (workspace / "datasets").mkdir(parents=True)
-    layout = WorkspaceLayout(project_root=workspace)
-    layout.ensure_runtime_dirs()
-    # "patient_name" is flagged is_sensitive in the semantic contract (the SQL-mask
-    # set) — the grid must hide it even though no display regex matches that exact
-    # name. department is a group dim; revenue is a numeric measure.
-    (workspace / "datasets" / "facts.csv").write_text(
-        "patient_name,department,revenue\n"
-        "Alice,Cardiology,100\n"
-        "Bob,Oncology,250\n"
-        "Carol,Cardiology,300\n"
-        "Dave,Neurology,50\n",
-        encoding="utf-8",
-    )
-    layout.contracts_dir.mkdir(parents=True, exist_ok=True)
-    (layout.contracts_dir / "semantic_contract.json").write_text(
-        json.dumps({"columns": {"patient_name": {"is_sensitive": True, "category": "name"}}}),
-        encoding="utf-8",
-    )
-    layout.kpi_registry_path.parent.mkdir(parents=True, exist_ok=True)
-    layout.kpi_registry_path.write_text(json.dumps({"kpis": []}), encoding="utf-8")
-    return repo_root, workspace_rel
-
-
-def _find_callback(app, output_id: str, output_prop: str):
-    """Return the UNDECORATED callback function whose output targets output_id.prop.
-
-    Dash wraps the registered callback (it expects an ``outputs_list`` kwarg from
-    the live request context); the original function is preserved on
-    ``__wrapped__`` (functools.wraps), so call that directly in tests.
-    """
-    target = f"{output_id}.{output_prop}"
-    for key, entry in app.callback_map.items():
-        if target in key:
-            fn = entry["callback"]
-            return getattr(fn, "__wrapped__", fn)
-    raise AssertionError(f"callback for {target} not registered; keys={list(app.callback_map)}")
-
-
 @pytest.mark.skipif(not _HAS_DASHBOARD, reason="dashboard extra not installed")
-def test_grid_get_rows_callback_excludes_pii_and_paginates(tmp_path):
-    duckdb = pytest.importorskip("duckdb", reason="duckdb not installed")  # noqa: F841
-    pytest.importorskip("dash_ag_grid", reason="dash-ag-grid not installed")
+def test_explore_slice_filters_rows_for_the_chart():
+    """The Explore slice (Power-BI filter) keeps only rows whose slice column is in
+    the selected values — this is the slice-and-dice the chart does on the data."""
+    from core.dashboard.renderer import _slice_rows
 
-    repo_root, workspace_rel = _make_workspace_with_grid_dataset(tmp_path)
-    app = build_dash_app(repo_root, workspace_rel)
-
-    # The build itself is the build-check: the app constructs and the grid
-    # callbacks are registered.
-    src_cb = _find_callback(app, "data-grid", "columnDefs")
-    rows_cb = _find_callback(app, "data-grid", "getRowsResponse")
-
-    # Source id is derived from the dataset stem: ds_facts.
-    from core.dashboard import grid_backend as gb
-
-    sources = gb.grid_sources(repo_root / workspace_rel)
-    src_ids = {s["id"] for s in sources}
-    assert "ds_facts" in src_ids
-    source_id = "ds_facts"
-
-    # Source-change callback -> coldefs exclude the PII column.
-    coldefs, group_opts, measure_opts = src_cb(source_id)
-    fields = {d["field"] for d in coldefs}
-    assert "patient_name" not in fields
-    assert {"department", "revenue"} <= fields
-    assert {o["value"] for o in measure_opts} == {"revenue"}      # numeric only
-
-    # getRowsResponse (flat block): no PII, full count, paginated block.
-    req = {"startRow": 0, "endRow": 2, "filterModel": {}, "sortModel": []}
-    out = rows_cb(req, source_id, None)
-    assert out["rowCount"] == 4
-    assert len(out["rowData"]) == 2                                # only the block
-    for row in out["rowData"]:
-        assert "patient_name" not in row
-
-    # getRowsResponse (grouped via the pivot store): GROUP BY department, SUM revenue.
-    pivot = {
-        "rowGroupCols": [{"id": "department", "field": "department"}],
-        "valueCols": [{"field": "revenue", "aggFunc": "sum"}],
-    }
-    greq = {"startRow": 0, "endRow": 100, "filterModel": {}, "sortModel": [],
-            "rowGroupCols": pivot["rowGroupCols"], "valueCols": pivot["valueCols"],
-            "groupKeys": []}
-    gout = rows_cb(greq, source_id, pivot)
-    by_dept = {r["department"]: r["revenue"] for r in gout["rowData"]}
-    assert by_dept["Cardiology"] == 400
-    assert gout["rowCount"] == 3
-    for row in gout["rowData"]:
-        assert "patient_name" not in row
+    rows = [
+        {"department": "Cardiology", "gender": "Female", "share": 10},
+        {"department": "Oncology", "gender": "Male", "share": 20},
+        {"department": "Cardiology", "gender": "Male", "share": 30},
+        {"department": "Neurology", "gender": "Female", "share": 5},
+    ]
+    # No slice -> unchanged.
+    assert _slice_rows(rows, "", []) == rows
+    assert _slice_rows(rows, "department", []) == rows
+    # Slice to one value.
+    onc = _slice_rows(rows, "department", ["Oncology"])
+    assert [r["department"] for r in onc] == ["Oncology"]
+    # Slice to multiple values (dice across a dimension).
+    multi = _slice_rows(rows, "department", ["Cardiology", "Neurology"])
+    assert {r["department"] for r in multi} == {"Cardiology", "Neurology"}
+    assert len(multi) == 3
 
 
 def test_global_date_filter_changes_chart_via_browser(tmp_path):

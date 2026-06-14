@@ -170,7 +170,6 @@ enterprise-metadata = [
 dashboard = [
     "dash>=4.1.0",
     "dash-bootstrap-components>=2.0.4",
-    "dash-ag-grid>=31.0.0",
 ]
 dashboard-testing = [
     "dash[testing]>=4.1.0",
