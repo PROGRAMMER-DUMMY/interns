@@ -339,6 +339,70 @@ def _data_view_html(
 
 
 
+def _explore_preview_html(
+    spec: Any, rows: list[dict[str, Any]], kpi_id: str, *, height: int = 360
+) -> str:
+    """Static QA proxy for the live Explore pane (Phase 1d).
+
+    The live Explore pane is interactive (dropdowns) and only works in the served
+    Dash app. For the screenshot/static export we bake one representative
+    *combined* view: a grouped bar of the measure with x = the first dimension and
+    color = the second dimension (when two dimensions exist), so the export reads
+    like the richer interactive view instead of going blank. Falls back to a plain
+    bar with one dimension, and renders nothing when the data lacks a usable
+    dimension+measure pair. Workspace-agnostic — columns are classified by dtype.
+    """
+    from core.dashboard.renderer import _classify_columns, _figure_from_spec
+    from core.dashboard.spec import DashboardSpec
+
+    if not rows:
+        return ""
+    dims, measures, date_cols = _classify_columns(rows)
+    if not measures or not (dims or date_cols):
+        return ""
+    measure = measures[0]
+    if date_cols:
+        # A timeline reads best as a line; color by the first dimension if present.
+        chart_type = "line"
+        x = date_cols[0]
+        color = dims[0] if dims else ""
+    elif len(dims) >= 2:
+        chart_type = "grouped_bar"
+        x, color = dims[0], dims[1]
+    else:
+        chart_type = "bar"
+        x, color = dims[0], ""
+    name = (measure or "").lower()
+    y_format = "percent" if any(
+        t in name for t in ("percent", "share", "ratio", "rate", "pct")
+    ) else ""
+    panel: dict[str, Any] = {"chart_type": chart_type, "x": x, "y": measure, "color": color, "title": ""}
+    if y_format:
+        panel["y_format"] = y_format
+    base = spec if isinstance(spec, DashboardSpec) else None
+    config = dict(panel)
+    config.setdefault("definition", (base.config.get("definition") if base else {}) or {})
+    transient = DashboardSpec(
+        kpi_id=kpi_id, config=config, machine_defaults=config,
+        user_overrides={}, spec_path=(base.spec_path if base else ""),
+    )
+    fig = _figure_from_spec(transient, rows, show_title=False)
+    fig.update_xaxes(title_text="")
+    fig.update_yaxes(title_text="")
+    fig.update_layout(height=height)
+    chart_html = fig.to_html(
+        include_plotlyjs="cdn", full_html=False,
+        div_id=f"explore_{kpi_id}",
+        config={"responsive": True, "displayModeBar": False}, default_width="100%",
+    )
+    label = {"line": "timeline", "grouped_bar": "x × breakdown", "bar": "by dimension"}[chart_type]
+    return (
+        f'<div class="panel pane" data-title="Explore (combined · {label})">'
+        f'<div class="panel-title">Explore (combined · {label})</div>'
+        f'<div class="chart">{chart_html}</div></div>'
+    )
+
+
 def _tile_html(kpi_id: str, headline: str, title: str, badge: str, *, blocked: bool = False) -> str:
     cls = "tile blockedt" if blocked else "tile"
     badge_html = f'<div class="st">{badge}</div>' if badge else ""
@@ -491,11 +555,21 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
             max_rows=_DATA_VIEW_ROW_CAP_INLINE,
             full_table_link=f"{kpi_id}.html",
         )
+        # Static QA proxy for the live Explore pane (one combined chart).
+        explore_preview = _explore_preview_html(spec, data_rows, kpi_id, height=420)
+        explore_block = (
+            f'<div class="panel-grid">{explore_preview}</div>' if explore_preview else ""
+        )
+        explore_inline = (
+            f'<div class="panel-grid">{_explore_preview_html(spec, data_rows, kpi_id, height=300)}</div>'
+            if explore_preview else ""
+        )
         page_body = (
             f'<div class="kpi-card detail-page"><div class="head"><div>'
             f'<h2>{page_card["title"]}</h2><div class="metric">{page_card.get("metric") or ""}</div></div>'
             f'<div class="headline">{page_card.get("headline") or ""}</div></div>'
             f'{_panels_html(page_card)}'
+            f'{explore_block}'
             f"{_data_view_html(workspace, kpi_id, data_rows, open_default=True)}"
             f'<div class="foot"><a href="index.html#{kpi_id}">← back to board</a></div></div>'
         )
@@ -527,6 +601,7 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
             f'<div class="metric">{card.get("metric") or ""}</div></div>'
             f'<div class="headline">{card.get("headline") or ""}</div></div>'
             f"{_panels_html(card)}"
+            f"{explore_inline}"
             f"{data_view}"
             f'<div class="foot"><span class="badge">{badges.get(kpi_id, "")}</span>'
             f'<a href="{kpi_id}.html">open full page →</a></div></div></section>'
