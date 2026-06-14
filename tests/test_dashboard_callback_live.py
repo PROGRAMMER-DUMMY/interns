@@ -374,6 +374,33 @@ class TestDrillDownCallback:
 
 
 @pytest.mark.skipif(not _HAS_DASHBOARD, reason="dashboard extra not installed")
+def test_cross_filter_applies_across_columns():
+    """Cross-filter (click any chart -> filter the whole canvas): AND across
+    columns, OR within a column, string-compared so a click matches any dtype."""
+    from core.dashboard.renderer import _apply_xfilter
+
+    rows = [
+        {"department": "Cardiology", "gender": "Female", "share": 10},
+        {"department": "Oncology", "gender": "Male", "share": 20},
+        {"department": "Cardiology", "gender": "Male", "share": 30},
+        {"department": "Neurology", "gender": "Female", "share": 5},
+    ]
+    assert _apply_xfilter(rows, {}) == rows                       # no filter
+    assert _apply_xfilter(rows, None) == rows
+    # One selection.
+    card = _apply_xfilter(rows, {"department": ["Cardiology"]})
+    assert {r["department"] for r in card} == {"Cardiology"}
+    assert len(card) == 2
+    # Stacked selections AND across columns.
+    cm = _apply_xfilter(rows, {"department": ["Cardiology"], "gender": ["Male"]})
+    assert cm == [{"department": "Cardiology", "gender": "Male", "share": 30}]
+    # Multiple values within a column OR together.
+    multi = _apply_xfilter(rows, {"department": ["Cardiology", "Neurology"]})
+    assert {r["department"] for r in multi} == {"Cardiology", "Neurology"}
+    assert len(multi) == 3
+
+
+@pytest.mark.skipif(not _HAS_DASHBOARD, reason="dashboard extra not installed")
 def test_explore_slice_filters_rows_for_the_chart():
     """The Explore slice (Power-BI filter) keeps only rows whose slice column is in
     the selected values — this is the slice-and-dice the chart does on the data."""

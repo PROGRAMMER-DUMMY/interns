@@ -384,6 +384,27 @@ def _filter_rows_by_value(
     return [r for r in rows if str(r.get(column)) == target]
 
 
+def _apply_xfilter(
+    rows: list[dict[str, Any]], xfilter: dict[str, list[Any]] | None
+) -> list[dict[str, Any]]:
+    """Cross-filter rows by the active selections (Power-BI 'connected canvas').
+
+    ``xfilter`` maps column -> selected value(s). A row is kept when it matches
+    EVERY filtered column (AND across columns); within one column any of the
+    selected values matches (OR), so clicking two departments shows both. String
+    comparison so a click on a numeric/category value matches regardless of dtype.
+    """
+    if not xfilter:
+        return rows
+    active = {c: {str(v) for v in vals} for c, vals in xfilter.items() if vals}
+    if not active:
+        return rows
+    return [
+        r for r in rows
+        if all(str(r.get(c)) in keep for c, keep in active.items())
+    ]
+
+
 _DRILL_DONUT_MAX = 8
 
 
@@ -1225,10 +1246,19 @@ def _dash_index_string(t: DesignTokens) -> str:
         "box-shadow:var(--shadow);padding:.8rem 1rem;min-width:0;overflow:hidden;}"
         ".pane .pt{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.12em;color:var(--accent-deep);margin:0 0 .3rem;}"
         ".js-plotly-plot,.plot-container{width:100%!important;}"
-        ".drill-bar{display:flex;align-items:center;gap:.7rem;margin:0 0 .7rem;}"
-        ".drill-back{font-family:var(--mono);font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;cursor:pointer;background:var(--card);color:var(--accent-deep);border:1px solid var(--rule);border-radius:8px;padding:.3rem .7rem;}"
-        ".drill-back:hover{border-color:var(--accent);}"
-        ".drill-crumb{font-family:var(--mono);font-size:.68rem;letter-spacing:.05em;color:var(--ink-soft);}"
+        # Cross-filter chip bar (Power-BI 'connected canvas').
+        ".xbar{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem;margin:0 0 .8rem;}"
+        ".xhint{font-family:var(--mono);font-size:.62rem;letter-spacing:.04em;color:var(--ink-soft);margin:0 0 .8rem;}"
+        ".xchip{display:inline-flex;align-items:center;gap:.4rem;background:rgba(180,68,28,.08);"
+        "border:1px solid var(--accent);border-radius:999px;padding:.18rem .3rem .18rem .65rem;}"
+        ".xchip-t{font-family:var(--sans);font-size:.72rem;color:var(--ink);}"
+        ".xchip-x{cursor:pointer;border:none;background:transparent;color:var(--accent-deep);"
+        "font-size:.8rem;line-height:1;padding:0 .25rem;border-radius:50%;}"
+        ".xchip-x:hover{background:var(--accent);color:#fff;}"
+        ".xclear{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;"
+        "cursor:pointer;background:transparent;color:var(--ink-soft);border:1px solid var(--rule);"
+        "border-radius:8px;padding:.25rem .6rem;margin-left:.3rem;}"
+        ".xclear:hover{border-color:var(--accent);color:var(--accent-deep);}"
         ".hidden{display:none!important;}"
     )
     return (
@@ -1410,7 +1440,9 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         kpi_state,
         # Phase 2 drill state: {kpi_id, by, value} when a category is drilled,
         # else None. A click on a panel bar sets it; "← back" clears it.
-        dcc.Store(id="drill-store"),
+        # Cross-filter state for the current KPI: {column: [selected values]}.
+        # A click on any panel adds/removes a value; chips clear them.
+        dcc.Store(id="xfilter-store", data={}),
         dcc.Download(id="detail-download"),
         html.Div([
             explore,
@@ -1418,66 +1450,55 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         ], className="scroll"),
     ], id="app")
 
-    def _drill_detail_children(kpi_id: str, by: str, value: Any) -> Any:
-        """Phase 2 sub-panel view: the WITHIN-category breakdown for a clicked
-        bar. Reuses `_figure_from_spec` on rows filtered to the clicked value,
-        one donut per OTHER dimension. "← back" clears the drill state."""
-        m = meta[kpi_id]
-        spec = m["spec"]
-        model = _drill_model(spec, m["rows"], by=by)
-        into = model["into"]
-        filtered = _filter_rows_by_value(m["rows"], by, value)
-        y_col = str(spec.config.get("y") or "")
-        y_format = str(spec.config.get("y_format") or "")
-        cells = []
-        for panel in _drill_panels(by, value, into, filtered):
-            p = dict(panel)
-            if y_col:
-                p["y"] = y_col
-            if y_format:
-                p["y_format"] = y_format
-            fig = _figure_from_spec(_panel_spec(spec, p), filtered, show_title=False)
-            cells.append(html.Div([
-                html.Div(p["title"], className="pt"),
-                dcc.Graph(figure=fig,
-                          config={"displaylogo": False, "responsive": True},
-                          style={"height": "300px"}),
-            ], className="pane"))
-        if not cells:
-            cells = [html.Div("No further breakdown for this category.", className="dm")]
-        by_label = by.replace("_", " ").title()
-        return [
-            html.Div([
-                html.Button("← back", id="drill-back", n_clicks=0, className="drill-back"),
-                html.Span(f"{by_label}: {value}", className="drill-crumb"),
-            ], className="drill-bar"),
-            html.H2(m["title"], className="dh"),
-            html.Div(f"Within {by_label} = {value}", className="dm"),
-            html.Div(cells, className="dgrid"),
-            _data_view_component(workspace, kpi_id, filtered),
-        ]
+    def _xfilter_bar(xfilter: dict[str, list[Any]]) -> Any:
+        """The active cross-filter chips (Power-BI 'connected canvas' control).
 
-    def _detail_children(
-        kpi_id: str, visible_idxs: list[int] | None, drill: dict[str, Any] | None = None
-    ) -> Any:
+        One chip per selected (column, value) with an ✕ to remove it, plus a
+        Clear-all. Empty filter -> a hint that clicking a chart filters the page."""
+        chips: list[Any] = []
+        for col, vals in (xfilter or {}).items():
+            for val in vals:
+                chips.append(html.Span([
+                    html.Span(f"{_pretty_label(col)}: {val}", className="xchip-t"),
+                    html.Button("✕", id={"role": "xchip", "col": col, "val": str(val)},
+                                n_clicks=0, className="xchip-x"),
+                ], className="xchip"))
+        if not chips:
+            return html.Div(
+                "Click any bar or slice to filter every chart below; click again to clear.",
+                className="xhint",
+            )
+        return html.Div(
+            [html.Span("Filters", className="lab")] + chips
+            + [html.Button("Clear all", id="xclear", n_clicks=0, className="xclear")],
+            className="xbar",
+        )
+
+    def _detail_children(kpi_id: str, xfilter: dict[str, list[Any]] | None = None) -> Any:
         m = meta.get(kpi_id)
         if not m:
             return html.Div("Select a KPI above.", className="dm")
-        # Drill active for THIS KPI -> render the within-category sub-panels.
-        if drill and drill.get("kpi_id") == kpi_id and drill.get("by"):
-            return _drill_detail_children(kpi_id, str(drill["by"]), drill.get("value"))
+        xfilter = xfilter if isinstance(xfilter, dict) else {}
+        # Cross-filter: every panel is rebuilt from the rows kept by the active
+        # selections, so a click on ANY chart filters the whole canvas in place.
+        rows = _apply_xfilter(m["rows"], xfilter)
+        spec = m["spec"]
         n = len(m["panel_titles"])
-        # Default = the 1-2 highest-value panels (not every derived view). Explore
-        # + drill give the user the rest on demand. `visible_idxs` (if a future
-        # caller passes one) still overrides.
-        idxs = visible_idxs if visible_idxs is not None else _default_panel_idxs(m["panels_cfg"])
+        # Default = the 1-2 highest-value panels (not every derived view).
+        idxs = _default_panel_idxs(m["panels_cfg"])
         cells = []
         for i in idxs:
             if i < 0 or i >= n:
                 continue
+            # Rebuild from filtered rows (not the cached full-data figure) so the
+            # panel reflects the cross-filter; the panel id carries its x column
+            # so a click knows which dimension it is filtering by.
+            fig = _figure_from_spec(
+                _panel_spec(spec, m["panels_cfg"][i]), rows, show_title=False
+            )
             cells.append(html.Div([
                 html.Div(m["panel_titles"][i], className="pt"),
-                dcc.Graph(figure=_panel_figure(kpi_id, i),  # built lazily + cached
+                dcc.Graph(figure=fig,
                           id={"role": "kpi-panel", "kpi_id": kpi_id, "idx": i,
                               "x": m["panel_x"][i]},
                           config={"displaylogo": False, "responsive": True},
@@ -1495,8 +1516,9 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
                     html.Button("Export CSV", id="detail-export-btn", n_clicks=0, className="tbtn"),
                 ], className="toolbar"),
             ], className="dhwrap"),
+            _xfilter_bar(xfilter),
             html.Div(cells, className="dgrid"),
-            html.Div(_data_view_table(workspace, m["rows"]),
+            html.Div(_data_view_table(workspace, rows),
                      id="detail-data", className="datawrap hidden"),
         ]
 
@@ -1515,59 +1537,73 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         @app.callback(
             Output("kpi-detail", "children"),
             Input("kpi-pick", "value"),
-            Input("drill-store", "data"),
+            Input("xfilter-store", "data"),
         )
-        def _render_detail(kpi_id, drill):
-            return _detail_children(
-                kpi_id,
-                None,  # default = the KPI's top-2 value panels
-                drill if isinstance(drill, dict) else None,
-            )
+        def _render_detail(kpi_id, xfilter):
+            return _detail_children(kpi_id, xfilter if isinstance(xfilter, dict) else {})
 
-        # --- Drill-down (Phase 2) -----------------------------------------
-        # A click on any rendered panel bar sets the drill state to the clicked
-        # category; selecting a different KPI or hitting "← back" clears it.
+        # --- Cross-filter: click any chart -> filter the whole canvas ------
+        # A click on any panel point toggles {its x column: clicked value} in the
+        # cross-filter; clicking a chip's ✕ removes it; Clear-all / a KPI switch
+        # resets. Selections stack (AND across columns, OR within a column).
         @app.callback(
-            Output("drill-store", "data"),
+            Output("xfilter-store", "data"),
             Input({"role": "kpi-panel", "kpi_id": ALL, "idx": ALL, "x": ALL}, "clickData"),
+            Input({"role": "xchip", "col": ALL, "val": ALL}, "n_clicks"),
+            Input("xclear", "n_clicks"),
             Input("kpi-pick", "value"),
+            State("xfilter-store", "data"),
             prevent_initial_call=True,
         )
-        def _set_drill(_clicks, _kpi_id):
+        def _set_xfilter(_panel_clicks, _chip_clicks, _clear, _kpi_id, current):
             trig = ctx.triggered_id
-            # KPI changed (or any non-panel trigger) -> clear drill.
-            if not (isinstance(trig, dict) and trig.get("role") == "kpi-panel"):
-                return None
-            by = str(trig.get("x") or "")
-            if not by:
-                return no_update
-            # Find which panel's clickData fired and read the clicked category.
-            point = None
-            for entry in (ctx.triggered or []):
-                val = entry.get("value")
-                if val and isinstance(val, dict) and val.get("points"):
-                    point = val["points"][0]
-                    break
-            if not point:
-                return no_update
-            # The clicked category is on the axis that holds the `by` dimension.
-            # For vertical bars it is x; ranked/horizontal bars put it on y.
-            value = point.get("x")
-            if value is None or value == "":
-                value = point.get("y")
-            if value is None or value == "":
-                value = point.get("label")  # donut/pie slice
-            if value is None:
-                return no_update
-            return {"kpi_id": str(trig.get("kpi_id") or ""), "by": by, "value": value}
-
-        @app.callback(
-            Output("drill-store", "data", allow_duplicate=True),
-            Input("drill-back", "n_clicks"),
-            prevent_initial_call=True,
-        )
-        def _clear_drill(n_clicks):
-            return None if n_clicks else no_update
+            xf: dict[str, list[Any]] = {
+                k: list(v) for k, v in (current or {}).items() if v
+            }
+            # KPI switch or Clear-all -> reset the canvas filter.
+            if trig == "kpi-pick" or trig == "xclear":
+                return {}
+            # A chip ✕ -> remove that one (column, value).
+            if isinstance(trig, dict) and trig.get("role") == "xchip":
+                col, val = str(trig.get("col") or ""), str(trig.get("val") or "")
+                vals = [v for v in xf.get(col, []) if str(v) != val]
+                if vals:
+                    xf[col] = vals
+                else:
+                    xf.pop(col, None)
+                return xf
+            # A panel click -> toggle {clicked column: clicked value}.
+            if isinstance(trig, dict) and trig.get("role") == "kpi-panel":
+                col = str(trig.get("x") or "")
+                if not col:
+                    return no_update
+                point = None
+                for entry in (ctx.triggered or []):
+                    val = entry.get("value")
+                    if val and isinstance(val, dict) and val.get("points"):
+                        point = val["points"][0]
+                        break
+                if not point:
+                    return no_update
+                value = point.get("x")
+                if value is None or value == "":
+                    value = point.get("y")
+                if value is None or value == "":
+                    value = point.get("label")  # donut/pie slice
+                if value is None:
+                    return no_update
+                value = str(value)
+                existing = [str(v) for v in xf.get(col, [])]
+                if value in existing:                       # toggle off
+                    existing.remove(value)
+                else:                                       # toggle on (stack)
+                    existing.append(value)
+                if existing:
+                    xf[col] = existing
+                else:
+                    xf.pop(col, None)
+                return xf
+            return no_update
 
         @app.callback(
             Output({"role": "kpi-tile", "kpi_id": ALL}, "className"),
