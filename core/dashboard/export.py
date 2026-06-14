@@ -403,6 +403,99 @@ def _explore_preview_html(
     )
 
 
+def _faceted_drill_html(
+    spec: Any, rows: list[dict[str, Any]], kpi_id: str,
+    *, top_n: int = 4, height: int = 240,
+) -> str:
+    """Static QA proxy for the live click-to-drill (Phase 2c).
+
+    The live drill is interactive (click a category bar -> its within-category
+    breakdown) and only works in the served Dash app. For the screenshot/static
+    export we bake a NON-interactive *small-multiples* equivalent: for the top-N
+    categories of the primary drill dimension, one mini panel each showing the
+    measure broken down by the next dimension WITHIN that category. This makes
+    the export read like the richer drill view instead of being flat.
+
+    Workspace-agnostic: the drill `by` axis and the `into` dimensions are derived
+    from the result columns' dtypes (`_drill_model`); top-N categories are ranked
+    by total measure. Renders nothing when there is no second dimension to drill
+    into. A RENDERED surface -> figures are built from the same redaction-unaware
+    aggregated result rows the live panels use (the measure is a share/count, not
+    a PII column); the row-level Data table below applies display redaction.
+    """
+    from core.dashboard.renderer import (
+        _drill_model,
+        _drill_panels,
+        _figure_from_spec,
+        _filter_rows_by_value,
+    )
+    from core.dashboard.spec import DashboardSpec
+
+    if not rows:
+        return ""
+    base = spec if isinstance(spec, DashboardSpec) else None
+    model = _drill_model(base, rows) if base else {"by": "", "into": []}
+    by, into = model.get("by") or "", model.get("into") or []
+    if not by or not into:
+        return ""
+    drill_dim = into[0]  # most-informative within-category breakdown
+    y_col = str((base.config.get("y") if base else "") or "")
+    y_format = str((base.config.get("y_format") if base else "") or "")
+    definition = (base.config.get("definition") if base else {}) or {}
+
+    # Top-N categories of the `by` axis by total measure (rank by data, not order).
+    totals: dict[str, float] = {}
+    for r in rows:
+        k = str(r.get(by))
+        v = r.get(y_col) if y_col else None
+        totals[k] = totals.get(k, 0.0) + (v if isinstance(v, (int, float)) else 0.0)
+    ranked = [k for k, _ in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)]
+    if not any(totals.values()):  # no usable measure -> first-appearance order
+        ranked = list(dict.fromkeys(str(r.get(by)) for r in rows))
+    top = ranked[:top_n]
+    if not top:
+        return ""
+
+    cells: list[str] = []
+    for i, value in enumerate(top):
+        filtered = _filter_rows_by_value(rows, by, value)
+        panel = _drill_panels(by, value, [drill_dim], filtered)[0]
+        config = dict(panel)
+        if y_col:
+            config["y"] = y_col
+        if y_format:
+            config["y_format"] = y_format
+        config.setdefault("definition", definition)
+        config["title"] = ""
+        transient = DashboardSpec(
+            kpi_id=kpi_id, config=config, machine_defaults=config,
+            user_overrides={}, spec_path=(base.spec_path if base else ""),
+        )
+        fig = _figure_from_spec(transient, filtered, show_title=False)
+        fig.update_xaxes(title_text="")
+        fig.update_yaxes(title_text="")
+        fig.update_layout(height=height)
+        chart_html = fig.to_html(
+            include_plotlyjs="cdn", full_html=False,
+            div_id=f"facet_{kpi_id}_{i}",
+            config={"responsive": True, "displayModeBar": False}, default_width="100%",
+        )
+        cells.append(
+            f'<div class="panel pane" data-title="{by.replace("_", " ").title()} = {value}">'
+            f'<div class="panel-title">{by.replace("_", " ").title()}: {value}</div>'
+            f'<div class="chart">{chart_html}</div></div>'
+        )
+    if not cells:
+        return ""
+    by_label = by.replace("_", " ").title()
+    into_label = drill_dim.replace("_", " ").title()
+    heading = (
+        f'<div class="panel-title">Drill (small multiples · top {len(top)} '
+        f'{by_label} → {into_label})</div>'
+    )
+    return f'{heading}<div class="panel-grid">{"".join(cells)}</div>'
+
+
 def _tile_html(kpi_id: str, headline: str, title: str, badge: str, *, blocked: bool = False) -> str:
     cls = "tile blockedt" if blocked else "tile"
     badge_html = f'<div class="st">{badge}</div>' if badge else ""
@@ -564,12 +657,16 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
             f'<div class="panel-grid">{_explore_preview_html(spec, data_rows, kpi_id, height=300)}</div>'
             if explore_preview else ""
         )
+        # Static QA proxy for the live click-to-drill (Phase 2c): small multiples.
+        facet_block = _faceted_drill_html(spec, data_rows, kpi_id, height=260)
+        facet_inline = _faceted_drill_html(spec, data_rows, kpi_id, height=200)
         page_body = (
             f'<div class="kpi-card detail-page"><div class="head"><div>'
             f'<h2>{page_card["title"]}</h2><div class="metric">{page_card.get("metric") or ""}</div></div>'
             f'<div class="headline">{page_card.get("headline") or ""}</div></div>'
             f'{_panels_html(page_card)}'
             f'{explore_block}'
+            f'{facet_block}'
             f"{_data_view_html(workspace, kpi_id, data_rows, open_default=True)}"
             f'<div class="foot"><a href="index.html#{kpi_id}">← back to board</a></div></div>'
         )
@@ -602,6 +699,7 @@ def export_static_html(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
             f'<div class="headline">{card.get("headline") or ""}</div></div>'
             f"{_panels_html(card)}"
             f"{explore_inline}"
+            f"{facet_inline}"
             f"{data_view}"
             f'<div class="foot"><span class="badge">{badges.get(kpi_id, "")}</span>'
             f'<a href="{kpi_id}.html">open full page →</a></div></div></section>'
