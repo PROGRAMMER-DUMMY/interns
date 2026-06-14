@@ -380,8 +380,9 @@ def _make_workspace_with_grid_dataset(tmp_path: Path) -> tuple[Path, str]:
     (workspace / "datasets").mkdir(parents=True)
     layout = WorkspaceLayout(project_root=workspace)
     layout.ensure_runtime_dirs()
-    # "patient_name" is PII (matches a default redaction pattern); department is a
-    # group dim; revenue is a numeric measure.
+    # "patient_name" is flagged is_sensitive in the semantic contract (the SQL-mask
+    # set) — the grid must hide it even though no display regex matches that exact
+    # name. department is a group dim; revenue is a numeric measure.
     (workspace / "datasets" / "facts.csv").write_text(
         "patient_name,department,revenue\n"
         "Alice,Cardiology,100\n"
@@ -390,17 +391,28 @@ def _make_workspace_with_grid_dataset(tmp_path: Path) -> tuple[Path, str]:
         "Dave,Neurology,50\n",
         encoding="utf-8",
     )
+    layout.contracts_dir.mkdir(parents=True, exist_ok=True)
+    (layout.contracts_dir / "semantic_contract.json").write_text(
+        json.dumps({"columns": {"patient_name": {"is_sensitive": True, "category": "name"}}}),
+        encoding="utf-8",
+    )
     layout.kpi_registry_path.parent.mkdir(parents=True, exist_ok=True)
     layout.kpi_registry_path.write_text(json.dumps({"kpis": []}), encoding="utf-8")
     return repo_root, workspace_rel
 
 
 def _find_callback(app, output_id: str, output_prop: str):
-    """Return the registered callback function whose output targets output_id.prop."""
+    """Return the UNDECORATED callback function whose output targets output_id.prop.
+
+    Dash wraps the registered callback (it expects an ``outputs_list`` kwarg from
+    the live request context); the original function is preserved on
+    ``__wrapped__`` (functools.wraps), so call that directly in tests.
+    """
     target = f"{output_id}.{output_prop}"
     for key, entry in app.callback_map.items():
         if target in key:
-            return entry["callback"]
+            fn = entry["callback"]
+            return getattr(fn, "__wrapped__", fn)
     raise AssertionError(f"callback for {target} not registered; keys={list(app.callback_map)}")
 
 

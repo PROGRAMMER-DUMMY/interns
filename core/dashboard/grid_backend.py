@@ -83,12 +83,37 @@ def _is_numeric_type(duck_type: object) -> bool:
     return any(tok in t for tok in _NUMERIC_TOKENS)
 
 
+def _contract_sensitive_columns(workspace_root: object) -> set[str]:
+    """Lowercased columns the semantic contract marks ``is_sensitive``.
+
+    Defense-in-depth for the RAW-data grid: a column flagged sensitive in the
+    contract (e.g. ``MedicaidID``/``NPI``) that no display regex happens to match
+    is still hidden, so the grid never shows a column the rest of the system masks.
+    Never raises (a missing/unreadable contract -> empty set)."""
+    if workspace_root is None:
+        return set()
+    try:
+        from pathlib import Path
+
+        from core.onboarding.kpi.sensitive_masking import load_sensitive_columns
+        from core.storage.workspace_layout import WorkspaceLayout
+
+        return {
+            c.lower()
+            for c in load_sensitive_columns(WorkspaceLayout(project_root=Path(str(workspace_root))))
+        }
+    except Exception:
+        return set()
+
+
 def redacted_columns(columns: list[str], workspace_root: object) -> set[str]:
     """Lowercased names of columns that must NOT appear on the rendered grid.
 
-    Uses the workspace's effective display-redaction patterns (built-in PII +
-    ``data_policy`` widening). Loading must never break the grid, so any failure
-    falls back to the built-in defaults rather than exposing everything.
+    Union of two governance sources so the grid never leaks what the system
+    protects elsewhere: (1) the workspace's effective DISPLAY-redaction patterns
+    (built-in PII + ``data_policy`` widening), and (2) the columns the semantic
+    contract marks ``is_sensitive`` (the SQL-mask set). Loading must never break
+    the grid, so failures fall back to the built-in patterns.
     """
     from core.onboarding.kpi.pii_redaction import (
         DEFAULT_PII_COLUMN_PATTERNS,
@@ -104,7 +129,12 @@ def redacted_columns(columns: list[str], workspace_root: object) -> set[str]:
         )
     except Exception:
         patterns = DEFAULT_PII_COLUMN_PATTERNS
-    return {c.lower() for c in columns if isinstance(c, str) and is_pii_column(c, patterns=patterns)}
+    by_pattern = {
+        c.lower() for c in columns if isinstance(c, str) and is_pii_column(c, patterns=patterns)
+    }
+    contract = _contract_sensitive_columns(workspace_root)
+    by_contract = {c.lower() for c in columns if isinstance(c, str) and c.lower() in contract}
+    return by_pattern | by_contract
 
 
 def table_columns(con: Any, relation: str) -> list[tuple[str, str]]:
