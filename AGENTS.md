@@ -19,7 +19,7 @@ rules.
 4. The Stage index in `Tool And Evidence Discovery` (below) for available project tools; read a
    command's `TOOLS.md` section on demand only. Do not read `TOOLS.md` / `.agents/tools.json`
    whole.
-5. `program.md` only when the active benchmark/task refers to it.
+5. `program.md` only when the active benchmark/task refers to it (optional, task-supplied file; not checked in to this repo).
 6. Relevant files in `core/`, `tools/`, `interns/`, `tests/`, or `workspaces/<project>/`.
 
 ## Step 0: Active Workflow Setup

@@ -52,7 +52,7 @@ The platform engine is organized by responsibility:
 - `core/onboarding/lexicon/` — workspace vocabulary and term normalization
 - `core/onboarding/memory/` — workspace definitions, decision history, user decisions
 - `core/onboarding/data_model/` — data model document parsing and image extraction
-- `core/onboarding/sources/` — source catalog ingestion and external source intake
+- `core/onboarding/sources/` — source catalog ingestion, external source intake, and external source discovery (`external_discovery.py`, backs `discover-external-sources` CLI)
 - `core/onboarding/databricks/` — Databricks asset manifests and Genie workspace specs
 
 **Supporting infrastructure:**

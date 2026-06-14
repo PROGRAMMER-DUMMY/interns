@@ -741,152 +741,7 @@ class WorkspaceFlow:
         preview = self._write_result_preview(preview_rows=PREVIEW_ROW_CAP)
         self._record_step(state, "preview_kpi_results", "ok", preview)
         kpi_entries = preview.get("kpis") or []
-        # Wiki notes stay an OPT-IN side output (Phase 1 decision: untracked
-        # surprises nobody asked for). The dashboard, by explicit user request
-        # (2026-06-12), is DEFAULT-ON at KPI completion: refresh specs, export
-        # static HTML, and open it. Opt out with AUTORESEARCH_DASHBOARD=0.
-        import os as _os
-
-        _side = _os.environ.get("AUTORESEARCH_SIDE_OUTPUTS", "")
-        _wiki_on = _side == "1" or _os.environ.get("AUTORESEARCH_WIKI", "") == "1"
-        _dash_flag = _os.environ.get("AUTORESEARCH_DASHBOARD", "")
-        _dash_on = _dash_flag != "0" and _side != "0"
-        if not _wiki_on:
-            self._record_step(
-                state, "upsert_kpi_wiki_notes", "skipped",
-                {"reason": "opt-in side output (set AUTORESEARCH_WIKI=1 or AUTORESEARCH_SIDE_OUTPUTS=1)"},
-            )
-        if not _dash_on:
-            self._record_step(
-                state, "refresh_workspace_dashboard", "skipped",
-                {"reason": "dashboard disabled (AUTORESEARCH_DASHBOARD=0)"},
-            )
-        wiki_paths: list[str] = []
-        if _wiki_on:
-          try:
-            wiki_layout = WikiLayout(project_root=self.workspace)
-            for entry in kpi_entries:
-                kpi_id = str(entry.get("kpi_id") or "")
-                if not kpi_id:
-                    continue
-                scaffold = build_kpi_completion_scaffold(kpi_id=kpi_id, entry=entry)
-                note_path = upsert_kpi_note(wiki_layout, kpi_id, scaffold)
-                wiki_paths.append(_rel(note_path, self.repo_root))
-          except Exception as exc:
-            self._record_step(
-                state,
-                "upsert_kpi_wiki_notes",
-                "failed",
-                {"error": str(exc), "count": len(wiki_paths)},
-            )
-          else:
-            self._record_step(
-                state,
-                "upsert_kpi_wiki_notes",
-                "ok",
-                {"count": len(wiki_paths), "notes": wiki_paths},
-            )
-        if _dash_on:
-          try:
-            dash_summary = refresh_workspace_dashboard(
-                self.layout, completed_kpi_entries=kpi_entries
-            )
-          except Exception as exc:
-            self._record_step(
-                state,
-                "refresh_workspace_dashboard",
-                "failed",
-                {"error": str(exc)},
-            )
-          else:
-            # Export static HTML and show it: KPI completion ends with the
-            # dashboard in front of the user, not just files on disk. Outside
-            # test runs the SCREENER wraps the export: every page is
-            # screenshotted and checked (render failures, blank pages, missing
-            # data viewer, redaction, palette) and its findings ride into the
-            # step record as warnings — visualization defects surface at
-            # completion instead of waiting for a manual look. Opt out with
-            # AUTORESEARCH_SCREEN_DASHBOARD=0.
-            import sys as _sys
-
-            dash_index_path = ""
-            _screen_ok = (
-                _os.environ.get("AUTORESEARCH_SCREEN_DASHBOARD", "") != "0"
-                and "unittest" not in _sys.modules
-                and "pytest" not in _sys.modules
-            )
-            try:
-                if _screen_ok:
-                    from core.dashboard.screener import screen_dashboard
-
-                    screen_summary = screen_dashboard(self.repo_root, self.workspace_rel)
-                    dash_summary = {**dash_summary, "screener": screen_summary}
-                    if not screen_summary.get("ok"):
-                        dash_summary["screener_warning"] = (
-                            f"{screen_summary.get('error_count')} visual finding(s); "
-                            f"see {screen_summary.get('report_md')} and review the "
-                            "staged screenshots"
-                        )
-                    export_dir = "dashboard/exports"
-                else:
-                    from core.dashboard.export import export_static_html
-
-                    export_summary = export_static_html(self.repo_root, self.workspace_rel)
-                    dash_summary = {**dash_summary, "export": export_summary}
-                    export_dir = export_summary["export_dir"]
-                dash_index_path = f"{self.workspace_rel}/{export_dir}/index.html"
-                dash_summary = {**dash_summary, "dashboard_index": dash_index_path}
-            except Exception as exc:
-                dash_summary = {**dash_summary, "export_error": str(exc)}
-            self._record_step(
-                state,
-                "refresh_workspace_dashboard",
-                "ok",
-                dash_summary,
-            )
-            if dash_index_path:
-                # The result packet ends with the dashboard link so the
-                # completion output always shows where the dashboard lives.
-                # current.md and runs/<date>/results.md are verbatim-forward
-                # twins (BUG-015 contract) — append to BOTH or neither.
-                link_line = f"\n**Dashboard:** `{dash_index_path}`\n"
-                packet_paths = [
-                    self.workspace / "interns" / "reports" / "kpi_results" / "current.md"
-                ]
-                runs_dir = self.workspace / "interns" / "runs"
-                if runs_dir.is_dir():
-                    dated = sorted(d for d in runs_dir.iterdir() if d.is_dir())
-                    if dated:
-                        packet_paths.append(dated[-1] / "results.md")
-                try:
-                    for packet_path in packet_paths:
-                        if packet_path.exists():
-                            content = packet_path.read_text(encoding="utf-8")
-                            if "**Dashboard:**" not in content:
-                                packet_path.write_text(
-                                    content + link_line, encoding="utf-8"
-                                )
-                except OSError:
-                    pass
-            import sys as _sys
-
-            _open_flag = _os.environ.get("AUTORESEARCH_OPEN_DASHBOARD", "")
-            _in_test_run = "unittest" in _sys.modules or "pytest" in _sys.modules
-            _open_ok = _open_flag == "1" or (_open_flag != "0" and not _in_test_run)
-            if dash_index_path and _open_ok:
-                try:
-                    import webbrowser
-
-                    webbrowser.open((self.repo_root / dash_index_path).resolve().as_uri())
-                except Exception:
-                    pass  # showing the path in the packet is the fallback
-            self._delegate_and_record(
-                state,
-                agent="dashboard-engineer",
-                stage="dashboard_refresh",
-                reason="every workflow completion must refresh dashboard specs (preserving user_overrides)",
-                verdict_fn=lambda: verdict_from_dashboard_summary(dash_summary),
-            )
+        wiki_paths = self._emit_side_outputs(state, kpi_entries)
         self._delegate_and_record(
             state,
             agent="kpi-analyst",
@@ -1105,6 +960,161 @@ class WorkspaceFlow:
             },
             source="complete",
         )
+
+    def _emit_side_outputs(self, state: dict[str, Any], kpi_entries: list[dict[str, Any]]) -> list[str]:
+        """Emit opt-in wiki notes and the (default-on) dashboard at KPI completion.
+
+        Side-effect-only: records steps/delegations on ``state`` and returns the wiki
+        note paths written (empty when wiki output is opt-out / fails). Extracted from
+        _advance_until_stop (phase 2 decomposition); behavior is unchanged.
+        """
+        # Wiki notes stay an OPT-IN side output (Phase 1 decision: untracked
+        # surprises nobody asked for). The dashboard, by explicit user request
+        # (2026-06-12), is DEFAULT-ON at KPI completion: refresh specs, export
+        # static HTML, and open it. Opt out with AUTORESEARCH_DASHBOARD=0.
+        import os as _os
+
+        _side = _os.environ.get("AUTORESEARCH_SIDE_OUTPUTS", "")
+        _wiki_on = _side == "1" or _os.environ.get("AUTORESEARCH_WIKI", "") == "1"
+        _dash_flag = _os.environ.get("AUTORESEARCH_DASHBOARD", "")
+        _dash_on = _dash_flag != "0" and _side != "0"
+        if not _wiki_on:
+            self._record_step(
+                state, "upsert_kpi_wiki_notes", "skipped",
+                {"reason": "opt-in side output (set AUTORESEARCH_WIKI=1 or AUTORESEARCH_SIDE_OUTPUTS=1)"},
+            )
+        if not _dash_on:
+            self._record_step(
+                state, "refresh_workspace_dashboard", "skipped",
+                {"reason": "dashboard disabled (AUTORESEARCH_DASHBOARD=0)"},
+            )
+        wiki_paths: list[str] = []
+        if _wiki_on:
+          try:
+            wiki_layout = WikiLayout(project_root=self.workspace)
+            for entry in kpi_entries:
+                kpi_id = str(entry.get("kpi_id") or "")
+                if not kpi_id:
+                    continue
+                scaffold = build_kpi_completion_scaffold(kpi_id=kpi_id, entry=entry)
+                note_path = upsert_kpi_note(wiki_layout, kpi_id, scaffold)
+                wiki_paths.append(_rel(note_path, self.repo_root))
+          except Exception as exc:
+            self._record_step(
+                state,
+                "upsert_kpi_wiki_notes",
+                "failed",
+                {"error": str(exc), "count": len(wiki_paths)},
+            )
+          else:
+            self._record_step(
+                state,
+                "upsert_kpi_wiki_notes",
+                "ok",
+                {"count": len(wiki_paths), "notes": wiki_paths},
+            )
+        if _dash_on:
+          try:
+            dash_summary = refresh_workspace_dashboard(
+                self.layout, completed_kpi_entries=kpi_entries
+            )
+          except Exception as exc:
+            self._record_step(
+                state,
+                "refresh_workspace_dashboard",
+                "failed",
+                {"error": str(exc)},
+            )
+          else:
+            # Export static HTML and show it: KPI completion ends with the
+            # dashboard in front of the user, not just files on disk. Outside
+            # test runs the SCREENER wraps the export: every page is
+            # screenshotted and checked (render failures, blank pages, missing
+            # data viewer, redaction, palette) and its findings ride into the
+            # step record as warnings — visualization defects surface at
+            # completion instead of waiting for a manual look. Opt out with
+            # AUTORESEARCH_SCREEN_DASHBOARD=0.
+            import sys as _sys
+
+            dash_index_path = ""
+            _screen_ok = (
+                _os.environ.get("AUTORESEARCH_SCREEN_DASHBOARD", "") != "0"
+                and "unittest" not in _sys.modules
+                and "pytest" not in _sys.modules
+            )
+            try:
+                if _screen_ok:
+                    from core.dashboard.screener import screen_dashboard
+
+                    screen_summary = screen_dashboard(self.repo_root, self.workspace_rel)
+                    dash_summary = {**dash_summary, "screener": screen_summary}
+                    if not screen_summary.get("ok"):
+                        dash_summary["screener_warning"] = (
+                            f"{screen_summary.get('error_count')} visual finding(s); "
+                            f"see {screen_summary.get('report_md')} and review the "
+                            "staged screenshots"
+                        )
+                    export_dir = "dashboard/exports"
+                else:
+                    from core.dashboard.export import export_static_html
+
+                    export_summary = export_static_html(self.repo_root, self.workspace_rel)
+                    dash_summary = {**dash_summary, "export": export_summary}
+                    export_dir = export_summary["export_dir"]
+                dash_index_path = f"{self.workspace_rel}/{export_dir}/index.html"
+                dash_summary = {**dash_summary, "dashboard_index": dash_index_path}
+            except Exception as exc:
+                dash_summary = {**dash_summary, "export_error": str(exc)}
+            self._record_step(
+                state,
+                "refresh_workspace_dashboard",
+                "ok",
+                dash_summary,
+            )
+            if dash_index_path:
+                # The result packet ends with the dashboard link so the
+                # completion output always shows where the dashboard lives.
+                # current.md and runs/<date>/results.md are verbatim-forward
+                # twins (BUG-015 contract) — append to BOTH or neither.
+                link_line = f"\n**Dashboard:** `{dash_index_path}`\n"
+                packet_paths = [
+                    self.workspace / "interns" / "reports" / "kpi_results" / "current.md"
+                ]
+                runs_dir = self.workspace / "interns" / "runs"
+                if runs_dir.is_dir():
+                    dated = sorted(d for d in runs_dir.iterdir() if d.is_dir())
+                    if dated:
+                        packet_paths.append(dated[-1] / "results.md")
+                try:
+                    for packet_path in packet_paths:
+                        if packet_path.exists():
+                            content = packet_path.read_text(encoding="utf-8")
+                            if "**Dashboard:**" not in content:
+                                packet_path.write_text(
+                                    content + link_line, encoding="utf-8"
+                                )
+                except OSError:
+                    pass
+            import sys as _sys
+
+            _open_flag = _os.environ.get("AUTORESEARCH_OPEN_DASHBOARD", "")
+            _in_test_run = "unittest" in _sys.modules or "pytest" in _sys.modules
+            _open_ok = _open_flag == "1" or (_open_flag != "0" and not _in_test_run)
+            if dash_index_path and _open_ok:
+                try:
+                    import webbrowser
+
+                    webbrowser.open((self.repo_root / dash_index_path).resolve().as_uri())
+                except Exception:
+                    pass  # showing the path in the packet is the fallback
+            self._delegate_and_record(
+                state,
+                agent="dashboard-engineer",
+                stage="dashboard_refresh",
+                reason="every workflow completion must refresh dashboard specs (preserving user_overrides)",
+                verdict_fn=lambda: verdict_from_dashboard_summary(dash_summary),
+            )
+        return wiki_paths
 
     def _workflow_checkpoint(self, state: dict[str, Any], *, mode: str) -> WorkspaceFlowResult:
         checkpoint = WorkspaceWorkflowOrchestrator(
