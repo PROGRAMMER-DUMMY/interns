@@ -192,6 +192,29 @@ def _norm_alias(text: str) -> str:
     return cleaned or "value"
 
 
+def _dimension_alias(column: str, cut_label: str) -> str:
+    """Output alias for a plain dimension column.
+
+    Normally the physical column name (``Name`` -> ``name``). But when that name
+    is a generic person-identifier word that DISPLAY redaction blanks
+    (``^name$``, ``^address$``, ...) yet the cut clearly names a non-PII business
+    dimension (``Department Name`` -> ``department_name``), alias by the cut
+    label so the dimension stays readable on rendered tables. The SQL still reads
+    the real column — only the OUTPUT alias changes. A cut that simply IS the
+    identifier (``SSN`` -> ``ssn``, ``DOB`` -> ``dob``) has no more-descriptive
+    label, so its alias is unchanged and it stays redacted. Genuinely sensitive
+    columns are independently SHA-256 masked upstream; this only governs the
+    label, never whether a value is protected. Domain-agnostic.
+    """
+    from core.onboarding.kpi.pii_redaction import is_pii_column
+
+    col_alias = _norm_alias(column)
+    label_alias = _norm_alias(cut_label)
+    if is_pii_column(col_alias) and label_alias != col_alias and not is_pii_column(label_alias):
+        return label_alias
+    return col_alias
+
+
 def _quote(value: str, dialect: str = "duckdb") -> str:
     if not value:
         return value
@@ -492,6 +515,43 @@ def _detect_window_intent(metric_text: str, name_text: str) -> dict[str, Any]:
             return {}
         return {"kind": "percent_of_group", "group": candidate}
     return {}
+
+
+def raw_date_input_columns(kpi: dict[str, Any]) -> set[str]:
+    """Source columns the result view consumes as RAW dates, lowercased.
+
+    These columns feed date arithmetic — age / days-since cuts
+    (``date_diff(..., CAST(col AS DATE), ...)``) and the event-date anchor of a
+    time-bucket cut (``Month(ServiceDate)``). In every case the RAW value is a
+    transformation INPUT and is never projected to the result output (only the
+    derived band / age / bucket is). The features view must therefore carry
+    these columns UNMASKED: a SHA-256 mask would make the downstream
+    ``CAST(<hash> AS DATE)`` fail, and masking serves no privacy purpose because
+    the raw value is never emitted. Domain-agnostic — derived purely from the
+    KPI's own cuts text, no column or domain vocabulary is hard-coded.
+
+    The SQL generator consults this so a sensitive date column (e.g. ``DOB``,
+    a HIPAA identifier) is still masked wherever it WOULD be output, but is left
+    raw when it is consumed only to derive a non-identifying band such as an age
+    bucket (which HIPAA Safe Harbor explicitly permits).
+    """
+    cuts_text = str(kpi.get("cuts") or "").strip()
+    if not cuts_text:
+        return set()
+    lookup = _column_lookup(kpi)
+    cols: set[str] = set()
+    for match in _AGE_PATTERN.finditer(cuts_text):
+        source = match.group(1) or match.group(2)
+        if source:
+            cols.add(_resolve_column(source, lookup))
+    for match in _DAYS_SINCE_PATTERN.finditer(cuts_text):
+        source = match.group(1)
+        if source:
+            cols.add(_resolve_column(source, lookup))
+    event = _detect_event_date_column(cuts_text, lookup)
+    if event:
+        cols.add(event)
+    return {c.lower() for c in cols if c}
 
 
 def _detect_event_date_column(cuts_text: str, lookup: dict[str, str]) -> str:
@@ -868,7 +928,7 @@ def parse_kpi(
                 col = _resolve_column(clean, lookup)
                 if col in emitted:
                     cut_columns.append(col)
-                    _add_grain(_quote(col), _norm_alias(col))
+                    _add_grain(_quote(col), _dimension_alias(col, clean))
 
             # Resolve the "for <group>" token to a REAL emitted column (graceful
             # fallback to the cut columns) and make sure it is part of the grain.
@@ -1553,4 +1613,5 @@ __all__ = [
     "ParsedKPI",
     "build_result_view_sql",
     "parse_kpi",
+    "raw_date_input_columns",
 ]

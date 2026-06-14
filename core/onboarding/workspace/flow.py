@@ -56,7 +56,11 @@ from core.onboarding.workspace.validation import WorkspaceArtifactValidator
 from core.onboarding.workspace.workflow import MODES as ORCHESTRATION_MODES
 from core.onboarding.workspace.workflow import WorkspaceWorkflowOrchestrator
 from core.presentation.console_tables import render_markdown_table, render_query_result_table
-from core.onboarding.kpi.pii_redaction import redact_table_rows, workspace_redaction_patterns
+from core.onboarding.kpi.pii_redaction import (
+    redact_table_rows,
+    workspace_aggregate_ages,
+    workspace_redaction_patterns,
+)
 from core.storage.workspace_layout import WorkspaceLayout
 from core.onboarding.workspace.flow_io import _read_json
 from core.onboarding.workspace.flow_panels import (
@@ -1394,7 +1398,10 @@ class WorkspaceFlow:
                         _cols = [str(d[0]) for d in cursor.description or []]
                         _rows = cursor.fetchall()
                         _patterns = workspace_redaction_patterns(self.layout.project_root)
-                        _rows = redact_table_rows(_cols, _rows, patterns=_patterns)
+                        _agg_ages = workspace_aggregate_ages(self.layout.project_root)
+                        _rows = redact_table_rows(
+                            _cols, _rows, patterns=_patterns, aggregate_ages=_agg_ages
+                        )
                         if not _cols:
                             preview_md = "(query returned no tabular result)"
                         elif not _rows:

@@ -27,10 +27,21 @@ from core.onboarding.kpi.result_view_builder import (
     _column_lookup,
     _detect_time_bucket,
     _detect_window_intent,
+    _dimension_alias,
     _norm_alias,
     _resolve_column,
     _split_cuts,
 )
+
+
+def column_dim_renamed(dim) -> bool:
+    """True when a plain-column dimension's OUTPUT alias was changed from its
+    physical column name (e.g. ``Name`` -> ``department_name``) by
+    ``_dimension_alias`` to avoid spurious display redaction. The imperative
+    engines materialize the renamed column so all three engines emit the same
+    output column name (row parity). Normal columns keep their physical name.
+    """
+    return getattr(dim, "kind", "") == "column" and dim.alias != _norm_alias(dim.column)
 
 # Window kinds the imperative engines cannot yet render faithfully; generators
 # must fail loud rather than emit a silently-different (simpler) query.
@@ -151,7 +162,7 @@ def parse_intent(kpi: dict[str, Any]) -> KPIIntent:
         clean = re.sub(r"\(.*?\)", "", token).strip()
         if clean:
             col = _resolve_column(clean, lookup)
-            dims.append(DimIntent(kind="column", column=col, alias=_norm_alias(col)))
+            dims.append(DimIntent(kind="column", column=col, alias=_dimension_alias(col, clean)))
 
     # Name-derived age threshold (e.g. "patients above 50 years") → filter on age.
     age_match = _NAME_AGE_THRESHOLD.search(name_text)

@@ -296,12 +296,15 @@ def _data_view_html(
     from core.onboarding.kpi.pii_redaction import (
         DEFAULT_PII_COLUMN_PATTERNS,
         redact_rows,
+        workspace_aggregate_ages,
     )
 
     patterns = DEFAULT_PII_COLUMN_PATTERNS + tuple(
         policy_redaction_patterns(load_workspace_data_policy(workspace))
     )
-    shown = redact_rows(rows[:max_rows], patterns=patterns)
+    shown = redact_rows(
+        rows[:max_rows], patterns=patterns, aggregate_ages=workspace_aggregate_ages(workspace)
+    )
     columns = list(shown[0].keys())
 
     def cell(value: Any) -> str:

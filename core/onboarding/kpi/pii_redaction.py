@@ -146,16 +146,19 @@ def redact_sample_values(
     *,
     patterns: tuple[str, ...] = DEFAULT_PII_COLUMN_PATTERNS,
     placeholder: str = REDACTION_PLACEHOLDER,
+    aggregate_ages: bool = True,
 ) -> list:
     """If ``column_name`` is PII, replace each value with ``placeholder``; else copy.
 
     Always returns a new list; never mutates the input. ``None`` values are
-    preserved so downstream null-rate analytics stay meaningful.
+    preserved so downstream null-rate analytics stay meaningful. ``aggregate_ages``
+    False (set by a workspace data policy) renders exact ages instead of the
+    Safe Harbor "90+" bucket.
     """
 
     if is_pii_column(column_name, patterns=patterns):
         return [None if v is None else placeholder for v in values]
-    if is_age_column(column_name):
+    if aggregate_ages and is_age_column(column_name):
         return [bucket_age_value(v) for v in values]
     return list(values)
 
@@ -165,18 +168,20 @@ def redact_row_dict(
     *,
     patterns: tuple[str, ...] = DEFAULT_PII_COLUMN_PATTERNS,
     placeholder: str = REDACTION_PLACEHOLDER,
+    aggregate_ages: bool = True,
 ) -> dict[str, object]:
     """Return a new dict with PII columns' values replaced by ``placeholder``.
 
     Non-PII keys pass through unchanged. ``None`` values are preserved even in
-    PII columns. The input dict is never mutated.
+    PII columns. The input dict is never mutated. ``aggregate_ages`` False renders
+    exact ages instead of the Safe Harbor "90+" bucket.
     """
 
     redacted: dict[str, object] = {}
     for key, value in row.items():
         if isinstance(key, str) and is_pii_column(key, patterns=patterns):
             redacted[key] = None if value is None else placeholder
-        elif isinstance(key, str) and is_age_column(key):
+        elif isinstance(key, str) and aggregate_ages and is_age_column(key):
             redacted[key] = bucket_age_value(value)
         else:
             redacted[key] = value
@@ -188,11 +193,14 @@ def redact_rows(
     *,
     patterns: tuple[str, ...] = DEFAULT_PII_COLUMN_PATTERNS,
     placeholder: str = REDACTION_PLACEHOLDER,
+    aggregate_ages: bool = True,
 ) -> list[dict[str, object]]:
     """Apply :func:`redact_row_dict` to each row. Returns a new list."""
 
     return [
-        redact_row_dict(row, patterns=patterns, placeholder=placeholder)
+        redact_row_dict(
+            row, patterns=patterns, placeholder=placeholder, aggregate_ages=aggregate_ages
+        )
         for row in rows
     ]
 
@@ -221,12 +229,30 @@ def workspace_redaction_patterns(workspace_path: object) -> tuple[str, ...]:
     return DEFAULT_PII_COLUMN_PATTERNS + tuple(extras)
 
 
+def workspace_aggregate_ages(workspace_path: object) -> bool:
+    """Whether ages over 89 should be Safe-Harbor bucketed to "90+" on rendered
+    surfaces for this workspace. True (default) unless the workspace's
+    ``data_policy.json`` set ``aggregate_ages_over_89: false``. Loading the
+    policy must never break a render, so failures fall back to the safe default.
+    """
+    if workspace_path is None:
+        return True
+    try:
+        from core.governance.data_policy import load_workspace_data_policy
+
+        policy = load_workspace_data_policy(workspace_path)
+    except Exception:
+        return True
+    return True if policy is None else policy.aggregate_ages_over_89
+
+
 def redact_table_rows(
     columns: list,
     rows: list,
     *,
     patterns: tuple[str, ...] = DEFAULT_PII_COLUMN_PATTERNS,
     placeholder: str = REDACTION_PLACEHOLDER,
+    aggregate_ages: bool = True,
 ) -> list[list]:
     """Redact row-major rows (tuples/lists) by column for tabular DISPLAY.
 
@@ -234,10 +260,12 @@ def redact_table_rows(
     columns -> Safe-Harbor bucketed. Non-sensitive columns pass through. Returns
     new row lists; never mutates the input. Used by the result packet and the
     verifier sample tables so the highest-traffic display surfaces redact too.
+    ``aggregate_ages`` False (set by a workspace data policy for synthetic data)
+    renders exact ages instead of the Safe Harbor "90+" bucket.
     """
     col_names = [str(c) for c in columns]
     pii_flags = [is_pii_column(c, patterns=patterns) for c in col_names]
-    age_flags = [is_age_column(c) for c in col_names]
+    age_flags = [aggregate_ages and is_age_column(c) for c in col_names]
     out: list[list] = []
     for row in rows:
         new_row = list(row)
@@ -263,5 +291,6 @@ __all__ = [
     "redact_rows",
     "redact_sample_values",
     "redact_table_rows",
+    "workspace_aggregate_ages",
     "workspace_redaction_patterns",
 ]

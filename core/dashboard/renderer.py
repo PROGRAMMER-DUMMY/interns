@@ -1105,12 +1105,17 @@ def _data_view_component(workspace: Path, kpi_id: str, rows: list[dict[str, Any]
     from core.onboarding.kpi.pii_redaction import (
         DEFAULT_PII_COLUMN_PATTERNS,
         redact_rows,
+        workspace_aggregate_ages,
     )
 
     patterns = DEFAULT_PII_COLUMN_PATTERNS + tuple(
         policy_redaction_patterns(load_workspace_data_policy(workspace))
     )
-    shown = redact_rows(rows[:_DATA_VIEW_ROWS_LIVE], patterns=patterns)
+    shown = redact_rows(
+        rows[:_DATA_VIEW_ROWS_LIVE],
+        patterns=patterns,
+        aggregate_ages=workspace_aggregate_ages(workspace),
+    )
     columns = list(shown[0].keys())
 
     def cell(value: Any) -> str:
