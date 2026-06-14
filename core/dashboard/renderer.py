@@ -1197,11 +1197,11 @@ def _dash_index_string(t: DesignTokens) -> str:
         ".explore .xh{display:flex;align-items:baseline;gap:.6rem;margin:0 0 .7rem;}"
         ".explore .xh b{font-family:var(--serif);font-weight:600;font-size:1.02rem;color:var(--ink);}"
         ".explore .xh span{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);}"
-        ".ctl{display:flex;gap:.7rem .9rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem;}"
-        # Each label+dropdown reads as one grouped control, not loose tokens.
+        ".ctl{display:flex;gap:.6rem 1.1rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem;}"
+        # Each label+dropdown reads as one grouped control that wraps as a unit.
+        ".cgroup{display:flex;align-items:center;gap:.45rem;}"
         ".ctl .lab{font-family:var(--mono);font-size:.58rem;text-transform:uppercase;letter-spacing:.12em;"
-        "color:var(--ink-soft);align-self:center;margin-left:.2rem;}"
-        ".ctl .lab:first-child{margin-left:0;}"
+        "color:var(--ink-soft);white-space:nowrap;}"
         # The data-to-viz 'why this chart' note under the Explore controls.
         ".why{font-family:var(--sans);font-size:.74rem;color:var(--ink-soft);line-height:1.4;"
         "margin:.1rem 0 .6rem;padding:.4rem .6rem;background:rgba(180,68,28,.05);"
@@ -1372,27 +1372,29 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             html.B("Explore"),
             html.Span("compare any columns for this KPI", className=""),
         ], className="xh"),
+        # Each label+dropdown is one .cgroup so a label never wraps away from its
+        # control. The first row is the comparison; the second is the slice.
         html.Div([
-            html.Span("X", className="lab"),
-            dcc.Dropdown(id="explore-x", clearable=False, style=_dd),
-            html.Span("Breakdown", className="lab"),
-            dcc.Dropdown(id="explore-series", clearable=True, placeholder="(none)", style=_dd),
-            html.Span("Measure", className="lab"),
-            dcc.Dropdown(id="explore-measure", clearable=False, style=_dd),
-            html.Span("Chart", className="lab"),
-            dcc.Dropdown(id="explore-chart", options=_explore_chart_options(),
-                         clearable=False, style=_dd),
+            html.Div([html.Span("X", className="lab"),
+                      dcc.Dropdown(id="explore-x", clearable=False, style=_dd)], className="cgroup"),
+            html.Div([html.Span("Breakdown", className="lab"),
+                      dcc.Dropdown(id="explore-series", clearable=True, placeholder="(none)", style=_dd)], className="cgroup"),
+            html.Div([html.Span("Measure", className="lab"),
+                      dcc.Dropdown(id="explore-measure", clearable=False, style=_dd)], className="cgroup"),
+            html.Div([html.Span("Chart", className="lab"),
+                      dcc.Dropdown(id="explore-chart", options=_explore_chart_options(),
+                                   clearable=False, style=_dd)], className="cgroup"),
         ], className="ctl"),
         # Slice (Power-BI-style filter): pick a dimension + the value(s) to keep;
         # the chart re-renders to only those rows. This is the slice-and-dice the
         # chart does on the data itself — no separate table.
         html.Div([
-            html.Span("Slice by", className="lab"),
-            dcc.Dropdown(id="explore-filter-col", clearable=True,
-                         placeholder="(no slice)", style=_dd),
-            html.Span("Values", className="lab"),
-            dcc.Dropdown(id="explore-filter-vals", multi=True,
-                         placeholder="(all)", style={"minWidth": "260px", "fontSize": ".8rem"}),
+            html.Div([html.Span("Slice by", className="lab"),
+                      dcc.Dropdown(id="explore-filter-col", clearable=True,
+                                   placeholder="(no slice)", style=_dd)], className="cgroup"),
+            html.Div([html.Span("Values", className="lab"),
+                      dcc.Dropdown(id="explore-filter-vals", multi=True, placeholder="(all)",
+                                   style={"minWidth": "260px", "fontSize": ".8rem"})], className="cgroup"),
         ], className="ctl"),
         # Why this chart — the data-to-viz reason for the recommendation.
         html.Div(id="explore-reason", className="why"),
