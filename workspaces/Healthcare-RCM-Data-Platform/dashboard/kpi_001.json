@@ -2,7 +2,7 @@
   "artifact_type": "dashboard_spec",
   "version": 2,
   "kpi_id": "kpi_001",
-  "updated_at": "2026-06-12T17:58:07.933404+00:00",
+  "updated_at": "2026-06-14T09:19:43.660212+00:00",
   "machine_defaults": {
     "title": "What is trend for amount paid for medicare LOB across gender and payer for patients above 50 years of age",
     "metric": "sum(PaidAmount)",

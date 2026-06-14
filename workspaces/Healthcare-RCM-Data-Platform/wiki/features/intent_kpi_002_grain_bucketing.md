@@ -7,9 +7,9 @@ tags:
 - feature
 applies_to_kpis:
 - kpi_002
-created: '2026-06-11T19:35:02.737639+00:00'
-updated: '2026-06-12T08:59:10.926366+00:00'
-last_validated_against_json: '2026-06-12T08:59:10.926366+00:00'
+created: '2026-06-14T07:51:30.842262+00:00'
+updated: '2026-06-14T07:51:30.842262+00:00'
+last_validated_against_json: '2026-06-14T07:51:30.842262+00:00'
 validator_status: ok
 ---
 
@@ -22,8 +22,7 @@ validator_status: ok
 
 ## Decision history
 
-- 2026-06-11T19:35:02.737639+00:00: Accepted `option_a` — band_continuous_cuts
-- 2026-06-12T08:59:10.926366+00:00: Accepted `option_a` — band_continuous_cuts — Re-applying human-confirmed decision recorded in wiki/features/intent_kpi_002_grain_bucketing.md (accepted option_a band_continuous_cuts on 2026-06-11)
+- 2026-06-14T07:51:30.842262+00:00: Accepted `option_a` — band_continuous_cuts
 
 ## Evidence
 

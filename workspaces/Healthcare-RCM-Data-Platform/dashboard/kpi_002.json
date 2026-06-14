@@ -2,13 +2,13 @@
   "artifact_type": "dashboard_spec",
   "version": 2,
   "kpi_id": "kpi_002",
-  "updated_at": "2026-06-12T17:58:08.105818+00:00",
+  "updated_at": "2026-06-14T09:19:43.809429+00:00",
   "machine_defaults": {
     "title": "What is percentage share of lives by gender, age , visit type, department",
     "metric": "percentage of sum(distinct PatientID)     /   sum(disitnct PatientID) for departement",
     "y_label": "percentage of sum(distinct PatientID)     /   sum(disitnct PatientID) for departement",
     "chart_type": "ranked_bar",
-    "x": "name",
+    "x": "department_name",
     "x_label": "Department Name",
     "y": "percentage_share",
     "agg": "sum",
@@ -21,10 +21,10 @@
         "selection_source": "https://www.data-to-viz.com/",
         "limit": 10,
         "orientation": "h",
-        "x": "name",
+        "x": "department_name",
         "y": "percentage_share",
         "agg": "sum",
-        "title": "Percentage Share by Name",
+        "title": "Percentage Share by Department Name",
         "y_format": "percent"
       },
       {
@@ -61,11 +61,11 @@
         "chart_type": "heatmap",
         "selection_reason": "two categorical dimensions against one measure: a heatmap shows the interaction no single-dimension panel can (data-to-viz: heatmap for two categorical variables)",
         "selection_source": "https://www.data-to-viz.com/",
-        "x": "name",
+        "x": "department_name",
         "color": "age_band",
         "y": "percentage_share",
         "agg": "sum",
-        "title": "Percentage Share: Name x Age Band",
+        "title": "Percentage Share: Department Name x Age Band",
         "y_format": "percent"
       }
     ],
@@ -79,7 +79,7 @@
       "cuts": "Department Name, VisitType, Gender, Age (DOB)"
     },
     "_column_validation": [
-      "spec field 'x' = 'name' does not exist in result view columns ['__attribution_rn']",
+      "spec field 'x' = 'department_name' does not exist in result view columns ['__attribution_rn']",
       "spec field 'y' = 'percentage_share' does not exist in result view columns ['__attribution_rn']",
       "spec field 'color' = 'VisitType' does not exist in result view columns ['__attribution_rn']"
     ],
