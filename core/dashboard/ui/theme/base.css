@@ -1,0 +1,363 @@
+/* MinusAnalyst — structural styles (theme-agnostic).
+   "Warm editorial analytics": paper canvas, Fraunces display serif + Hanken
+   Grotesk UI, layered warm shadows, staggered reveal motion.
+   All colors/fonts come from CSS variables in the active theme file. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background:
+    radial-gradient(1300px 820px at 72% -12%, var(--canvas-glow), transparent 58%),
+    var(--canvas);
+  background-attachment: fixed;
+}
+
+/* Fine paper grain over the whole viewport (behind content). */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
+::selection { background: var(--accent-soft); }
+
+/* ---------------- App shell ----------------
+   Column widths are driven by CSS vars so panels collapse smoothly: the left
+   sidebar and right chat each go to 0 width via a body class, reclaiming the
+   full canvas for the dashboard. */
+.app {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  --c-sidebar: var(--sidebar-w);
+  --c-chat: 0px;
+  grid-template-columns: var(--c-sidebar) 1fr var(--c-chat);
+  min-height: 100vh;
+  transition: grid-template-columns 0.26s cubic-bezier(.2,.7,.2,1);
+}
+.app.chat-on { --c-chat: var(--chat-w); }
+.app.sidebar-off { --c-sidebar: 0px; }
+/* A collapsed panel must leave NOTHING behind: zero its own padding + border so
+   no sliver of the sidebar's padding/background leaks past the 0-width track. */
+.app.sidebar-off .sidebar { padding: 0; border-right: 0; }
+.app:not(.chat-on) .chat { padding: 0; border-left: 0; }
+/* min-width:0 lets the tracks shrink; overflow:hidden clips the fixed-width
+   panel content so a collapsed (0-width) panel actually disappears. */
+.sidebar, .chat { min-width: 0; overflow: hidden; }
+
+/* ---------------- Sidebar ---------------- */
+.sidebar {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--surface) 92%, var(--canvas)) 0%, var(--surface) 100%);
+  border-right: 1px solid var(--border);
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 4px 8px 22px;
+}
+.brand-mark {
+  width: 28px; height: 28px;
+  border-radius: 9px;
+  background: linear-gradient(150deg, var(--accent-bright), var(--accent-ink));
+  display: grid; place-items: center;
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 600; font-size: 15px;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+.brand-name {
+  font-family: var(--font-display);
+  font-weight: 600; font-size: 15.5px; letter-spacing: -0.01em;
+  font-optical-sizing: auto;
+}
+.nav-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--faint); padding: 14px 12px 8px; font-weight: 600;
+}
+.nav-item {
+  position: relative;
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 12px; border-radius: var(--radius-sm);
+  color: var(--slate); text-decoration: none; font-weight: 500; font-size: 13.5px;
+  transition: background 0.15s ease, color 0.15s ease;
+  cursor: pointer;
+}
+.nav-item:hover { background: var(--surface-2); }
+.nav-item.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.nav-item.active::before {
+  content: ""; position: absolute; left: -16px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 20px; border-radius: 0 3px 3px 0; background: var(--accent);
+}
+.nav-item .nav-icon { font-size: 15px; width: 18px; text-align: center; }
+.sidebar-foot {
+  margin-top: auto; padding: 14px 12px 2px; color: var(--faint); font-size: 11.5px;
+  border-top: 1px solid var(--border); letter-spacing: 0.01em;
+}
+
+/* ---------------- Main ---------------- */
+.main { min-width: 0; display: flex; flex-direction: column; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 28px 12px; gap: 16px;
+}
+.topbar-left { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.page-title {
+  position: relative;
+  font-family: var(--font-display); font-optical-sizing: auto;
+  font-size: 23px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.1;
+  margin: 0 0 3px; padding-bottom: 8px;
+}
+.page-title::after {
+  content: ""; position: absolute; left: 1px; bottom: 0;
+  width: 38px; height: 2.5px; border-radius: 3px; background: var(--accent);
+  animation: rule-grow 0.7s 0.1s cubic-bezier(.2,.7,.2,1) both;
+}
+.page-sub { color: var(--muted); margin: 0; font-size: 12.5px; max-width: 72ch; }
+.topbar-actions { display: flex; gap: 8px; align-items: center; flex: none; }
+
+/* Panel collapse toggles (left sidebar, right chat) */
+.icon-btn {
+  flex: none; width: 30px; height: 30px; border-radius: 9px;
+  border: 1px solid var(--border-strong); background: var(--surface);
+  color: var(--muted); cursor: pointer; padding: 0;
+  display: grid; place-items: center; font-size: 15px; line-height: 1;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.icon-btn:hover { color: var(--accent-ink); border-color: var(--accent-border); background: var(--surface-2); }
+.icon-btn::before { content: "\00AB"; }                       /* « collapse sidebar */
+.app.sidebar-off .icon-btn:not(.icon-btn--chat)::before { content: "\00BB"; }  /* » open */
+.icon-btn--chat::before { content: "\00AB"; }                 /* « open chat */
+.app.chat-on .icon-btn--chat::before { content: "\00BB"; }    /* » collapse chat */
+
+.btn {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 15px; border-radius: 10px; font: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s ease;
+}
+.btn:hover { background: var(--surface-2); border-color: var(--accent-border); }
+.btn-accent {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.18);
+}
+.btn-accent:hover { background: var(--accent-ink); border-color: var(--accent-ink); }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.btn-ghost:hover { background: var(--surface-2); color: var(--ink); }
+
+/* ---------------- Slicer bar ---------------- */
+.slicer-bar {
+  display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;
+  padding: 8px 36px 20px;
+}
+.slicer-group { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
+.slicer { display: flex; flex-direction: column; gap: 6px; min-width: 196px; }
+.slicer-label {
+  font-size: 11px; font-weight: 600; color: var(--muted);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.crossfilter-chip {
+  display: inline-flex; align-items: center; gap: 9px;
+  background: var(--accent-soft); color: var(--accent-ink);
+  border: 1px solid var(--accent-border);
+  padding: 7px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+}
+.crossfilter-chip.drill { border-style: dashed; }
+.crossfilter-chip .x { cursor: pointer; font-weight: 700; opacity: 0.7; }
+.crossfilter-chip .x:hover { opacity: 1; }
+
+/* ---------------- Grid + tiles ---------------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 16px;
+  padding: 4px 28px 36px;
+}
+.tile {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 15px 17px;
+  display: flex; flex-direction: column;
+  min-width: 0;
+  transition: transform 0.2s cubic-bezier(.2,.7,.2,1), box-shadow 0.2s ease;
+  animation: tile-rise 0.55s cubic-bezier(.2,.7,.2,1) both;
+}
+.tile:hover { transform: translateY(-3px); box-shadow: var(--shadow-lift); }
+.tile-title {
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 14px;
+}
+.tile-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tile-head .tile-title { margin: 0 0 12px; }
+.csv-btn {
+  flex: none; border: 1px solid var(--border-strong); background: var(--surface);
+  color: var(--muted); border-radius: 7px; font: inherit; font-size: 10.5px;
+  font-weight: 600; letter-spacing: 0.04em; padding: 3px 9px; cursor: pointer;
+  margin-bottom: 10px; transition: all .15s ease;
+}
+.csv-btn:hover { color: var(--accent-ink); border-color: var(--accent-border); background: var(--surface-2); }
+
+/* staggered page-load reveal */
+.grid .tile:nth-child(1) { animation-delay: 0.02s; }
+.grid .tile:nth-child(2) { animation-delay: 0.07s; }
+.grid .tile:nth-child(3) { animation-delay: 0.12s; }
+.grid .tile:nth-child(4) { animation-delay: 0.17s; }
+.grid .tile:nth-child(5) { animation-delay: 0.22s; }
+.grid .tile:nth-child(6) { animation-delay: 0.27s; }
+.grid .tile:nth-child(7) { animation-delay: 0.32s; }
+.grid .tile:nth-child(8) { animation-delay: 0.37s; }
+.grid .tile:nth-child(n+9) { animation-delay: 0.42s; }
+
+/* KPI — hero numerals in the display serif, with an accent edge.
+   Value font scales with the viewport and never wraps/overflows. */
+.kpi { justify-content: center; gap: 6px; overflow: hidden; }
+.kpi::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(var(--accent-bright), var(--accent-ink));
+}
+.kpi-label {
+  font-size: 10.5px; color: var(--muted); font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.kpi-value {
+  font-family: var(--font-display); font-optical-sizing: auto;
+  font-size: clamp(19px, 2vw, 27px); font-weight: 600;
+  letter-spacing: -0.015em; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.kpi-accent .kpi-value { color: var(--accent-ink); }
+.kpi-delta { display: flex; gap: 5px; align-items: baseline; font-size: 11.5px; font-weight: 600; }
+.kpi-delta.up { color: #3F8C6E; }
+.kpi-delta.down { color: #C0563F; }
+.kpi-delta-label { color: var(--faint); font-weight: 500; }
+
+/* Tables */
+.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tbl th {
+  text-align: left; font-weight: 600; color: var(--muted);
+  font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 9px 11px; border-bottom: 1.5px solid var(--border-strong);
+  position: sticky; top: 0; background: var(--surface);
+}
+.tbl td {
+  padding: 9px 11px; border-bottom: 1px solid var(--border); color: var(--ink);
+}
+.tbl tbody tr { transition: background 0.12s ease; }
+.tbl tbody tr:hover { background: var(--surface-2); }
+.tbl tr:last-child td { border-bottom: none; }
+.tbl td.num, .tbl th.num {
+  text-align: right; font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+.tbl-wrap { overflow: auto; }
+
+/* Dropdowns (dcc.Dropdown / react-select) tuned to theme */
+.Select-control, .is-focused:not(.is-open) > .Select-control {
+  border-radius: 10px !important; border-color: var(--border-strong) !important;
+  background: var(--surface) !important; box-shadow: none !important;
+  min-height: 38px !important;
+}
+.Select-control:hover { border-color: var(--accent-border) !important; }
+.Select-placeholder, .Select--single > .Select-control .Select-value { color: var(--muted) !important; }
+.Select-menu-outer {
+  border-radius: 10px !important; border-color: var(--border-strong) !important;
+  box-shadow: var(--shadow) !important; overflow: hidden;
+  background: var(--surface) !important;
+}
+.Select-option { background: var(--surface) !important; color: var(--ink) !important; }
+.Select-option.is-focused { background: var(--accent-soft) !important; }
+.Select--multi .Select-value {
+  background: var(--accent-soft) !important; color: var(--accent-ink) !important;
+  border-color: var(--accent-border) !important; border-radius: 8px !important;
+}
+
+/* Date picker + slider nudge to theme accent */
+.SingleDatePickerInput, .DateRangePickerInput { background: var(--surface) !important; }
+.rc-slider-track { background: var(--accent) !important; }
+.rc-slider-handle { border-color: var(--accent) !important; }
+
+/* ---------------- Chat panel ---------------- */
+.chat {
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  height: 100vh; position: sticky; top: 0;
+  display: flex; flex-direction: column;
+}
+.chat-head {
+  padding: 22px 20px 16px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.chat-head h3 {
+  margin: 0; font-family: var(--font-display); font-optical-sizing: auto;
+  font-size: 17px; font-weight: 600;
+}
+.chat-head .sub { color: var(--muted); font-size: 12px; margin-top: 3px; font-family: var(--font-body); }
+.chat-log { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.bubble {
+  border-radius: 14px; padding: 11px 14px; font-size: 13px; line-height: 1.5;
+  max-width: 100%; white-space: pre-wrap; word-break: break-word;
+}
+.bubble.user {
+  background: var(--accent); color: #fff; align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+.bubble.agent {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--ink);
+  border-bottom-left-radius: 4px;
+}
+.bubble.agent code, .bubble.agent pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+.chat-compose { padding: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 9px; }
+.chat-compose textarea {
+  width: 100%; resize: none; min-height: 68px;
+  border: 1px solid var(--border-strong); border-radius: 12px;
+  padding: 11px 13px; font: inherit; color: var(--ink); background: var(--surface-2);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.chat-compose textarea:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+.chat-hint { color: var(--faint); font-size: 11.5px; }
+
+.empty {
+  padding: 64px 36px; text-align: center; color: var(--muted); white-space: pre-wrap;
+  font-size: 14px;
+}
+
+/* ---------------- Motion ---------------- */
+@keyframes tile-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes rule-grow {
+  from { width: 0; opacity: 0; }
+  to   { width: 46px; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
