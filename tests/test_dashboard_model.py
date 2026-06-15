@@ -93,6 +93,24 @@ class TestApplyFilters(unittest.TestCase):
         self.assertEqual(apply_filters(df, {"unknown": "x"}).height, 4)  # unknown = no-op
 
 
+class TestTypeTolerantFilter(unittest.TestCase):
+    def test_date_column_matches_string_click_value(self):
+        import datetime as dt
+        df = pl.DataFrame({
+            "month": [dt.date(2024, 1, 1), dt.date(2024, 2, 1)],
+            "sum_paid": [100.0, 250.0],
+        })
+        # a Plotly click on a line point yields the date as a string
+        out = apply_filters(df, {"month": "2024-02-01"})
+        self.assertEqual(out.height, 1)
+        self.assertEqual(out.get_column("sum_paid").to_list(), [250.0])
+
+    def test_int_coded_category_matches_string(self):
+        df = pl.DataFrame({"code": [1, 2, 3], "m": [10.0, 20.0, 30.0]})
+        out = apply_filters(df, {"code": "2"})
+        self.assertEqual(out.get_column("m").to_list(), [20.0])
+
+
 class TestAggregateAdditive(unittest.TestCase):
     def test_rollup_by_one_cut(self):
         df = _additive_frame()

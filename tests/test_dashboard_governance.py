@@ -62,6 +62,27 @@ class TestLayoutHonorsRedaction(unittest.TestCase):
         # headline card + 1 safe panel (the PII 'Name' panel is dropped) = 2
         self.assertEqual(len(tiles), 2)
 
+
+class TestClickCrossFilter(unittest.TestCase):
+    def test_chips_built_from_click_filters(self):
+        from core.dashboard.ui.layout import crossfilter_chips
+        chips = crossfilter_chips({"Gender": "F", "PayorID": "P1"})
+        self.assertEqual(len(chips), 2)
+
+    def test_headline_reflects_click_filter(self):
+        from core.dashboard.ui.layout import kpi_page
+        model = KpiModel(kpi_id="k", title="K", gold_columns=["Gender", "sum_paid"],
+                         measure="sum_paid", cuts=["Gender"], kind="sum", additive=True,
+                         panels=[{"chart_type": "bar", "x": "Gender", "y": "sum_paid",
+                                  "title": "by gender"}])
+        gold = pl.DataFrame({"Gender": ["M", "F", "M"], "sum_paid": [10.0, 5.0, 20.0]})
+        tiles = kpi_page(model, gold, "claude", None, None, {"Gender": "F"})
+        # headline card is tiles[0]; its value should be the F subset (5.0)
+        card = tiles[0].children  # html.Div wrapper -> kpi_card
+        # kpi value text lives in the card; assert the filtered total is used
+        from core.dashboard.ui.format import format_value
+        self.assertIn(format_value(5.0, None), str(card))
+
     def test_pii_dimension_not_offered_as_slicer(self):
         a = KpiModel(kpi_id="a", title="a", gold_columns=["Department", "Name", "m"],
                      measure="m", cuts=["Department", "Name"], kind="sum", additive=True)

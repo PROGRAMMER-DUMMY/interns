@@ -81,10 +81,32 @@ def apply_filters(frame: pl.DataFrame, filters: dict[str, Any] | None) -> pl.Dat
             if hi is not None:
                 df = df.filter(pl.col(col) <= hi)
         elif isinstance(val, (list, tuple, set)):
-            df = df.filter(pl.col(col).is_in(list(val)))
+            df = df.filter(_eq_any(df.schema.get(col), col, list(val)))
         else:
-            df = df.filter(pl.col(col) == val)
+            df = df.filter(_eq(df.schema.get(col), col, val))
     return df
+
+
+def _eq(dtype, col: str, val) -> pl.Expr:
+    """Type-tolerant equality. A click on a non-string axis (e.g. a date point on
+    a line, or an integer-coded category) arrives as a string from Plotly; compare
+    on the column's string form so it still matches the typed gold values."""
+    if dtype is not None and not _is_string_dtype(dtype) and isinstance(val, str):
+        return pl.col(col).cast(pl.Utf8) == val
+    return pl.col(col) == val
+
+
+def _eq_any(dtype, col: str, vals: list) -> pl.Expr:
+    if dtype is not None and not _is_string_dtype(dtype) and any(isinstance(v, str) for v in vals):
+        return pl.col(col).cast(pl.Utf8).is_in([str(v) for v in vals])
+    return pl.col(col).is_in(vals)
+
+
+def _is_string_dtype(dtype) -> bool:
+    try:
+        return dtype in (pl.Utf8, pl.String) or dtype == pl.Categorical
+    except Exception:
+        return False
 
 
 def aggregate(

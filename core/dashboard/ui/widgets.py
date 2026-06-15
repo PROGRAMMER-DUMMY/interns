@@ -28,6 +28,29 @@ def _humanize(name: str) -> str:
     return str(name).replace("_", " ").replace(".", " ").strip().title()
 
 
+def _apply_highlight(fig, frame, x, highlight, colors, kind: str) -> None:
+    """Power BI cross-highlight: keep every mark but dim the non-selected ones.
+
+    Called when this chart's own dimension carries an active click-filter -- the
+    chart shows all its categories with the clicked one in the accent color and
+    the rest in the muted ``dim`` color, instead of collapsing to one bar/slice.
+    """
+    if highlight is None or not x:
+        return
+    xc = resolve_column(x, frame.columns)
+    if xc is None:
+        return
+    hl = highlight if isinstance(highlight, (list, tuple, set)) else [highlight]
+    hlset = {str(v) for v in hl}
+    cats = frame.get_column(xc).cast(pl.Utf8).to_list()
+    marks = [colors["accent"] if c in hlset else colors["dim"] for c in cats]
+    k = (kind or "").lower()
+    if k in ("bar", "hbar", "ranked_bar", "grouped_bar"):
+        fig.update_traces(marker_color=marks)
+    elif k in ("donut", "pie"):
+        fig.update_traces(marker=dict(colors=marks))
+
+
 def _xy(frame: pl.DataFrame, panel: dict[str, Any], measure: str):
     x = resolve_column(panel.get("x"), frame.columns)
     color = resolve_column(panel.get("color"), frame.columns)
@@ -75,6 +98,8 @@ def render_bar(frame, panel, measure, colors, *, horizontal=False):
         if horizontal:
             fig.update_yaxes(autorange="reversed")
     _style(fig, colors, horizontal=horizontal)
+    _apply_highlight(fig, frame, panel.get("x"), panel.get("_highlight"), colors,
+                     str(panel.get("chart_type") or "bar"))
     return fig
 
 
@@ -124,6 +149,8 @@ def render_donut(frame, panel, measure, colors, *, hole=0.55):
             text=(f"<b>{format_value(total, panel.get('y_format'))}</b>"
                   f"<br><span style='font-size:9px'>{_humanize(y)}</span>"),
             font=dict(size=15, color=colors["ink"], family="Fraunces, Georgia, serif"))
+    _apply_highlight(fig, frame, panel.get("x"), panel.get("_highlight"), colors,
+                     str(panel.get("chart_type") or "donut"))
     return fig
 
 
