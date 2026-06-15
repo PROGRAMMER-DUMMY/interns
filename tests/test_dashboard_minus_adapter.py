@@ -43,9 +43,18 @@ class TestAdapterReal(unittest.TestCase):
         self.assertIn("detail", self.res["pages"])
 
     def test_has_collection_rate_and_kpi_measures(self):
-        # generic RCM measure + one measure per gold KPI
+        # generic RCM measures + one measure per gold KPI
         self.assertIn("collection_rate", self.res["measures"])
+        self.assertIn("days_in_ar", self.res["measures"])   # Days in A/R (RCM KPI)
         self.assertTrue(any(m.startswith("kpi_") for m in self.res["measures"]))
+
+    def test_days_in_ar_is_avg_with_lower_target(self):
+        from minus.config.loader import load_project
+        proj = load_project(minus_root(self.layout))
+        m = proj.measure("days_in_ar")
+        self.assertEqual(m.agg, "avg")
+        self.assertEqual(m.target, 30.0)
+        self.assertEqual(m.goal, "lower")
 
     def test_vendored_minus_validates_generated_project(self):
         from minus.config.loader import load_dashboards, load_project

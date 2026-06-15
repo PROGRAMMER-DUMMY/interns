@@ -77,7 +77,22 @@ def _measure_specs(model: ConformedModel) -> list[dict[str, Any]]:
                       "kind": "expression",
                       "expression": f"{paid_slug} / {amount_slug} * 100",
                       "fmt": "percent", "target": 96.0, "goal": "higher"})
+    # Days in A/R = avg(paid date - service date). RCM benchmark <30 days, lower better.
+    if "ar_days" in model.frame.columns:
+        specs.append({"name": "days_in_ar", "label": "Days in A/R", "agg": "avg",
+                      "field": f"{_TABLE}.ar_days", "fmt": "float",
+                      "target": 30.0, "goal": "lower"})
     return specs
+
+
+def _measure_field_columns(measures: list[dict[str, Any]]) -> set[str]:
+    """Source columns consumed by measures (excluded from dimension lists)."""
+    cols: set[str] = set()
+    for m in measures:
+        fld = m.get("field")
+        if fld and "." in fld:
+            cols.add(fld.split(".", 1)[1])
+    return cols
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +209,8 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[s
         "dashboards_dir": "config/dashboards",
     }
 
-    dims = _display_dimensions(model)
+    mfields = _measure_field_columns(measures)
+    dims = [(d, dist) for d, dist in _display_dimensions(model) if d not in mfields]
     primary = next((m["name"] for m in measures if m.get("agg") == "sum"),
                    measures[0]["name"] if measures else "record_count")
     # KPI row: every measure as a tile (4-wide layout). Add a period-over-period
@@ -209,7 +225,7 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[s
             w["compare"] = f"{_TABLE}.{svc_date}"
             w["compare_period"] = "quarter"
         return w
-    kpi_widgets = [_kpi_tile(m) for m in measures[:4]]
+    kpi_widgets = [_kpi_tile(m) for m in measures[:6]]  # all measures incl. RCM KPIs
     chart_widgets = [_widget_for(d, dist, primary, i) for i, (d, dist) in enumerate(dims[:5])]
     # filters from low-cardinality dimensions
     filters = [{"id": f"f_{_slug(d)}", "field": f"{_TABLE}.{d}", "label": _human(d),

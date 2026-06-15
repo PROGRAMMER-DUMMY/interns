@@ -164,12 +164,17 @@ def _clean_table(
 
 
 def _derive_columns(df: pl.DataFrame) -> pl.DataFrame:
-    """Add common derived dimensions on the joined star (age is derived earlier,
-    per-table, before DOB redaction). Here: month from a service date."""
+    """Add common derived columns on the joined star (age is derived earlier,
+    per-table, before DOB redaction). Here: month from a service date, and
+    ar_days (days in A/R = paid date - service date) when both dates exist."""
     exprs = []
     svc = next((c for c in df.columns if c.lower() in ("servicedate", "service_date")), None)
+    paid = next((c for c in df.columns if c.lower() in ("paiddate", "paid_date")), None)
     if svc and df.schema.get(svc) == pl.Date:
         exprs.append(pl.col(svc).dt.truncate("1mo").alias("month"))
+    if svc and paid and df.schema.get(svc) == pl.Date and df.schema.get(paid) == pl.Date:
+        # Days in Accounts Receivable: how long a claim takes to get paid.
+        exprs.append((pl.col(paid) - pl.col(svc)).dt.total_days().alias("ar_days"))
     return df.with_columns(exprs) if exprs else df
 
 
