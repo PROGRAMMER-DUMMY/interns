@@ -109,13 +109,12 @@ class TestTheme(unittest.TestCase):
 
 
 class TestLayout(unittest.TestCase):
-    def test_section_renders_expected_tiles(self):
-        from core.dashboard.ui.layout import kpi_section
+    def test_page_renders_expected_tiles(self):
+        from core.dashboard.ui.layout import kpi_page
         model, frame = _model(), _frame()
-        section = kpi_section(model, frame, "claude")
-        # the section holds an H2 + a .grid div; the grid has headline + 2 panel tiles
-        grid = section.children[1]
-        self.assertEqual(len(grid.children), 1 + 2)
+        tiles = kpi_page(model, frame, "claude")
+        # headline card + 2 panel tiles
+        self.assertEqual(len(tiles), 1 + 2)
 
     def test_panel_data_topn_applies(self):
         model, frame = _model(), _frame()

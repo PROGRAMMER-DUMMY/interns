@@ -12,7 +12,7 @@ from core.dashboard.ui.governance import (
     WorkspaceRedaction,
     is_loopback_host,
 )
-from core.dashboard.ui.layout import kpi_section, slicer_bar
+from core.dashboard.ui.layout import kpi_page, slicer_bar
 from core.storage.workspace_layout import WorkspaceLayout
 
 _WS = Path("workspaces/Healthcare-RCM-Data-Platform")
@@ -53,15 +53,14 @@ class TestLayoutHonorsRedaction(unittest.TestCase):
             ],
         )
 
-    def test_pii_panel_dropped_from_section(self):
+    def test_pii_panel_dropped_from_page(self):
         model = self._model_with_pii_panel()
         gold = pl.DataFrame({"Department": ["A", "B"], "Name": ["x", "y"],
                              "sum_paid": [10.0, 20.0]})
         r = WorkspaceRedaction(None)
-        section = kpi_section(model, gold, "claude", r)
-        grid = section.children[1]
+        tiles = kpi_page(model, gold, "claude", r)
         # headline card + 1 safe panel (the PII 'Name' panel is dropped) = 2
-        self.assertEqual(len(grid.children), 2)
+        self.assertEqual(len(tiles), 2)
 
     def test_pii_dimension_not_offered_as_slicer(self):
         a = KpiModel(kpi_id="a", title="a", gold_columns=["Department", "Name", "m"],
@@ -72,16 +71,16 @@ class TestLayoutHonorsRedaction(unittest.TestCase):
         canvas = CanvasModel(layout=WorkspaceLayout(project_root=_WS.resolve()),
                              kpis={"a": a, "b": b}, gold={"a": gold, "b": gold})
         r = WorkspaceRedaction(None)
-        bar = slicer_bar(canvas, r)
+        slicers = slicer_bar(canvas, r)  # now a list of slicer divs
         # Department is shared+safe -> a slicer; Name is shared but redacted -> none
-        labels = _slicer_labels(bar)
+        labels = _slicer_labels(slicers)
         self.assertIn("Department", labels)
         self.assertNotIn("Name", labels)
 
 
-def _slicer_labels(slicer_bar_div) -> list[str]:
+def _slicer_labels(slicers) -> list[str]:
     out = []
-    for slicer in slicer_bar_div.children:
+    for slicer in slicers:
         # slicer.children[0] is the html.Label
         try:
             out.append(slicer.children[0].children)

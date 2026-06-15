@@ -1,11 +1,11 @@
-"""Build the live Power BI-style Dash app for a workspace.
+"""Build the live MinusAnalyst-style Dash app for a workspace.
 
-Lists the gold KPIs, builds models + reads gold (Phase 1), renders the warm
-MinusAnalyst theme with one section per KPI (Phase 3), and wires global slicers
-to cross-filter the canvas (Phase 2 engine).
+Sidebar (brand + KPI nav) + wide main canvas (topbar + global slicer bar +
+12-col grid). One page per KPI plus an Overview. A single callback handles both
+routing (URL -> active page + sidebar state) and cross-filtering (slicer values
+-> refiltered grid), reading the validated gold layer via the Phase 1/2 model.
 
-Binds 127.0.0.1 by design. Auth + PII redaction are Phase 4; do not bind a
-non-loopback host here until that lands.
+Binds 127.0.0.1 by design. Non-loopback binds require a token (Phase 4).
 """
 from __future__ import annotations
 
@@ -13,95 +13,65 @@ from typing import Any
 
 from dash import ALL, Dash, Input, Output, html
 
-from core.dashboard.model.crossfilter import CanvasModel, load_canvas, panel_data
+from core.dashboard.model.crossfilter import CanvasModel, load_canvas
 from core.dashboard.ui import layout as L
-from core.dashboard.ui.chart_map import is_big_number, map_chart_type
 from core.dashboard.ui.governance import WorkspaceRedaction
-from core.dashboard.ui.theme import build_theme_css, chart_colors, index_string
-from core.dashboard.ui.widgets import graph
+from core.dashboard.ui.theme import build_theme_css, index_string
 from core.storage.workspace_layout import WorkspaceLayout
 
 
-def _canvas_body(canvas: CanvasModel, theme: str, redaction: WorkspaceRedaction) -> list:
-    if not canvas.kpis:
-        return [html.Div("No gold KPI results found for this workspace.",
-                         className="empty")]
-    sections = [L.slicer_bar(canvas, redaction)]
-    for kid, model in canvas.kpis.items():
-        sections.append(L.kpi_section(model, canvas.gold[kid], theme, redaction))
-    return sections
-
-
-def build_live_dashboard(
-    layout: WorkspaceLayout, *, theme: str = "claude"
-) -> Dash:
+def build_live_dashboard(layout: WorkspaceLayout, *, theme: str = "claude") -> Dash:
     """Construct (do not run) the live dashboard Dash app for a workspace."""
     canvas = load_canvas(layout)
     redaction = WorkspaceRedaction(layout.project_root)
-    app = Dash(__name__, title=f"{layout.project_root.name} - dashboard")
+    app = Dash(__name__, title=f"{layout.project_root.name} - dashboard",
+               suppress_callback_exceptions=True)
     app.index_string = index_string(build_theme_css(theme))
-
-    app.layout = html.Div(
-        className="app sidebar-off",
-        children=[
-            html.Div(  # main column
-                className="main",
-                children=[
-                    html.Div(
-                        html.Div([
-                            html.H1(layout.project_root.name, className="page-title"),
-                            html.P("Live KPI canvas - click a slicer to cross-filter.",
-                                   className="page-sub"),
-                        ], className="topbar-left"),
-                        className="topbar",
-                    ),
-                    html.Div(_canvas_body(canvas, theme, redaction), id="canvas"),
-                ],
-            ),
-        ],
-    )
-
+    app.layout = L.app_shell(layout.project_root.name)
     _register_callbacks(app, canvas, theme, redaction)
     return app
 
 
+def _active_id_from_path(pathname: str, canvas: CanvasModel) -> str:
+    slug = (pathname or "/").strip("/").lower()
+    if slug in canvas.kpis:
+        return slug
+    return L.OVERVIEW_ID
+
+
 def _register_callbacks(app: Dash, canvas: CanvasModel, theme: str,
                         redaction: WorkspaceRedaction) -> None:
+
     @app.callback(
-        Output("canvas", "children"),
+        Output("sidebar", "children"),
+        Output("slicer-bar", "children"),
+        Output("page-header", "children"),
+        Output("widgets", "children"),
+        Input("url", "pathname"),
         Input({"kind": "slicer", "col": ALL}, "value"),
         Input({"kind": "slicer", "col": ALL}, "id"),
-        prevent_initial_call=True,
     )
-    def _cross_filter(values, ids):  # pragma: no cover - exercised via Dash runtime
+    def _render(pathname, slicer_values, slicer_ids):  # pragma: no cover - Dash runtime
+        active = _active_id_from_path(pathname, canvas)
         filters: dict[str, Any] = {}
-        for val, ident in zip(values or [], ids or []):
+        for val, ident in zip(slicer_values or [], slicer_ids or []):
             if val:
                 filters[ident["col"]] = val
-        body = [L.slicer_bar(canvas, redaction)]
-        colors = chart_colors(theme)
-        for kid, model in canvas.kpis.items():
-            gold = canvas.gold[kid]
-            tiles = []
-            safe_panels = [p for p in model.panels
-                           if p.get("x") and redaction.panel_is_safe(p)]
-            for i, panel in enumerate(safe_panels):
-                span = L._WIDTHS[i] if i < len(L._WIDTHS) else 6
-                try:
-                    frame = panel_data(model, gold, panel, filters=filters)
-                except Exception:
-                    frame = gold.head(0)
-                ct = str(panel.get("chart_type") or "bar")
-                if is_big_number(ct):
-                    continue
-                renderer = map_chart_type(ct)
-                fig = renderer(frame, panel, panel.get("y") or model.measure, colors)
-                tiles.append(L._tile(graph(fig), span=span, title=panel.get("title") or ""))
-            body.append(html.Div([
-                html.H2(model.title, className="page-title"),
-                html.Div(tiles, className="grid"),
-            ], className="kpi-section"))
-        return body
+
+        sidebar = L.build_sidebar(canvas, active)
+        slicers = L.slicer_bar(canvas, redaction)
+
+        if active == L.OVERVIEW_ID:
+            header = L.page_header(
+                canvas.layout.project_root.name,
+                "Live KPI canvas - click a slicer to cross-filter the whole canvas.",
+            )
+            grid = L.overview_page(canvas, theme, redaction, filters)
+        else:
+            model = canvas.kpis[active]
+            header = L.page_header(model.title, model.y_format and f"Measure: {model.measure}" or "")
+            grid = L.kpi_page(model, canvas.gold[active], theme, redaction, filters)
+        return sidebar, slicers, header, grid
 
 
 __all__ = ["build_live_dashboard"]
