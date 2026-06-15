@@ -85,4 +85,24 @@ def read_silver(layout: WorkspaceLayout, kpi_id: str) -> pl.DataFrame | None:
     return _read_delta(layout.silver_dir / f"{kpi_id}{_SILVER_SUFFIX}")
 
 
-__all__ = ["list_gold_kpis", "read_gold", "read_silver"]
+def list_bronze_tables(layout: WorkspaceLayout) -> list[str]:
+    """Names of the raw bronze entity tables (transactions/patients/...)."""
+    bronze = layout.bronze_dir
+    if not bronze.exists():
+        return []
+    return sorted(c.name for c in bronze.iterdir() if c.is_dir())
+
+
+def read_bronze(layout: WorkspaceLayout, table: str) -> pl.DataFrame | None:
+    """A raw bronze entity table as a Polars frame. None if absent.
+
+    Bronze is the only conformed (shared) layer in this medallion; the conformed
+    semantic model cleans + joins these into a star. Returns the raw rows -- the
+    caller applies silver-grade cleaning.
+    """
+    return _read_delta(layout.bronze_dir / table)
+
+
+__all__ = [
+    "list_bronze_tables", "list_gold_kpis", "read_bronze", "read_gold", "read_silver",
+]
