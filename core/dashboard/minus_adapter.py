@@ -100,22 +100,49 @@ def _measure_field_columns(measures: list[dict[str, Any]]) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+# A categorical dimension is only a readable chart up to this many categories;
+# higher-cardinality columns (procedure/diagnosis codes, ids) make poor overview
+# charts and are excluded (still reachable via Detail / drill).
+_MAX_DIM_CARDINALITY = 50
+
+
 def _display_dimensions(model: ConformedModel) -> list[tuple[str, int]]:
-    """(dimension, distinct) worth charting, ordered by informativeness-ish
-    (lower cardinality first), skipping raw dates (keep 'month'), constants, and
-    near-unique columns."""
-    n = model.frame.height or 1
+    """(dimension, distinct) worth charting, ordered low-cardinality first,
+    skipping raw dates (keep 'month'), constants, and high-cardinality columns."""
     out: list[tuple[str, int]] = []
     for d in model.dimensions:
         dl = d.lower()
         if dl != "month" and any(t in dl for t in _DATE_ISH):
             continue
         distinct = model.frame.get_column(d).n_unique()
-        if distinct <= 1 or distinct > max(60, n * 0.5):
+        if distinct <= 1 or (dl != "month" and distinct > _MAX_DIM_CARDINALITY):
             continue
         out.append((d, distinct))
     out.sort(key=lambda t: (t[0].lower() != "month", t[1]))  # month first, then low-card
     return out
+
+
+def _diversified_chart_widgets(dims: list[tuple[str, int]], measure: str) -> list[dict[str, Any]]:
+    """Assign varied chart types so the canvas is not a wall of donuts:
+    month -> line; up to 2 lowest-card -> donut; mid -> bar; high-card -> hbar."""
+    widgets: list[dict[str, Any]] = []
+    cat = [(d, n) for d, n in dims if d.lower() != "month"]
+    for d, n in [(d, n) for d, n in dims if d.lower() == "month"][:1]:
+        widgets.append({"id": f"w_{_slug(d)}", "type": "line", "measure": measure,
+                        "dimension": f"{_TABLE}.{d}", "title": f"Trend by {_human(d)}",
+                        "width": 12, "height": 340})
+    donut_budget = 2
+    for d, n in sorted(cat, key=lambda x: x[1]):  # lowest cardinality first
+        common = {"id": f"w_{_slug(d)}", "measure": measure,
+                  "dimension": f"{_TABLE}.{d}", "title": f"By {_human(d)}", "height": 340}
+        if n <= 5 and donut_budget > 0:
+            widgets.append({**common, "type": "donut", "width": 5})
+            donut_budget -= 1
+        elif n > 12:
+            widgets.append({**common, "type": "hbar", "limit": 12, "width": 7})
+        else:
+            widgets.append({**common, "type": "bar", "width": 6})
+    return widgets
 
 
 def _widget_for(dim: str, distinct: int, measure_slug: str, idx: int) -> dict[str, Any]:
@@ -213,9 +240,8 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[s
     dims = [(d, dist) for d, dist in _display_dimensions(model) if d not in mfields]
     primary = next((m["name"] for m in measures if m.get("agg") == "sum"),
                    measures[0]["name"] if measures else "record_count")
-    # KPI row: every measure as a tile (4-wide layout). Add a period-over-period
-    # trend (UP/DOWN vs prior quarter) when the fact carries a service date --
-    # the healthcare-KPI "value + direction" presentation.
+    # KPI row: a balanced FOUR cards (fills the 12-col row evenly), prioritizing
+    # the RCM KPIs, with a period-over-period trend when a service date exists.
     svc_date = next((c for c in model.frame.columns
                      if c.lower() in ("servicedate", "service_date")), None)
     def _kpi_tile(m):
@@ -225,8 +251,13 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[s
             w["compare"] = f"{_TABLE}.{svc_date}"
             w["compare_period"] = "quarter"
         return w
-    kpi_widgets = [_kpi_tile(m) for m in measures[:6]]  # all measures incl. RCM KPIs
-    chart_widgets = [_widget_for(d, dist, primary, i) for i, (d, dist) in enumerate(dims[:5])]
+    _priority = {"record_count": 0, "total_paid_amount": 1, "collection_rate": 2,
+                 "days_in_ar": 3}
+    row = sorted(measures, key=lambda m: _priority.get(m["name"], 9))[:4]
+    kpi_widgets = [_kpi_tile(m) for m in row]
+    # Diversified charts (line + a couple donuts + bars + a department hbar) so the
+    # canvas is varied AND high-value dims like department are not crowded out.
+    chart_widgets = _diversified_chart_widgets(dims[:6], primary)
     # filters from low-cardinality dimensions
     filters = [{"id": f"f_{_slug(d)}", "field": f"{_TABLE}.{d}", "label": _human(d),
                 "type": "multi"} for d, dist in dims if dist <= 40][:4]
