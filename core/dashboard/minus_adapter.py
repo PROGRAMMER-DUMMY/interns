@@ -24,7 +24,9 @@ import polars as pl
 import yaml
 
 from core.dashboard.model.conformed import ConformedModel, build_conformed_model
+from core.dashboard.model.cuts import build_kpi_model
 from core.dashboard.model.dq import certify
+from core.dashboard.model.layers import list_gold_kpis, read_gold
 from core.storage.workspace_layout import WorkspaceLayout
 
 _TABLE = "claims"   # the single conformed (pre-joined) table MinusAnalyst reads
@@ -118,19 +120,74 @@ def _human(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Workspace-defined KPIs (gold-backed): surface the ACTUAL KPIs, not just
+# generic measures. Each gold result becomes its own table + measure + a tile
+# on a dedicated "KPIs" page, showing the validated answer.
+# ---------------------------------------------------------------------------
+
+
+def _kpi_artifacts(layout: WorkspaceLayout):
+    """Return (tables, measures, page, exports) for every gold KPI.
+
+    exports maps table-name -> gold frame (written to parquet by generate()).
+    """
+    tables: list[dict[str, Any]] = []
+    measures: list[dict[str, Any]] = []
+    widgets: list[dict[str, Any]] = []
+    exports: dict[str, pl.DataFrame] = {}
+
+    for kpi_id in list_gold_kpis(layout):
+        gold = read_gold(layout, kpi_id)
+        if gold is None or gold.height == 0:
+            continue
+        km = build_kpi_model(layout, kpi_id, gold)
+        tname = kpi_id  # e.g. "kpi_001"
+        mslug = _slug(f"{kpi_id}_{km.measure}")
+        fmt = "percent" if (km.y_format or "").lower() == "percent" else "currency"
+        exports[tname] = gold
+        tables.append({"name": tname, "source": "conformed_src",
+                       "file": f"{tname}.parquet", "label": km.card_label})
+        measures.append({"name": mslug, "label": km.card_label, "agg": "sum",
+                         "field": f"{tname}.{km.measure}", "fmt": fmt})
+        # headline card + a chart of the KPI by its lead cut
+        widgets.append({"id": f"k_{tname}", "type": "kpi", "measure": mslug,
+                        "width": 3, "height": 132})
+        lead_cut = km.cuts[0] if km.cuts else None
+        if lead_cut:
+            distinct = gold.get_column(lead_cut).n_unique()
+            w = _widget_for(lead_cut, distinct, mslug, 0)
+            w["id"] = f"c_{tname}"
+            w["title"] = f"{km.card_label} by {_human(lead_cut)}"
+            w["dimension"] = f"{tname}.{lead_cut}"
+            widgets.append(w)
+
+    if not widgets:
+        return tables, measures, None, exports
+    page = {
+        "id": "kpis", "title": "KPIs", "order": 5,
+        "description": "The workspace's defined KPIs, served from the validated gold layer.",
+        "filters": [],
+        "widgets": widgets,
+    }
+    return tables, measures, page, exports
+
+
+# ---------------------------------------------------------------------------
 # Project + dashboards
 # ---------------------------------------------------------------------------
 
 
-def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict]]:
+def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[str, pl.DataFrame]]:
     measures = _measure_specs(model)
     pk = _fact_pk(model)
+    kpi_tables, kpi_measures, kpi_page, kpi_exports = _kpi_artifacts(model.layout)
     project = {
         "name": f"{model.layout.project_root.name}",
         "datasources": [{"name": "conformed_src", "type": "parquet", "path": "data"}],
         "tables": [{"name": _TABLE, "source": "conformed_src",
-                    "file": "conformed.parquet", "primary_key": pk, "label": "Claims"}],
-        "measures": measures,
+                    "file": "conformed.parquet", "primary_key": pk, "label": "Claims"}]
+                  + kpi_tables,
+        "measures": measures + kpi_measures,
         "theme": {"name": "claude"},
         "agent": {"enabled": False},
         "dashboards_dir": "config/dashboards",
@@ -139,9 +196,19 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict]]:
     dims = _display_dimensions(model)
     primary = next((m["name"] for m in measures if m.get("agg") == "sum"),
                    measures[0]["name"] if measures else "record_count")
-    # KPI row: every measure as a tile (4-wide layout)
-    kpi_widgets = [{"id": f"k_{m['name']}", "type": "kpi", "measure": m["name"],
-                    "width": 3, "height": 132} for m in measures[:4]]
+    # KPI row: every measure as a tile (4-wide layout). Add a period-over-period
+    # trend (UP/DOWN vs prior quarter) when the fact carries a service date --
+    # the healthcare-KPI "value + direction" presentation.
+    svc_date = next((c for c in model.frame.columns
+                     if c.lower() in ("servicedate", "service_date")), None)
+    def _kpi_tile(m):
+        w = {"id": f"k_{m['name']}", "type": "kpi", "measure": m["name"],
+             "width": 3, "height": 132}
+        if svc_date:
+            w["compare"] = f"{_TABLE}.{svc_date}"
+            w["compare_period"] = "quarter"
+        return w
+    kpi_widgets = [_kpi_tile(m) for m in measures[:4]]
     chart_widgets = [_widget_for(d, dist, primary, i) for i, (d, dist) in enumerate(dims[:5])]
     # filters from low-cardinality dimensions
     filters = [{"id": f"f_{_slug(d)}", "field": f"{_TABLE}.{d}", "label": _human(d),
@@ -154,9 +221,11 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict]]:
         "widgets": kpi_widgets + chart_widgets,
     }
 
+    # KPIs page first (order 5): the workspace's defined KPIs from gold.
+    pages = [kpi_page, overview] if kpi_page else [overview]
+
     # Detail page: a conditional-format table by the first categorical dimension.
     cat = next((d for d, _ in dims if d.lower() != "month"), None)
-    pages = [overview]
     if cat:
         table_measures = [m["name"] for m in measures][:4]
         conditional = []
@@ -173,7 +242,7 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict]]:
                          "sort": "desc", "limit": 50, "width": 12, "height": 520,
                          "export": True, "conditional": conditional}],
         })
-    return project, pages
+    return project, pages, kpi_exports
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +269,9 @@ def generate(layout: WorkspaceLayout, *, force: bool = False) -> dict[str, Any]:
     dash_dir.mkdir(parents=True, exist_ok=True)
 
     model.frame.write_parquet(data_dir / "conformed.parquet")
-    project, pages = build_minus_project(model)
+    project, pages, kpi_exports = build_minus_project(model)
+    for tname, frame in kpi_exports.items():
+        frame.write_parquet(data_dir / f"{tname}.parquet")
     (root / "project.yaml").write_text(
         yaml.safe_dump(project, sort_keys=False, allow_unicode=True, width=100),
         encoding="utf-8")
