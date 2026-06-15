@@ -15,6 +15,7 @@ from core.dashboard.model.crossfilter import panel_data
 from core.dashboard.model.cuts import KpiModel
 from core.dashboard.ui import widgets
 from core.dashboard.ui.chart_map import is_big_number, map_chart_type
+from core.dashboard.ui.governance import WorkspaceRedaction
 from core.dashboard.ui.theme import chart_colors
 
 # Tile widths (out of 12) by panel position; first panel is wider.
@@ -49,8 +50,13 @@ def _panel_tile(model: KpiModel, gold: pl.DataFrame, panel: dict[str, Any],
     return _tile(widgets.graph(fig), span=span, title=title)
 
 
-def kpi_section(model: KpiModel, gold: pl.DataFrame, theme: str = "claude") -> html.Div:
-    """A titled section: KPI headline card + its recommended panel tiles."""
+def kpi_section(model: KpiModel, gold: pl.DataFrame, theme: str = "claude",
+                redaction: WorkspaceRedaction | None = None) -> html.Div:
+    """A titled section: KPI headline card + its recommended panel tiles.
+
+    Panels whose axis/series is a display-redacted column are dropped (governance
+    parity): the live app cannot offer a sensitive column as a chart axis.
+    """
     from core.dashboard.model.aggregate import resolve_column
     mcol = resolve_column(model.measure, gold.columns)
     headline = float(gold.get_column(mcol).sum()) if mcol else None
@@ -62,6 +68,8 @@ def kpi_section(model: KpiModel, gold: pl.DataFrame, theme: str = "claude") -> h
         )
     ]
     panels = [p for p in model.panels if p.get("x")]
+    if redaction is not None:
+        panels = [p for p in panels if redaction.panel_is_safe(p)]
     for i, panel in enumerate(panels):
         span = _WIDTHS[i] if i < len(_WIDTHS) else 6
         tiles.append(_panel_tile(model, gold, panel, span, theme))
@@ -83,17 +91,20 @@ def _slicer(label: str, col: str, options: list[str]) -> html.Div:
     ], className="slicer")
 
 
-def slicer_bar(canvas) -> html.Div:
+def slicer_bar(canvas, redaction: WorkspaceRedaction | None = None) -> html.Div:
     """Page slicers from the canvas's shared dimensions (cross-filter the canvas).
 
     Only dimensions present in >1 KPI become global slicers; their distinct values
-    are pooled across the KPIs that expose them.
+    are pooled across the KPIs that expose them. Display-redacted dimensions are
+    never offered as slicers (governance parity).
     """
     shared = canvas.shared_dimensions()
     slicers = []
     for dim_lower, kpi_ids in sorted(shared.items()):
         if len(kpi_ids) < 2:
             continue  # single-KPI dims are sliced within their section, not globally
+        if redaction is not None and redaction.is_redacted(dim_lower):
+            continue  # never expose a redacted column as a slicer
         # pool distinct values across KPIs exposing this dim
         values: set = set()
         col_name = dim_lower

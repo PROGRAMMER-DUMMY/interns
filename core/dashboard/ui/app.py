@@ -16,18 +16,19 @@ from dash import ALL, Dash, Input, Output, html
 from core.dashboard.model.crossfilter import CanvasModel, load_canvas, panel_data
 from core.dashboard.ui import layout as L
 from core.dashboard.ui.chart_map import is_big_number, map_chart_type
+from core.dashboard.ui.governance import WorkspaceRedaction
 from core.dashboard.ui.theme import build_theme_css, chart_colors, index_string
 from core.dashboard.ui.widgets import graph
 from core.storage.workspace_layout import WorkspaceLayout
 
 
-def _canvas_body(canvas: CanvasModel, theme: str) -> list:
+def _canvas_body(canvas: CanvasModel, theme: str, redaction: WorkspaceRedaction) -> list:
     if not canvas.kpis:
         return [html.Div("No gold KPI results found for this workspace.",
                          className="empty")]
-    sections = [L.slicer_bar(canvas)]
+    sections = [L.slicer_bar(canvas, redaction)]
     for kid, model in canvas.kpis.items():
-        sections.append(L.kpi_section(model, canvas.gold[kid], theme))
+        sections.append(L.kpi_section(model, canvas.gold[kid], theme, redaction))
     return sections
 
 
@@ -36,6 +37,7 @@ def build_live_dashboard(
 ) -> Dash:
     """Construct (do not run) the live dashboard Dash app for a workspace."""
     canvas = load_canvas(layout)
+    redaction = WorkspaceRedaction(layout.project_root)
     app = Dash(__name__, title=f"{layout.project_root.name} - dashboard")
     app.index_string = index_string(build_theme_css(theme))
 
@@ -53,17 +55,18 @@ def build_live_dashboard(
                         ], className="topbar-left"),
                         className="topbar",
                     ),
-                    html.Div(_canvas_body(canvas, theme), id="canvas"),
+                    html.Div(_canvas_body(canvas, theme, redaction), id="canvas"),
                 ],
             ),
         ],
     )
 
-    _register_callbacks(app, canvas, theme)
+    _register_callbacks(app, canvas, theme, redaction)
     return app
 
 
-def _register_callbacks(app: Dash, canvas: CanvasModel, theme: str) -> None:
+def _register_callbacks(app: Dash, canvas: CanvasModel, theme: str,
+                        redaction: WorkspaceRedaction) -> None:
     @app.callback(
         Output("canvas", "children"),
         Input({"kind": "slicer", "col": ALL}, "value"),
@@ -75,12 +78,14 @@ def _register_callbacks(app: Dash, canvas: CanvasModel, theme: str) -> None:
         for val, ident in zip(values or [], ids or []):
             if val:
                 filters[ident["col"]] = val
-        body = [L.slicer_bar(canvas)]
+        body = [L.slicer_bar(canvas, redaction)]
         colors = chart_colors(theme)
         for kid, model in canvas.kpis.items():
             gold = canvas.gold[kid]
             tiles = []
-            for i, panel in enumerate([p for p in model.panels if p.get("x")]):
+            safe_panels = [p for p in model.panels
+                           if p.get("x") and redaction.panel_is_safe(p)]
+            for i, panel in enumerate(safe_panels):
                 span = L._WIDTHS[i] if i < len(L._WIDTHS) else 6
                 try:
                     frame = panel_data(model, gold, panel, filters=filters)
