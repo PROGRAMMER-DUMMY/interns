@@ -24,7 +24,10 @@ import polars as pl
 
 from core.dashboard.model.aggregate import is_numeric_dtype, resolve_column
 from core.dashboard.model.layers import list_bronze_tables, read_bronze
-from core.dashboard.ui.governance import WorkspaceRedaction
+from core.onboarding.kpi.pii_redaction import (
+    is_pii_column,
+    workspace_redaction_patterns,
+)
 from core.storage.workspace_layout import WorkspaceLayout
 
 _DATE_NAME_RE = re.compile(r"(date|dob|timestamp|_at$|_dt$)", re.IGNORECASE)
@@ -137,7 +140,7 @@ _SMALL_DIM_MAX = 2000
 
 
 def _clean_table(
-    df: pl.DataFrame, pk: str | None, redaction: WorkspaceRedaction,
+    df: pl.DataFrame, pk: str | None, patterns: tuple[str, ...],
     *, entity: str = "", is_dim: bool = False,
 ) -> pl.DataFrame:
     df = _normalize_types(df)
@@ -151,7 +154,7 @@ def _clean_table(
         df = df.rename({"Name": f"{entity.rstrip('s')}_name"})
     df = _dedup_on(df, pk)
     # Governance: drop PII columns from the model entirely (never displayable).
-    keep = [c for c in df.columns if not redaction.is_redacted(c)]
+    keep = [c for c in df.columns if not is_pii_column(c, patterns=patterns)]
     return df.select(keep)
 
 
@@ -188,7 +191,7 @@ def build_conformed_model(layout: WorkspaceLayout) -> ConformedModel | None:
     tables = list_bronze_tables(layout)
     if not tables:
         return None
-    redaction = WorkspaceRedaction(layout.project_root)
+    patterns = workspace_redaction_patterns(layout.project_root)
     edges = [e for e in approved_edges(layout)
              if e.left_table in tables and e.right_table in tables]
     fact = _infer_fact(edges, tables)
@@ -202,7 +205,7 @@ def build_conformed_model(layout: WorkspaceLayout) -> ConformedModel | None:
     if fact_raw is None or fact_raw.height == 0:
         return None
     fact_cols = list(fact_raw.columns)
-    frame = _clean_table(fact_raw, pk_by_table.get(fact), redaction, entity=fact)
+    frame = _clean_table(fact_raw, pk_by_table.get(fact), patterns, entity=fact)
 
     joined_tables = {fact}
     for e in edges:
@@ -211,7 +214,7 @@ def build_conformed_model(layout: WorkspaceLayout) -> ConformedModel | None:
         dim_raw = read_bronze(layout, e.right_table)
         if dim_raw is None:
             continue
-        dim = _clean_table(dim_raw, e.right_col, redaction,
+        dim = _clean_table(dim_raw, e.right_col, patterns,
                            entity=e.right_table, is_dim=True)
         lk = resolve_column(e.left_col, frame.columns)
         rk = resolve_column(e.right_col, dim.columns)
@@ -226,7 +229,7 @@ def build_conformed_model(layout: WorkspaceLayout) -> ConformedModel | None:
     dimensions = [
         c for c in frame.columns
         if c not in measure_cols and not _ID_RE.search(c)
-        and not redaction.is_redacted(c)
+        and not is_pii_column(c, patterns=patterns)
     ]
     return ConformedModel(
         layout=layout, fact=fact, frame=frame,
