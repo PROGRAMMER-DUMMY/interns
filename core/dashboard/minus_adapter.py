@@ -265,15 +265,20 @@ def _kpi_panel_widgets(tname, mslug, label, measure_col, gold, panels) -> list[d
     cols = list(gold.columns)
     out: list[dict[str, Any]] = []
     seen: set = set()
-    for i, panel in enumerate(panels[:4]):
+    for i, panel in enumerate(panels[:5]):
         ct = str(panel.get("chart_type") or "").lower()
         if ct in ("big_number", ""):
             continue
         x = resolve_column(panel.get("x"), cols)
-        if x is None or x in seen:
+        if x is None:
             continue
-        seen.add(x)
         color = resolve_column(panel.get("color"), cols)
+        # Dedup on (x, color) so a 2-categorical interaction panel (e.g. a
+        # heatmap of dept x age_band) survives alongside a plain bar on dept.
+        key = (x, color or "")
+        if key in seen:
+            continue
+        seen.add(key)
         wtype = _CHART_TYPE_MAP.get(ct, "bar")
         w = {"id": f"p_{tname}_{i}", "type": wtype, "measure": mslug,
              "dimension": f"{tname}.{x}",
