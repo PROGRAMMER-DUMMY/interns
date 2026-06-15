@@ -676,8 +676,21 @@ def verdict_from_engine_generation(
 def verdict_from_result_review(entries: list[dict[str, Any]]) -> DelegationVerdict:
     """data-analyst verdict for the result_review stage.
 
-    Confirms every KPI produced result rows for interpretation; flags any KPI that
-    executed but returned no rows (a readiness/anomaly signal worth a human look)."""
+    Confirms every KPI produced result rows for interpretation, and inspects the
+    result CONTENT itself for two generic, workspace-agnostic data defects that a
+    human must look at before the run is treated as final:
+
+      (a) zero rows -- a KPI that executed but returned no rows
+          (``result_row_count == 0``, or a non-``ok`` execution status), and
+      (b) an all-blank column -- a result column that is entirely NULL or
+          empty/whitespace across every row (``all_blank_columns``). A grouping/
+          dimension column that came back fully blank means the cut silently
+          collapsed (e.g. a join/derivation that produced no label), which the
+          mechanical execution checks do not catch.
+
+    Both checks operate purely on the produced rows/columns; no specific column
+    name is ever referenced, so the gate stays workspace-agnostic.
+    """
     total = len(entries or [])
     if total == 0:
         return DelegationVerdict(
@@ -685,17 +698,48 @@ def verdict_from_result_review(entries: list[dict[str, Any]]) -> DelegationVerdi
             summary="No KPI results available to review.",
             details={"kpi_count": 0},
         )
-    produced = sum(1 for e in entries if str(e.get("status")) == "ok")
-    if produced < total:
+
+    # (a) Zero-row / non-ok KPIs. ``result_row_count`` (when present) is the
+    # authoritative full-view count; fall back to execution status when absent.
+    def _zero_rows(entry: dict[str, Any]) -> bool:
+        if str(entry.get("status")) != "ok":
+            return True
+        rc = entry.get("result_row_count")
+        return rc is not None and int(rc) == 0
+
+    zero_row_ids = [e.get("kpi_id") for e in entries if _zero_rows(e)]
+
+    # (b) All-blank (entirely NULL/empty) columns per KPI.
+    blank_column_map = {
+        e.get("kpi_id"): list(e.get("all_blank_columns") or [])
+        for e in entries
+        if e.get("all_blank_columns")
+    }
+
+    if zero_row_ids or blank_column_map:
+        produced = total - len(zero_row_ids)
+        parts: list[str] = []
+        if zero_row_ids:
+            parts.append(
+                f"{len(zero_row_ids)} KPI(s) returned zero rows ({', '.join(str(k) for k in zero_row_ids)})"
+            )
+        if blank_column_map:
+            blank_desc = "; ".join(
+                f"{kid}: {', '.join(cols)}" for kid, cols in blank_column_map.items()
+            )
+            parts.append(f"all-blank dimension column(s) in {blank_desc}")
         return DelegationVerdict(
             status="needs_review",
-            summary=f"{produced}/{total} KPIs produced result rows; review the remainder for anomalies.",
+            summary=(
+                f"{produced}/{total} KPIs produced usable result content; "
+                + " and ".join(parts)
+                + " — human review required before treating these results as final."
+            ),
             details={
                 "kpi_count": total,
                 "produced_count": produced,
-                "no_result_kpi_ids": [
-                    e.get("kpi_id") for e in entries if str(e.get("status")) != "ok"
-                ],
+                "no_result_kpi_ids": zero_row_ids,
+                "all_blank_column_kpis": blank_column_map,
             },
         )
     return DelegationVerdict(

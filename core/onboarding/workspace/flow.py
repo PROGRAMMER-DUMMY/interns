@@ -1390,6 +1390,37 @@ class WorkspaceFlow:
                     conn.execute(sql_text)
                     view = _result_view(conn, kpi_id)
                     if view:
+                        # Result-content signals for the result_review gate (FIX B):
+                        # computed over the FULL view (not the capped preview) so the
+                        # gate sees the true row count + which columns are entirely
+                        # NULL/empty across every row. Workspace-agnostic: it operates
+                        # on the result columns themselves, never on named columns.
+                        try:
+                            _all_cols = [str(c[0]) for c in conn.execute(
+                                f'SELECT * FROM "{view}" LIMIT 0'
+                            ).description or []]
+                            _row_count = int(
+                                conn.execute(f'SELECT COUNT(*) FROM "{view}"').fetchone()[0]
+                            )
+                            _empty_cols: list[str] = []
+                            for _col in _all_cols:
+                                # A column is "blank" when every row is NULL or, cast to
+                                # text, an empty/whitespace-only string.
+                                _non_blank = conn.execute(
+                                    f'SELECT COUNT(*) FROM "{view}" '
+                                    f'WHERE "{_col}" IS NOT NULL '
+                                    f"AND TRIM(CAST(\"{_col}\" AS VARCHAR)) <> ''"
+                                ).fetchone()[0]
+                                if int(_non_blank) == 0:
+                                    _empty_cols.append(_col)
+                            entry["result_row_count"] = _row_count
+                            entry["result_columns"] = _all_cols
+                            # Only meaningful as a "blank dimension" when the view has
+                            # rows; a zero-row KPI is flagged separately.
+                            entry["all_blank_columns"] = _empty_cols if _row_count > 0 else []
+                        except Exception:
+                            # Never let the gate-signal scan break preview generation.
+                            pass
                         cursor = conn.execute(f'SELECT * FROM "{view}" LIMIT {int(preview_rows)}')
                         # Redact PHI/PCI before rendering the canonical result packet —
                         # this is the highest-traffic display surface (CLAUDE.md says
@@ -3486,6 +3517,40 @@ def pipeline_main(argv: list[str] | None = None) -> int:
             print("Then re-run `run-kpi-pipeline`. If the SQL is wrong, fix the generator,")
             print("not the .sql file (hand-edits are overwritten on regeneration).")
             return 2
+
+        # FIX B: result_review CONTENT gate. The data-analyst verdict
+        # (`verdict_from_result_review`) is recorded during the flow but was never
+        # ENFORCED, so a KPI whose grouping/dimension column came back entirely
+        # blank, or that produced zero rows, completed silently. Load the executed
+        # result rows (the same evidence packet the stale-check reads) and re-run
+        # the verdict here; if it is not `ok`, do NOT print success — stop and route
+        # the operator to the data-analyst result_review stage.
+        result_packet = repo_root / workspace_rel / "interns" / "generated" / "evidence" / "kpi_results" / "current.json"
+        result_entries = (_read_json(result_packet).get("kpis") or []) if result_packet.exists() else []
+        review_verdict = verdict_from_result_review(result_entries)
+        if review_verdict.status != "ok":
+            details_lines = [f"  {review_verdict.summary}"]
+            zero_ids = review_verdict.details.get("no_result_kpi_ids") or []
+            blank_map = review_verdict.details.get("all_blank_column_kpis") or {}
+            for kid in zero_ids:
+                details_lines.append(f"  [x] {kid}: produced zero rows")
+            for kid, cols in blank_map.items():
+                details_lines.append(
+                    f"  [x] {kid}: dimension column(s) entirely NULL/empty: {', '.join(cols)}"
+                )
+            routing = STAGE_ROUTING.get("result_review") or {}
+            agents = ", ".join(routing.get("agents") or []) or "data-analyst"
+            return _gate_stop(
+                headline="Result content review required — a KPI produced no rows or an all-blank dimension column.",
+                details=details_lines
+                + [
+                    f"  Route to the result_review specialist(s): {agents}.",
+                    f"  Packet: {_rel(result_packet, repo_root)}",
+                ],
+                commands=[
+                    f"uv run workspace-flow status --workspace {workspace_rel} --diff",
+                ],
+            )
 
         if emit_json:
             print(json.dumps(panel_data.get("summary") or result.summary(), indent=2, default=str))
