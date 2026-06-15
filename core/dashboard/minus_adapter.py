@@ -71,11 +71,12 @@ def _measure_specs(model: ConformedModel) -> list[dict[str, Any]]:
             elif "amount" in cl and amount_slug is None:
                 amount_slug = slug
     # Collection Rate = paid / gross amount * 100 -- a real RCM KPI when both exist.
+    # Net Collection Rate benchmark is >=96% (RCM 2026), higher is better.
     if paid_slug and amount_slug:
         specs.append({"name": "collection_rate", "label": "Collection Rate",
                       "kind": "expression",
                       "expression": f"{paid_slug} / {amount_slug} * 100",
-                      "fmt": "percent"})
+                      "fmt": "percent", "target": 96.0, "goal": "higher"})
     return specs
 
 

@@ -151,6 +151,16 @@ class Measure(_Base):
         "Python format spec like ',.2f'.",
     )
 
+    target: Optional[float] = Field(
+        None,
+        description="Optional KPI benchmark/target. When set, the KPI tile shows "
+        "the target and colors the value green/red according to 'goal'.",
+    )
+    goal: Literal["higher", "lower"] = Field(
+        "higher",
+        description="Whether higher or lower is better, for target coloring.",
+    )
+
     @field_validator("name")
     @classmethod
     def _slug(cls, v: str) -> str:

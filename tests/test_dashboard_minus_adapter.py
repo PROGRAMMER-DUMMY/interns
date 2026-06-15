@@ -65,6 +65,35 @@ class TestAdapterReal(unittest.TestCase):
             self.assertNotIn(pii, cols)
 
 
+class TestKpiTargetColor(unittest.TestCase):
+    """Vendored MinusAnalyst KPI tile colors the value vs a target (Stage 2a)."""
+
+    def _render(self, scalar, target, goal="higher"):
+        import polars as pl
+        from minus.config.models import Measure, Project, Widget
+        from minus.query.engine import QueryResult
+        from minus.render.widgets.render import _kpi
+        proj = Project(name="t", measures=[Measure(
+            name="collection_rate", label="Collection Rate", kind="expression",
+            expression="1", fmt="percent", target=target, goal=goal)])
+        w = Widget(id="k", type="kpi", measure="collection_rate")
+        res = QueryResult(frame=pl.DataFrame({"collection_rate": [scalar]}), scalar=scalar)
+        return _kpi(w, res, proj)
+
+    def test_below_target_is_red(self):
+        value_div = self._render(77.6, 96.0)[1]
+        self.assertEqual(value_div.style.get("color"), "#C0563F")
+
+    def test_at_or_above_target_is_green(self):
+        value_div = self._render(98.0, 96.0)[1]
+        self.assertEqual(value_div.style.get("color"), "#3F8C6E")
+
+    def test_lower_is_better_goal(self):
+        # denial-rate style: 3% <= 5% target -> good (green)
+        value_div = self._render(3.0, 5.0, goal="lower")[1]
+        self.assertEqual(value_div.style.get("color"), "#3F8C6E")
+
+
 class TestAdapterNoBronze(unittest.TestCase):
     def test_missing_bronze_returns_not_ok(self):
         import tempfile

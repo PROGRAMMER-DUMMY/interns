@@ -54,10 +54,25 @@ def _kpi(widget, result, project):
     m = project.measure(widget.measure)
     label = widget.title or m.label or m.name
     value = format_value(result.scalar, m.fmt)
+    # Target/benchmark: color the value green/red vs target (healthcare-KPI style).
+    target = getattr(m, "target", None)
+    value_style = {}
+    on_target = None
+    if target is not None and result.scalar is not None:
+        higher_better = getattr(m, "goal", "higher") == "higher"
+        on_target = (result.scalar >= target) if higher_better else (result.scalar <= target)
+        value_style = {"color": "#3F8C6E" if on_target else "#C0563F"}
     children = [
         html.Div(label, className="kpi-label"),
-        html.Div(value, className="kpi-value"),
+        html.Div(value, className="kpi-value", style=value_style),
     ]
+    if target is not None:
+        children.append(html.Div(
+            className="kpi-delta " + ("up" if on_target else "down"),
+            children=[
+                html.Span("● ", style={"color": "#3F8C6E" if on_target else "#C0563F"}),
+                html.Span(f"Target {format_value(target, m.fmt)}", className="kpi-delta-label"),
+            ]))
     # Period-over-period trend (▲/▼ % vs prev period), when configured.
     if result.delta is not None:
         up = result.delta >= 0
