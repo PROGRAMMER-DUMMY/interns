@@ -72,6 +72,25 @@ def main(argv: list[str] | None = None) -> int:
         help="Host for the Dash server (default 127.0.0.1).",
     )
     parser.add_argument(
+        "--live",
+        action="store_true",
+        help=(
+            "Serve the live Power BI-style dashboard (core.dashboard.ui) read from "
+            "the validated medallion gold layer, instead of the legacy renderer. "
+            "Runs the gold parity gate first and refuses on failure unless --force."
+        ),
+    )
+    parser.add_argument(
+        "--theme",
+        default="claude",
+        help="Live dashboard theme: claude (light) or dark. Used with --live.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="With --live, serve even if the gold parity gate reports failures.",
+    )
+    parser.add_argument(
         "--export",
         action="store_true",
         help="Write static HTML to dashboard/exports/ and exit. Skips the live server.",
@@ -168,6 +187,32 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+
+    if args.live:
+        from core.dashboard.model import parity_report
+        from core.dashboard.model.parity import check_parity
+        from core.dashboard.ui import build_live_dashboard
+
+        failures = [r for r in check_parity(layout) if not r.get("ok")]
+        if failures and not args.force:
+            print("[x] gold parity gate failed; refusing to serve the live "
+                  "dashboard (use --force to override):", file=sys.stderr)
+            print(parity_report(layout), file=sys.stderr)
+            return 1
+        if failures:
+            print(f"[~] serving with --force despite {len(failures)} parity "
+                  "failure(s).", file=sys.stderr)
+        app = build_live_dashboard(layout, theme=args.theme)
+        if not is_loopback_host(args.host):
+            attach_token_auth(app, token)
+            print(
+                f"non-loopback bind: requests require Authorization: Bearer "
+                f"<{DASHBOARD_TOKEN_ENV}> (or ?token=...)."
+            )
+        print(f"Live dashboard: http://{args.host}:{args.port}/ "
+              f"(workspace: {args.workspace}, theme: {args.theme})")
+        app.run(host=args.host, port=args.port, debug=False)
+        return 0
 
     app = build_dash_app(repo_root, args.workspace)
     if not is_loopback_host(args.host):
