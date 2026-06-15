@@ -117,8 +117,7 @@ def _register_callbacks(app: Dash, canvas: CanvasModel, theme: str,
             grid = L.overview_page(canvas, theme, redaction, slicer_filters, click_filters)
         else:
             model = canvas.kpis[active]
-            header = L.page_header(model.title,
-                                   f"Measure: {model.measure}" if model.measure else "")
+            header = L.page_header(model.card_label or model.title, model.title)
             grid = L.kpi_page(model, canvas.gold[active], theme, redaction,
                               slicer_filters, click_filters)
         return sidebar, slicers, chips, header, grid

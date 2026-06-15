@@ -41,7 +41,7 @@ class KpiModel:
     """How to read + re-aggregate one KPI's validated result."""
 
     kpi_id: str
-    title: str
+    title: str                         # the full business question (subtitle/tooltip)
     gold_columns: list[str]
     measure: str                       # actual gold column name
     cuts: list[str]                    # actual gold column names (non-measure)
@@ -49,6 +49,7 @@ class KpiModel:
     additive: bool
     y_format: str = ""
     panels: list[dict[str, Any]] = field(default_factory=list)
+    card_label: str = ""               # short measure name for KPI cards/nav
 
 
 def classify_measure(*, agg: str, y_format: str, metric: str) -> tuple[str, bool]:
@@ -65,6 +66,31 @@ def classify_measure(*, agg: str, y_format: str, metric: str) -> tuple[str, bool
     if (agg or "").lower() in {"avg", "mean"} or _RATIO_RE.search(metric_l):
         return "ratio", False
     return "sum", True
+
+
+def _split_camel(token: str) -> str:
+    """'PaidAmount' -> 'Paid Amount'; 'paidamount' -> 'Paidamount'."""
+    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(token))
+    s = re.sub(r"[_\s]+", " ", s).strip()
+    return s.title()
+
+
+def clean_measure_name(metric: str, measure: str, y_format: str) -> str:
+    """A short, human measure label for KPI cards/nav -- NOT the business question.
+
+    'sum(PaidAmount)' -> 'Paid Amount'; percentage/share metrics -> 'Percentage
+    Share'; falls back to the humanized measure column.
+    """
+    metric_l = (metric or "").lower()
+    if (y_format or "").lower() == "percent" or _SHARE_RE.search(metric_l) \
+            or _SHARE_RE.search((measure or "").lower()):
+        return "Percentage Share"
+    inner = re.search(r"\(([^)]+)\)", metric or "")
+    token = inner.group(1) if inner else (measure or "")
+    token = re.sub(r"\bdistinct\b", "", token, flags=re.IGNORECASE).strip()
+    token = re.sub(r"^(sum|avg|mean|count|total|min|max)[_ ]?", "", token, flags=re.IGNORECASE)
+    label = _split_camel(token)
+    return label or _split_camel(measure) or "Value"
 
 
 def _choose_measure(columns: list[str], schema: dict[str, Any], hint: str | None) -> str:
@@ -114,6 +140,8 @@ def build_kpi_model(
         metric=str(hints.get("metric") or hints.get("title") or ""),
     )
     panels = hints.get("panels") if isinstance(hints.get("panels"), list) else []
+    metric = str(hints.get("metric") or "")
+    y_format = str(hints.get("y_format") or "")
     return KpiModel(
         kpi_id=kpi_id,
         title=str(hints.get("title") or kpi_id),
@@ -122,9 +150,10 @@ def build_kpi_model(
         cuts=cuts,
         kind=kind,
         additive=additive,
-        y_format=str(hints.get("y_format") or ""),
+        y_format=y_format,
         panels=panels,
+        card_label=clean_measure_name(metric, measure, y_format),
     )
 
 
-__all__ = ["KpiModel", "build_kpi_model", "classify_measure"]
+__all__ = ["KpiModel", "build_kpi_model", "classify_measure", "clean_measure_name"]

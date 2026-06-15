@@ -17,7 +17,7 @@ from core.dashboard.model.aggregate import (
     apply_filters,
     resolve_column,
 )
-from core.dashboard.model.cuts import classify_measure
+from core.dashboard.model.cuts import classify_measure, clean_measure_name
 from core.dashboard.model.layers import list_gold_kpis
 from core.dashboard.model.parity import check_parity
 from core.storage.workspace_layout import WorkspaceLayout
@@ -73,6 +73,19 @@ class TestClassify(unittest.TestCase):
         kind, additive = classify_measure(agg="sum", y_format="", metric="readmission rate")
         self.assertFalse(additive)
         self.assertEqual(kind, "ratio")
+
+
+class TestCleanMeasureName(unittest.TestCase):
+    def test_sum_metric_camel_split(self):
+        self.assertEqual(clean_measure_name("sum(PaidAmount)", "sum_paidamount", ""),
+                         "Paid Amount")
+
+    def test_percent_is_share(self):
+        self.assertEqual(clean_measure_name("percentage of lives", "percentage_share",
+                                            "percent"), "Percentage Share")
+
+    def test_falls_back_to_measure(self):
+        self.assertTrue(clean_measure_name("", "sum_paidamount", ""))
 
 
 class TestResolveColumn(unittest.TestCase):

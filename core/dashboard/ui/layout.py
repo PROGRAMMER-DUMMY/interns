@@ -63,32 +63,62 @@ def app_shell(workspace_name: str) -> html.Div:
     )
 
 
+def nav_labels(canvas) -> dict[str, str]:
+    """Short, unique nav labels per KPI from the measure name. When two KPIs share
+    a measure label, disambiguate with their most distinctive cut."""
+    base: dict[str, str] = {kid: (m.card_label or kid) for kid, m in canvas.kpis.items()}
+    seen: dict[str, int] = {}
+    for label in base.values():
+        seen[label] = seen.get(label, 0) + 1
+    out: dict[str, str] = {}
+    for kid, model in canvas.kpis.items():
+        label = base[kid]
+        if seen.get(label, 0) > 1 and model.cuts:
+            label = f"{label} ({_humanize(model.cuts[0])})"
+        out[kid] = label
+    return out
+
+
 def build_sidebar(canvas, active_id: str) -> list:
     name = canvas.layout.project_root.name
     mark = (name or "M")[0].upper()
+    labels = nav_labels(canvas)
     items = [dcc.Link(
         className="nav-item active" if active_id == OVERVIEW_ID else "nav-item",
         href="/", children=[html.Span("Overview")],
     )]
-    for kid, model in canvas.kpis.items():
+    for kid in canvas.kpis:
         items.append(dcc.Link(
             className="nav-item active" if kid == active_id else "nav-item",
-            href=f"/{kid}", children=[html.Span(_nav_title(model.title))],
+            href=f"/{kid}", children=[html.Span(labels[kid])],
         ))
     return [
         html.Div(className="brand", children=[
             html.Div(mark, className="brand-mark"),
             html.Span(name, className="brand-name"),
         ]),
-        html.Div("KPIs", className="nav-label"),
+        html.Div("Metrics", className="nav-label"),
         *items,
         html.Div("Live - validated gold layer", className="sidebar-foot"),
     ]
 
 
-def _nav_title(title: str, limit: int = 46) -> str:
-    t = (title or "").strip()
-    return t if len(t) <= limit else t[: limit - 1].rstrip() + "..."
+def _humanize(name: str) -> str:
+    return str(name).replace("_", " ").replace(".", " ").strip().title()
+
+
+def _clean_title(raw: str, model) -> str:
+    """Replace the raw measure phrase in a panel title with the clean card label.
+
+    'Sum Paidamount by Gender' -> 'Paid Amount by Gender'.
+    """
+    if not raw:
+        return raw
+    measure_phrase = _humanize(model.measure)
+    if model.card_label and measure_phrase and measure_phrase.lower() in raw.lower():
+        import re
+        return re.sub(re.escape(measure_phrase), model.card_label, raw, flags=re.IGNORECASE)
+    return raw
 
 
 def page_header(title: str, sub: str = "") -> html.Div:
@@ -195,7 +225,7 @@ def _headline(model, gold, slicer_filters, click_filters) -> float | None:
 def _panel_tile(model, gold, panel, span, theme, kpi_id,
                 slicer_filters, click_filters) -> html.Div:
     colors = chart_colors(theme)
-    title = panel.get("title") or ""
+    title = _clean_title(panel.get("title") or "", model)
     chart_type = str(panel.get("chart_type") or "bar")
     xcol = panel.get("x")
     xres = resolve_column(xcol, gold.columns) if xcol else None
@@ -235,9 +265,10 @@ def _safe_panels(model, redaction):
 def kpi_page(model, gold, theme="claude", redaction=None,
              slicer_filters=None, click_filters=None) -> list:
     tiles = [html.Div(
-        widgets.kpi_card(model.title, _headline(model, gold, slicer_filters, click_filters),
+        widgets.kpi_card(model.card_label or model.title,
+                         _headline(model, gold, slicer_filters, click_filters),
                          fmt=model.y_format or None),
-        style={"gridColumn": "span 12"},
+        style={"gridColumn": "span 3"},
     )]
     for i, panel in enumerate(_safe_panels(model, redaction)):
         span = _WIDTHS[i] if i < len(_WIDTHS) else 6
@@ -249,13 +280,15 @@ def kpi_page(model, gold, theme="claude", redaction=None,
 def overview_page(canvas, theme="claude", redaction=None,
                   slicer_filters=None, click_filters=None) -> list:
     tiles = []
+    n = max(1, len(canvas.kpis))
+    card_span = max(3, 12 // n)
     for kid, model in canvas.kpis.items():
         gold = canvas.gold[kid]
         tiles.append(html.Div(
-            widgets.kpi_card(model.title,
+            widgets.kpi_card(model.card_label or model.title,
                              _headline(model, gold, slicer_filters, click_filters),
                              fmt=model.y_format or None),
-            style={"gridColumn": "span 4"},
+            style={"gridColumn": f"span {card_span}"},
         ))
     for kid, model in canvas.kpis.items():
         panels = _safe_panels(model, redaction)
