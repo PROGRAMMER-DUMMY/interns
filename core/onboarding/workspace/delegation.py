@@ -279,7 +279,7 @@ STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
     },
     "dashboard_refresh": {
         "agents": ["dashboard-engineer"],
-        "skills": ["dashboard-design"],
+        "skills": ["dashboard-design", "dashboard-agent"],
     },
     "remote_execution": {
         # databricks-access-gates agent removed (Phase 1): it twinned the
