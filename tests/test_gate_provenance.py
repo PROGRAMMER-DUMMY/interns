@@ -1,9 +1,13 @@
 """Tests for BUG-014 gate-provenance enforcement in workspace-flow.
 
-Three required cases:
-  (a) Completion with an agent-asserted gate prints the [~] warning but still
-      completes (default behaviour — non-breaking).
-  (b) --require-human-gates blocks that same case (exit non-zero).
+FIX C flipped the default: human-gate provenance is now ENFORCED by default.
+
+Required cases:
+  (a) Completion with an agent-asserted gate (no --confirmed-by) is BLOCKED by
+      default (exit non-zero) — provenance is enforced.
+  (a2) --allow-agent-gates is the escape hatch: it lets that same case complete.
+  (b) --require-human-gates also blocks (now redundant with the default; kept
+      for backward compatibility).
   (c) A human-confirmed gate (source: human via --confirmed-by) completes
       cleanly with no [~] agent-asserted warning.
 """
@@ -143,11 +147,11 @@ class GateProvenanceCompletionTests(unittest.TestCase):
             self.skipTest("duckdb or polars not installed")
 
     # ------------------------------------------------------------------
-    # Case (a): agent-asserted gate still completes by default (non-breaking)
+    # Case (a): agent-asserted gate is BLOCKED by default (FIX C)
     # ------------------------------------------------------------------
-    def test_agent_asserted_gate_completes_with_warning_by_default(self):
+    def test_agent_asserted_gate_blocks_by_default(self):
         """Completion with an agent-asserted kpi-analyst review (no --confirmed-by)
-        must succeed (status=complete) but print a [~] warning — NOT block.
+        must BLOCK by default (exit non-zero) — provenance is enforced (FIX C).
         """
         self._skip_without_deps()
 
@@ -159,7 +163,8 @@ class GateProvenanceCompletionTests(unittest.TestCase):
             result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
             self.assertEqual(result.status, "needs_specialist_review")
 
-            # Post review WITHOUT --confirmed-by (agent-asserted).
+            # Post review WITHOUT --confirmed-by (agent-asserted) and WITHOUT the
+            # escape hatch.
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
                 exit_code = workspace_flow_main([
@@ -172,14 +177,45 @@ class GateProvenanceCompletionTests(unittest.TestCase):
                 ])
 
             output = stdout.getvalue()
-            # Must complete (exit 0) even though gate is agent-asserted.
-            self.assertEqual(exit_code, 0,
-                             f"Default mode must complete even with agent-asserted gate.\nOutput:\n{output}")
-            # Must print the [~] warning.
-            self.assertIn("[~]", output,
-                          "Completion with agent-asserted gate must print [~] warning in CLI output")
+            # Must block (exit non-zero) by default.
+            self.assertNotEqual(exit_code, 0,
+                                f"Default mode must BLOCK an agent-asserted gate (FIX C).\nOutput:\n{output}")
+            self.assertIn("[blocked]", output,
+                          "Default agent-asserted gate must print [blocked] headline")
             self.assertIn("agent-asserted", output,
-                          "CLI output must contain 'agent-asserted' when gate is not human-confirmed")
+                          "[blocked] message must name agent-asserted gates")
+
+    # ------------------------------------------------------------------
+    # Case (a2): --allow-agent-gates escape hatch lets it complete
+    # ------------------------------------------------------------------
+    def test_allow_agent_gates_escape_hatch_completes(self):
+        """--allow-agent-gates must let an agent-asserted gate complete (exit 0)."""
+        self._skip_without_deps()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = _make_encounters_workspace(root)
+
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            self.assertEqual(result.status, "needs_specialist_review")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = workspace_flow_main([
+                    "--repo-root", str(root),
+                    "review",
+                    "--session", result.session_id,
+                    "--verdict", "ok",
+                    "--summary", "agent check",
+                    "--allow-agent-gates",  # explicit opt-out
+                    # NO --confirmed-by => source: agent
+                ])
+
+            output = stdout.getvalue()
+            self.assertEqual(exit_code, 0,
+                             f"--allow-agent-gates must complete even with agent-asserted gate.\nOutput:\n{output}")
+            self.assertNotIn("[blocked]", output,
+                             "--allow-agent-gates must NOT print a [blocked] provenance headline")
 
     # ------------------------------------------------------------------
     # Case (b): --require-human-gates blocks agent-asserted gate

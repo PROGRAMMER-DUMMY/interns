@@ -2351,8 +2351,9 @@ def _gate_provenance_headline(gates: list[dict[str, Any]]) -> str:
     agent_count = sum(1 for g in gates if g.get("source") != "human")
     if agent_count:
         return (
-            f"[~] Completed WITHOUT human confirmation on {agent_count} gate(s) "
-            "(pass --require-human-gates to block on agent-asserted gates)"
+            f"[~] {agent_count} gate(s) are agent-asserted (no human confirmation) "
+            "— completion is blocked by default; confirm with --confirmed-by or pass "
+            "--allow-agent-gates to opt out"
         )
     return "[ok] Completed — all gates confirmed by humans"
 
@@ -2831,15 +2832,27 @@ def main(argv: list[str] | None = None) -> int:
             "Omit to record as source: agent (machine-asserted)."
         ),
     )
-    # BUG-014 (enforcement): strict opt-in to block completion when any required
-    # gate is agent-asserted rather than human-confirmed.
+    # FIX C (BUG-014 enforcement): human-gate provenance is enforced BY DEFAULT.
+    # Completion is blocked (exit non-zero) when any required gate is agent-asserted.
+    # --require-human-gates is kept for backward compatibility (now a no-op: it is
+    # the default). --allow-agent-gates is the explicit escape hatch for automated/
+    # test contexts that intentionally accept agent-asserted gates.
     review_p.add_argument(
         "--require-human-gates",
         action="store_true",
         help=(
-            "Block completion (exit non-zero) if any required gate is agent-asserted. "
-            "By default completion proceeds with a visible [~] warning. "
-            "Requires --confirmed-by on each gate or prior human approvals."
+            "Deprecated / no-op: human-gate provenance is now enforced by default. "
+            "Completion is blocked when any required gate is agent-asserted. "
+            "Use --confirmed-by on each gate, or --allow-agent-gates to opt out."
+        ),
+    )
+    review_p.add_argument(
+        "--allow-agent-gates",
+        action="store_true",
+        help=(
+            "Escape hatch: allow completion even when a required gate is "
+            "agent-asserted (source != human). Off by default — provenance is "
+            "enforced. Intended for automated/test contexts only."
         ),
     )
 
@@ -3022,9 +3035,11 @@ def main(argv: list[str] | None = None) -> int:
             per_kpi=per_kpi,
             confirmed_by=getattr(args, "confirmed_by", "") or "",
         )
-        # BUG-014 (enforcement): --require-human-gates blocks completion when any
-        # required gate is agent-asserted (non-breaking by default).
-        if getattr(args, "require_human_gates", False) and result.status == "complete":
+        # FIX C (BUG-014 enforcement): human-gate provenance is enforced BY DEFAULT.
+        # Block completion when any required gate is agent-asserted, unless the
+        # operator opts out with --allow-agent-gates.
+        allow_agent_gates = getattr(args, "allow_agent_gates", False)
+        if not allow_agent_gates and result.status == "complete":
             panel_path = (Path(args.repo_root).resolve() / result.current_panel_path
                           if result.current_panel_path else None)
             panel_payload: dict[str, Any] = {}
@@ -3036,13 +3051,16 @@ def main(argv: list[str] | None = None) -> int:
             provenance = (panel_payload.get("summary") or {}).get("gate_provenance") or []
             agent_gates = [g for g in provenance if g.get("source") != "human"]
             if agent_gates:
-                print("[blocked] --require-human-gates: completion blocked — the following gates are agent-asserted:")
+                print("[blocked] human-gate provenance: completion blocked — the following gates are agent-asserted:")
                 for g in agent_gates:
                     label = g.get("label", g.get("gate", ""))
                     print(f"  [~] {label}")
                 print("")
                 print("Confirm each gate with the appropriate --confirmed-by flag, for example:")
                 print(f"  workspace-flow review --session {result.session_id} --verdict ok --confirmed-by <reviewer>")
+                print("")
+                print("Or, to intentionally accept agent-asserted gates (automated/test contexts):")
+                print("  add --allow-agent-gates")
                 print("")
                 return 2
     elif args.cmd == "artifacts":
@@ -3212,15 +3230,24 @@ def pipeline_main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print the final result as machine-readable JSON.",
     )
-    # BUG-014 (enforcement): strict opt-in to block completion when any required
-    # gate is agent-asserted rather than human-confirmed.
+    # FIX C (BUG-014 enforcement): human-gate provenance is enforced BY DEFAULT.
+    # --require-human-gates is kept for backward compatibility (now a no-op: it is
+    # the default). --allow-agent-gates is the explicit escape hatch.
     parser.add_argument(
         "--require-human-gates",
         action="store_true",
         help=(
-            "Block completion (exit non-zero) if any required gate is agent-asserted. "
-            "By default the pipeline completes with a visible [~] warning. "
-            "Use --confirmed-by on workspace-flow review to record human confirmation."
+            "Deprecated / no-op: human-gate provenance is now enforced by default. "
+            "Completion is blocked when any required gate is agent-asserted."
+        ),
+    )
+    parser.add_argument(
+        "--allow-agent-gates",
+        action="store_true",
+        help=(
+            "Escape hatch: allow completion even when a required gate is "
+            "agent-asserted (source != human). Off by default — provenance is "
+            "enforced. Intended for automated/test contexts only."
         ),
     )
 
@@ -3230,7 +3257,7 @@ def pipeline_main(argv: list[str] | None = None) -> int:
     domain: str = args.domain
     quiet: bool = args.quiet
     emit_json: bool = args.json
-    require_human_gates: bool = getattr(args, "require_human_gates", False)
+    allow_agent_gates: bool = getattr(args, "allow_agent_gates", False)
 
     def _log(msg: str) -> None:
         if not quiet:
@@ -3489,14 +3516,17 @@ def pipeline_main(argv: list[str] | None = None) -> int:
         agent_gates = [g for g in provenance if g.get("source") != "human"]
         headline = (panel_data.get("summary") or {}).get("completion_headline") or ""
 
-        if require_human_gates and agent_gates:
-            print("[blocked] --require-human-gates: pipeline completion blocked — the following gates are agent-asserted:")
+        if not allow_agent_gates and agent_gates:
+            print("[blocked] human-gate provenance: pipeline completion blocked — the following gates are agent-asserted:")
             for g in agent_gates:
                 label = g.get("label", g.get("gate", ""))
                 print(f"  [~] {label}")
             print("")
             print("Confirm each gate with the appropriate --confirmed-by flag, for example:")
             print(f"  workspace-flow review --session {result.session_id} --verdict ok --confirmed-by <reviewer>")
+            print("")
+            print("Or, to intentionally accept agent-asserted gates (automated/test contexts):")
+            print("  add --allow-agent-gates")
             print("")
             print("Re-run `run-kpi-pipeline` after resolving all agent-asserted gates.")
             return 2
