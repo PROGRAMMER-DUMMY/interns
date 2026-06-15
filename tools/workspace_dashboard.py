@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         "--live",
         action="store_true",
         help=(
-            "Serve the live Power BI-style dashboard (core.dashboard.ui) read from "
+            "Serve the live Power BI-style dashboard (vendored MinusAnalyst) read from "
             "the validated medallion gold layer, instead of the legacy renderer. "
             "Runs the gold parity gate first and refuses on failure unless --force."
         ),
