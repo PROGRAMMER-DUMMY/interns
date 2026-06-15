@@ -23,6 +23,7 @@ from typing import Any
 import polars as pl
 import yaml
 
+from core.dashboard.model.aggregate import resolve_column
 from core.dashboard.model.conformed import ConformedModel, build_conformed_model
 from core.dashboard.model.cuts import build_kpi_model
 from core.dashboard.model.dq import certify
@@ -197,8 +198,10 @@ def _kpi_artifacts(layout: WorkspaceLayout):
                          "field": f"{tname}.{km.measure}", "fmt": fmt})
         cards.append({"id": f"k_{tname}", "type": "kpi", "measure": mslug,
                       "width": card_w, "height": 132})
-        # each KPI explored across up to 2 of its cuts (diversified, 2-up)
-        charts.extend(_kpi_breakdown_charts(tname, mslug, km.card_label, gold, km.cuts))
+        # Render the interns-recommended panels (rich: multi-series, breakdowns,
+        # heatmaps). Fall back to simple per-cut charts only if no panels exist.
+        rich = _kpi_panel_widgets(tname, mslug, km.card_label, km.measure, gold, km.panels or [])
+        charts.extend(rich or _kpi_breakdown_charts(tname, mslug, km.card_label, gold, km.cuts))
 
     if not cards:
         return tables, measures, None, exports
@@ -232,6 +235,55 @@ def _kpi_breakdown_charts(tname, mslug, label, gold, cuts) -> list[dict[str, Any
             out.append({**common, "type": "hbar", "limit": 12})
         else:
             out.append({**common, "type": "bar"})
+    return out
+
+
+# interns chart_type -> MinusAnalyst widget type. The interns recommendation
+# engine already chose rich panels per KPI (multi-series, breakdowns, heatmaps);
+# we render THOSE so each KPI is shown across its cuts, not minimally.
+_CHART_TYPE_MAP = {
+    "line": "line", "stacked_area": "area",
+    "bar": "bar", "grouped_bar": "bar", "stacked_bar_percent": "bar",
+    "ranked_bar": "hbar", "donut": "donut", "pie": "pie",
+    "heatmap": "heatmap", "scatter": "scatter",
+}
+
+
+def _clean_panel_title(raw: str, measure_col: str, label: str, x: str) -> str:
+    if not raw:
+        return f"{label} by {_human(x)}"
+    phrase = _human(measure_col)  # e.g. "Sum Paidamount"
+    if phrase and label and phrase.lower() in raw.lower():
+        return re.sub(re.escape(phrase), label, raw, flags=re.IGNORECASE)
+    return raw
+
+
+def _kpi_panel_widgets(tname, mslug, label, measure_col, gold, panels) -> list[dict[str, Any]]:
+    """Render the interns-recommended panels for a KPI as MinusAnalyst widgets on
+    its gold table -- multi-series lines, grouped bars, heatmaps, etc. (rich,
+    showing the metric across its cuts), instead of a couple of minimal charts."""
+    cols = list(gold.columns)
+    out: list[dict[str, Any]] = []
+    seen: set = set()
+    for i, panel in enumerate(panels[:4]):
+        ct = str(panel.get("chart_type") or "").lower()
+        if ct in ("big_number", ""):
+            continue
+        x = resolve_column(panel.get("x"), cols)
+        if x is None or x in seen:
+            continue
+        seen.add(x)
+        color = resolve_column(panel.get("color"), cols)
+        wtype = _CHART_TYPE_MAP.get(ct, "bar")
+        w = {"id": f"p_{tname}_{i}", "type": wtype, "measure": mslug,
+             "dimension": f"{tname}.{x}",
+             "title": _clean_panel_title(panel.get("title"), measure_col, label, x),
+             "width": 6, "height": 320}
+        if color and color != x and wtype in ("bar", "line", "area", "heatmap"):
+            w["breakdown"] = f"{tname}.{color}"
+        if ct == "ranked_bar" or panel.get("limit"):
+            w["limit"] = int(panel.get("limit") or 12)
+        out.append(w)
     return out
 
 
