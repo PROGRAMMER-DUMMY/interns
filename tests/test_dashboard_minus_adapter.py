@@ -123,6 +123,51 @@ class TestRefresh(unittest.TestCase):
         self.assertEqual(parquet.stat().st_mtime_ns, before)  # untouched
 
 
+@unittest.skipUnless((_WS / "interns/state/medallion/bronze").exists(),
+                     "bronze layer not present")
+class TestPushdownScan(unittest.TestCase):
+    """Stage 4: pushdown queries the parquet file in place (no full RAM load)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.layout = WorkspaceLayout(project_root=_WS.resolve())
+        generate(cls.layout)
+
+    def _model_engine(self):
+        from minus.config.loader import load_project
+        from minus.data.model import SemanticModel
+        from minus.query.engine import QueryEngine
+        proj = load_project(minus_root(self.layout))
+        model = SemanticModel(proj, minus_root(self.layout))
+        return proj, model, QueryEngine(proj, model)
+
+    def test_scan_source_is_read_parquet(self):
+        _, model, _ = self._model_engine()
+        scan = model.scan_source("claims")
+        self.assertIsNotNone(scan)
+        self.assertTrue(scan.startswith("read_parquet("), scan)
+
+    def test_pushdown_result_matches_direct_aggregation(self):
+        import polars as pl
+        from minus.config.models import Widget
+        proj, model, engine = self._model_engine()
+        # measure total_paid_amount by department_name via the engine (pushdown)
+        w = Widget(id="t", type="bar", measure="total_paid_amount",
+                   dimension="claims.department_name")
+        res = engine.run(w)
+        got = dict(zip(res.frame.get_column("claims.department_name").to_list(),
+                       res.frame.get_column("total_paid_amount").to_list()))
+        # ground truth: aggregate the parquet directly
+        raw = pl.read_parquet(minus_root(self.layout) / "data" / "conformed.parquet")
+        truth = (raw.group_by("department_name")
+                 .agg(pl.col("PaidAmount").sum().alias("v")))
+        truth_d = dict(zip(truth.get_column("department_name").to_list(),
+                           truth.get_column("v").to_list()))
+        self.assertEqual(set(got), set(truth_d))
+        for k, v in truth_d.items():
+            self.assertAlmostEqual(got[k], v, places=2)
+
+
 class TestAdapterNoBronze(unittest.TestCase):
     def test_missing_bronze_returns_not_ok(self):
         import tempfile

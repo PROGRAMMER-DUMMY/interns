@@ -43,3 +43,11 @@ class ParquetConnector(Connector):
         # Cheap: read the schema only (no row groups).
         names = pl.scan_parquet(path).collect_schema().names()
         return [str(c).strip() for c in names]
+
+    def scan_source(self, table: Table):
+        """DuckDB scans the parquet file directly (no full Python load)."""
+        path = self._path_for(table)
+        if not path.exists():
+            return None
+        p = path.resolve().as_posix().replace("'", "''")
+        return f"read_parquet('{p}')"

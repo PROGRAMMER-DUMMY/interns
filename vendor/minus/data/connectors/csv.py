@@ -40,6 +40,14 @@ class CsvConnector(Connector):
         head = pl.read_csv(path, n_rows=0, **self.source.options)
         return [str(c).strip() for c in head.columns]
 
+    def scan_source(self, table: Table):
+        """DuckDB scans the CSV file directly (no full Python load)."""
+        path = self._path_for(table)
+        if not path.exists():
+            return None
+        p = path.resolve().as_posix().replace("'", "''")
+        return f"read_csv_auto('{p}')"
+
 
 def _coerce(df: pl.DataFrame) -> pl.DataFrame:
     """Best-effort typing: parse obvious date columns so date filters work."""

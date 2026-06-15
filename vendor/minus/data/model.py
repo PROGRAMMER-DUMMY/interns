@@ -32,15 +32,28 @@ class SemanticModel:
         self._connectors: dict[str, object] = {}
 
     # -- raw table access -------------------------------------------------
+    def _connector_for(self, name: str):
+        tbl = self.project.table(name)
+        ds = self.project.datasource(tbl.source)
+        if ds.name not in self._connectors:
+            self._connectors[ds.name] = get_connector(ds, self.root)
+        return self._connectors[ds.name], tbl
+
     def table_df(self, name: str) -> pl.DataFrame:
         if name not in self._cache:
-            tbl = self.project.table(name)
-            ds = self.project.datasource(tbl.source)
-            if ds.name not in self._connectors:
-                self._connectors[ds.name] = get_connector(ds, self.root)
-            conn = self._connectors[ds.name]
+            conn, tbl = self._connector_for(name)
             self._cache[name] = conn.read(tbl)
         return self._cache[name]
+
+    def scan_source(self, name: str):
+        """A DuckDB-scannable SQL source (e.g. read_parquet('...')) for a table,
+        or None when the connector can't be scanned in place. Lets the pushdown
+        engine query files directly instead of loading them into memory."""
+        conn, tbl = self._connector_for(name)
+        try:
+            return conn.scan_source(tbl)
+        except Exception:
+            return None
 
     def clear_cache(self) -> None:
         self._cache.clear()

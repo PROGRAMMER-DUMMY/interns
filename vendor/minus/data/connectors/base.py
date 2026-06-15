@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Optional
 
 import polars as pl
 
@@ -27,6 +28,17 @@ class Connector(ABC):
     @abstractmethod
     def list_columns(self, table: Table) -> list[str]:
         """Return column names without loading the full table (best effort)."""
+
+    def scan_source(self, table: Table) -> Optional[str]:
+        """Return a DuckDB-scannable SQL source for this table, or None.
+
+        File-backed connectors return e.g. ``read_parquet('/abs/path')`` so the
+        pushdown engine can query the file IN PLACE (predicate/projection
+        pushdown, larger-than-memory) instead of loading the whole table into
+        Python memory first. Connectors that can't be scanned return None and the
+        engine falls back to the in-memory frame.
+        """
+        return None
 
 
 _REGISTRY: dict[str, type[Connector]] = {}

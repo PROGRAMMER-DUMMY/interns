@@ -199,10 +199,18 @@ def run_pushdown(
 
     con = duckdb.connect()
     try:
-        # Register each table's Polars frame as a view named exactly after the
-        # logical table, with original (unprefixed) column names.
+        # Bring each needed table into DuckDB under its logical name (original,
+        # unprefixed columns). Prefer scanning the file IN PLACE (read_parquet/
+        # read_csv_auto) so the join+group-by+filter pushes down to DuckDB
+        # without materializing the whole table in Python -- the scalable path.
+        # Fall back to registering the in-memory frame when no file scan exists.
         for tbl in join_tables:
-            con.register(tbl, model.table_df(tbl))
+            scan = model.scan_source(tbl)
+            if scan:
+                con.execute(f"CREATE OR REPLACE VIEW {_quote_ident(tbl)} AS "
+                            f"SELECT * FROM {scan}")
+            else:
+                con.register(tbl, model.table_df(tbl))
 
         # SELECT list: dims (aliased to 'table.column') + measures.
         select_parts: list[str] = []
