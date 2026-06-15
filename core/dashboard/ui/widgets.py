@@ -93,8 +93,9 @@ def render_bar(frame, panel, measure, colors, *, horizontal=False):
     if y and not color and frame.height:
         fmt = panel.get("y_format")
         texts = [format_value(v, fmt) for v in frame.get_column(y).to_list()]
-        fig.update_traces(text=texts, textposition="outside", cliponaxis=False,
-                          textfont=dict(size=10.5, color=colors["muted"]))
+        fig.update_traces(text=texts, texttemplate="%{text}", textposition="outside",
+                          cliponaxis=False, constraintext="none",
+                          textfont=dict(size=11, color=colors["ink"]))
         if horizontal:
             fig.update_yaxes(autorange="reversed")
     _style(fig, colors, horizontal=horizontal)
