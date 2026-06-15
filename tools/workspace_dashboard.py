@@ -88,7 +88,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="With --live, serve even if the gold parity gate reports failures.",
+        help="With --live/--refresh, publish even if DQ certification reports failures.",
+    )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help=(
+            "Regenerate the live (MinusAnalyst) project + certified-clean data for "
+            "the workspace and exit. DQ-gated: on failure nothing is rewritten "
+            "(last-good snapshot stays). For a scheduler to call after new data lands."
+        ),
+    )
+    parser.add_argument(
+        "--refresh-seconds",
+        type=int,
+        default=0,
+        help=(
+            "With --live, make the running dashboard re-read its data every N "
+            "seconds (auto-pick-up of refreshed data). 0 = off."
+        ),
     )
     parser.add_argument(
         "--export",
@@ -188,12 +206,30 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    if args.refresh:
+        # Regenerate the live project + certified-clean data and exit (DQ-gated).
+        # For a scheduled job to call after the upstream pipeline lands new gold.
+        from core.dashboard.minus_adapter import generate
+
+        res = generate(layout, force=args.force, refresh_seconds=args.refresh_seconds)
+        if args.json:
+            print(json.dumps({"action": "refresh", **res}, indent=2, default=str))
+        elif res.get("ok"):
+            print(f"[ok] refreshed: {res['rows']} rows, pages {res['pages']} "
+                  f"(certified={res['certified']})")
+        else:
+            print(f"[x] refresh blocked: {res.get('reason')} (last-good kept; "
+                  "use --force to override).", file=sys.stderr)
+            for chk in (res.get("failed") or []):
+                print(f"    - {chk.get('check')}: {chk.get('detail')}", file=sys.stderr)
+        return 0 if res.get("ok") else 1
+
     if args.live:
         # Generate a vendored-MinusAnalyst project + certified-clean data for this
         # workspace, then launch the real MinusAnalyst app on it (DQ-gated).
         from core.dashboard.minus_adapter import generate, minus_root
 
-        res = generate(layout, force=args.force)
+        res = generate(layout, force=args.force, refresh_seconds=args.refresh_seconds)
         if not res.get("ok"):
             print(f"[x] {res.get('reason')}; refusing to serve the live dashboard "
                   "(use --force to override).", file=sys.stderr)

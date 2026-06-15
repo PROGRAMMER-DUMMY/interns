@@ -251,13 +251,19 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[s
 # ---------------------------------------------------------------------------
 
 
-def generate(layout: WorkspaceLayout, *, force: bool = False) -> dict[str, Any]:
+def generate(layout: WorkspaceLayout, *, force: bool = False,
+             refresh_seconds: int = 0) -> dict[str, Any]:
     """Build + certify the conformed model, then (if certified) write the
-    MinusAnalyst root. Returns a status dict; never raises on a DQ failure."""
+    MinusAnalyst root. Returns a status dict; never raises on a DQ failure.
+
+    DQ-gated publish: when certification fails (and not ``force``), nothing is
+    written, so a running dashboard keeps the last-good snapshot. ``refresh_seconds``
+    > 0 makes the generated project tell the live app to re-read data that often.
+    """
     model = build_conformed_model(layout)
     if model is None:
         return {"ok": False, "reason": "no conformed model (bronze/edges missing)",
-                "root": str(minus_root(layout))}
+                "root": str(minus_root(layout)), "published": False}
     report = certify(model)
     root = minus_root(layout)
     if not report.get("ok") and not force:
@@ -271,6 +277,8 @@ def generate(layout: WorkspaceLayout, *, force: bool = False) -> dict[str, Any]:
 
     model.frame.write_parquet(data_dir / "conformed.parquet")
     project, pages, kpi_exports = build_minus_project(model)
+    if refresh_seconds and refresh_seconds > 0:
+        project["refresh_seconds"] = int(refresh_seconds)
     for tname, frame in kpi_exports.items():
         frame.write_parquet(data_dir / f"{tname}.parquet")
     (root / "project.yaml").write_text(
@@ -289,6 +297,7 @@ def generate(layout: WorkspaceLayout, *, force: bool = False) -> dict[str, Any]:
         "measures": [m["name"] for m in project["measures"]],
         "pages": [p["id"] for p in pages],
         "certified": report.get("ok"), "force": force,
+        "refresh_seconds": int(refresh_seconds or 0),
     }
 
 

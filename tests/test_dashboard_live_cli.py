@@ -63,6 +63,25 @@ class TestLiveCli(unittest.TestCase):
         self.assertEqual(rc, 1)           # refused
         create.assert_not_called()        # never launched
 
+    def test_refresh_regenerates_and_exits(self):
+        import tools.workspace_dashboard as cli
+        ok = {"ok": True, "published": True, "rows": 10000, "certified": True,
+              "pages": ["kpis", "overview"], "refresh_seconds": 0}
+        with mock.patch("core.dashboard.minus_adapter.generate", return_value=ok) as gen, \
+             mock.patch("minus.render.app.create_app") as create:
+            rc = cli.main(["--workspace", _WS_REL, "--refresh", "--no-refresh"])
+        self.assertEqual(rc, 0)
+        gen.assert_called_once()
+        create.assert_not_called()        # --refresh does NOT launch a server
+
+    def test_refresh_blocked_on_dq_failure_returns_1(self):
+        import tools.workspace_dashboard as cli
+        bad = {"ok": False, "reason": "DQ certification failed", "published": False,
+               "failed": [{"check": "lossless", "detail": "drift"}]}
+        with mock.patch("core.dashboard.minus_adapter.generate", return_value=bad):
+            rc = cli.main(["--workspace", _WS_REL, "--refresh", "--no-refresh"])
+        self.assertEqual(rc, 1)
+
     def test_force_serves_despite_findings(self):
         import tools.workspace_dashboard as cli
         stub = _StubApp()

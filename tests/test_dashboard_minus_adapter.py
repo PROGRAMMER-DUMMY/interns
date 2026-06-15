@@ -94,6 +94,35 @@ class TestKpiTargetColor(unittest.TestCase):
         self.assertEqual(value_div.style.get("color"), "#3F8C6E")
 
 
+@unittest.skipUnless((_WS / "interns/state/medallion/bronze").exists(),
+                     "bronze layer not present")
+class TestRefresh(unittest.TestCase):
+    """Stage 3: DQ-gated refresh + live-reload wiring."""
+
+    def test_refresh_seconds_written_to_project(self):
+        from unittest import mock
+        layout = WorkspaceLayout(project_root=_WS.resolve())
+        res = generate(layout, refresh_seconds=900)
+        self.assertEqual(res["refresh_seconds"], 900)
+        txt = (minus_root(layout) / "project.yaml").read_text(encoding="utf-8")
+        self.assertIn("refresh_seconds: 900", txt)
+
+    def test_dq_failure_keeps_last_good(self):
+        from unittest import mock
+        layout = WorkspaceLayout(project_root=_WS.resolve())
+        generate(layout)  # publish a good snapshot first
+        parquet = minus_root(layout) / "data" / "conformed.parquet"
+        self.assertTrue(parquet.exists())
+        before = parquet.stat().st_mtime_ns
+        # now a refresh whose DQ fails must NOT overwrite the last-good data
+        with mock.patch("core.dashboard.minus_adapter.certify",
+                        return_value={"ok": False, "failed": [{"check": "no_fanout"}]}):
+            res = generate(layout)
+        self.assertFalse(res["ok"])
+        self.assertFalse(res["published"])
+        self.assertEqual(parquet.stat().st_mtime_ns, before)  # untouched
+
+
 class TestAdapterNoBronze(unittest.TestCase):
     def test_missing_bronze_returns_not_ok(self):
         import tempfile
