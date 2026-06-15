@@ -17,7 +17,10 @@ from typing import Any
 
 from dash import ALL, Dash, Input, Output, State, callback_context, html
 
+from core.dashboard.model.conformed import build_conformed_model
 from core.dashboard.model.crossfilter import CanvasModel, load_canvas
+from core.dashboard.model.dq import certify
+from core.dashboard.ui import conformed_page as C
 from core.dashboard.ui import layout as L
 from core.dashboard.ui.governance import WorkspaceRedaction
 from core.dashboard.ui.theme import build_theme_css, index_string
@@ -28,11 +31,17 @@ def build_live_dashboard(layout: WorkspaceLayout, *, theme: str = "claude") -> D
     """Construct (do not run) the live dashboard Dash app for a workspace."""
     canvas = load_canvas(layout)
     redaction = WorkspaceRedaction(layout.project_root)
+    # The conformed model powers the true Power BI Overview canvas. It is used
+    # only when it certifies clean (DQ gate); otherwise the Overview falls back
+    # to the gold KPI summary.
+    conformed = build_conformed_model(layout)
+    conformed_ok = bool(conformed) and certify(conformed).get("ok", False)
     app = Dash(__name__, title=f"{layout.project_root.name} - dashboard",
                suppress_callback_exceptions=True)
     app.index_string = index_string(build_theme_css(theme))
     app.layout = L.app_shell(layout.project_root.name)
-    _register_callbacks(app, canvas, theme, redaction)
+    _register_callbacks(app, canvas, theme, redaction,
+                        conformed if conformed_ok else None)
     return app
 
 
@@ -54,7 +63,7 @@ def _click_value(click_data: dict, orient: str):
 
 
 def _register_callbacks(app: Dash, canvas: CanvasModel, theme: str,
-                        redaction: WorkspaceRedaction) -> None:
+                        redaction: WorkspaceRedaction, conformed=None) -> None:
 
     @app.callback(
         Output("click-filters", "data"),
@@ -106,16 +115,28 @@ def _register_callbacks(app: Dash, canvas: CanvasModel, theme: str,
         click_filters = dict(click_filters or {})
 
         sidebar = L.build_sidebar(canvas, active)
-        slicers = L.slicer_bar(canvas, redaction)
         chips = L.crossfilter_chips(click_filters)
 
         if active == L.OVERVIEW_ID:
-            header = L.page_header(
-                canvas.layout.project_root.name,
-                "Live KPI canvas - click any bar or slice to cross-filter the whole canvas.",
-            )
-            grid = L.overview_page(canvas, theme, redaction, slicer_filters, click_filters)
+            if conformed is not None:
+                # True Power BI canvas: one conformed model, measure x any
+                # dimension, every visual cross-filters every other.
+                slicers = C.conformed_slicers(conformed, redaction)
+                header = L.page_header(
+                    canvas.layout.project_root.name,
+                    "Conformed model - click any bar or slice to cross-filter the whole canvas.",
+                )
+                grid = C.conformed_canvas(conformed, theme, redaction,
+                                          slicer_filters, click_filters)
+            else:
+                slicers = L.slicer_bar(canvas, redaction)
+                header = L.page_header(
+                    canvas.layout.project_root.name,
+                    "Live KPI canvas - click any bar or slice to cross-filter the whole canvas.",
+                )
+                grid = L.overview_page(canvas, theme, redaction, slicer_filters, click_filters)
         else:
+            slicers = L.slicer_bar(canvas, redaction)
             model = canvas.kpis[active]
             header = L.page_header(model.card_label or model.title, model.title)
             grid = L.kpi_page(model, canvas.gold[active], theme, redaction,
