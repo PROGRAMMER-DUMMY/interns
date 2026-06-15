@@ -189,28 +189,35 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.live:
-        from core.dashboard.model import parity_report
-        from core.dashboard.model.parity import check_parity
-        from core.dashboard.ui import build_live_dashboard
+        # Generate a vendored-MinusAnalyst project + certified-clean data for this
+        # workspace, then launch the real MinusAnalyst app on it (DQ-gated).
+        from core.dashboard.minus_adapter import generate, minus_root
 
-        failures = [r for r in check_parity(layout) if not r.get("ok")]
-        if failures and not args.force:
-            print("[x] gold parity gate failed; refusing to serve the live "
-                  "dashboard (use --force to override):", file=sys.stderr)
-            print(parity_report(layout), file=sys.stderr)
+        res = generate(layout, force=args.force)
+        if not res.get("ok"):
+            print(f"[x] {res.get('reason')}; refusing to serve the live dashboard "
+                  "(use --force to override).", file=sys.stderr)
+            for chk in (res.get("failed") or []):
+                print(f"    - {chk.get('check')}: {chk.get('detail')}", file=sys.stderr)
             return 1
-        if failures:
-            print(f"[~] serving with --force despite {len(failures)} parity "
-                  "failure(s).", file=sys.stderr)
-        app = build_live_dashboard(layout, theme=args.theme)
+        if res.get("force"):
+            print("[~] published with --force despite DQ findings.", file=sys.stderr)
+
+        vendor_dir = repo_root / "vendor"
+        if str(vendor_dir) not in sys.path:
+            sys.path.insert(0, str(vendor_dir))
+        from minus.render.app import create_app  # vendored MinusAnalyst
+
+        app, state = create_app(minus_root(layout))
         if not is_loopback_host(args.host):
             attach_token_auth(app, token)
             print(
                 f"non-loopback bind: requests require Authorization: Bearer "
                 f"<{DASHBOARD_TOKEN_ENV}> (or ?token=...)."
             )
-        print(f"Live dashboard: http://{args.host}:{args.port}/ "
-              f"(workspace: {args.workspace}, theme: {args.theme})")
+        print(f"Live dashboard (MinusAnalyst): http://{args.host}:{args.port}/ "
+              f"(workspace: {args.workspace}, {len(state.pages)} pages, "
+              f"{res['rows']} rows)")
         app.run(host=args.host, port=args.port, debug=False)
         return 0
 

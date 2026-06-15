@@ -1,0 +1,38 @@
+/* MinusAnalyst — "Claude" theme (light): warm editorial paper.
+   Variables only; structure + typography live in base.css. */
+
+:root {
+  /* paper canvas + atmosphere */
+  --canvas: #F1ECE2;
+  --canvas-glow: #FBF7EF;       /* center of the radial wash */
+  --surface: #FCFAF5;           /* warm card paper */
+  --surface-2: #F4EFE4;
+  --ink: #211D18;               /* warm near-black */
+  --muted: #6C6358;
+  --faint: #9C9387;
+
+  /* terracotta / clay accent family */
+  --accent: #C2603C;
+  --accent-ink: #A24B2C;
+  --accent-bright: #DA7756;     /* lifted clay for charts/marks */
+  --accent-soft: rgba(194, 96, 60, 0.12);
+  --accent-border: rgba(194, 96, 60, 0.30);
+
+  --slate: #423C34;
+  --border: #E4DCCD;
+  --border-strong: #D5CBB6;
+
+  --shadow: 0 1px 1px rgba(60, 45, 25, 0.05), 0 10px 30px -8px rgba(60, 45, 25, 0.12);
+  --shadow-sm: 0 1px 2px rgba(60, 45, 25, 0.06);
+  --shadow-lift: 0 2px 4px rgba(60, 45, 25, 0.06), 0 18px 40px -10px rgba(60, 45, 25, 0.18);
+
+  --grain-opacity: 0.45;
+
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --font-body: "Hanken Grotesk", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+
+  --radius: 16px;
+  --radius-sm: 11px;
+  --sidebar-w: 264px;
+  --chat-w: 372px;
+}
