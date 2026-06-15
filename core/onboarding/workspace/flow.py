@@ -903,6 +903,14 @@ class WorkspaceFlow:
         gate_provenance = _collect_gate_provenance(state, self.layout)
         agent_gate_count = sum(1 for g in gate_provenance if g.get("source") != "human")
         completion_headline = _gate_provenance_headline(gate_provenance)
+        # FIX D: stamp a self-describing gate-state banner at the TOP of the emitted
+        # result packet (current.md + its aliases + the dated runs snapshot). Anyone
+        # who reads current.md directly (bypassing the flow CLI) then sees whether the
+        # session's gates are human-verified, agent-asserted, or the result content was
+        # flagged — instead of mistaking an unreviewed/broken packet for a final one.
+        result_review_verdict = verdict_from_result_review(kpi_entries)
+        banner = _result_packet_gate_banner(gate_provenance, result_review_verdict)
+        self._stamp_result_packet_banner(banner)
         # P0 (core-audit): regenerate the artifact MANIFEST on completion so its
         # presence counts never lag the actual run. The manifest previously went
         # stale (claimed "Present 17/29" after kpi_results already existed) because
@@ -1617,6 +1625,50 @@ class WorkspaceFlow:
             (run_dir / f"{kpi_id}.md").write_text(section, encoding="utf-8")
         (run_dir / "results.md").write_text(compact_markdown, encoding="utf-8")
         (run_dir / "results_full.md").write_text(full_markdown, encoding="utf-8")
+
+    def _stamp_result_packet_banner(self, banner: str) -> None:
+        """Prepend a gate-state banner (FIX D) to every emitted result-packet file.
+
+        The banner is idempotent: a previously stamped banner line (any line that
+        starts with the banner prefix) is stripped before the new one is prepended,
+        so re-runs never accumulate banners. All packet surfaces are stamped — the
+        canonical `current.md` (the file the doc rule says to forward verbatim and
+        that a reader might open directly), its aliases, and the dated runs snapshot
+        — so the parity between `current.md` and `runs/<date>/results.md` is kept.
+        """
+        if not banner:
+            return
+        result_dir = self.layout.reports_dir / "kpi_results"
+        run_dir = self.layout.runs_dir / date.today().isoformat()
+        targets = [
+            result_dir / "current.md",
+            result_dir / "current_full.md",
+            result_dir / "current_compact.md",
+            run_dir / "results.md",
+            run_dir / "results_full.md",
+        ]
+        prefixes = ("[blocked] UNVERIFIED RESULT PACKET", "[ok] HUMAN-VERIFIED")
+        for path in targets:
+            if not path.exists():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            lines = text.splitlines()
+            # Strip a previously stamped banner (+ its blank separator) for idempotency.
+            while lines and lines[0].startswith(prefixes):
+                lines.pop(0)
+                if lines and lines[0].strip() == "":
+                    lines.pop(0)
+            body = "\n".join(lines)
+            new_text = banner + "\n\n" + body
+            if not new_text.endswith("\n"):
+                new_text += "\n"
+            try:
+                path.write_text(new_text, encoding="utf-8")
+            except OSError:
+                continue
 
     def _base_state(self, intent: str) -> dict[str, Any]:
         return {
@@ -2356,6 +2408,38 @@ def _gate_provenance_headline(gates: list[dict[str, Any]]) -> str:
             "--allow-agent-gates to opt out"
         )
     return "[ok] Completed — all gates confirmed by humans"
+
+
+def _result_packet_gate_banner(
+    gates: list[dict[str, Any]],
+    result_review: "DelegationVerdict | None" = None,
+) -> str:
+    """Return a self-describing gate-state banner to stamp at the TOP of the
+    result packet (FIX D).
+
+    The banner makes the packet honest when read directly (bypassing the flow CLI):
+      * result content was flagged (zero rows / all-blank dimension), OR a required
+        gate is agent-asserted  -> a [blocked] UNVERIFIED banner;
+      * all gates human-confirmed and content ok                      -> an [ok]
+        HUMAN-VERIFIED banner.
+    ASCII-only, workspace-agnostic.
+    """
+    agent_count = sum(1 for g in gates if g.get("source") != "human")
+    content_flagged = bool(result_review is not None and result_review.status != "ok")
+    if content_flagged or agent_count:
+        reasons: list[str] = []
+        if agent_count:
+            reasons.append(
+                f"{agent_count} gate(s) agent-asserted (kpi-analyst review not signed off by a human)"
+            )
+        if content_flagged and result_review is not None:
+            reasons.append(f"result content flagged: {result_review.summary}")
+        return (
+            "[blocked] UNVERIFIED RESULT PACKET - "
+            + "; ".join(reasons)
+            + "; do not treat as final."
+        )
+    return "[ok] HUMAN-VERIFIED - all required gates confirmed (source: human)."
 
 
 def _now() -> str:

@@ -617,5 +617,99 @@ class ResultReviewGateWiringTests(unittest.TestCase):
             self.assertIn("department", output)
 
 
+# ---------------------------------------------------------------------------
+# FIX D: gate-state banner stamped into the result packet artifact
+# ---------------------------------------------------------------------------
+
+from core.onboarding.workspace.delegation import DelegationVerdict
+from core.onboarding.workspace.flow import _result_packet_gate_banner
+
+
+class ResultPacketBannerUnitTests(unittest.TestCase):
+    """Unit tests for the FIX D banner text (workspace-agnostic, ASCII-only)."""
+
+    def test_human_verified_banner_when_all_human_and_content_ok(self):
+        gates = [{"gate": "kpi_analyst_review", "source": "human", "confirmed_by": "alice"}]
+        ok = DelegationVerdict(status="ok", summary="all good")
+        banner = _result_packet_gate_banner(gates, ok)
+        self.assertTrue(banner.startswith("[ok] HUMAN-VERIFIED"))
+
+    def test_unverified_banner_when_gate_agent_asserted(self):
+        gates = [{"gate": "kpi_analyst_review", "source": "agent"}]
+        ok = DelegationVerdict(status="ok", summary="all good")
+        banner = _result_packet_gate_banner(gates, ok)
+        self.assertTrue(banner.startswith("[blocked] UNVERIFIED RESULT PACKET"))
+        self.assertIn("agent-asserted", banner)
+
+    def test_unverified_banner_when_content_flagged(self):
+        gates = [{"gate": "kpi_analyst_review", "source": "human", "confirmed_by": "alice"}]
+        flagged = DelegationVerdict(status="needs_review", summary="zero rows")
+        banner = _result_packet_gate_banner(gates, flagged)
+        self.assertTrue(banner.startswith("[blocked] UNVERIFIED RESULT PACKET"))
+        self.assertIn("result content flagged", banner)
+
+    def test_banner_is_ascii_only(self):
+        gates = [{"gate": "x", "source": "agent"}]
+        banner = _result_packet_gate_banner(gates, DelegationVerdict(status="ok", summary="s"))
+        banner.encode("ascii")  # raises if any non-ASCII char slipped in
+
+
+class ResultPacketBannerStampTests(unittest.TestCase):
+    """The completion path must stamp the banner at the TOP of current.md (FIX D)."""
+
+    def _skip_without_deps(self) -> None:
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars not installed")
+
+    def test_agent_asserted_completion_stamps_unverified_banner(self):
+        self._skip_without_deps()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = _make_simple_encounters_workspace(root)
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            self.assertEqual(result.status, "needs_specialist_review")
+            # Agent-asserted (no confirmed_by). The flow API still reaches complete;
+            # the CLI enforcement (FIX C) is separate from the on-disk banner.
+            done = WorkspaceFlow.from_session(root, result.session_id).review(
+                verdict="ok", summary="agent check",
+            )
+            self.assertEqual(done.status, "complete")
+
+            current_md = (root / ws / "interns" / "reports" / "kpi_results" / "current.md")
+            text = current_md.read_text(encoding="utf-8")
+            self.assertTrue(
+                text.startswith("[blocked] UNVERIFIED RESULT PACKET"),
+                f"current.md must start with the unverified banner.\nHead:\n{text[:200]}",
+            )
+            # Parity with the dated runs snapshot must be preserved.
+            from datetime import date as _date
+            runs_md = (root / ws / "interns" / "runs" / _date.today().isoformat() / "results.md")
+            self.assertEqual(runs_md.read_text(encoding="utf-8"), text)
+
+    def test_human_confirmed_completion_stamps_verified_banner_and_is_idempotent(self):
+        self._skip_without_deps()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = _make_simple_encounters_workspace(root)
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            self.assertEqual(result.status, "needs_specialist_review")
+            done = WorkspaceFlow.from_session(root, result.session_id).review(
+                verdict="ok", summary="human reviewed", confirmed_by="alice",
+            )
+            self.assertEqual(done.status, "complete")
+
+            current_md = (root / ws / "interns" / "reports" / "kpi_results" / "current.md")
+            text = current_md.read_text(encoding="utf-8")
+            self.assertTrue(
+                text.startswith("[ok] HUMAN-VERIFIED"),
+                f"current.md must start with the verified banner.\nHead:\n{text[:200]}",
+            )
+            # Idempotency: exactly one banner line, not stacked.
+            self.assertEqual(text.count("HUMAN-VERIFIED"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

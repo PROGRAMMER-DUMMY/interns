@@ -733,7 +733,7 @@ def verdict_from_result_review(entries: list[dict[str, Any]]) -> DelegationVerdi
             summary=(
                 f"{produced}/{total} KPIs produced usable result content; "
                 + " and ".join(parts)
-                + " — human review required before treating these results as final."
+                + " - human review required before treating these results as final."
             ),
             details={
                 "kpi_count": total,

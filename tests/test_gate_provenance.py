@@ -214,8 +214,11 @@ class GateProvenanceCompletionTests(unittest.TestCase):
             output = stdout.getvalue()
             self.assertEqual(exit_code, 0,
                              f"--allow-agent-gates must complete even with agent-asserted gate.\nOutput:\n{output}")
-            self.assertNotIn("[blocked]", output,
-                             "--allow-agent-gates must NOT print a [blocked] provenance headline")
+            # The escape hatch lets completion PROCEED, but it does not make the
+            # result human-verified: the provenance BLOCK message must be absent
+            # (the FIX D packet banner may still honestly say UNVERIFIED).
+            self.assertNotIn("human-gate provenance: completion blocked", output,
+                             "--allow-agent-gates must NOT print the provenance block message")
 
     # ------------------------------------------------------------------
     # Case (b): --require-human-gates blocks agent-asserted gate
