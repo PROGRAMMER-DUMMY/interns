@@ -176,10 +176,13 @@ def _kpi_artifacts(layout: WorkspaceLayout):
     """
     tables: list[dict[str, Any]] = []
     measures: list[dict[str, Any]] = []
-    widgets: list[dict[str, Any]] = []
+    cards: list[dict[str, Any]] = []     # headline strip (all KPIs together)
+    charts: list[dict[str, Any]] = []    # per-KPI breakdowns, 2-up below
     exports: dict[str, pl.DataFrame] = {}
 
-    for kpi_id in list_gold_kpis(layout):
+    kpis = list_gold_kpis(layout)
+    card_w = max(3, 12 // max(1, len(kpis)))
+    for kpi_id in kpis:
         gold = read_gold(layout, kpi_id)
         if gold is None or gold.height == 0:
             continue
@@ -192,27 +195,44 @@ def _kpi_artifacts(layout: WorkspaceLayout):
                        "file": f"{tname}.parquet", "label": km.card_label})
         measures.append({"name": mslug, "label": km.card_label, "agg": "sum",
                          "field": f"{tname}.{km.measure}", "fmt": fmt})
-        # headline card + a chart of the KPI by its lead cut
-        widgets.append({"id": f"k_{tname}", "type": "kpi", "measure": mslug,
-                        "width": 3, "height": 132})
-        lead_cut = km.cuts[0] if km.cuts else None
-        if lead_cut:
-            distinct = gold.get_column(lead_cut).n_unique()
-            w = _widget_for(lead_cut, distinct, mslug, 0)
-            w["id"] = f"c_{tname}"
-            w["title"] = f"{km.card_label} by {_human(lead_cut)}"
-            w["dimension"] = f"{tname}.{lead_cut}"
-            widgets.append(w)
+        cards.append({"id": f"k_{tname}", "type": "kpi", "measure": mslug,
+                      "width": card_w, "height": 132})
+        # each KPI explored across up to 2 of its cuts (diversified, 2-up)
+        charts.extend(_kpi_breakdown_charts(tname, mslug, km.card_label, gold, km.cuts))
 
-    if not widgets:
+    if not cards:
         return tables, measures, None, exports
     page = {
         "id": "kpis", "title": "KPIs", "order": 5,
         "description": "The workspace's defined KPIs, served from the validated gold layer.",
         "filters": [],
-        "widgets": widgets,
+        "widgets": cards + charts,
     }
     return tables, measures, page, exports
+
+
+def _kpi_breakdown_charts(tname, mslug, label, gold, cuts) -> list[dict[str, Any]]:
+    """Up to 2 charts per KPI: the measure by its lead cuts, diversified
+    (month -> line, one donut, else bar/hbar), 2-up grid."""
+    out: list[dict[str, Any]] = []
+    donut_budget = 1
+    for cut in cuts[:2]:
+        if cut not in gold.columns:
+            continue
+        distinct = gold.get_column(cut).n_unique()
+        common = {"id": f"c_{tname}_{_slug(cut)}", "measure": mslug,
+                  "dimension": f"{tname}.{cut}",
+                  "title": f"{label} by {_human(cut)}", "height": 320, "width": 6}
+        if cut.lower() == "month":
+            out.append({**common, "type": "line"})
+        elif distinct <= 5 and donut_budget > 0:
+            out.append({**common, "type": "donut"})
+            donut_budget -= 1
+        elif distinct > 12:
+            out.append({**common, "type": "hbar", "limit": 12})
+        else:
+            out.append({**common, "type": "bar"})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -272,23 +292,32 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[s
     # KPIs page first (order 5): the workspace's defined KPIs from gold.
     pages = [kpi_page, overview] if kpi_page else [overview]
 
-    # Detail page: a conditional-format table by the first categorical dimension.
-    cat = next((d for d, _ in dims if d.lower() != "month"), None)
-    if cat:
+    # Detail page: a KPI strip for context + a conditional-format breakdown table
+    # for the highest-cardinality categorical dimensions (most detail, e.g.
+    # department) rather than the lowest (gender).
+    cat_dims = [d for d, _ in sorted(
+        [(d, n) for d, n in dims if d.lower() != "month"],
+        key=lambda x: -x[1])][:2]
+    if cat_dims:
         table_measures = [m["name"] for m in measures][:4]
         conditional = []
         for mname in table_measures:
             mspec = next((m for m in measures if m["name"] == mname), {})
             conditional.append({"column": mname,
                                 "type": "color_scale" if mspec.get("fmt") == "percent" else "data_bar"})
+        # context strip: the same 4 KPI cards as the overview row
+        detail_widgets = [dict(w, id=f"d_{w['id']}") for w in kpi_widgets]
+        for cat in cat_dims:
+            detail_widgets.append({
+                "id": f"tbl_{_slug(cat)}", "type": "table", "title": f"By {_human(cat)}",
+                "dimension": f"{_TABLE}.{cat}", "measures": table_measures,
+                "sort": "desc", "limit": 50, "width": 12, "height": 460,
+                "export": True, "conditional": conditional})
         pages.append({
             "id": "detail", "title": "Detail", "order": 20,
             "description": "Row-level breakdown with conditional formatting. Export to CSV.",
             "filters": filters,
-            "widgets": [{"id": "tbl", "type": "table", "title": f"By {_human(cat)}",
-                         "dimension": f"{_TABLE}.{cat}", "measures": table_measures,
-                         "sort": "desc", "limit": 50, "width": 12, "height": 520,
-                         "export": True, "conditional": conditional}],
+            "widgets": detail_widgets,
         })
     return project, pages, kpi_exports
 
