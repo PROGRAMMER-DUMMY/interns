@@ -314,18 +314,25 @@ def _kpi_artifacts(layout: WorkspaceLayout):
 
 
 def _pick_hero(panels: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """The single most useful chart to headline a KPI in the compact view:
-    a readable, DRILLABLE categorical bar first (so 'click to drill' works),
-    then a trend line, then anything that isn't a label-heavy heatmap."""
+    """The single chart that best headlines a KPI in the compact view -- chosen
+    by the KPI's INTENT, not a fixed type order:
+
+    - A temporal KPI's story IS its trend, so a line over time wins (and it
+      carries a cut as a second series, e.g. by gender), even though it isn't
+      drillable -- the trend is the point.
+    - Otherwise a readable, DRILLABLE categorical bar (so 'click to drill'
+      works and breadth comes from drilling, not a second near-identical chart).
+    - Never a label-crammed heatmap as the headline.
+    """
     if not panels:
         return None
+    line = next((w for w in panels if w["type"] == "line"), None)
+    if line:
+        return line
     for wtype in ("hbar", "bar"):
         for w in panels:
             if w["type"] == wtype:
                 return w
-    for w in panels:
-        if w["type"] == "line":
-            return w
     for w in panels:
         if w["type"] != "heatmap":
             return w
