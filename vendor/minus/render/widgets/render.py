@@ -12,10 +12,16 @@ from minus.query.engine import QueryResult
 from minus.query.measures import format_value
 from minus.render.theme import chart_colors
 
-# Warm editorial palette: terracotta lead with muted complements (pine, ochre,
-# dusty blue, plum, sage, sand, slate). Cohesive with the Claude theme accent.
-PALETTE = ["#C2603C", "#3F6B5E", "#C9952F", "#6E7F94",
-           "#9C5A6B", "#7E8B5A", "#D9A877", "#4A453D"]
+# Warm editorial palette: terracotta lead with distinct, saturated complements
+# (teal, gold, indigo, plum, olive, sky, slate) -- cohesive with the Claude
+# accent but separable enough to read many series apart at a glance.
+PALETTE = ["#C2603C", "#2F7D6B", "#D69A21", "#4E5D94",
+           "#9C4F6B", "#7E8B5A", "#5BA3C2", "#4A453D"]
+
+# Sequential scale for heatmaps: cream -> ochre -> terracotta -> deep brown,
+# so cell intensity is actually legible (the old surface->accent wash wasn't).
+HEAT_SCALE = [[0.0, "#FBF3E7"], [0.25, "#E8C893"], [0.55, "#D9943F"],
+              [0.8, "#C2603C"], [1.0, "#7E3A22"]]
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +42,10 @@ def render_widget(widget: Widget, result: QueryResult, project: Project,
         body = _chart(widget, result, project, page_id, highlight, colors)
     title = widget.title or ""
     head_bits = [html.P(title, className="tile-title")] if title else [html.Span()]
+    # Affordance: tell a first-time user this chart drills. Shown only at the top
+    # level (once drilled, the breadcrumb's 'up' control takes over).
+    if getattr(widget, "drill_path", None) and drill_crumb is None:
+        head_bits.append(html.Span("click a bar to drill in ↧", className="drill-hint"))
     if widget.export:
         head_bits.append(html.Button("CSV", n_clicks=0, className="csv-btn",
                                      id={"kind": "export", "page": page_id, "wid": widget.id}))
@@ -185,7 +195,8 @@ def _chart(widget, result, project, page_id, highlight=None, colors=None):
             xcats = [c for c in pivot.columns if c != dim]
             fig = go.Figure(go.Heatmap(z=pivot.drop(dim).to_numpy(),
                                        x=[str(c) for c in xcats], y=[str(i) for i in ycats],
-                                       colorscale=[[0, colors["surface"]], [1, colors["accent"]]]))
+                                       colorscale=HEAT_SCALE,
+                                       colorbar=dict(thickness=10, len=0.9)))
         else:
             fig = px.bar(df, x=dim, y=primary, labels=labels, **seq)
     else:  # pragma: no cover - guarded by schema

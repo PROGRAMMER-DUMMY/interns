@@ -258,32 +258,27 @@ def _kpi_artifacts(layout: WorkspaceLayout):
             card["compare_period"] = "quarter"
         cards.append(card)
 
-        # The cards stay untabbed (a persistent scorecard); each KPI's rich
-        # recommended cut-charts go under its OWN tab so nothing scrolls. The
-        # recommender already chose multi-cut panels (grouped/stacked/heatmap/
-        # multi-series) -- render them, richest (2-cut) first.
-        tab_label = (kws.get(kpi_id) or km.card_label or kpi_id).strip()[:22]
+        # ONE compact analytics view (no per-KPI tabs): under each KPI card sits
+        # a single readable, drillable hero chart, aligned in the same column.
+        # Depth comes from in-place drill-down, breadth from the shared slicers --
+        # so the whole scorecard reads at a glance and nothing scrolls.
         panels = _kpi_panel_widgets(tname, mslug, km.card_label, km.measure,
                                     gold, km.panels or [])
         if not panels:
             panels = _kpi_breakdown_charts(tname, mslug, km.card_label, gold, km.cuts)
-        # surface the richer 2-cut panels (those with a breakdown) first
-        panels.sort(key=lambda w: 0 if w.get("breakdown") else 1)
-        panels = panels[:3]
-        for w in panels:
-            w["tab"] = tab_label
-            w["height"] = 330
-            w["width"] = 12 if (len(panels) == 1 or w["type"] == "heatmap") else 6
-            # PowerBI-style in-place drill on single-dim bars: click a category
-            # -> redraw THIS chart by the next cut, filtered to that category.
-            if w["type"] in ("bar", "hbar"):
-                xcol = w["dimension"].split(".")[-1]
-                bd = (w.get("breakdown") or "").split(".")[-1]
+        hero = _pick_hero(panels)
+        if hero:
+            hero["width"] = span          # aligns under its card (n-across)
+            hero["height"] = 360
+            hero.pop("tab", None)         # untabbed -> joins the single grid
+            if hero["type"] in ("bar", "hbar"):
+                xcol = hero["dimension"].split(".")[-1]
+                bd = (hero.get("breakdown") or "").split(".")[-1]
                 rest = [c for c in km.cuts
                         if c not in (xcol, bd) and c.lower() != "month"]
                 if rest:
-                    w["drill_path"] = [xcol] + rest[:2]   # depth up to 3 levels
-        charts.extend(panels)
+                    hero["drill_path"] = [xcol] + rest[:2]   # depth up to 3 levels
+            charts.append(hero)
 
     if not cards:
         return tables, measures, None, exports
@@ -309,12 +304,32 @@ def _kpi_artifacts(layout: WorkspaceLayout):
                                 "label": _human(col), "type": "multi"})
     page = {
         "id": "kpis", "title": "KPIs", "order": 5,
-        "description": "All defined KPIs at a glance, served from validated gold. "
-                       "Shared slicers cut across every KPI that has the dimension.",
+        "description": "Each KPI shows its headline number with a chart beneath it. "
+                       "Use the filters to slice every KPI at once; click any bar to "
+                       "drill into it, then '↑ up' to go back.",
         "filters": kpi_filters[:4],
         "widgets": cards + charts,   # scorecard row, then per-KPI chart tabs
     }
     return tables, measures, page, exports
+
+
+def _pick_hero(panels: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The single most useful chart to headline a KPI in the compact view:
+    a readable, DRILLABLE categorical bar first (so 'click to drill' works),
+    then a trend line, then anything that isn't a label-heavy heatmap."""
+    if not panels:
+        return None
+    for wtype in ("hbar", "bar"):
+        for w in panels:
+            if w["type"] == wtype:
+                return w
+    for w in panels:
+        if w["type"] == "line":
+            return w
+    for w in panels:
+        if w["type"] != "heatmap":
+            return w
+    return panels[0]
 
 
 def _kpi_breakdown_charts(tname, mslug, label, gold, cuts) -> list[dict[str, Any]]:

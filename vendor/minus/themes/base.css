@@ -223,6 +223,32 @@ body::before {
 }
 .csv-btn:hover { color: var(--accent-ink); border-color: var(--accent-border); background: var(--surface-2); }
 
+/* Drill-down affordance + breadcrumb -------------------------------------- */
+/* Chart tiles are interactive: signal it with a pointer cursor on the plot. */
+.tile .js-plotly-plot, .tile .js-plotly-plot .cartesianlayer { cursor: pointer; }
+
+.drill-hint {
+  flex: none; margin: 0 0 12px; font-size: 10px; font-weight: 600;
+  letter-spacing: 0.03em; color: var(--accent); opacity: 0.85;
+  background: var(--surface-2); border: 1px solid var(--accent-border);
+  border-radius: 999px; padding: 2px 9px; white-space: nowrap;
+}
+.drill-crumb {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 0 0 10px; font-size: 11px; color: var(--muted);
+}
+.drill-up-btn {
+  border: 1px solid var(--accent-border); background: var(--accent);
+  color: #fff; border-radius: 7px; font: inherit; font-size: 11px;
+  font-weight: 700; padding: 2px 10px; cursor: pointer; transition: all .15s ease;
+}
+.drill-up-btn:hover { filter: brightness(1.07); }
+.drill-step {
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  border-radius: 999px; padding: 2px 9px; color: var(--ink); font-weight: 600;
+}
+.drill-next { color: var(--accent-ink); font-weight: 700; }
+
 /* staggered page-load reveal */
 .grid .tile:nth-child(1) { animation-delay: 0.02s; }
 .grid .tile:nth-child(2) { animation-delay: 0.07s; }
