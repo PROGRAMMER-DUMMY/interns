@@ -207,7 +207,11 @@ def _render_tile(w, state, page, filters, crossfilter, drill=None):
             for dim_name, label in ds.get("trail", []):
                 wf[f"{table}.{dim_name}"] = label
             level = min(ds["level"], len(path) - 1)
-            eff = w.model_copy(update={"dimension": f"{table}.{path[level]}"})
+            # Drop the now-stale "... by <top dim>" from the title; the breadcrumb
+            # shows the live drill dimension, so the title shouldn't contradict it.
+            base_title = (w.title or "").split(" by ")[0].strip()
+            eff = w.model_copy(update={"dimension": f"{table}.{path[level]}",
+                                       "title": base_title or w.title})
             crumb = build_drill_crumb(page.id, w.id, ds.get("trail", []), path[level])
 
         result = state.engine.run(eff, wf)

@@ -278,7 +278,19 @@ class QueryEngine:
         if primary and primary in result.columns:
             result = result.sort(primary, descending=(widget.sort != "asc"), nulls_last=True)
         if widget.limit:
-            result = result.head(widget.limit)
+            # For a 2-dimension chart (stacked/grouped bar) the limit must keep
+            # the top-N LEADING categories with all their breakdown segments --
+            # not the top-N rows, which would show only a handful of categories.
+            if len(dims) > 1 and primary and primary in result.columns:
+                lead = dims[0]
+                top = (result.group_by(lead)
+                       .agg(pl.col(primary).sum().alias("__lead_total"))
+                       .sort("__lead_total", descending=(widget.sort != "asc"),
+                             nulls_last=True)
+                       .head(widget.limit).get_column(lead).to_list())
+                result = result.filter(pl.col(lead).is_in(top))
+            else:
+                result = result.head(widget.limit)
         keep = [c for c in (dims + measure_cols) if c in result.columns]
         return QueryResult(frame=result.select(keep), dimensions=dims, measures=measure_cols)
 
