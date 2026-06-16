@@ -177,12 +177,11 @@ def _kpi_artifacts(layout: WorkspaceLayout):
     """
     tables: list[dict[str, Any]] = []
     measures: list[dict[str, Any]] = []
-    cards: list[dict[str, Any]] = []     # headline strip (all KPIs together)
-    charts: list[dict[str, Any]] = []    # per-KPI breakdowns, 2-up below
+    widgets: list[dict[str, Any]] = []   # per-KPI: card + panels, one tab each
     exports: dict[str, pl.DataFrame] = {}
 
     kpis = list_gold_kpis(layout)
-    card_w = max(3, 12 // max(1, len(kpis)))
+    used_tabs: set = set()
     for kpi_id in kpis:
         gold = read_gold(layout, kpi_id)
         if gold is None or gold.height == 0:
@@ -196,20 +195,26 @@ def _kpi_artifacts(layout: WorkspaceLayout):
                        "file": f"{tname}.parquet", "label": km.card_label})
         measures.append({"name": mslug, "label": km.card_label, "agg": "sum",
                          "field": f"{tname}.{km.measure}", "fmt": fmt})
-        cards.append({"id": f"k_{tname}", "type": "kpi", "measure": mslug,
-                      "width": card_w, "height": 132})
-        # Render the interns-recommended panels (rich: multi-series, breakdowns,
-        # heatmaps). Fall back to simple per-cut charts only if no panels exist.
+        # One TAB per KPI (no scrolling): the card + its rich recommended panels.
+        tab = km.card_label
+        if tab in used_tabs and km.cuts:
+            tab = f"{tab} ({_human(km.cuts[0])})"
+        used_tabs.add(tab)
+        kpi_widgets = [{"id": f"k_{tname}", "type": "kpi", "measure": mslug,
+                        "width": 3, "height": 132}]
         rich = _kpi_panel_widgets(tname, mslug, km.card_label, km.measure, gold, km.panels or [])
-        charts.extend(rich or _kpi_breakdown_charts(tname, mslug, km.card_label, gold, km.cuts))
+        kpi_widgets += (rich or _kpi_breakdown_charts(tname, mslug, km.card_label, gold, km.cuts))
+        for w in kpi_widgets:
+            w["tab"] = tab
+        widgets.extend(kpi_widgets)
 
-    if not cards:
+    if not widgets:
         return tables, measures, None, exports
     page = {
         "id": "kpis", "title": "KPIs", "order": 5,
-        "description": "The workspace's defined KPIs, served from the validated gold layer.",
+        "description": "Each defined KPI in its own tab, served from validated gold.",
         "filters": [],
-        "widgets": cards + charts,
+        "widgets": widgets,
     }
     return tables, measures, page, exports
 
@@ -339,11 +344,22 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[s
     filters = [{"id": f"f_{_slug(d)}", "field": f"{_TABLE}.{d}", "label": _human(d),
                 "type": "multi"} for d, dist in dims if dist <= 40][:4]
 
+    # Two tabs so neither view scrolls: "Summary" = KPI cards + trend + the
+    # headline (department) breakdown; "Breakdowns" = the remaining dimension charts.
+    for w in kpi_widgets:
+        w["tab"] = "Summary"
+    summary_charts, breakdown_charts = [], []
+    for w in chart_widgets:
+        (summary_charts if w["type"] in ("line", "hbar") else breakdown_charts).append(w)
+    for w in summary_charts:
+        w["tab"] = "Summary"
+    for w in breakdown_charts:
+        w["tab"] = "Breakdowns"
     overview = {
         "id": "overview", "title": "Overview", "order": 10,
         "description": "Certified-clean conformed model. Click any bar/slice to cross-filter.",
         "filters": filters,
-        "widgets": kpi_widgets + chart_widgets,
+        "widgets": kpi_widgets + summary_charts + breakdown_charts,
     }
 
     # KPIs page first (order 5): the workspace's defined KPIs from gold.
@@ -362,14 +378,18 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[s
             mspec = next((m for m in measures if m["name"] == mname), {})
             conditional.append({"column": mname,
                                 "type": "color_scale" if mspec.get("fmt") == "percent" else "data_bar"})
-        # context strip: the same 4 KPI cards as the overview row
-        detail_widgets = [dict(w, id=f"d_{w['id']}") for w in kpi_widgets]
+        # One tab per breakdown table (no scrolling); each tab repeats the KPI
+        # context strip above its table.
+        detail_widgets = []
         for cat in cat_dims:
+            tab = f"By {_human(cat)}"
+            for w in kpi_widgets:
+                detail_widgets.append(dict(w, id=f"d_{_slug(cat)}_{w['id']}", tab=tab))
             detail_widgets.append({
-                "id": f"tbl_{_slug(cat)}", "type": "table", "title": f"By {_human(cat)}",
+                "id": f"tbl_{_slug(cat)}", "type": "table", "title": tab,
                 "dimension": f"{_TABLE}.{cat}", "measures": table_measures,
                 "sort": "desc", "limit": 50, "width": 12, "height": 460,
-                "export": True, "conditional": conditional})
+                "export": True, "conditional": conditional, "tab": tab})
         pages.append({
             "id": "detail", "title": "Detail", "order": 20,
             "description": "Row-level breakdown with conditional formatting. Export to CSV.",

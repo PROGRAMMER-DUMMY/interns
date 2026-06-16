@@ -225,6 +225,11 @@ class Widget(_Base):
         6, ge=1, le=12, description="Grid width in 12-column units."
     )
     height: int = Field(320, description="Tile height in pixels.")
+    tab: Optional[str] = Field(
+        None,
+        description="Optional tab label. Widgets sharing a tab render together in "
+        "a dcc.Tab so each view fits the screen without scrolling.",
+    )
 
     compare: Optional[str] = Field(
         None,

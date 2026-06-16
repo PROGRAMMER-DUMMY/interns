@@ -349,6 +349,26 @@ body::before {
   font-size: 14px;
 }
 
+/* ---------------- Widget tabs (no-scroll views) ---------------- */
+.widget-tabs { padding: 0 28px; }
+.widget-tabs .tab-container,
+.widget-tabs > div:first-child {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); margin-bottom: 4px;
+}
+.widget-tab {
+  border: none !important; background: transparent !important;
+  color: var(--muted) !important; font-weight: 600; font-size: 13px;
+  padding: 10px 16px !important; cursor: pointer; border-radius: 10px 10px 0 0;
+  font-family: var(--font-body) !important;
+}
+.widget-tab:hover { color: var(--ink) !important; background: var(--surface-2) !important; }
+.widget-tab--sel {
+  color: var(--accent-ink) !important; background: var(--surface) !important;
+  border-bottom: 2.5px solid var(--accent) !important;
+}
+.widget-tabs .grid { padding-top: 14px; }
+
 /* ---------------- Motion ---------------- */
 @keyframes tile-rise {
   from { opacity: 0; transform: translateY(14px); }

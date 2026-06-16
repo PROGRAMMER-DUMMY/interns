@@ -117,8 +117,9 @@ def register_callbacks(app, state) -> None:
         Input("crossfilter", "data"),
         Input("config-version", "data"),
         State("url", "pathname"),
+        State("active-tab", "data"),
     )
-    def _widgets(_vals, _starts, _ends, cf, _ver, pathname):
+    def _widgets(_vals, _starts, _ends, cf, _ver, pathname, active_tab):
         page = _page_id(pathname, state)
         if page is None:
             raise PreventUpdate
@@ -148,7 +149,16 @@ def register_callbacks(app, state) -> None:
         # Keep slicers and click selections separate so the clicked chart can
         # highlight (not self-filter). Slicers still filter every widget.
         cross = (cf or {}).get(page.id, {})
-        return L.build_widgets(page, state, filters, cross)
+        return L.build_widgets(page, state, filters, cross, active_tab)
+
+    # ----- remember the active widget tab (so cross-filter keeps it) ----
+    @app.callback(
+        Output("active-tab", "data"),
+        Input("widget-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def _remember_tab(value):
+        return value
 
     # ----- CSV export ----------------------------------------------------
     @app.callback(

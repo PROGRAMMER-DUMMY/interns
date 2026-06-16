@@ -37,6 +37,8 @@ def app_shell(state) -> html.Div:
                          disabled=not state.project.refresh_seconds),
             dcc.Store(id="config-version", data=state.version),
             dcc.Store(id="crossfilter", data={}),
+            # Remembers the active widget tab so a cross-filter re-render keeps it.
+            dcc.Store(id="active-tab", data=None),
             # Panel visibility persists in the browser session.
             dcc.Store(id="ui-state", storage_type="session",
                       data={"sidebar": True, "chat": chat_on}),
@@ -49,7 +51,7 @@ def app_shell(state) -> html.Div:
                         html.Div(id="slicer-controls", className="slicer-group"),
                         html.Div(id="crossfilter-chips", className="slicer-group"),
                     ]),
-                    html.Div(id="widgets", className="grid"),
+                    html.Div(id="widgets"),
                 ],
             ),
             build_chat(state) if chat_on else html.Div(),
@@ -167,37 +169,61 @@ def _distinct(state, field: str, limit: int = 500) -> list:
 # ---------------------------------------------------------------------------
 
 
+def _render_tile(w, state, page, filters, crossfilter):
+    try:
+        wf = dict(filters)
+        wf.update(crossfilter)
+        highlight = None
+        if w.dimension and w.dimension in crossfilter:
+            wf.pop(w.dimension, None)          # don't self-filter the clicked chart
+            highlight = crossfilter[w.dimension]
+        result = state.engine.run(w, wf)
+        return render_widget(w, result, state.project, page.id, highlight)
+    except Exception as exc:  # surface per-tile errors instead of crashing the page
+        return html.Div(
+            className="tile", style={"gridColumn": f"span {w.width}"},
+            children=[html.P(w.title or w.id, className="tile-title"),
+                      html.Div(f"⚠ {exc}", className="empty")])
+
+
 def build_widgets(page: Dashboard, state, filters: dict[str, Any],
-                  crossfilter: dict[str, Any] | None = None) -> list:
-    """Render every tile.
+                  crossfilter: dict[str, Any] | None = None,
+                  active_tab: str | None = None) -> list:
+    """Render the page's tiles.
 
     ``filters`` are page slicers; ``crossfilter`` are click selections. A click
     on a chart filters every *other* visual + the KPIs, but the clicked chart
-    keeps all its categories and highlights the selection instead of collapsing
-    to a single bar (Power BI-style cross-highlight).
+    keeps all its categories and highlights the selection (Power BI-style).
+
+    When widgets declare a ``tab``, the tiles are grouped into ``dcc.Tabs`` so
+    each view fits the screen without scrolling; switching tabs is client-side,
+    and ``active_tab`` restores the selected tab across cross-filter re-renders.
     """
     crossfilter = crossfilter or {}
-    tiles = []
+    if not page.widgets:
+        return [html.Div("This page has no widgets yet.", className="empty")]
+
+    # Group preserving first-seen order; widgets without a tab go to a default.
+    groups: dict[str, list] = {}
     for w in page.widgets:
-        try:
-            wf = dict(filters)
-            wf.update(crossfilter)
-            highlight = None
-            if w.dimension and w.dimension in crossfilter:
-                wf.pop(w.dimension, None)          # don't self-filter the clicked chart
-                highlight = crossfilter[w.dimension]
-            result = state.engine.run(w, wf)
-            tiles.append(render_widget(w, result, state.project, page.id, highlight))
-        except Exception as exc:  # surface per-tile errors instead of crashing the page
-            tiles.append(html.Div(
-                className="tile",
-                style={"gridColumn": f"span {w.width}"},
-                children=[html.P(w.title or w.id, className="tile-title"),
-                          html.Div(f"⚠ {exc}", className="empty")],
-            ))
-    if not tiles:
-        tiles = [html.Div("This page has no widgets yet.", className="empty")]
-    return tiles
+        groups.setdefault(getattr(w, "tab", None) or "", []).append(w)
+
+    def grid_for(ws):
+        return html.Div([_render_tile(w, state, page, filters, crossfilter) for w in ws],
+                        className="grid")
+
+    # No tabs declared -> a single grid (original behavior).
+    if len(groups) == 1 and "" in groups:
+        return [grid_for(groups[""])]
+
+    labels = list(groups.keys())
+    value = active_tab if active_tab in labels else labels[0]
+    return [dcc.Tabs(
+        id="widget-tabs", value=value, className="widget-tabs",
+        children=[dcc.Tab(label=lbl or "Other", value=lbl,
+                          className="widget-tab", selected_className="widget-tab--sel",
+                          children=[grid_for(ws)]) for lbl, ws in groups.items()],
+    )]
 
 
 # ---------------------------------------------------------------------------
