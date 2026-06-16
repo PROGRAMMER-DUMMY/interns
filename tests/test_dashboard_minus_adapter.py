@@ -180,6 +180,124 @@ class TestPushdownScan(unittest.TestCase):
             self.assertAlmostEqual(got[k], v, places=2)
 
 
+class TestResultCache(unittest.TestCase):
+    """Phase 1: QueryEngine memoizes results per (data-generation, widget, filters)
+    so the live grid's per-interaction re-runs become dict lookups, and a data
+    refresh (generation bump) cleanly invalidates them. Self-contained: stubs the
+    underlying query so no workspace data is required."""
+
+    def _engine(self):
+        from minus.query.engine import QueryEngine, QueryResult
+        import polars as pl
+
+        class _FakeModel:
+            generation = 0
+
+        engine = QueryEngine(project=None, model=_FakeModel())
+        calls = {"n": 0}
+
+        def _fake_run(widget, filters):
+            calls["n"] += 1
+            return QueryResult(frame=pl.DataFrame({"v": [calls["n"]]}))
+
+        engine._run_uncached = _fake_run
+        return engine, calls
+
+    def _widget(self):
+        from minus.config.models import Widget
+        return Widget(id="w", type="bar", measure="m")
+
+    def test_identical_calls_hit_cache(self):
+        engine, calls = self._engine()
+        w = self._widget()
+        first = engine.run(w)
+        second = engine.run(w)
+        self.assertEqual(calls["n"], 1)            # underlying query ran once
+        self.assertIs(first, second)               # same cached object returned
+
+    def test_generation_bump_invalidates(self):
+        engine, calls = self._engine()
+        w = self._widget()
+        engine.run(w)
+        engine.model.generation += 1               # mimics model.clear_cache()
+        engine.run(w)
+        self.assertEqual(calls["n"], 2)
+
+    def test_distinct_filters_are_separate_entries(self):
+        engine, calls = self._engine()
+        w = self._widget()
+        engine.run(w, {"a": 1})
+        engine.run(w, {"a": 2})
+        engine.run(w, {"a": 1})                    # repeat of the first -> hit
+        self.assertEqual(calls["n"], 2)
+
+    def test_cache_is_lru_bounded(self):
+        from minus.query import engine as eng_mod
+        engine, _ = self._engine()
+        w = self._widget()
+        for i in range(eng_mod._RESULT_CACHE_MAX + 50):
+            engine.run(w, {"a": i})
+        self.assertLessEqual(len(engine._result_cache), eng_mod._RESULT_CACHE_MAX)
+
+
+class TestConnectionReuseAndTimeout(unittest.TestCase):
+    """Phase 1: the model reuses one DuckDB connection (guarded by a lock), and a
+    watchdog interrupts a runaway query so it can't hold that lock forever."""
+
+    def _model(self):
+        from minus.data.model import SemanticModel
+        return SemanticModel(project=None, root=".")
+
+    def test_duckdb_connection_is_reused(self):
+        m = self._model()
+        c1 = m.duckdb()
+        c2 = m.duckdb()
+        self.assertIs(c1, c2)               # same connection, not reconnected
+        c1.close()
+
+    def test_duckdb_lock_is_acquirable(self):
+        m = self._model()
+        self.assertTrue(m.duckdb_lock.acquire(blocking=False))
+        m.duckdb_lock.release()
+
+    def test_interrupt_after_fires_on_overrun(self):
+        import time
+        from minus.data.duckdb_exec import _interrupt_after
+
+        class _Con:
+            def __init__(self):
+                self.hit = False
+
+            def interrupt(self):
+                self.hit = True
+
+        con = _Con()
+        with _interrupt_after(con, 0.02):
+            time.sleep(0.10)
+        self.assertTrue(con.hit)
+
+    def test_interrupt_after_noop_when_fast_or_disabled(self):
+        from minus.data.duckdb_exec import _interrupt_after
+
+        class _Con:
+            def __init__(self):
+                self.hit = False
+
+            def interrupt(self):
+                self.hit = True
+
+        # Fast query: timer cancelled before firing.
+        con = _Con()
+        with _interrupt_after(con, 5):
+            pass
+        self.assertFalse(con.hit)
+        # Disabled: zero timeout never arms the watchdog.
+        con2 = _Con()
+        with _interrupt_after(con2, 0):
+            pass
+        self.assertFalse(con2.hit)
+
+
 class TestAdapterNoBronze(unittest.TestCase):
     def test_missing_bronze_returns_not_ok(self):
         import tempfile

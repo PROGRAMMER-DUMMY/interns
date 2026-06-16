@@ -10,7 +10,9 @@ Flow per widget:
 
 from __future__ import annotations
 
+import json
 import re
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -37,10 +39,30 @@ class QueryResult:
 Filters = dict[str, Any]
 
 
+# How many distinct (widget, filters) results to retain per data generation.
+# The live grid re-runs every widget on each slicer/cross-filter interaction;
+# caching turns repeat interactions into dict lookups instead of full
+# join+group-by passes. Bounded LRU so memory stays flat over a long session.
+_RESULT_CACHE_MAX = 512
+
+
 class QueryEngine:
     def __init__(self, project: Project, model: SemanticModel):
         self.project = project
         self.model = model
+        self._result_cache: "OrderedDict[tuple, QueryResult]" = OrderedDict()
+
+    # -- result cache -----------------------------------------------------
+    def _cache_key(self, widget: Widget, filters: Filters) -> Optional[tuple]:
+        """Stable key for a (data-version, widget-spec, filters) result, or None
+        when the inputs can't be canonicalized (then we skip caching)."""
+        try:
+            wkey = widget.model_dump_json()
+            fkey = json.dumps(filters, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            return None
+        gen = getattr(self.model, "generation", 0)
+        return (gen, wkey, fkey)
 
     # -- helpers ----------------------------------------------------------
     def _measures_for(self, widget: Widget) -> list[Measure]:
@@ -82,7 +104,24 @@ class QueryEngine:
 
     # -- main entry -------------------------------------------------------
     def run(self, widget: Widget, filters: Optional[Filters] = None) -> QueryResult:
+        """Run the widget query, returning a cached result when one exists for
+        the same widget + filters at the current data generation."""
         filters = filters or {}
+        key = self._cache_key(widget, filters)
+        if key is not None and key in self._result_cache:
+            self._result_cache.move_to_end(key)        # mark as recently used
+            return self._result_cache[key]
+
+        result = self._run_uncached(widget, filters)
+
+        if key is not None:
+            self._result_cache[key] = result
+            self._result_cache.move_to_end(key)
+            while len(self._result_cache) > _RESULT_CACHE_MAX:
+                self._result_cache.popitem(last=False)  # evict least-recent
+        return result
+
+    def _run_uncached(self, widget: Widget, filters: Filters) -> QueryResult:
         ms = self._measures_for(widget)
         base = self._base_table(widget, ms)
         agg_fields = self._agg_fields(ms)

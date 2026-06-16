@@ -20,9 +20,11 @@ error also propagates so the engine can fall back.
 
 from __future__ import annotations
 
+import os
+import threading
+from contextlib import contextmanager
 from typing import Any, Optional
 
-import duckdb
 import polars as pl
 
 from minus.config.models import Measure, Relationship
@@ -42,6 +44,33 @@ _SUPPORTED_AGGS = set(_SQL_AGG) | {"count", "count_distinct"}
 
 class PushdownUnsupported(Exception):
     """Raised when a widget/query cannot be expressed by the DuckDB path."""
+
+
+def _query_timeout() -> float:
+    """Seconds before a runaway pushdown query is interrupted so it can't hold
+    the shared connection lock forever. 0 (or unset to the default) disables it;
+    override with the ``MINUS_QUERY_TIMEOUT`` environment variable."""
+    try:
+        return float(os.environ.get("MINUS_QUERY_TIMEOUT", "30"))
+    except ValueError:
+        return 30.0
+
+
+@contextmanager
+def _interrupt_after(con, seconds: float):
+    """Interrupt ``con``'s in-flight query after ``seconds`` (a watchdog timer).
+    DuckDB raises on interrupt, so the engine falls back to pandas and, crucially,
+    the connection lock is released. A non-positive timeout is a no-op."""
+    if not seconds or seconds <= 0:
+        yield
+        return
+    timer = threading.Timer(seconds, con.interrupt)
+    timer.daemon = True
+    timer.start()
+    try:
+        yield
+    finally:
+        timer.cancel()
 
 
 def _quote_ident(name: str) -> str:
@@ -197,8 +226,11 @@ def run_pushdown(
     plan = _join_plan(model, base, needed)
     join_tables = [base] + [dst for dst, _ in plan]
 
-    con = duckdb.connect()
-    try:
+    # Reuse the model's persistent connection (no per-query reconnect). The lock
+    # serializes access -- a DuckDB connection is not safe for concurrent use --
+    # and the timeout watchdog guarantees one query can't hold it indefinitely.
+    con = model.duckdb()
+    with model.duckdb_lock:
         # Bring each needed table into DuckDB under its logical name (original,
         # unprefixed columns). Prefer scanning the file IN PLACE (read_parquet/
         # read_csv_auto) so the join+group-by+filter pushes down to DuckDB
@@ -235,6 +267,5 @@ def run_pushdown(
             group_terms = ", ".join(_col_ref(d) for d in dims)
             sql += f"\nGROUP BY {group_terms}"
 
-        return con.execute(sql).pl()
-    finally:
-        con.close()
+        with _interrupt_after(con, _query_timeout()):
+            return con.execute(sql).pl()

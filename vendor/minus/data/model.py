@@ -9,6 +9,7 @@ Power-BI style.
 
 from __future__ import annotations
 
+import threading
 from collections import deque
 from pathlib import Path
 
@@ -30,6 +31,15 @@ class SemanticModel:
         self.root = Path(root)
         self._cache: dict[str, pl.DataFrame] = {}
         self._connectors: dict[str, object] = {}
+        # Monotonic token bumped whenever the underlying source data is dropped
+        # (scheduled refresh). Downstream result caches key off it so a refresh
+        # invalidates cached query results without rebuilding the engine.
+        self._generation = 0
+        # A single DuckDB connection reused across pushdown queries (built
+        # lazily). The lock serializes access -- the dev server is threaded and
+        # a DuckDB connection is not safe for concurrent use.
+        self._duckdb_con = None
+        self._duckdb_lock = threading.Lock()
 
     # -- raw table access -------------------------------------------------
     def _connector_for(self, name: str):
@@ -55,8 +65,28 @@ class SemanticModel:
         except Exception:
             return None
 
+    @property
+    def generation(self) -> int:
+        """Data-version token; increments each time the source cache is cleared."""
+        return self._generation
+
+    def duckdb(self):
+        """A persistent in-memory DuckDB connection, reused across pushdown
+        queries instead of reconnecting each time. Concurrent callers MUST hold
+        :attr:`duckdb_lock` around any use of it."""
+        if self._duckdb_con is None:
+            import duckdb
+            self._duckdb_con = duckdb.connect()
+        return self._duckdb_con
+
+    @property
+    def duckdb_lock(self) -> threading.Lock:
+        """Serializes access to the shared :meth:`duckdb` connection."""
+        return self._duckdb_lock
+
     def clear_cache(self) -> None:
         self._cache.clear()
+        self._generation += 1
 
     def columns(self, name: str) -> list[str]:
         return list(self.table_df(name).columns)
