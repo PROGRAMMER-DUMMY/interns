@@ -114,6 +114,39 @@ def _chart(widget, result, project, page_id, highlight=None, colors=None):
         else:
             fig = px.bar(df, x=dim, y=val, color=breakdown, barmode="group",
                          labels=labels, **seq)
+    elif t == "stacked_bar":
+        # composition: one bar per x, stacked segments per breakdown
+        fig = px.bar(df, x=dim, y=primary, color=breakdown, barmode="stack",
+                     labels=labels, **seq)
+    elif t == "combo":
+        # measures[0] as bars (left axis) + measures[1] as a line (right axis),
+        # with the line measure's target drawn as a dotted reference -- one chart
+        # showing absolute value AND a rate/target together.
+        ms = result.measures
+        d = df.sort(dim)
+        xs = d.get_column(dim).cast(pl.Utf8).to_list()
+        fig = go.Figure()
+        fig.add_bar(x=xs, y=d.get_column(ms[0]).to_list(),
+                    name=_measure_label(ms[0], project), marker_color=PALETTE[0])
+        if len(ms) > 1:
+            fig.add_scatter(x=xs, y=d.get_column(ms[1]).to_list(), yaxis="y2",
+                            name=_measure_label(ms[1], project), mode="lines+markers",
+                            line=dict(color=PALETTE[1], width=2.5))
+            tgt = getattr(project.measure(ms[1]), "target", None)
+            if tgt is not None:
+                fig.add_hline(y=tgt, yref="y2", line_dash="dot",
+                              line_color=colors["muted"],
+                              annotation_text=f"target {tgt:g}",
+                              annotation_font_size=9)
+    elif t == "small_multiples":
+        # the measure faceted by the breakdown dimension (trellis) -- compares a
+        # trend/shape across categories without one overloaded chart.
+        d = df.sort(dim)
+        facet = breakdown or dim
+        fig = px.line(d, x=dim, y=primary, facet_col=facet, facet_col_wrap=3,
+                      markers=True, labels=labels, **seq)
+        fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+        fig.update_yaxes(matches=None, showticklabels=False)
     elif t in ("line", "area"):
         d = df.sort(dim)
         fn = px.area if t == "area" else px.line
@@ -162,6 +195,15 @@ def _chart(widget, result, project, page_id, highlight=None, colors=None):
             fig.update_traces(marker=dict(colors=marks))
 
     _style(fig, widget, colors)
+
+    # Combo: a right-hand secondary axis for the line measure + a legend.
+    if t == "combo":
+        fig.update_layout(
+            showlegend=True,
+            yaxis2=dict(overlaying="y", side="right", showgrid=False,
+                        tickfont=dict(size=11, color=colors["muted"])),
+            legend=dict(orientation="h", yanchor="bottom", y=-0.22, x=0, title_text=""),
+        )
 
     # Donut/pie: show a legend, and a center total for donuts (self-explanatory).
     if t in ("pie", "donut"):

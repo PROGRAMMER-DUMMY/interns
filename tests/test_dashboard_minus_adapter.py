@@ -37,10 +37,12 @@ class TestAdapterReal(unittest.TestCase):
         self.assertTrue((root / "project.yaml").exists())
         self.assertTrue((root / "data" / "conformed.parquet").exists())
 
-    def test_pages_include_kpis_overview_detail(self):
-        self.assertIn("kpis", self.res["pages"])      # the workspace's defined KPIs
-        self.assertIn("overview", self.res["pages"])  # conformed canvas
-        self.assertIn("detail", self.res["pages"])
+    def test_pages_are_kpis_and_analysis(self):
+        # two sections: the defined-KPI scorecard + a silver-layer Analysis page
+        self.assertIn("kpis", self.res["pages"])
+        self.assertIn("analysis", self.res["pages"])
+        self.assertNotIn("overview", self.res["pages"])
+        self.assertNotIn("detail", self.res["pages"])
 
     def test_has_collection_rate_and_kpi_measures(self):
         # generic RCM measures + one measure per gold KPI
@@ -62,9 +64,10 @@ class TestAdapterReal(unittest.TestCase):
         proj = load_project(root)
         pages = load_dashboards(root, proj)
         self.assertGreaterEqual(len(proj.tables), 2)   # claims + gold KPI tables
-        self.assertGreaterEqual(len(pages), 3)
+        self.assertGreaterEqual(len(pages), 2)         # KPIs + Analysis
         page_ids = {p.id for p in pages}
         self.assertIn("kpis", page_ids)
+        self.assertIn("analysis", page_ids)
 
     def test_no_pii_column_in_exported_data(self):
         import polars as pl

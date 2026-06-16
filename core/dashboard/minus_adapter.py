@@ -320,83 +320,113 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[s
 
     mfields = _measure_field_columns(measures)
     dims = [(d, dist) for d, dist in _display_dimensions(model) if d not in mfields]
-    primary = next((m["name"] for m in measures if m.get("agg") == "sum"),
-                   measures[0]["name"] if measures else "record_count")
-    # KPI row: a balanced FOUR cards (fills the 12-col row evenly), prioritizing
-    # the RCM KPIs, with a period-over-period trend when a service date exists.
+    analysis = _analysis_page(model, measures, dims)
+    # Two sections only: KPIs (the defined-KPI scorecard) + Analysis (silver-layer
+    # exploration with dense, multi-cut charts). No separate Overview/Detail.
+    pages = [kpi_page, analysis] if kpi_page else [analysis]
+    return project, pages, kpi_exports
+
+
+def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
+    """Build the Analysis page: complex, multi-cut charts on the conformed (silver)
+    model, in three tabs (Trends / Breakdowns / Detail) so nothing scrolls.
+
+    Each chart carries several cuts: a combo (value bars + rate line + target),
+    small multiples (a trend faceted by a category), a stacked bar (two cuts), a
+    grouped bar, one donut, and conditional-format detail tables.
+    """
+    sums = [m for m in measures if m.get("agg") == "sum"]
+    primary_m = next((m for m in sums if "paid" in str(m.get("field", "")).lower()),
+                     sums[0] if sums else (measures[0] if measures else None))
+    primary = primary_m["name"] if primary_m else "record_count"
+    plabel = primary_m["label"] if primary_m else "Value"
+    has_rate = any(m["name"] == "collection_rate" for m in measures)
     svc_date = next((c for c in model.frame.columns
                      if c.lower() in ("servicedate", "service_date")), None)
-    def _kpi_tile(m):
-        w = {"id": f"k_{m['name']}", "type": "kpi", "measure": m["name"],
-             "width": 3, "height": 132}
+
+    def kpi_card(m, tab):
+        w = {"id": f"a_k_{m['name']}", "type": "kpi", "measure": m["name"],
+             "width": 3, "height": 132, "tab": tab}
         if svc_date:
             w["compare"] = f"{_TABLE}.{svc_date}"
             w["compare_period"] = "quarter"
         return w
+
     _priority = {"record_count": 0, "total_paid_amount": 1, "collection_rate": 2,
                  "days_in_ar": 3}
     row = sorted(measures, key=lambda m: _priority.get(m["name"], 9))[:4]
-    kpi_widgets = [_kpi_tile(m) for m in row]
-    # Diversified charts (line + a couple donuts + bars + a department hbar) so the
-    # canvas is varied AND high-value dims like department are not crowded out.
-    chart_widgets = _diversified_chart_widgets(dims[:6], primary)
-    # filters from low-cardinality dimensions
+
+    temporal = "month" if any(d == "month" for d, _ in dims) else None
+    cats_desc = [d for d, _ in sorted([(d, n) for d, n in dims if d != "month"],
+                                      key=lambda x: -x[1])]
+    low = [d for d, n in sorted([(d, n) for d, n in dims if d != "month" and n <= 6],
+                                key=lambda x: -x[1])]  # mid cards first (e.g. visit type)
+    cat1 = cats_desc[0] if cats_desc else None          # highest card (department)
+    facet_cat = low[0] if low else None
+    stack_cat = low[1] if len(low) > 1 else facet_cat
+    group_cat = low[2] if len(low) > 2 else None
+    donut_cat = low[-1] if low else None
+
+    A: list[dict[str, Any]] = []
+
+    # ---- Trends: KPI strip + combo (value+rate+target) + small multiples ----
+    A += [kpi_card(m, "Trends") for m in row]
+    if temporal:
+        if has_rate:
+            A.append({"id": "a_combo", "type": "combo",
+                      "measures": [primary, "collection_rate"],
+                      "dimension": f"{_TABLE}.{temporal}",
+                      "title": f"{plabel} (bars) & Collection Rate (line) over Month",
+                      "width": 12, "height": 340, "tab": "Trends"})
+        else:
+            A.append({"id": "a_trend", "type": "line", "measure": primary,
+                      "dimension": f"{_TABLE}.{temporal}",
+                      "title": f"{plabel} over Month", "width": 12,
+                      "height": 320, "tab": "Trends"})
+        if facet_cat:
+            A.append({"id": "a_sm", "type": "small_multiples", "measure": primary,
+                      "dimension": f"{_TABLE}.{temporal}",
+                      "breakdown": f"{_TABLE}.{facet_cat}",
+                      "title": f"{plabel} over Month, by {_human(facet_cat)}",
+                      "width": 12, "height": 300, "tab": "Trends"})
+
+    # ---- Breakdowns: stacked (2 cuts) + grouped + one donut ----
+    if cat1 and stack_cat and cat1 != stack_cat:
+        A.append({"id": "a_stack", "type": "stacked_bar", "measure": primary,
+                  "dimension": f"{_TABLE}.{cat1}", "breakdown": f"{_TABLE}.{stack_cat}",
+                  "title": f"{plabel} by {_human(cat1)}, split by {_human(stack_cat)}",
+                  "width": 12, "height": 380, "tab": "Breakdowns"})
+    if group_cat and facet_cat and group_cat != facet_cat:
+        A.append({"id": "a_group", "type": "bar", "measure": primary,
+                  "dimension": f"{_TABLE}.{group_cat}", "breakdown": f"{_TABLE}.{facet_cat}",
+                  "title": f"{plabel} by {_human(group_cat)} x {_human(facet_cat)}",
+                  "width": 6, "height": 340, "tab": "Breakdowns"})
+    if donut_cat:
+        A.append({"id": "a_donut", "type": "donut", "measure": "record_count",
+                  "dimension": f"{_TABLE}.{donut_cat}",
+                  "title": f"Records by {_human(donut_cat)}", "width": 6,
+                  "height": 340, "tab": "Breakdowns"})
+
+    # ---- Detail: conditional-format tables for the top categorical dims ----
+    table_measures = [m["name"] for m in measures][:4]
+    conditional = [{"column": mn,
+                    "type": "color_scale" if next((m for m in measures if m["name"] == mn), {}).get("fmt") == "percent"
+                            else "data_bar"} for mn in table_measures]
+    for cat in cats_desc[:2]:
+        A.append({"id": f"a_tbl_{_slug(cat)}", "type": "table", "title": f"By {_human(cat)}",
+                  "dimension": f"{_TABLE}.{cat}", "measures": table_measures,
+                  "sort": "desc", "limit": 50, "width": 12, "height": 460,
+                  "export": True, "conditional": conditional, "tab": "Detail"})
+
     filters = [{"id": f"f_{_slug(d)}", "field": f"{_TABLE}.{d}", "label": _human(d),
                 "type": "multi"} for d, dist in dims if dist <= 40][:4]
-
-    # Two tabs so neither view scrolls: "Summary" = KPI cards + trend + the
-    # headline (department) breakdown; "Breakdowns" = the remaining dimension charts.
-    for w in kpi_widgets:
-        w["tab"] = "Summary"
-    summary_charts, breakdown_charts = [], []
-    for w in chart_widgets:
-        (summary_charts if w["type"] in ("line", "hbar") else breakdown_charts).append(w)
-    for w in summary_charts:
-        w["tab"] = "Summary"
-    for w in breakdown_charts:
-        w["tab"] = "Breakdowns"
-    overview = {
-        "id": "overview", "title": "Overview", "order": 10,
-        "description": "Certified-clean conformed model. Click any bar/slice to cross-filter.",
+    return {
+        "id": "analysis", "title": "Analysis", "order": 10,
+        "description": "Silver-layer exploration with dense, multi-cut charts. "
+                       "Click any element to cross-filter the page.",
         "filters": filters,
-        "widgets": kpi_widgets + summary_charts + breakdown_charts,
+        "widgets": A,
     }
-
-    # KPIs page first (order 5): the workspace's defined KPIs from gold.
-    pages = [kpi_page, overview] if kpi_page else [overview]
-
-    # Detail page: a KPI strip for context + a conditional-format breakdown table
-    # for the highest-cardinality categorical dimensions (most detail, e.g.
-    # department) rather than the lowest (gender).
-    cat_dims = [d for d, _ in sorted(
-        [(d, n) for d, n in dims if d.lower() != "month"],
-        key=lambda x: -x[1])][:2]
-    if cat_dims:
-        table_measures = [m["name"] for m in measures][:4]
-        conditional = []
-        for mname in table_measures:
-            mspec = next((m for m in measures if m["name"] == mname), {})
-            conditional.append({"column": mname,
-                                "type": "color_scale" if mspec.get("fmt") == "percent" else "data_bar"})
-        # One tab per breakdown table (no scrolling); each tab repeats the KPI
-        # context strip above its table.
-        detail_widgets = []
-        for cat in cat_dims:
-            tab = f"By {_human(cat)}"
-            for w in kpi_widgets:
-                detail_widgets.append(dict(w, id=f"d_{_slug(cat)}_{w['id']}", tab=tab))
-            detail_widgets.append({
-                "id": f"tbl_{_slug(cat)}", "type": "table", "title": tab,
-                "dimension": f"{_TABLE}.{cat}", "measures": table_measures,
-                "sort": "desc", "limit": 50, "width": 12, "height": 460,
-                "export": True, "conditional": conditional, "tab": tab})
-        pages.append({
-            "id": "detail", "title": "Detail", "order": 20,
-            "description": "Row-level breakdown with conditional formatting. Export to CSV.",
-            "filters": filters,
-            "widgets": detail_widgets,
-        })
-    return project, pages, kpi_exports
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,10 @@ DerivedKind = Literal["ratio", "percent_of_total", "yoy", "expression"]
 WidgetType = Literal[
     "kpi", "bar", "hbar", "line", "area", "pie", "donut",
     "scatter", "heatmap", "table",
+    # dense / multi-cut visuals
+    "stacked_bar",       # one bar per x, segments = breakdown (composition)
+    "combo",             # measures[0] as bars + measures[1] as a line on a 2nd axis
+    "small_multiples",   # the measure faceted by a dimension (trellis)
 ]
 
 FilterType = Literal["dropdown", "multi", "date_range", "range"]
