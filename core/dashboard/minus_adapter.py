@@ -497,11 +497,16 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
                       "title": f"{plabel} over Month", "width": 12,
                       "height": 320, "tab": "Trends"})
         if facet_cat:
-            A.append({"id": "a_sm", "type": "small_multiples", "measure": primary,
+            # Judge by cardinality, don't hardcode: a few series read best
+            # OVERLAID on one line chart (direct comparison); many series would
+            # overplot, so fall back to small multiples (trellis) only then.
+            facet_n = dict(dims).get(facet_cat, 99)
+            sm_type = "line" if facet_n <= 7 else "small_multiples"
+            A.append({"id": "a_sm", "type": sm_type, "measure": primary,
                       "dimension": f"{_TABLE}.{temporal}",
                       "breakdown": f"{_TABLE}.{facet_cat}",
                       "title": f"{plabel} over Month, by {_human(facet_cat)}",
-                      "width": 12, "height": 300, "tab": "Trends"})
+                      "width": 12, "height": 320, "tab": "Trends"})
 
     # ---- Breakdowns: stacked (2 cuts) + grouped + one donut ----
     cat_cols = [d for d, _ in dims if d != "month"]   # drill hierarchy source
