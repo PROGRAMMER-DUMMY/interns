@@ -131,7 +131,7 @@ def build_crossfilter_chips(crossfilter: dict[str, Any]) -> list:
 def _slicer(f: Filter, state) -> html.Div:
     sid = {"kind": "slicer", "field": f.field}
     table, col = split_field(f.field)
-    label = f.label or col
+    label = f.label or col or f.field        # bare 'column' has no table part
     if f.type == "date_range":
         # DatePickerRange exposes start_date/end_date (not `value`), so it uses a
         # distinct id kind that the widgets callback reads separately.
@@ -162,10 +162,22 @@ def _slicer(f: Filter, state) -> html.Div:
 
 
 def _distinct(state, field: str, limit: int = 500) -> list:
-    table = split_field(field)[0]
-    s = state.model.assemble(table, [field]).get_column(field).drop_nulls()
-    vals = sorted(s.unique().to_list(), key=lambda v: str(v))
-    return vals[:limit]
+    if "." in field:
+        table = split_field(field)[0]
+        s = state.model.assemble(table, [field]).get_column(field).drop_nulls()
+        return sorted(s.unique().to_list(), key=lambda v: str(v))[:limit]
+    # Logical / global slicer (bare column): union the column's distinct values
+    # across every table that has it, so one control spans several tables.
+    vals: set = set()
+    for t in state.project.tables:
+        try:
+            cols = state.model.columns(t.name)
+        except Exception:
+            continue
+        col = next((c for c in cols if c.lower() == field.lower()), None)
+        if col:
+            vals |= set(state.model.table_df(t.name).get_column(col).drop_nulls().unique().to_list())
+    return sorted(vals, key=lambda v: str(v))[:limit]
 
 
 # ---------------------------------------------------------------------------

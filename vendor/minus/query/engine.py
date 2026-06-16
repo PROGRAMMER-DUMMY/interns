@@ -26,6 +26,14 @@ from minus.query import measures as M
 _IDENT = re.compile(r"[A-Za-z_]\w*")
 
 
+def _ci_resolve(name: str, cols: list[str]) -> Optional[str]:
+    """Case-insensitive column lookup ('gender' -> 'Gender'), or None."""
+    if name in cols:
+        return name
+    low = name.lower()
+    return next((c for c in cols if c.lower() == low), None)
+
+
 @dataclass
 class QueryResult:
     frame: pl.DataFrame                 # tidy: dimension cols + measure-name cols
@@ -91,10 +99,15 @@ class QueryEngine:
         raise ValueError(f"widget {widget.id!r}: cannot infer base table")
 
     def applicable_filters(self, widget: Widget, filters: Filters) -> Filters:
-        """Drop filters whose table can't be join-reached from this widget's base
-        table. A cross-filter on a multi-KPI scorecard (each card from its own,
-        unrelated gold table) then becomes a no-op for the unrelated tiles
-        instead of raising 'no relationship path' and rendering an error tile."""
+        """Resolve a page's filters to THIS widget's data.
+
+        - A dotted ``table.column`` filter is kept only when that table is
+          join-reachable from the widget's base (so a cross-filter on a multi-KPI
+          scorecard is a no-op for unrelated tiles instead of erroring).
+        - A bare ``column`` filter is a *logical / global slicer*: it is rebound
+          to the widget's own base-table column when that column exists, and
+          dropped when it doesn't. One slicer can thus span several unrelated
+          tables (e.g. a Gender slicer over independent KPI gold tables)."""
         if not filters:
             return filters
         try:
@@ -102,10 +115,21 @@ class QueryEngine:
         except (ValueError, KeyError):
             return filters
         keep: Filters = {}
+        base_cols: Optional[list[str]] = None
         for key, val in filters.items():
-            table = split_field(key)[0] if "." in key else base
-            if table == base or self.model.reachable(base, table):
-                keep[key] = val
+            if "." in key:
+                table = split_field(key)[0]
+                if table == base or self.model.reachable(base, table):
+                    keep[key] = val
+                continue
+            if base_cols is None:
+                try:
+                    base_cols = self.model.columns(base)
+                except Exception:
+                    base_cols = []
+            col = _ci_resolve(key, base_cols)
+            if col:
+                keep[f"{base}.{col}"] = val
         return keep
 
     def _agg_fields(self, ms: list[Measure]) -> dict[str, Optional[str]]:

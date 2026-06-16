@@ -166,7 +166,11 @@ def _check_dashboard(d: Dashboard, p: Project, source: Path) -> None:
     page_ids = None  # cross-page drilldown checked at app build time
 
     for f in d.filters:
-        errs.extend(_check_field(f.field, tbl_names, f"filter {f.id!r}.field"))
+        # A dotted 'table.column' filter is validated against the model; a bare
+        # 'column' is a logical/global slicer resolved per-widget at render time
+        # (it no-ops where the column is absent), so there's no table to check.
+        if "." in f.field:
+            errs.extend(_check_field(f.field, tbl_names, f"filter {f.id!r}.field"))
 
     wid_seen: set[str] = set()
     for w in d.widgets:

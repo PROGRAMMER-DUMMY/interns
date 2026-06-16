@@ -283,6 +283,48 @@ class TestCrossFilterScoping(unittest.TestCase):
                                  f"{wbase} must not receive {dim}")
 
 
+@unittest.skipUnless((_WS / "interns/state/medallion/bronze").exists(),
+                     "bronze layer not present")
+class TestLogicalGlobalFilters(unittest.TestCase):
+    """A bare-column page filter is a logical/global slicer: it rebinds to each
+    widget's own table column and no-ops where that column is absent, so one
+    Gender slicer can cut across independent KPI gold tables."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.layout = WorkspaceLayout(project_root=_WS.resolve())
+        generate(cls.layout)
+
+    def _state(self):
+        from minus.render.app import AppState
+        return AppState(minus_root(self.layout))
+
+    def test_kpi_page_has_shared_bare_column_filters(self):
+        state = self._state()
+        kpis = next(p for p in state.pages if p.id == "kpis")
+        fields = [f.field for f in kpis.filters]
+        self.assertTrue(fields, "expected shared KPI slicers")
+        # at least one is a bare column (logical/global), not table.column
+        self.assertTrue(any("." not in f for f in fields), fields)
+
+    def test_logical_filter_rebinds_or_noops_per_widget(self):
+        state = self._state()
+        kpis = next(p for p in state.pages if p.id == "kpis")
+        cards = [w for w in kpis.widgets if not w.dimension]
+        applied = noop = 0
+        for w in cards:
+            base = state.engine._base_table(w, state.engine._measures_for(w))
+            scoped = state.engine.applicable_filters(w, {"Gender": "Male"})
+            state.engine.run(w, scoped)            # must never raise
+            if scoped:
+                self.assertEqual(scoped, {f"{base}.Gender": "Male"})
+                applied += 1
+            else:
+                noop += 1
+        self.assertGreater(applied, 0)             # some KPI has Gender
+        self.assertGreater(noop, 0)                # some KPI does not
+
+
 class TestConnectionReuseAndTimeout(unittest.TestCase):
     """Phase 1: the model reuses one DuckDB connection (guarded by a lock), and a
     watchdog interrupts a runaway query so it can't hold that lock forever."""

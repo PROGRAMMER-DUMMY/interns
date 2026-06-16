@@ -287,11 +287,32 @@ def _kpi_artifacts(layout: WorkspaceLayout):
 
     if not cards:
         return tables, measures, None, exports
+
+    # Logical/global slicers: a dimension shared by >=2 KPI gold tables (and low
+    # cardinality) becomes a page-level filter. engine.applicable_filters rebinds
+    # it to each KPI's own column, so e.g. one Gender slicer filters every
+    # gender-bearing KPI at once -- a "decisive" cut across the scorecard --
+    # while KPIs lacking that dimension simply ignore it.
+    col_tables: dict[str, list] = {}
+    for _kid, km2, g in infos:
+        for c in g.columns:
+            if c == km2.measure or c.lower().endswith("id") or c.lower() == "month":
+                continue
+            col_tables.setdefault(c, []).append(g)
+    kpi_filters = []
+    for col in sorted(col_tables):
+        golds = col_tables[col]
+        if len(golds) < 2:
+            continue
+        if max(g.get_column(col).n_unique() for g in golds) <= 40:
+            kpi_filters.append({"id": f"kf_{_slug(col)}", "field": col,
+                                "label": _human(col), "type": "multi"})
     page = {
         "id": "kpis", "title": "KPIs", "order": 5,
-        "description": "All defined KPIs at a glance, served from validated gold.",
-        "filters": [],
-        "widgets": cards + charts,   # scorecard row, then a lead chart per KPI
+        "description": "All defined KPIs at a glance, served from validated gold. "
+                       "Shared slicers cut across every KPI that has the dimension.",
+        "filters": kpi_filters[:4],
+        "widgets": cards + charts,   # scorecard row, then per-KPI chart tabs
     }
     return tables, measures, page, exports
 
