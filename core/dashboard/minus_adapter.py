@@ -177,11 +177,13 @@ def _kpi_artifacts(layout: WorkspaceLayout):
     """
     tables: list[dict[str, Any]] = []
     measures: list[dict[str, Any]] = []
-    widgets: list[dict[str, Any]] = []   # per-KPI: card + panels, one tab each
+    cards: list[dict[str, Any]] = []     # ALL KPI cards together (one scorecard row)
+    charts: list[dict[str, Any]] = []    # one lead chart per KPI, beside the row
     exports: dict[str, pl.DataFrame] = {}
 
     kpis = list_gold_kpis(layout)
-    used_tabs: set = set()
+    n = max(1, len(kpis))
+    span = max(3, 12 // n)               # cards + charts fill the 12-col row evenly
     for kpi_id in kpis:
         gold = read_gold(layout, kpi_id)
         if gold is None or gold.height == 0:
@@ -195,26 +197,25 @@ def _kpi_artifacts(layout: WorkspaceLayout):
                        "file": f"{tname}.parquet", "label": km.card_label})
         measures.append({"name": mslug, "label": km.card_label, "agg": "sum",
                          "field": f"{tname}.{km.measure}", "fmt": fmt})
-        # One TAB per KPI (no scrolling): the card + its rich recommended panels.
-        tab = km.card_label
-        if tab in used_tabs and km.cuts:
-            tab = f"{tab} ({_human(km.cuts[0])})"
-        used_tabs.add(tab)
-        kpi_widgets = [{"id": f"k_{tname}", "type": "kpi", "measure": mslug,
-                        "width": 3, "height": 132}]
-        rich = _kpi_panel_widgets(tname, mslug, km.card_label, km.measure, gold, km.panels or [])
-        kpi_widgets += (rich or _kpi_breakdown_charts(tname, mslug, km.card_label, gold, km.cuts))
-        for w in kpi_widgets:
-            w["tab"] = tab
-        widgets.extend(kpi_widgets)
+        cards.append({"id": f"k_{tname}", "type": "kpi", "measure": mslug,
+                      "width": span, "height": 132})
+        # one lead chart per KPI (its most-informative recommended panel) so all
+        # KPIs sit together at a glance -- no per-KPI tabs/sections, no scrolling.
+        lead = _kpi_panel_widgets(tname, mslug, km.card_label, km.measure, gold, km.panels or [])[:1]
+        if not lead:
+            lead = _kpi_breakdown_charts(tname, mslug, km.card_label, gold, km.cuts)[:1]
+        for w in lead:
+            w["width"] = span
+            w["height"] = 300
+        charts.extend(lead)
 
-    if not widgets:
+    if not cards:
         return tables, measures, None, exports
     page = {
         "id": "kpis", "title": "KPIs", "order": 5,
-        "description": "Each defined KPI in its own tab, served from validated gold.",
+        "description": "All defined KPIs at a glance, served from validated gold.",
         "filters": [],
-        "widgets": widgets,
+        "widgets": cards + charts,   # scorecard row, then a lead chart per KPI
     }
     return tables, measures, page, exports
 
