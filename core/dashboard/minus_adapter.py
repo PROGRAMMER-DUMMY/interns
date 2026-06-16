@@ -273,6 +273,16 @@ def _kpi_artifacts(layout: WorkspaceLayout):
             hero.pop("tab", None)         # untabbed -> joins the single grid
             if hero["type"] in ("bar", "hbar"):
                 xcol = hero["dimension"].split(".")[-1]
+                # Enrich a single-series hero with a low-cardinality second cut
+                # (a colour split) so each chart carries more than one dimension
+                # -- without adding x categories that would overlap.
+                if not hero.get("breakdown"):
+                    for c in km.cuts:
+                        if c == xcol or c.lower() == "month" or c not in gold.columns:
+                            continue
+                        if 2 <= gold.get_column(c).n_unique() <= 6:
+                            hero["breakdown"] = f"{tname}.{c}"
+                            break
                 bd = (hero.get("breakdown") or "").split(".")[-1]
                 rest = [c for c in km.cuts
                         if c not in (xcol, bd) and c.lower() != "month"]

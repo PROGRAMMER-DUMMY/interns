@@ -137,8 +137,11 @@ def _chart(widget, result, project, page_id, highlight=None, colors=None):
     val = result.measures if multi else primary
     if t in ("bar", "hbar"):
         if t == "hbar":
+            # With a second cut, STACK (one bar per category, coloured segments)
+            # -- a grouped hbar would explode into a forest of thin bars.
             fig = px.bar(df, y=dim, x=val, color=breakdown, orientation="h",
-                         barmode="group", labels=labels, **seq)
+                         barmode="stack" if breakdown else "group",
+                         labels=labels, **seq)
         else:
             fig = px.bar(df, x=dim, y=val, color=breakdown, barmode="group",
                          labels=labels, **seq)
@@ -273,8 +276,20 @@ def _style(fig, widget, colors):
         showlegend=is_pie or bool(fig.data and len(fig.data) > 1),
     )
     # hide data labels that don't fit (prevents overlap on thin bars)
-    if widget.type in ("bar", "hbar"):
+    if widget.type in ("bar", "hbar", "stacked_bar"):
         fig.update_layout(uniformtext=dict(minsize=8, mode="hide"))
+        # Stop a few categories (e.g. after a drill leaves 1-2) from ballooning
+        # into giant square blocks: widen the gap so bars stay a sane width.
+        try:
+            tr = fig.data[0]
+            cats = tr.y if widget.type == "hbar" else tr.x
+            ncat = len({str(c) for c in cats}) if cats is not None else 0
+        except Exception:
+            ncat = 0
+        if ncat and ncat <= 2:
+            fig.update_layout(bargap=0.74)
+        elif ncat and ncat <= 5:
+            fig.update_layout(bargap=0.5)
     fig.update_xaxes(showgrid=False, zeroline=False, automargin=True,
                      title_text="", tickfont=dict(size=11, color=colors["muted"]))
     fig.update_yaxes(showgrid=True, gridcolor=colors["grid"], zeroline=False,
