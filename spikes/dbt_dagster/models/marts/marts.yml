@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: fct_kpi_001_paid_trend
+    description: "KPI-001 paid trend. Reconciles to gold/kpi_001_results."
+    columns:
+      - name: sum_paidamount
+        tests: [not_null]
+  - name: fct_kpi_002_lives_share
+    description: "KPI-002 lives share (single attribution; shares sum to 100%)."
+    columns:
+      - name: percentage_share
+        tests: [not_null]
+  - name: fct_kpi_003_top_payers
+    description: "KPI-003 top-10 Commercial payers. Reconciles to gold."
+    columns:
+      - name: sum_paidamount
+        tests: [not_null]

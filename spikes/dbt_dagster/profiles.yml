@@ -1,0 +1,10 @@
+# dbt-duckdb profile. The delta extension lets sources read the bronze Delta
+# tables in place (same engine the live dashboard's pushdown already uses).
+hospital_a_spike:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ':memory:'
+      extensions:
+        - delta

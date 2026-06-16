@@ -11,6 +11,20 @@ The per-workspace dashboard is now the **real MinusAnalyst Power BI app** (vendo
 model** built from the medallion. Two sections: **KPIs** (scorecard of the workspace's defined
 KPIs, from gold) and **Analysis** (silver-layer exploration with dense, multi-cut charts).
 
+## 1b. Phased plan status (2026-06-16)
+
+A production-rate review of the live query path drove a 3-phase plan:
+- **Phase 1 — production-rate hardening: DONE** (commit `fc524cc`). Result cache
+  (LRU, generation-invalidated) + persistent DuckDB connection reuse + concurrency
+  lock + query-timeout watchdog. Fixes the click-render lag. 8 tests; green-gate passes.
+- **Phase 2 — dbt Core + Dagster spike: DONE (spike).** `spikes/dbt_dagster/` —
+  the medallion + 3 KPIs expressed as a real dbt project; `validate_spike.py` proves
+  the marts reconcile to gold exactly with governance (PII drop, approved-edge joins,
+  single-attribution share) intact. Verdict + recommendation in
+  `spikes/dbt_dagster/FINDINGS.md`. Not wired into the product — decision pending.
+- **Phase 3 — TB-scale-out: DESIGN ONLY** (needs infra). Distributed pushdown,
+  rollup cube, optional Cube.dev semantic layer. See `docs/dashboard_scaleout_design.md`.
+
 ## 2. How to run / verify
 
 ```
@@ -61,14 +75,19 @@ Generated MinusAnalyst project + parquet land under `workspaces/<ws>/interns/sta
 - [ ] **Open the PR** — branch is pushed; `gh` not installed + GitHub MCP token invalid.
       Link: https://github.com/PROGRAMMER-DUMMY/interns/pull/new/feature/dashboard-powerbi-live
 - [ ] **Production hardening (deferred by request):**
-      - Result **caching** (Flask-Caching / functools) — fixes the click-render lag (MinusAnalyst
-        re-renders the whole page server-side per interaction).
+      - [x] Result **caching** — DONE (commit `fc524cc`): `QueryEngine.run` is a bounded LRU keyed
+        by (data-generation, widget, filters); kills the click-render lag. Plus persistent DuckDB
+        connection reuse + a concurrency lock + a query-timeout watchdog (`MINUS_QUERY_TIMEOUT`,
+        default 30s). See "Phased plan status" below.
       - **Row-level security / role-based views** (HIPAA); only a loopback-token guard exists today.
       - **Mobile layout**, **data-freshness badge**.
       - Serve behind a **production WSGI** (gunicorn) instead of the Flask dev server.
 - [ ] **Incremental medallion upstream** — the KPI pipeline still does FULL recompute. For TB scale
       it must become bronze-append + silver-MERGE (the `core/medallion/merge_emitter.py` design) +
-      partition-scoped gold; `--refresh` already consumes whatever gold exists.
+      partition-scoped gold; `--refresh` already consumes whatever gold exists. A **dbt Core +
+      Dagster** approach to this was prototyped and validated — see `spikes/dbt_dagster/FINDINGS.md`
+      (dbt incremental marts close this gap; recommendation = adopt behind a flag, one workspace at
+      a time).
 
 ### Medium
 - [ ] **KPI exec polish:** auto **insight line** per card ("↑4% vs last quarter, above target");
@@ -81,12 +100,15 @@ Generated MinusAnalyst project + parquet land under `workspaces/<ws>/interns/sta
       assumes a date axis.
 
 ### Lower / Stage 4 (TB scale — design only, needs infra)
+**Full design now written up in `docs/dashboard_scaleout_design.md` (with trigger thresholds —
+don't build early).** Summary:
 - [ ] Distributed/warehouse **pushdown connector** (Databricks SQL / Trino / ClickHouse / StarRocks);
-      only the DuckDB-over-parquet file-scan slice is built.
+      only the DuckDB-over-parquet file-scan slice is built. Add as a sibling executor behind the
+      existing `run_pushdown` contract; the Phase 1 cache sits above it unchanged.
 - [ ] **Liquid clustering** on filter/join keys; **materialized views / per-KPI rollup cube** for
-      sub-second cross-filter at TB.
-- [ ] **Cube.dev semantic layer** (governed metrics + MCP + pre-aggregations) — converges the
-      precompute/MCP/governed-KPI goals.
+      sub-second cross-filter at TB (authored as a dbt incremental model — reuses Phase 2).
+- [ ] **Cube.dev semantic layer** (governed metrics + MCP + pre-aggregations) — optional; only when
+      metric consistency across BI+API+LLM becomes a hard requirement.
 
 ## 5. Known issues / caveats
 
