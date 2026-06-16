@@ -24,7 +24,7 @@ PALETTE = ["#C2603C", "#3F6B5E", "#C9952F", "#6E7F94",
 
 
 def render_widget(widget: Widget, result: QueryResult, project: Project,
-                  page_id: str, highlight=None) -> html.Div:
+                  page_id: str, highlight=None, drill_crumb=None) -> html.Div:
     style = {"gridColumn": f"span {widget.width}", "height": f"{widget.height}px"}
     if widget.type == "kpi":
         return html.Div(_kpi(widget, result, project), className="tile kpi kpi-accent",
@@ -36,13 +36,27 @@ def render_widget(widget: Widget, result: QueryResult, project: Project,
         body = _chart(widget, result, project, page_id, highlight, colors)
     title = widget.title or ""
     head_bits = [html.P(title, className="tile-title")] if title else [html.Span()]
-    extras = []
     if widget.export:
         head_bits.append(html.Button("CSV", n_clicks=0, className="csv-btn",
                                      id={"kind": "export", "page": page_id, "wid": widget.id}))
-        extras.append(dcc.Download(id={"kind": "download", "page": page_id, "wid": widget.id}))
+    extras = [dcc.Download(id={"kind": "download", "page": page_id, "wid": widget.id})] \
+        if widget.export else []
     header = [html.Div(head_bits, className="tile-head")] if (title or widget.export) else []
+    if drill_crumb is not None:
+        header = [drill_crumb] + header
     return html.Div(header + [body] + extras, className="tile", style=style)
+
+
+def drill_crumb(page_id: str, wid: str, trail: list, next_dim: str) -> html.Div:
+    """Breadcrumb + 'up' control for a drilled-down chart."""
+    steps = [html.Span(f"{_short(dim)}: {label}", className="drill-step")
+             for dim, label in trail]
+    return html.Div(className="drill-crumb", children=[
+        html.Button("↑ up", id={"kind": "drill-up", "page": page_id, "wid": wid},
+                    n_clicks=0, className="drill-up-btn", title="Drill up one level"),
+        *steps,
+        html.Span(f"→ by {_short(next_dim)}", className="drill-next"),
+    ])
 
 
 # ---------------------------------------------------------------------------

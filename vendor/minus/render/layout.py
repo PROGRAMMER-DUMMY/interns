@@ -14,7 +14,9 @@ from dash import dcc, html
 
 from minus.config.models import Dashboard, Filter
 from minus.data.model import split_field
+from minus.render.interactions import drill_state
 from minus.render.widgets import render_widget
+from minus.render.widgets.render import drill_crumb as build_drill_crumb
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +39,8 @@ def app_shell(state) -> html.Div:
                          disabled=not state.project.refresh_seconds),
             dcc.Store(id="config-version", data=state.version),
             dcc.Store(id="crossfilter", data={}),
+            # Per-widget in-place drill-down position {page: {wid: {level, trail}}}.
+            dcc.Store(id="drill", data={}),
             # Remembers the active widget tab so a cross-filter re-render keeps it.
             dcc.Store(id="active-tab", data=None),
             # Panel visibility persists in the browser session.
@@ -169,7 +173,7 @@ def _distinct(state, field: str, limit: int = 500) -> list:
 # ---------------------------------------------------------------------------
 
 
-def _render_tile(w, state, page, filters, crossfilter):
+def _render_tile(w, state, page, filters, crossfilter, drill=None):
     try:
         wf = dict(filters)
         wf.update(crossfilter)
@@ -180,8 +184,22 @@ def _render_tile(w, state, page, filters, crossfilter):
         # Scope the cross-filter: a click on one KPI's chart must not error the
         # sibling tiles of an unrelated-table scorecard -- they just ignore it.
         wf = state.engine.applicable_filters(w, wf)
-        result = state.engine.run(w, wf)
-        return render_widget(w, result, state.project, page.id, highlight)
+
+        # In-place drill-down: override the chart's dimension to the current
+        # drill level and filter to the drilled-into categories, with a crumb.
+        eff, crumb = w, None
+        path = list(getattr(w, "drill_path", []) or [])
+        ds = drill_state(drill, page.id, w.id) if (drill and path) else None
+        if ds and ds.get("level", 0) > 0 and w.dimension:
+            table = split_field(w.dimension)[0]
+            for dim_name, label in ds.get("trail", []):
+                wf[f"{table}.{dim_name}"] = label
+            level = min(ds["level"], len(path) - 1)
+            eff = w.model_copy(update={"dimension": f"{table}.{path[level]}"})
+            crumb = build_drill_crumb(page.id, w.id, ds.get("trail", []), path[level])
+
+        result = state.engine.run(eff, wf)
+        return render_widget(eff, result, state.project, page.id, highlight, crumb)
     except Exception as exc:  # surface per-tile errors instead of crashing the page
         return html.Div(
             className="tile", style={"gridColumn": f"span {w.width}"},
@@ -191,7 +209,8 @@ def _render_tile(w, state, page, filters, crossfilter):
 
 def build_widgets(page: Dashboard, state, filters: dict[str, Any],
                   crossfilter: dict[str, Any] | None = None,
-                  active_tab: str | None = None) -> list:
+                  active_tab: str | None = None,
+                  drill: dict[str, Any] | None = None) -> list:
     """Render the page's tiles.
 
     ``filters`` are page slicers; ``crossfilter`` are click selections. A click
@@ -212,21 +231,30 @@ def build_widgets(page: Dashboard, state, filters: dict[str, Any],
         groups.setdefault(getattr(w, "tab", None) or "", []).append(w)
 
     def grid_for(ws):
-        return html.Div([_render_tile(w, state, page, filters, crossfilter) for w in ws],
-                        className="grid")
+        return html.Div([_render_tile(w, state, page, filters, crossfilter, drill)
+                         for w in ws], className="grid")
 
     # No tabs declared -> a single grid (original behavior).
     if len(groups) == 1 and "" in groups:
         return [grid_for(groups[""])]
 
-    labels = list(groups.keys())
-    value = active_tab if active_tab in labels else labels[0]
-    return [dcc.Tabs(
-        id="widget-tabs", value=value, className="widget-tabs",
-        children=[dcc.Tab(label=lbl or "Other", value=lbl,
-                          className="widget-tab", selected_className="widget-tab--sel",
-                          children=[grid_for(ws)]) for lbl, ws in groups.items()],
-    )]
+    blocks: list = []
+    # Untabbed widgets render as a PERSISTENT grid above the tabs (e.g. a KPI
+    # scorecard that stays visible while you switch the per-KPI chart tabs),
+    # rather than being shoved into an "Other" tab.
+    if "" in groups:
+        blocks.append(grid_for(groups.pop("")))
+
+    if groups:
+        labels = list(groups.keys())
+        value = active_tab if active_tab in labels else labels[0]
+        blocks.append(dcc.Tabs(
+            id="widget-tabs", value=value, className="widget-tabs",
+            children=[dcc.Tab(label=lbl or "Other", value=lbl,
+                              className="widget-tab", selected_className="widget-tab--sel",
+                              children=[grid_for(ws)]) for lbl, ws in groups.items()],
+        ))
+    return blocks
 
 
 # ---------------------------------------------------------------------------

@@ -258,15 +258,32 @@ def _kpi_artifacts(layout: WorkspaceLayout):
             card["compare_period"] = "quarter"
         cards.append(card)
 
-        # one lead chart per KPI (its most-informative recommended panel) so all
-        # KPIs sit together at a glance -- no per-KPI tabs/sections, no scrolling.
-        lead = _kpi_panel_widgets(tname, mslug, km.card_label, km.measure, gold, km.panels or [])[:1]
-        if not lead:
-            lead = _kpi_breakdown_charts(tname, mslug, km.card_label, gold, km.cuts)[:1]
-        for w in lead:
-            w["width"] = span
-            w["height"] = 300
-        charts.extend(lead)
+        # The cards stay untabbed (a persistent scorecard); each KPI's rich
+        # recommended cut-charts go under its OWN tab so nothing scrolls. The
+        # recommender already chose multi-cut panels (grouped/stacked/heatmap/
+        # multi-series) -- render them, richest (2-cut) first.
+        tab_label = (kws.get(kpi_id) or km.card_label or kpi_id).strip()[:22]
+        panels = _kpi_panel_widgets(tname, mslug, km.card_label, km.measure,
+                                    gold, km.panels or [])
+        if not panels:
+            panels = _kpi_breakdown_charts(tname, mslug, km.card_label, gold, km.cuts)
+        # surface the richer 2-cut panels (those with a breakdown) first
+        panels.sort(key=lambda w: 0 if w.get("breakdown") else 1)
+        panels = panels[:3]
+        for w in panels:
+            w["tab"] = tab_label
+            w["height"] = 330
+            w["width"] = 12 if (len(panels) == 1 or w["type"] == "heatmap") else 6
+            # PowerBI-style in-place drill on single-dim bars: click a category
+            # -> redraw THIS chart by the next cut, filtered to that category.
+            if w["type"] in ("bar", "hbar"):
+                xcol = w["dimension"].split(".")[-1]
+                bd = (w.get("breakdown") or "").split(".")[-1]
+                rest = [c for c in km.cuts
+                        if c not in (xcol, bd) and c.lower() != "month"]
+                if rest:
+                    w["drill_path"] = [xcol] + rest[:2]   # depth up to 3 levels
+        charts.extend(panels)
 
     if not cards:
         return tables, measures, None, exports
@@ -330,7 +347,7 @@ def _kpi_panel_widgets(tname, mslug, label, measure_col, gold, panels) -> list[d
     cols = list(gold.columns)
     out: list[dict[str, Any]] = []
     seen: set = set()
-    for i, panel in enumerate(panels[:5]):
+    for i, panel in enumerate(panels[:8]):
         ct = str(panel.get("chart_type") or "").lower()
         if ct in ("big_number", ""):
             continue
@@ -451,16 +468,24 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
                       "width": 12, "height": 300, "tab": "Trends"})
 
     # ---- Breakdowns: stacked (2 cuts) + grouped + one donut ----
+    cat_cols = [d for d, _ in dims if d != "month"]   # drill hierarchy source
+
+    def _drill(xcol, exclude):
+        rest = [c for c in cat_cols if c not in exclude][:2]
+        return [xcol] + rest if rest else []
+
     if cat1 and stack_cat and cat1 != stack_cat:
         A.append({"id": "a_stack", "type": "stacked_bar", "measure": primary,
                   "dimension": f"{_TABLE}.{cat1}", "breakdown": f"{_TABLE}.{stack_cat}",
                   "title": f"{plabel} by {_human(cat1)}, split by {_human(stack_cat)}",
-                  "width": 12, "height": 380, "tab": "Breakdowns"})
+                  "width": 12, "height": 380, "tab": "Breakdowns",
+                  "drill_path": _drill(cat1, {cat1, stack_cat})})
     if group_cat and facet_cat and group_cat != facet_cat:
         A.append({"id": "a_group", "type": "bar", "measure": primary,
                   "dimension": f"{_TABLE}.{group_cat}", "breakdown": f"{_TABLE}.{facet_cat}",
                   "title": f"{plabel} by {_human(group_cat)} x {_human(facet_cat)}",
-                  "width": 6, "height": 340, "tab": "Breakdowns"})
+                  "width": 6, "height": 340, "tab": "Breakdowns",
+                  "drill_path": _drill(group_cat, {group_cat, facet_cat})})
     if donut_cat:
         A.append({"id": "a_donut", "type": "donut", "measure": "record_count",
                   "dimension": f"{_TABLE}.{donut_cat}",

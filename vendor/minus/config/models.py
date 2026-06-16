@@ -252,6 +252,12 @@ class Widget(_Base):
     drilldown: Optional[str] = Field(
         None, description="Page id to navigate to when a data point is clicked."
     )
+    drill_path: list[str] = Field(
+        default_factory=list,
+        description="Ordered dimension columns for in-place drill-down. Clicking a "
+        "category re-renders THIS chart by the next dimension, filtered to the "
+        "clicked value (PowerBI-style). drill_path[0] is the top level.",
+    )
     conditional: list[ConditionalRule] = Field(
         default_factory=list,
         description="Conditional formatting rules for table widgets (data bars, "

@@ -55,3 +55,47 @@ def apply_interaction(trigger: Any, value: Any, crossfilter: dict,
         return cf, NO_NAV
 
     return None, NO_NAV
+
+
+# ---------------------------------------------------------------------------
+# In-place hierarchical drill-down (PowerBI-style): a click on a drillable
+# chart re-renders THAT chart by the next dimension, filtered to the clicked
+# category. Per-widget state {level, trail=[[dim,label],...]} lives in a store.
+# ---------------------------------------------------------------------------
+
+
+def _clone_drill(drill: dict) -> dict:
+    return {p: {w: dict(s) for w, s in ws.items()}
+            for p, ws in (drill or {}).items()}
+
+
+def drill_state(drill: dict, page_id: str, wid: str) -> dict:
+    """The widget's current drill position (level + breadcrumb trail)."""
+    return (drill or {}).get(page_id, {}).get(wid) or {"level": 0, "trail": []}
+
+
+def drill_descend(drill: dict, page_id: str, wid: str,
+                  path: list, label: Any) -> Optional[dict]:
+    """Record (current_dim, label) and go one level deeper. Returns the new
+    drill state, or None when already at the deepest level (the caller then
+    falls back to plain cross-filtering)."""
+    cur = drill_state(drill, page_id, wid)
+    level = int(cur.get("level", 0))
+    if not path or level >= len(path) - 1:
+        return None
+    new = _clone_drill(drill)
+    trail = list(cur.get("trail", [])) + [[path[level], label]]
+    new.setdefault(page_id, {})[wid] = {"level": level + 1, "trail": trail}
+    return new
+
+
+def drill_ascend(drill: dict, page_id: str, wid: str) -> Optional[dict]:
+    """Pop one drill level for a widget. None if already at the top level."""
+    cur = drill_state(drill, page_id, wid)
+    level = int(cur.get("level", 0))
+    if level <= 0:
+        return None
+    new = _clone_drill(drill)
+    trail = list(cur.get("trail", []))[:-1]
+    new.setdefault(page_id, {})[wid] = {"level": level - 1, "trail": trail}
+    return new

@@ -16,7 +16,12 @@ from dash.exceptions import PreventUpdate
 
 from minus.agent.bridge import build_prompt, run_agent
 from minus.render import layout as L
-from minus.render.interactions import NO_NAV, apply_interaction
+from minus.render.interactions import (
+    NO_NAV,
+    apply_interaction,
+    drill_ascend,
+    drill_descend,
+)
 
 
 def _page_id(pathname: str | None, state):
@@ -115,11 +120,12 @@ def register_callbacks(app, state) -> None:
         Input({"kind": "slicer-date", "field": ALL}, "start_date"),
         Input({"kind": "slicer-date", "field": ALL}, "end_date"),
         Input("crossfilter", "data"),
+        Input("drill", "data"),
         Input("config-version", "data"),
         State("url", "pathname"),
         State("active-tab", "data"),
     )
-    def _widgets(_vals, _starts, _ends, cf, _ver, pathname, active_tab):
+    def _widgets(_vals, _starts, _ends, cf, drill, _ver, pathname, active_tab):
         page = _page_id(pathname, state)
         if page is None:
             raise PreventUpdate
@@ -149,7 +155,7 @@ def register_callbacks(app, state) -> None:
         # Keep slicers and click selections separate so the clicked chart can
         # highlight (not self-filter). Slicers still filter every widget.
         cross = (cf or {}).get(page.id, {})
-        return L.build_widgets(page, state, filters, cross, active_tab)
+        return L.build_widgets(page, state, filters, cross, active_tab, drill)
 
     # ----- remember the active widget tab (so cross-filter keeps it) ----
     @app.callback(
@@ -185,25 +191,57 @@ def register_callbacks(app, state) -> None:
         result = state.engine.run(widget, filters)
         return dcc.send_string(result.frame.write_csv(), f"{page.id}_{widget.id}.csv")
 
-    # ----- crossfilter / drill-through / reset ---------------------------
+    # ----- crossfilter / in-place drill / drill-through / reset ----------
     @app.callback(
         Output("crossfilter", "data"),
+        Output("drill", "data"),
         Output("url", "pathname"),
         Input({"kind": "graph", "page": ALL, "wid": ALL, "dim": ALL, "drill": ALL}, "clickData"),
         Input({"kind": "cf-remove", "field": ALL}, "n_clicks"),
+        Input({"kind": "drill-up", "page": ALL, "wid": ALL}, "n_clicks"),
         Input("reset-filters", "n_clicks"),
         State("crossfilter", "data"),
+        State("drill", "data"),
         State("url", "pathname"),
         prevent_initial_call=True,
     )
-    def _crossfilter(_clicks, _removes, _reset, cf, pathname):
+    def _interact(_clicks, _removes, _ups, _reset, cf, drill, pathname):
         page = _page_id(pathname, state)
         page_id = page.id if page else ""
+        trig = ctx.triggered_id
         value = ctx.triggered[0]["value"] if ctx.triggered else None
-        new_cf, nav = apply_interaction(ctx.triggered_id, value, cf or {}, page_id)
+
+        # Reset clears BOTH cross-filter and drill state for a clean slate.
+        if trig == "reset-filters":
+            return {}, {}, no_update
+
+        # Drill-up button on a drilled tile.
+        if isinstance(trig, dict) and trig.get("kind") == "drill-up":
+            if not value:                       # ignore the mount event
+                raise PreventUpdate
+            nd = drill_ascend(drill or {}, page_id, trig["wid"])
+            if nd is None:
+                raise PreventUpdate
+            return no_update, nd, no_update
+
+        # Click on a chart: drill in place when the widget is drillable and not
+        # yet at its deepest level; otherwise fall back to cross-filtering.
+        if isinstance(trig, dict) and trig.get("kind") == "graph" and value:
+            widget = next((w for w in page.widgets if w.id == trig.get("wid")), None) \
+                if page else None
+            path = list(getattr(widget, "drill_path", []) or []) if widget else []
+            if path:
+                pt = (value.get("points") or [{}])[0]
+                label = pt.get("label", pt.get("x", pt.get("y")))
+                nd = drill_descend(drill or {}, page_id, trig["wid"], path, label)
+                if nd is not None:
+                    return no_update, nd, no_update
+                # already deepest -> fall through to cross-filter below
+
+        new_cf, nav = apply_interaction(trig, value, cf or {}, page_id)
         if new_cf is None:
             raise PreventUpdate
-        return new_cf, (no_update if nav is NO_NAV else nav)
+        return new_cf, no_update, (no_update if nav is NO_NAV else nav)
 
     # ----- chat -> agent -------------------------------------------------
     if state.project.agent.enabled:
