@@ -234,7 +234,8 @@ def _chart(widget, result, project, page_id, highlight=None, colors=None):
             showlegend=True,
             yaxis2=dict(overlaying="y", side="right", showgrid=False,
                         tickfont=dict(size=11, color=colors["muted"])),
-            legend=dict(orientation="h", yanchor="bottom", y=-0.22, x=0, title_text=""),
+            legend=dict(orientation="h", yanchor="top", y=-0.18, x=0.5,
+                        xanchor="center", title_text=""),
         )
 
     # Donut/pie: show a legend, and a center total for donuts (self-explanatory).
@@ -265,6 +266,16 @@ def _style(fig, widget, colors):
     elif widget.type == "hbar":
         margin["r"] = 66
     is_pie = bool(fig.data) and getattr(fig.data[0], "type", "") == "pie"
+    legend_shown = is_pie or bool(fig.data and len(fig.data) > 1)
+    # Reserve bottom space so the horizontal legend sits BELOW the plot/axis and
+    # never overlaps the bars or tick labels (more room when many series wrap).
+    if legend_shown:
+        if is_pie:
+            labels = getattr(fig.data[0], "labels", None)
+            n_series = len(labels) if labels is not None else 0
+        else:
+            n_series = len(fig.data)
+        margin["b"] = 58 + (18 if n_series > 4 else 0)
     fig.update_layout(
         colorway=PALETTE,
         paper_bgcolor="rgba(0,0,0,0)",
@@ -272,8 +283,9 @@ def _style(fig, widget, colors):
         font=dict(family="Hanken Grotesk, ui-sans-serif, Segoe UI, sans-serif",
                   color=colors["muted"], size=12),
         margin=margin,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.22, x=0, title_text=""),
-        showlegend=is_pie or bool(fig.data and len(fig.data) > 1),
+        legend=dict(orientation="h", yanchor="top", y=-0.16, x=0.5, xanchor="center",
+                    title_text="", font=dict(size=10.5, color=colors["muted"])),
+        showlegend=legend_shown,
     )
     # hide data labels that don't fit (prevents overlap on thin bars)
     if widget.type in ("bar", "hbar", "stacked_bar"):
