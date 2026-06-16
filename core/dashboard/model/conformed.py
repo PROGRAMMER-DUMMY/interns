@@ -174,7 +174,10 @@ def _derive_columns(df: pl.DataFrame) -> pl.DataFrame:
         exprs.append(pl.col(svc).dt.truncate("1mo").alias("month"))
     if svc and paid and df.schema.get(svc) == pl.Date and df.schema.get(paid) == pl.Date:
         # Days in Accounts Receivable: how long a claim takes to get paid.
-        exprs.append((pl.col(paid) - pl.col(svc)).dt.total_days().alias("ar_days"))
+        # A negative gap (paid before service) is a data error -> null it so it
+        # doesn't poison the average (guards the nonsensical value).
+        gap = (pl.col(paid) - pl.col(svc)).dt.total_days()
+        exprs.append(pl.when(gap >= 0).then(gap).otherwise(None).alias("ar_days"))
     return df.with_columns(exprs) if exprs else df
 
 

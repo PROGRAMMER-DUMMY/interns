@@ -234,6 +234,11 @@ class Widget(_Base):
         description="Optional tab label. Widgets sharing a tab render together in "
         "a dcc.Tab so each view fits the screen without scrolling.",
     )
+    subtitle: Optional[str] = Field(
+        None,
+        description="Optional one-line context shown under a KPI card's value "
+        "(e.g. the business question the KPI answers).",
+    )
 
     compare: Optional[str] = Field(
         None,

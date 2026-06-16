@@ -66,6 +66,10 @@ def _kpi(widget, result, project):
         html.Div(label, className="kpi-label"),
         html.Div(value, className="kpi-value", style=value_style),
     ]
+    # One-line business context (the question the KPI answers).
+    sub = getattr(widget, "subtitle", None)
+    if sub:
+        children.append(html.Div(sub, className="kpi-sub", title=sub))
     if target is not None:
         children.append(html.Div(
             className="kpi-delta " + ("up" if on_target else "down"),

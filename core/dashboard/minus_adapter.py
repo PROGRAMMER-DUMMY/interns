@@ -170,6 +170,29 @@ def _human(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+_NAME_STOP = set(
+    "what is the for of across and to a an by in on with above over under per "
+    "years year age amount each their les value count total number".split())
+
+
+def _distinct_keywords(titles: dict[str, str]) -> dict[str, str]:
+    """A keyword unique to each KPI's business question, to disambiguate cards
+    that share a measure label (e.g. two 'Paid Amount' KPIs -> Medicare/Commercial)."""
+    ordered: dict[str, list[str]] = {}
+    for kid, t in titles.items():
+        seen: list[str] = []
+        for w in re.findall(r"[A-Za-z]{4,}", str(t).lower()):
+            if w not in _NAME_STOP and w not in seen:
+                seen.append(w)
+        ordered[kid] = seen
+    freq: dict[str, int] = {}
+    for seen in ordered.values():
+        for w in set(seen):
+            freq[w] = freq.get(w, 0) + 1
+    return {kid: next((w.title() for w in seen if freq.get(w) == 1), "")
+            for kid, seen in ordered.items()}
+
+
 def _kpi_artifacts(layout: WorkspaceLayout):
     """Return (tables, measures, page, exports) for every gold KPI.
 
@@ -181,24 +204,60 @@ def _kpi_artifacts(layout: WorkspaceLayout):
     charts: list[dict[str, Any]] = []    # one lead chart per KPI, beside the row
     exports: dict[str, pl.DataFrame] = {}
 
-    kpis = list_gold_kpis(layout)
-    n = max(1, len(kpis))
-    span = max(3, 12 // n)               # cards + charts fill the 12-col row evenly
-    for kpi_id in kpis:
+    infos = []  # (kpi_id, km, gold)
+    for kpi_id in list_gold_kpis(layout):
         gold = read_gold(layout, kpi_id)
         if gold is None or gold.height == 0:
             continue
-        km = build_kpi_model(layout, kpi_id, gold)
-        tname = kpi_id  # e.g. "kpi_001"
+        infos.append((kpi_id, build_kpi_model(layout, kpi_id, gold), gold))
+
+    # Distinct, business-meaningful card names: card_label, disambiguated with a
+    # keyword from the question when two KPIs share a label (Paid Amount -> ... Medicare).
+    kws = _distinct_keywords({kid: km.title for kid, km, _ in infos})
+    label_freq: dict[str, int] = {}
+    for _, km, _g in infos:
+        label_freq[km.card_label] = label_freq.get(km.card_label, 0) + 1
+
+    n = max(1, len(infos))
+    span = max(3, 12 // n)               # cards + charts fill the 12-col row evenly
+    for kpi_id, km, gold in infos:
+        tname = kpi_id
         mslug = _slug(f"{kpi_id}_{km.measure}")
-        fmt = "percent" if (km.y_format or "").lower() == "percent" else "currency"
+        is_share = (km.y_format or "").lower() == "percent" or "share" in km.measure.lower()
+        fmt = "percent" if is_share else "currency"
         exports[tname] = gold
         tables.append({"name": tname, "source": "conformed_src",
                        "file": f"{tname}.parquet", "label": km.card_label})
         measures.append({"name": mslug, "label": km.card_label, "agg": "sum",
                          "field": f"{tname}.{km.measure}", "fmt": fmt})
-        cards.append({"id": f"k_{tname}", "type": "kpi", "measure": mslug,
-                      "width": span, "height": 132})
+
+        name = km.card_label
+        if label_freq.get(km.card_label, 0) > 1 and kws.get(kpi_id):
+            name = f"{km.card_label} - {kws[kpi_id]}"
+        question = km.title if len(km.title) <= 95 else km.title[:92] + "..."
+
+        # A summed share = 100% (meaningless headline) -> show the largest
+        # segment's share instead (max), with a clear label.
+        if is_share:
+            card_measure = _slug(f"{kpi_id}_top")
+            measures.append({"name": card_measure, "label": "Largest Segment",
+                             "agg": "max", "field": f"{tname}.{km.measure}",
+                             "fmt": "percent"})
+            card_title = "Largest Segment" if name == km.card_label else f"Largest Segment - {kws.get(kpi_id, '')}".rstrip(" -")
+        else:
+            card_measure = mslug
+            card_title = name
+
+        card = {"id": f"k_{tname}", "type": "kpi", "measure": card_measure,
+                "title": card_title, "subtitle": question, "width": span, "height": 150}
+        # Period-over-period trend when the KPI's gold carries a date column.
+        datecol = next((c for c in gold.columns
+                        if c.lower() in ("month", "servicedate", "service_date", "date")), None)
+        if datecol:
+            card["compare"] = f"{tname}.{datecol}"
+            card["compare_period"] = "quarter"
+        cards.append(card)
+
         # one lead chart per KPI (its most-informative recommended panel) so all
         # KPIs sit together at a glance -- no per-KPI tabs/sections, no scrolling.
         lead = _kpi_panel_widgets(tname, mslug, km.card_label, km.measure, gold, km.panels or [])[:1]
