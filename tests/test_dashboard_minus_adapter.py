@@ -240,6 +240,49 @@ class TestResultCache(unittest.TestCase):
         self.assertLessEqual(len(engine._result_cache), eng_mod._RESULT_CACHE_MAX)
 
 
+@unittest.skipUnless((_WS / "interns/state/medallion/bronze").exists(),
+                     "bronze layer not present")
+class TestCrossFilterScoping(unittest.TestCase):
+    """A click on one KPI's chart must not error the sibling tiles of a
+    multi-KPI scorecard, where each card/chart comes from its own unrelated
+    gold table. The cross-filter is scoped to widgets that can reach the
+    clicked dimension's table; the rest ignore it."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.layout = WorkspaceLayout(project_root=_WS.resolve())
+        generate(cls.layout)
+
+    def _state(self):
+        from minus.render.app import AppState
+        return AppState(minus_root(self.layout))
+
+    def test_reachable_false_across_independent_kpi_tables(self):
+        state = self._state()
+        # independent gold tables -> no join path; self is always reachable
+        self.assertTrue(state.model.reachable("kpi_001", "kpi_001"))
+        self.assertFalse(state.model.reachable("kpi_002", "kpi_001"))
+
+    def test_unrelated_kpi_filter_is_scoped_out(self):
+        state = self._state()
+        kpis = next(p for p in state.pages if p.id == "kpis")
+        cards = [w for w in kpis.widgets if not w.dimension]
+        charts = [w for w in kpis.widgets if w.dimension]
+        self.assertTrue(cards and charts)
+
+        dim = charts[0].dimension              # e.g. 'kpi_001.month'
+        clicked_table = dim.split(".")[0]
+        cf = {dim: "x"}
+        for w in cards:
+            scoped = state.engine.applicable_filters(w, dict(cf))
+            wbase = state.engine._base_table(w, state.engine._measures_for(w))
+            if wbase == clicked_table or state.model.reachable(wbase, clicked_table):
+                self.assertIn(dim, scoped)      # same KPI: keeps the filter
+            else:
+                self.assertNotIn(dim, scoped,   # other KPI: drops it (no error)
+                                 f"{wbase} must not receive {dim}")
+
+
 class TestConnectionReuseAndTimeout(unittest.TestCase):
     """Phase 1: the model reuses one DuckDB connection (guarded by a lock), and a
     watchdog interrupts a runaway query so it can't hold that lock forever."""

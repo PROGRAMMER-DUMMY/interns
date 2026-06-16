@@ -122,6 +122,18 @@ class SemanticModel:
             f"add a relationship to project.yaml"
         )
 
+    def reachable(self, base: str, target: str) -> bool:
+        """True if ``target`` can be join-reached from ``base``. Lets callers
+        scope a cross-filter to related widgets instead of erroring when a
+        dashboard mixes unrelated fact tables (e.g. a multi-KPI scorecard)."""
+        if base == target:
+            return True
+        try:
+            self._path(base, target)
+            return True
+        except KeyError:
+            return False
+
     # -- assembly ---------------------------------------------------------
     def assemble(self, base: str, fields: list[str]) -> pl.DataFrame:
         """Return a frame with columns named 'table.column' covering ``fields``.

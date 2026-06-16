@@ -177,6 +177,9 @@ def _render_tile(w, state, page, filters, crossfilter):
         if w.dimension and w.dimension in crossfilter:
             wf.pop(w.dimension, None)          # don't self-filter the clicked chart
             highlight = crossfilter[w.dimension]
+        # Scope the cross-filter: a click on one KPI's chart must not error the
+        # sibling tiles of an unrelated-table scorecard -- they just ignore it.
+        wf = state.engine.applicable_filters(w, wf)
         result = state.engine.run(w, wf)
         return render_widget(w, result, state.project, page.id, highlight)
     except Exception as exc:  # surface per-tile errors instead of crashing the page

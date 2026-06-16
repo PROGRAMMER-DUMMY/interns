@@ -90,6 +90,24 @@ class QueryEngine:
             return split_field(widget.dimension)[0]
         raise ValueError(f"widget {widget.id!r}: cannot infer base table")
 
+    def applicable_filters(self, widget: Widget, filters: Filters) -> Filters:
+        """Drop filters whose table can't be join-reached from this widget's base
+        table. A cross-filter on a multi-KPI scorecard (each card from its own,
+        unrelated gold table) then becomes a no-op for the unrelated tiles
+        instead of raising 'no relationship path' and rendering an error tile."""
+        if not filters:
+            return filters
+        try:
+            base = self._base_table(widget, self._measures_for(widget))
+        except (ValueError, KeyError):
+            return filters
+        keep: Filters = {}
+        for key, val in filters.items():
+            table = split_field(key)[0] if "." in key else base
+            if table == base or self.model.reachable(base, table):
+                keep[key] = val
+        return keep
+
     def _agg_fields(self, ms: list[Measure]) -> dict[str, Optional[str]]:
         out: dict[str, Optional[str]] = {}
         pending = list(ms)
