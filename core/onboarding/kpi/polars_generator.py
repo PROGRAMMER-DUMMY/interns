@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from core.onboarding.kpi.feature_resolver import READY_STATES
-from core.onboarding.kpi.kpi_intent import KPIIntent, parse_intent
+from core.onboarding.kpi.kpi_intent import KPIIntent, column_dim_renamed, parse_intent
 from core.onboarding.kpi.sensitive_masking import (
     POLARS_MASK_HELPER,
     load_sensitive_columns,
@@ -145,7 +145,12 @@ class PolarsKPIGenerator:
         # Sensitive columns to mask (SHA-256 hex) so this engine never writes raw
         # PHI/PCI to Silver/Gold and stays parity-consistent with SQL. Single-
         # sourced in sensitive_masking. Ref: core-audit ob-kpi-b.md (T2).
-        sensitive_cols = load_sensitive_columns(self.layout)
+        # A sensitive column consumed only as a RAW date-arithmetic input (e.g.
+        # DOB feeding an age band) is left unmasked here EXACTLY as the SQL path
+        # does — masking it would break the date diff and diverge from SQL
+        # (row parity). Its raw value is a derivation input, never written out.
+        from core.onboarding.kpi.result_view_builder import raw_date_input_columns
+        sensitive_cols = load_sensitive_columns(self.layout) - raw_date_input_columns(kpi)
 
         code = self._emit_script(
             kpi, kpi_id, intent, required_sources, source_aliases, base_source,
@@ -380,7 +385,12 @@ class PolarsKPIGenerator:
         (exactly like the SQL path), everything else its column/alias."""
         if band_width and dim.kind in ("age", "days_since"):
             return f"{dim.alias}_band"
-        return dim.column if dim.kind == "column" else dim.alias
+        if dim.kind == "column":
+            # A renamed column dim (Name -> department_name) is materialized
+            # under its alias by _derive_dim_lines; a normal column keeps its
+            # physical name so existing output schemas are unchanged.
+            return dim.alias if column_dim_renamed(dim) else dim.column
+        return dim.alias
 
     def _result_lines(self, intent: KPIIntent, *, band_width: int | None = None) -> list[str]:
         if intent.share:
@@ -559,6 +569,11 @@ class PolarsKPIGenerator:
             as_of_date = "pl.lit(date.today())"
         with_cols: list[str] = []
         for dim in intent.dims:
+            if column_dim_renamed(dim):
+                # Emit the renamed dimension under its alias (Name ->
+                # department_name) so the engine's output column matches SQL.
+                with_cols.append(f'pl.col("{dim.column}").alias("{dim.alias}")')
+                continue
             if dim.kind == "time":
                 every = _PL_EVERY.get(dim.unit, "1mo")
                 with_cols.append(

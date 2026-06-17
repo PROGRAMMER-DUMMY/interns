@@ -135,8 +135,9 @@ class DashIndexStringTests(unittest.TestCase):
         html = _dash_index_string(parse_design_md("accent: #abcdef\n"))
         # token wired into the CSS shell
         self.assertIn("--accent:#abcdef", html)
-        # fit-to-viewport overview+drill regions present
-        for cls in (".strip", ".tile", ".detail", ".dgrid", "height:100vh"):
+        # fit-to-viewport regions present: KPI rail, scroll region (Explore card
+        # + value panels), panel grid.
+        for cls in (".strip", ".tile", ".scroll", ".explore", ".dgrid", "height:100vh"):
             self.assertIn(cls, html)
         # required Dash template placeholders preserved
         for ph in ("{%app_entry%}", "{%config%}", "{%scripts%}", "{%renderer%}"):

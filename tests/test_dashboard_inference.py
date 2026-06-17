@@ -426,6 +426,59 @@ class CorporateThemeTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_HAS_DASHBOARD, "dashboard extra (plotly) not installed")
+class ClassifyColumnsTests(unittest.TestCase):
+    """Phase 1a: dtype-based column classification for the Explore pane.
+
+    Workspace-agnostic — every fixture uses generic vocabulary and the
+    classification is driven by the VALUES, not the column names (except the
+    date-name hint, which is also generic)."""
+
+    def _classify(self, rows):
+        from core.dashboard.renderer import _classify_columns
+        return _classify_columns(rows)
+
+    def test_splits_dimensions_measures_and_dates(self):
+        rows = [
+            {"order_month": "2024-01-01", "region": "north", "sum_amount": 100},
+            {"order_month": "2024-02-01", "region": "south", "sum_amount": 250},
+        ]
+        dims, measures, dates = self._classify(rows)
+        self.assertEqual(dates, ["order_month"])
+        self.assertEqual(measures, ["sum_amount"])
+        self.assertEqual(dims, ["region"])
+
+    def test_preserves_first_row_column_order(self):
+        rows = [{"a_dim": "x", "b_measure": 1, "c_dim": "y", "d_measure": 2.5}]
+        dims, measures, _ = self._classify(rows)
+        self.assertEqual(dims, ["a_dim", "c_dim"])
+        self.assertEqual(measures, ["b_measure", "d_measure"])
+
+    def test_numeric_date_named_year_is_a_date_not_measure(self):
+        # A year stored as an int reads as a timeline, never a quantity to sum.
+        rows = [{"year": "2021", "v": 10}, {"year": "2022", "v": 20}]
+        dims, measures, dates = self._classify(rows)
+        self.assertEqual(dates, ["year"])
+        self.assertEqual(measures, ["v"])
+        self.assertEqual(dims, [])
+
+    def test_bool_column_is_a_dimension_not_measure(self):
+        rows = [{"flag": True, "n": 1}, {"flag": False, "n": 2}]
+        dims, measures, _ = self._classify(rows)
+        self.assertIn("flag", dims)
+        self.assertEqual(measures, ["n"])
+
+    def test_empty_rows_returns_three_empty_lists(self):
+        self.assertEqual(self._classify([]), ([], [], []))
+
+    def test_non_date_string_column_is_a_dimension(self):
+        rows = [{"segment": "alpha", "share": 30.0}, {"segment": "beta", "share": 70.0}]
+        dims, measures, dates = self._classify(rows)
+        self.assertEqual(dims, ["segment"])
+        self.assertEqual(measures, ["share"])
+        self.assertEqual(dates, [])
+
+
+@unittest.skipUnless(_HAS_DASHBOARD, "dashboard extra (plotly) not installed")
 class HeadlineTests(unittest.TestCase):
     def _headline(self, config, rows):
         from core.dashboard.renderer import _kpi_headline

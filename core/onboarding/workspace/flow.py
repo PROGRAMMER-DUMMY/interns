@@ -56,7 +56,11 @@ from core.onboarding.workspace.validation import WorkspaceArtifactValidator
 from core.onboarding.workspace.workflow import MODES as ORCHESTRATION_MODES
 from core.onboarding.workspace.workflow import WorkspaceWorkflowOrchestrator
 from core.presentation.console_tables import render_markdown_table, render_query_result_table
-from core.onboarding.kpi.pii_redaction import redact_table_rows, workspace_redaction_patterns
+from core.onboarding.kpi.pii_redaction import (
+    redact_table_rows,
+    workspace_aggregate_ages,
+    workspace_redaction_patterns,
+)
 from core.storage.workspace_layout import WorkspaceLayout
 from core.onboarding.workspace.flow_io import _read_json
 from core.onboarding.workspace.flow_panels import (
@@ -899,6 +903,14 @@ class WorkspaceFlow:
         gate_provenance = _collect_gate_provenance(state, self.layout)
         agent_gate_count = sum(1 for g in gate_provenance if g.get("source") != "human")
         completion_headline = _gate_provenance_headline(gate_provenance)
+        # FIX D: stamp a self-describing gate-state banner at the TOP of the emitted
+        # result packet (current.md + its aliases + the dated runs snapshot). Anyone
+        # who reads current.md directly (bypassing the flow CLI) then sees whether the
+        # session's gates are human-verified, agent-asserted, or the result content was
+        # flagged — instead of mistaking an unreviewed/broken packet for a final one.
+        result_review_verdict = verdict_from_result_review(kpi_entries)
+        banner = _result_packet_gate_banner(gate_provenance, result_review_verdict)
+        self._stamp_result_packet_banner(banner)
         # P0 (core-audit): regenerate the artifact MANIFEST on completion so its
         # presence counts never lag the actual run. The manifest previously went
         # stale (claimed "Present 17/29" after kpi_results already existed) because
@@ -1386,6 +1398,37 @@ class WorkspaceFlow:
                     conn.execute(sql_text)
                     view = _result_view(conn, kpi_id)
                     if view:
+                        # Result-content signals for the result_review gate (FIX B):
+                        # computed over the FULL view (not the capped preview) so the
+                        # gate sees the true row count + which columns are entirely
+                        # NULL/empty across every row. Workspace-agnostic: it operates
+                        # on the result columns themselves, never on named columns.
+                        try:
+                            _all_cols = [str(c[0]) for c in conn.execute(
+                                f'SELECT * FROM "{view}" LIMIT 0'
+                            ).description or []]
+                            _row_count = int(
+                                conn.execute(f'SELECT COUNT(*) FROM "{view}"').fetchone()[0]
+                            )
+                            _empty_cols: list[str] = []
+                            for _col in _all_cols:
+                                # A column is "blank" when every row is NULL or, cast to
+                                # text, an empty/whitespace-only string.
+                                _non_blank = conn.execute(
+                                    f'SELECT COUNT(*) FROM "{view}" '
+                                    f'WHERE "{_col}" IS NOT NULL '
+                                    f"AND TRIM(CAST(\"{_col}\" AS VARCHAR)) <> ''"
+                                ).fetchone()[0]
+                                if int(_non_blank) == 0:
+                                    _empty_cols.append(_col)
+                            entry["result_row_count"] = _row_count
+                            entry["result_columns"] = _all_cols
+                            # Only meaningful as a "blank dimension" when the view has
+                            # rows; a zero-row KPI is flagged separately.
+                            entry["all_blank_columns"] = _empty_cols if _row_count > 0 else []
+                        except Exception:
+                            # Never let the gate-signal scan break preview generation.
+                            pass
                         cursor = conn.execute(f'SELECT * FROM "{view}" LIMIT {int(preview_rows)}')
                         # Redact PHI/PCI before rendering the canonical result packet —
                         # this is the highest-traffic display surface (CLAUDE.md says
@@ -1394,7 +1437,10 @@ class WorkspaceFlow:
                         _cols = [str(d[0]) for d in cursor.description or []]
                         _rows = cursor.fetchall()
                         _patterns = workspace_redaction_patterns(self.layout.project_root)
-                        _rows = redact_table_rows(_cols, _rows, patterns=_patterns)
+                        _agg_ages = workspace_aggregate_ages(self.layout.project_root)
+                        _rows = redact_table_rows(
+                            _cols, _rows, patterns=_patterns, aggregate_ages=_agg_ages
+                        )
                         if not _cols:
                             preview_md = "(query returned no tabular result)"
                         elif not _rows:
@@ -1579,6 +1625,50 @@ class WorkspaceFlow:
             (run_dir / f"{kpi_id}.md").write_text(section, encoding="utf-8")
         (run_dir / "results.md").write_text(compact_markdown, encoding="utf-8")
         (run_dir / "results_full.md").write_text(full_markdown, encoding="utf-8")
+
+    def _stamp_result_packet_banner(self, banner: str) -> None:
+        """Prepend a gate-state banner (FIX D) to every emitted result-packet file.
+
+        The banner is idempotent: a previously stamped banner line (any line that
+        starts with the banner prefix) is stripped before the new one is prepended,
+        so re-runs never accumulate banners. All packet surfaces are stamped — the
+        canonical `current.md` (the file the doc rule says to forward verbatim and
+        that a reader might open directly), its aliases, and the dated runs snapshot
+        — so the parity between `current.md` and `runs/<date>/results.md` is kept.
+        """
+        if not banner:
+            return
+        result_dir = self.layout.reports_dir / "kpi_results"
+        run_dir = self.layout.runs_dir / date.today().isoformat()
+        targets = [
+            result_dir / "current.md",
+            result_dir / "current_full.md",
+            result_dir / "current_compact.md",
+            run_dir / "results.md",
+            run_dir / "results_full.md",
+        ]
+        prefixes = ("[blocked] UNVERIFIED RESULT PACKET", "[ok] HUMAN-VERIFIED")
+        for path in targets:
+            if not path.exists():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            lines = text.splitlines()
+            # Strip a previously stamped banner (+ its blank separator) for idempotency.
+            while lines and lines[0].startswith(prefixes):
+                lines.pop(0)
+                if lines and lines[0].strip() == "":
+                    lines.pop(0)
+            body = "\n".join(lines)
+            new_text = banner + "\n\n" + body
+            if not new_text.endswith("\n"):
+                new_text += "\n"
+            try:
+                path.write_text(new_text, encoding="utf-8")
+            except OSError:
+                continue
 
     def _base_state(self, intent: str) -> dict[str, Any]:
         return {
@@ -2313,10 +2403,43 @@ def _gate_provenance_headline(gates: list[dict[str, Any]]) -> str:
     agent_count = sum(1 for g in gates if g.get("source") != "human")
     if agent_count:
         return (
-            f"[~] Completed WITHOUT human confirmation on {agent_count} gate(s) "
-            "(pass --require-human-gates to block on agent-asserted gates)"
+            f"[~] {agent_count} gate(s) are agent-asserted (no human confirmation) "
+            "— completion is blocked by default; confirm with --confirmed-by or pass "
+            "--allow-agent-gates to opt out"
         )
     return "[ok] Completed — all gates confirmed by humans"
+
+
+def _result_packet_gate_banner(
+    gates: list[dict[str, Any]],
+    result_review: "DelegationVerdict | None" = None,
+) -> str:
+    """Return a self-describing gate-state banner to stamp at the TOP of the
+    result packet (FIX D).
+
+    The banner makes the packet honest when read directly (bypassing the flow CLI):
+      * result content was flagged (zero rows / all-blank dimension), OR a required
+        gate is agent-asserted  -> a [blocked] UNVERIFIED banner;
+      * all gates human-confirmed and content ok                      -> an [ok]
+        HUMAN-VERIFIED banner.
+    ASCII-only, workspace-agnostic.
+    """
+    agent_count = sum(1 for g in gates if g.get("source") != "human")
+    content_flagged = bool(result_review is not None and result_review.status != "ok")
+    if content_flagged or agent_count:
+        reasons: list[str] = []
+        if agent_count:
+            reasons.append(
+                f"{agent_count} gate(s) agent-asserted (kpi-analyst review not signed off by a human)"
+            )
+        if content_flagged and result_review is not None:
+            reasons.append(f"result content flagged: {result_review.summary}")
+        return (
+            "[blocked] UNVERIFIED RESULT PACKET - "
+            + "; ".join(reasons)
+            + "; do not treat as final."
+        )
+    return "[ok] HUMAN-VERIFIED - all required gates confirmed (source: human)."
 
 
 def _now() -> str:
@@ -2793,15 +2916,27 @@ def main(argv: list[str] | None = None) -> int:
             "Omit to record as source: agent (machine-asserted)."
         ),
     )
-    # BUG-014 (enforcement): strict opt-in to block completion when any required
-    # gate is agent-asserted rather than human-confirmed.
+    # FIX C (BUG-014 enforcement): human-gate provenance is enforced BY DEFAULT.
+    # Completion is blocked (exit non-zero) when any required gate is agent-asserted.
+    # --require-human-gates is kept for backward compatibility (now a no-op: it is
+    # the default). --allow-agent-gates is the explicit escape hatch for automated/
+    # test contexts that intentionally accept agent-asserted gates.
     review_p.add_argument(
         "--require-human-gates",
         action="store_true",
         help=(
-            "Block completion (exit non-zero) if any required gate is agent-asserted. "
-            "By default completion proceeds with a visible [~] warning. "
-            "Requires --confirmed-by on each gate or prior human approvals."
+            "Deprecated / no-op: human-gate provenance is now enforced by default. "
+            "Completion is blocked when any required gate is agent-asserted. "
+            "Use --confirmed-by on each gate, or --allow-agent-gates to opt out."
+        ),
+    )
+    review_p.add_argument(
+        "--allow-agent-gates",
+        action="store_true",
+        help=(
+            "Escape hatch: allow completion even when a required gate is "
+            "agent-asserted (source != human). Off by default — provenance is "
+            "enforced. Intended for automated/test contexts only."
         ),
     )
 
@@ -2984,9 +3119,11 @@ def main(argv: list[str] | None = None) -> int:
             per_kpi=per_kpi,
             confirmed_by=getattr(args, "confirmed_by", "") or "",
         )
-        # BUG-014 (enforcement): --require-human-gates blocks completion when any
-        # required gate is agent-asserted (non-breaking by default).
-        if getattr(args, "require_human_gates", False) and result.status == "complete":
+        # FIX C (BUG-014 enforcement): human-gate provenance is enforced BY DEFAULT.
+        # Block completion when any required gate is agent-asserted, unless the
+        # operator opts out with --allow-agent-gates.
+        allow_agent_gates = getattr(args, "allow_agent_gates", False)
+        if not allow_agent_gates and result.status == "complete":
             panel_path = (Path(args.repo_root).resolve() / result.current_panel_path
                           if result.current_panel_path else None)
             panel_payload: dict[str, Any] = {}
@@ -2998,13 +3135,16 @@ def main(argv: list[str] | None = None) -> int:
             provenance = (panel_payload.get("summary") or {}).get("gate_provenance") or []
             agent_gates = [g for g in provenance if g.get("source") != "human"]
             if agent_gates:
-                print("[blocked] --require-human-gates: completion blocked — the following gates are agent-asserted:")
+                print("[blocked] human-gate provenance: completion blocked — the following gates are agent-asserted:")
                 for g in agent_gates:
                     label = g.get("label", g.get("gate", ""))
                     print(f"  [~] {label}")
                 print("")
                 print("Confirm each gate with the appropriate --confirmed-by flag, for example:")
                 print(f"  workspace-flow review --session {result.session_id} --verdict ok --confirmed-by <reviewer>")
+                print("")
+                print("Or, to intentionally accept agent-asserted gates (automated/test contexts):")
+                print("  add --allow-agent-gates")
                 print("")
                 return 2
     elif args.cmd == "artifacts":
@@ -3174,15 +3314,24 @@ def pipeline_main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print the final result as machine-readable JSON.",
     )
-    # BUG-014 (enforcement): strict opt-in to block completion when any required
-    # gate is agent-asserted rather than human-confirmed.
+    # FIX C (BUG-014 enforcement): human-gate provenance is enforced BY DEFAULT.
+    # --require-human-gates is kept for backward compatibility (now a no-op: it is
+    # the default). --allow-agent-gates is the explicit escape hatch.
     parser.add_argument(
         "--require-human-gates",
         action="store_true",
         help=(
-            "Block completion (exit non-zero) if any required gate is agent-asserted. "
-            "By default the pipeline completes with a visible [~] warning. "
-            "Use --confirmed-by on workspace-flow review to record human confirmation."
+            "Deprecated / no-op: human-gate provenance is now enforced by default. "
+            "Completion is blocked when any required gate is agent-asserted."
+        ),
+    )
+    parser.add_argument(
+        "--allow-agent-gates",
+        action="store_true",
+        help=(
+            "Escape hatch: allow completion even when a required gate is "
+            "agent-asserted (source != human). Off by default — provenance is "
+            "enforced. Intended for automated/test contexts only."
         ),
     )
 
@@ -3192,7 +3341,7 @@ def pipeline_main(argv: list[str] | None = None) -> int:
     domain: str = args.domain
     quiet: bool = args.quiet
     emit_json: bool = args.json
-    require_human_gates: bool = getattr(args, "require_human_gates", False)
+    allow_agent_gates: bool = getattr(args, "allow_agent_gates", False)
 
     def _log(msg: str) -> None:
         if not quiet:
@@ -3451,14 +3600,17 @@ def pipeline_main(argv: list[str] | None = None) -> int:
         agent_gates = [g for g in provenance if g.get("source") != "human"]
         headline = (panel_data.get("summary") or {}).get("completion_headline") or ""
 
-        if require_human_gates and agent_gates:
-            print("[blocked] --require-human-gates: pipeline completion blocked — the following gates are agent-asserted:")
+        if not allow_agent_gates and agent_gates:
+            print("[blocked] human-gate provenance: pipeline completion blocked — the following gates are agent-asserted:")
             for g in agent_gates:
                 label = g.get("label", g.get("gate", ""))
                 print(f"  [~] {label}")
             print("")
             print("Confirm each gate with the appropriate --confirmed-by flag, for example:")
             print(f"  workspace-flow review --session {result.session_id} --verdict ok --confirmed-by <reviewer>")
+            print("")
+            print("Or, to intentionally accept agent-asserted gates (automated/test contexts):")
+            print("  add --allow-agent-gates")
             print("")
             print("Re-run `run-kpi-pipeline` after resolving all agent-asserted gates.")
             return 2
@@ -3479,6 +3631,40 @@ def pipeline_main(argv: list[str] | None = None) -> int:
             print("Then re-run `run-kpi-pipeline`. If the SQL is wrong, fix the generator,")
             print("not the .sql file (hand-edits are overwritten on regeneration).")
             return 2
+
+        # FIX B: result_review CONTENT gate. The data-analyst verdict
+        # (`verdict_from_result_review`) is recorded during the flow but was never
+        # ENFORCED, so a KPI whose grouping/dimension column came back entirely
+        # blank, or that produced zero rows, completed silently. Load the executed
+        # result rows (the same evidence packet the stale-check reads) and re-run
+        # the verdict here; if it is not `ok`, do NOT print success — stop and route
+        # the operator to the data-analyst result_review stage.
+        result_packet = repo_root / workspace_rel / "interns" / "generated" / "evidence" / "kpi_results" / "current.json"
+        result_entries = (_read_json(result_packet).get("kpis") or []) if result_packet.exists() else []
+        review_verdict = verdict_from_result_review(result_entries)
+        if review_verdict.status != "ok":
+            details_lines = [f"  {review_verdict.summary}"]
+            zero_ids = review_verdict.details.get("no_result_kpi_ids") or []
+            blank_map = review_verdict.details.get("all_blank_column_kpis") or {}
+            for kid in zero_ids:
+                details_lines.append(f"  [x] {kid}: produced zero rows")
+            for kid, cols in blank_map.items():
+                details_lines.append(
+                    f"  [x] {kid}: dimension column(s) entirely NULL/empty: {', '.join(cols)}"
+                )
+            routing = STAGE_ROUTING.get("result_review") or {}
+            agents = ", ".join(routing.get("agents") or []) or "data-analyst"
+            return _gate_stop(
+                headline="Result content review required — a KPI produced no rows or an all-blank dimension column.",
+                details=details_lines
+                + [
+                    f"  Route to the result_review specialist(s): {agents}.",
+                    f"  Packet: {_rel(result_packet, repo_root)}",
+                ],
+                commands=[
+                    f"uv run workspace-flow status --workspace {workspace_rel} --diff",
+                ],
+            )
 
         if emit_json:
             print(json.dumps(panel_data.get("summary") or result.summary(), indent=2, default=str))

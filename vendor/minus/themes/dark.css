@@ -1,0 +1,35 @@
+/* MinusAnalyst — "Dark" theme: warm charcoal, clay kept for brand continuity. */
+
+:root {
+  --canvas: #181613;
+  --canvas-glow: #221E19;
+  --surface: #211D19;
+  --surface-2: #2A251F;
+  --ink: #F1EADE;
+  --muted: #ABA193;
+  --faint: #756C5F;
+
+  --accent: #DD8763;
+  --accent-ink: #EFA886;
+  --accent-bright: #E59370;
+  --accent-soft: rgba(221, 135, 99, 0.15);
+  --accent-border: rgba(221, 135, 99, 0.36);
+
+  --slate: #D8D0C3;
+  --border: #332E27;
+  --border-strong: #443D33;
+
+  --shadow: 0 1px 1px rgba(0, 0, 0, 0.30), 0 12px 32px -8px rgba(0, 0, 0, 0.46);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.35), 0 20px 44px -10px rgba(0, 0, 0, 0.55);
+
+  --grain-opacity: 0.30;
+
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --font-body: "Hanken Grotesk", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+
+  --radius: 16px;
+  --radius-sm: 11px;
+  --sidebar-w: 264px;
+  --chat-w: 372px;
+}

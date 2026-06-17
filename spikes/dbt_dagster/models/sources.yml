@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: raw
+    description: "Bronze medallion layer (Delta) for Hospital A; read in place."
+    meta:
+      note: >
+        In a real dbt-duckdb run these resolve via the delta plugin /
+        external_location. The offline validate_spike.py harness maps each
+        source to delta_scan('<medallion>/bronze/<name>').
+    tables:
+      - name: transactions
+      - name: patients
+      - name: departments

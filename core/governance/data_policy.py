@@ -13,6 +13,7 @@ redaction in ``core.onboarding.kpi.pii_redaction``:
       "categories": {"trade_secret": ["^route[_ ]?cost[_ ]?model$"]},
       "not_sensitive_columns": ["Name"],
       "tier_override": "phi",
+      "aggregate_ages_over_89": true,
       "notes": "Loyalty codes are contractually confidential."
     }
 
@@ -30,6 +31,11 @@ Semantics:
                              ``"none"`` is intentionally NOT honored for
                              downgrades when identifiers were detected — the
                              allowlist is the per-column escape hatch).
+- ``aggregate_ages_over_89`` ``true`` (default) keeps the HIPAA Safe Harbor rule
+                             that renders ages over 89 as ``"90+"`` on displayed
+                             tables. An owner whose data is synthetic / not real
+                             PHI may set it ``false`` to show exact ages. Opt-in
+                             only: absent ⇒ the safeguard stays on.
 
 The policy is user-authored input (like datasets), never a generated artifact:
 generators must not write it, and validation reports problems instead of
@@ -56,6 +62,11 @@ class WorkspaceDataPolicy:
     categories: dict[str, tuple[str, ...]] = field(default_factory=dict)
     not_sensitive_columns: tuple[str, ...] = ()
     tier_override: str = ""
+    # HIPAA Safe Harbor aggregates ages over 89 to "90+" on rendered tables.
+    # True (default) keeps that safeguard on; an owner whose data is synthetic /
+    # not real PHI can set it False to render exact ages. Opt-in only — the safe
+    # default stays on for every workspace that does not declare otherwise.
+    aggregate_ages_over_89: bool = True
     notes: str = ""
     errors: tuple[str, ...] = ()
 
@@ -70,6 +81,7 @@ class WorkspaceDataPolicy:
             or self.categories
             or self.not_sensitive_columns
             or self.tier_override
+            or not self.aggregate_ages_over_89
         )
 
     def summary(self) -> dict[str, Any]:
@@ -80,6 +92,7 @@ class WorkspaceDataPolicy:
             "custom_categories": sorted(self.categories),
             "allowlisted_column_count": len(self.not_sensitive_columns),
             "tier_override": self.tier_override,
+            "aggregate_ages_over_89": self.aggregate_ages_over_89,
             "errors": list(self.errors),
         }
 
@@ -173,6 +186,14 @@ def load_workspace_data_policy(workspace_root: str | Path) -> WorkspaceDataPolic
         errors.append("`tier_override` must be \"phi\" or \"none\"")
         tier_override = ""
 
+    aggregate_ages_over_89 = True
+    if "aggregate_ages_over_89" in data:
+        raw_flag = data.get("aggregate_ages_over_89")
+        if isinstance(raw_flag, bool):
+            aggregate_ages_over_89 = raw_flag
+        else:
+            errors.append("`aggregate_ages_over_89` must be true or false")
+
     declared = {column.lower() for column in sensitive_columns}
     conflicted = [
         column for column in allowlist if column.lower() in declared
@@ -191,6 +212,7 @@ def load_workspace_data_policy(workspace_root: str | Path) -> WorkspaceDataPolic
         categories=categories,
         not_sensitive_columns=allowlist,
         tier_override=tier_override,
+        aggregate_ages_over_89=aggregate_ages_over_89,
         notes=str(data.get("notes") or ""),
         errors=tuple(errors),
     )

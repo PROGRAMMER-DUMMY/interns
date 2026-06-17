@@ -466,5 +466,250 @@ class PipelineWrapperTests(unittest.TestCase):
             )
 
 
+# ---------------------------------------------------------------------------
+# FIX B: result_review CONTENT gate
+# ---------------------------------------------------------------------------
+
+import unittest.mock as _mock
+
+from core.onboarding.workspace.delegation import verdict_from_result_review
+
+
+class ResultReviewVerdictTests(unittest.TestCase):
+    """Unit tests for the extended verdict_from_result_review (FIX B).
+
+    Workspace-agnostic: the verdict operates only on the produced rows/columns.
+    """
+
+    def test_healthy_results_are_ok(self):
+        entries = [
+            {"kpi_id": "kpi_001", "status": "ok", "result_row_count": 3,
+             "result_columns": ["segment", "revenue"], "all_blank_columns": []},
+        ]
+        self.assertEqual(verdict_from_result_review(entries).status, "ok")
+
+    def test_zero_row_kpi_needs_review(self):
+        entries = [
+            {"kpi_id": "kpi_001", "status": "ok", "result_row_count": 0,
+             "result_columns": ["segment", "revenue"], "all_blank_columns": []},
+        ]
+        verdict = verdict_from_result_review(entries)
+        self.assertEqual(verdict.status, "needs_review")
+        self.assertIn("kpi_001", verdict.details.get("no_result_kpi_ids") or [])
+
+    def test_all_blank_dimension_column_needs_review(self):
+        entries = [
+            {"kpi_id": "kpi_dept", "status": "ok", "result_row_count": 5,
+             "result_columns": ["department", "count"], "all_blank_columns": ["department"]},
+        ]
+        verdict = verdict_from_result_review(entries)
+        self.assertEqual(verdict.status, "needs_review")
+        self.assertIn("kpi_dept", verdict.details.get("all_blank_column_kpis") or {})
+
+    def test_non_ok_execution_status_counts_as_zero_rows(self):
+        entries = [
+            {"kpi_id": "kpi_err", "status": "error", "error": "boom"},
+        ]
+        verdict = verdict_from_result_review(entries)
+        self.assertEqual(verdict.status, "needs_review")
+        self.assertIn("kpi_err", verdict.details.get("no_result_kpi_ids") or [])
+
+
+class ResultReviewGateWiringTests(unittest.TestCase):
+    """Integration: the result_review verdict must BLOCK pipeline completion (FIX B)."""
+
+    def _skip_without_deps(self) -> None:
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars not installed")
+
+    def _complete_session(self, root: Path, ws: str):
+        """Advance to the review gate and post a human-confirmed verdict so the
+        session reaches `complete`. Returns the completed session id."""
+        result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+        self.assertEqual(result.status, "needs_specialist_review")
+        done = WorkspaceFlow.from_session(root, result.session_id).review(
+            verdict="ok", summary="reviewed", confirmed_by="alice",
+        )
+        self.assertEqual(done.status, "complete")
+        return result.session_id
+
+    def _packet_path(self, root: Path, ws: str) -> Path:
+        return (root / ws / "interns" / "generated" / "evidence"
+                / "kpi_results" / "current.json")
+
+    def _run_pipeline_resuming(self, root: Path, ws: str, session_id: str):
+        """Run pipeline_main so it RESUMES the (already complete) session via a
+        read-only `status()` call instead of minting a fresh session that would
+        re-execute and overwrite the tampered packet. This isolates the Step 5
+        result_review content gate."""
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            with _mock.patch(
+                "core.onboarding.workspace.flow.latest_open_session",
+                return_value=session_id,
+            ):
+                try:
+                    exit_code = pipeline_main([
+                        "--repo-root", str(root), "--workspace", ws,
+                        "--domain", "generic", "--quiet",
+                    ])
+                except SystemExit as exc:
+                    exit_code = int(exc.code or 0)
+        return exit_code, stdout.getvalue()
+
+    def test_healthy_result_completes(self):
+        self._skip_without_deps()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = _make_simple_encounters_workspace(root)
+            session_id = self._complete_session(root, ws)
+
+            exit_code, output = self._run_pipeline_resuming(root, ws, session_id)
+            self.assertEqual(exit_code, 0,
+                             f"healthy result must complete.\nOutput:\n{output}")
+            self.assertIn("KPI Result Packet", output)
+            self.assertIn("## Pipeline Complete", output)
+
+    def test_zero_row_result_blocks_completion(self):
+        self._skip_without_deps()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = _make_simple_encounters_workspace(root)
+            session_id = self._complete_session(root, ws)
+
+            # Tamper the executed packet to look like a zero-row KPI.
+            packet = self._packet_path(root, ws)
+            data = json.loads(packet.read_text(encoding="utf-8"))
+            for entry in data.get("kpis", []):
+                entry["status"] = "ok"
+                entry["result_row_count"] = 0
+                entry["all_blank_columns"] = []
+            packet.write_text(json.dumps(data), encoding="utf-8")
+
+            exit_code, output = self._run_pipeline_resuming(root, ws, session_id)
+            self.assertNotEqual(exit_code, 0,
+                                f"zero-row KPI must block completion.\nOutput:\n{output}")
+            self.assertIn("[blocked]", output)
+            self.assertNotIn("## Pipeline Complete", output)
+
+    def test_all_blank_dimension_blocks_completion(self):
+        self._skip_without_deps()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = _make_simple_encounters_workspace(root)
+            session_id = self._complete_session(root, ws)
+
+            packet = self._packet_path(root, ws)
+            data = json.loads(packet.read_text(encoding="utf-8"))
+            for entry in data.get("kpis", []):
+                entry["status"] = "ok"
+                entry["result_row_count"] = 4
+                entry["all_blank_columns"] = ["department"]
+            packet.write_text(json.dumps(data), encoding="utf-8")
+
+            exit_code, output = self._run_pipeline_resuming(root, ws, session_id)
+            self.assertNotEqual(exit_code, 0,
+                                f"all-blank dimension column must block completion.\nOutput:\n{output}")
+            self.assertIn("[blocked]", output)
+            self.assertIn("department", output)
+
+
+# ---------------------------------------------------------------------------
+# FIX D: gate-state banner stamped into the result packet artifact
+# ---------------------------------------------------------------------------
+
+from core.onboarding.workspace.delegation import DelegationVerdict
+from core.onboarding.workspace.flow import _result_packet_gate_banner
+
+
+class ResultPacketBannerUnitTests(unittest.TestCase):
+    """Unit tests for the FIX D banner text (workspace-agnostic, ASCII-only)."""
+
+    def test_human_verified_banner_when_all_human_and_content_ok(self):
+        gates = [{"gate": "kpi_analyst_review", "source": "human", "confirmed_by": "alice"}]
+        ok = DelegationVerdict(status="ok", summary="all good")
+        banner = _result_packet_gate_banner(gates, ok)
+        self.assertTrue(banner.startswith("[ok] HUMAN-VERIFIED"))
+
+    def test_unverified_banner_when_gate_agent_asserted(self):
+        gates = [{"gate": "kpi_analyst_review", "source": "agent"}]
+        ok = DelegationVerdict(status="ok", summary="all good")
+        banner = _result_packet_gate_banner(gates, ok)
+        self.assertTrue(banner.startswith("[blocked] UNVERIFIED RESULT PACKET"))
+        self.assertIn("agent-asserted", banner)
+
+    def test_unverified_banner_when_content_flagged(self):
+        gates = [{"gate": "kpi_analyst_review", "source": "human", "confirmed_by": "alice"}]
+        flagged = DelegationVerdict(status="needs_review", summary="zero rows")
+        banner = _result_packet_gate_banner(gates, flagged)
+        self.assertTrue(banner.startswith("[blocked] UNVERIFIED RESULT PACKET"))
+        self.assertIn("result content flagged", banner)
+
+    def test_banner_is_ascii_only(self):
+        gates = [{"gate": "x", "source": "agent"}]
+        banner = _result_packet_gate_banner(gates, DelegationVerdict(status="ok", summary="s"))
+        banner.encode("ascii")  # raises if any non-ASCII char slipped in
+
+
+class ResultPacketBannerStampTests(unittest.TestCase):
+    """The completion path must stamp the banner at the TOP of current.md (FIX D)."""
+
+    def _skip_without_deps(self) -> None:
+        try:
+            import duckdb  # noqa: F401
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb or polars not installed")
+
+    def test_agent_asserted_completion_stamps_unverified_banner(self):
+        self._skip_without_deps()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = _make_simple_encounters_workspace(root)
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            self.assertEqual(result.status, "needs_specialist_review")
+            # Agent-asserted (no confirmed_by). The flow API still reaches complete;
+            # the CLI enforcement (FIX C) is separate from the on-disk banner.
+            done = WorkspaceFlow.from_session(root, result.session_id).review(
+                verdict="ok", summary="agent check",
+            )
+            self.assertEqual(done.status, "complete")
+
+            current_md = (root / ws / "interns" / "reports" / "kpi_results" / "current.md")
+            text = current_md.read_text(encoding="utf-8")
+            self.assertTrue(
+                text.startswith("[blocked] UNVERIFIED RESULT PACKET"),
+                f"current.md must start with the unverified banner.\nHead:\n{text[:200]}",
+            )
+            # Parity with the dated runs snapshot must be preserved.
+            from datetime import date as _date
+            runs_md = (root / ws / "interns" / "runs" / _date.today().isoformat() / "results.md")
+            self.assertEqual(runs_md.read_text(encoding="utf-8"), text)
+
+    def test_human_confirmed_completion_stamps_verified_banner_and_is_idempotent(self):
+        self._skip_without_deps()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = _make_simple_encounters_workspace(root)
+            result = WorkspaceFlow(root, ws).start(intent="full_kpi_sql")
+            self.assertEqual(result.status, "needs_specialist_review")
+            done = WorkspaceFlow.from_session(root, result.session_id).review(
+                verdict="ok", summary="human reviewed", confirmed_by="alice",
+            )
+            self.assertEqual(done.status, "complete")
+
+            current_md = (root / ws / "interns" / "reports" / "kpi_results" / "current.md")
+            text = current_md.read_text(encoding="utf-8")
+            self.assertTrue(
+                text.startswith("[ok] HUMAN-VERIFIED"),
+                f"current.md must start with the verified banner.\nHead:\n{text[:200]}",
+            )
+            # Idempotency: exactly one banner line, not stacked.
+            self.assertEqual(text.count("HUMAN-VERIFIED"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

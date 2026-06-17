@@ -247,6 +247,400 @@ def _first_non_constant_categorical(
     return preferred or next(iter(rows[0]), "")
 
 
+def _as_year(value: Any) -> int | None:
+    """Return a plausible 4-digit year (1900-2100) from an int/float/str, else None.
+
+    Lets a date-named column holding bare years ("2021", 2021) read as a timeline
+    axis. Generic — no workspace assumptions, just a sane calendar-year window."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        n = int(value)
+    else:
+        text = str(value).strip()
+        if not text.lstrip("-").isdigit():
+            return None
+        n = int(text)
+    return n if 1900 <= n <= 2100 else None
+
+
+def _classify_columns(
+    rows: list[dict[str, Any]],
+) -> tuple[list[str], list[str], list[str]]:
+    """Split a KPI result's columns into (dimensions, measures, date_cols) by dtype.
+
+    Workspace-agnostic: classification is purely structural, derived from the
+    VALUES in the live result rows plus a date-name hint, never from any
+    workspace's domain vocabulary.
+
+    * date_cols  — values coerce to a date, OR the column name is date-like and
+      every present value coerces to a date. These are timeline X candidates.
+    * measures   — values are numeric (int/float, non-bool) and the column is not
+      a date column. These are Y / measure candidates.
+    * dimensions — everything else (categorical / text / mixed). These are the
+      X / breakdown candidates.
+
+    A date column is NOT also listed as a measure (a year stored as an int still
+    reads as a timeline, not a quantity to sum). The returned lists preserve the
+    column order of the first row so dropdowns are stable.
+    """
+    if not rows:
+        return [], [], []
+    columns = list(rows[0].keys())
+    dimensions: list[str] = []
+    measures: list[str] = []
+    date_cols: list[str] = []
+    for col in columns:
+        present = [r.get(col) for r in rows if r.get(col) is not None]
+        if not present:
+            # All-null column: treat as a (weak) dimension so it stays selectable.
+            dimensions.append(col)
+            continue
+        name_is_date = bool(_DATE_NAME_RE.search(col))
+        # Numeric? booleans are ints in Python but read as categories, not measures.
+        numeric = [
+            v for v in present if isinstance(v, (int, float)) and not isinstance(v, bool)
+        ]
+        all_numeric = len(numeric) == len(present)
+        # Date? a value-level coercion test (handles string/date/datetime values).
+        coerces_date = sum(1 for v in present if _coerce_date(v) is not None)
+        looks_date = coerces_date == len(present) and (
+            name_is_date or not all_numeric
+        )
+        # A date-NAMED column of bare year values ("2021", 2021) is a timeline
+        # axis, not a quantity to sum — _coerce_date can't parse a lone year, so
+        # detect it here (every value is an int-like year in a plausible range).
+        if not looks_date and name_is_date:
+            years = [_as_year(v) for v in present]
+            if all(y is not None for y in years):
+                looks_date = True
+        if looks_date:
+            date_cols.append(col)
+        elif all_numeric:
+            measures.append(col)
+        else:
+            dimensions.append(col)
+    return dimensions, measures, date_cols
+
+
+# --- Drill-down model (Phase 2) -------------------------------------------
+# Clicking a category bar (e.g. an age band) re-renders the detail to show the
+# WITHIN-category breakdown by the OTHER dimensions, filtered to the clicked
+# value. The drill hierarchy is workspace-agnostic: the `by` axis is whatever
+# categorical the clicked panel charts, and the `into` dimensions are derived
+# from the result columns' dtypes (the other non-measure, non-date categoricals).
+# A spec MAY pin an explicit `drill: {"by": <col>, "into": [<col>, ...]}` to
+# override the default derivation; absent/invalid fields fall back to derivation.
+
+
+def _drill_into(rows: list[dict[str, Any]], by: str) -> list[str]:
+    """The OTHER categorical dimensions to break a drilled category down by.
+
+    Generic: every non-measure, non-date dimension except `by`, in result-column
+    order, that actually varies WITHIN the clicked slice's natural scope (kept
+    here as all dims; the caller filters rows then renders, so a degenerate
+    single-value dim simply renders one slice). No domain assumptions.
+    """
+    if not rows or not by:
+        return []
+    dims, _measures, _dates = _classify_columns(rows)
+    return [d for d in dims if d != by]
+
+
+def _drill_model(
+    spec: DashboardSpec, rows: list[dict[str, Any]], by: str = ""
+) -> dict[str, Any]:
+    """Resolve the drill hierarchy for a click on the `by` category.
+
+    Honors an optional `spec.config['drill'] = {"by": col, "into": [cols]}`:
+    a pinned `by` (when the caller doesn't pass one) and/or a pinned `into`
+    list are used when their columns exist in the live rows; otherwise both are
+    derived from the data shape. Returns ``{"by": str, "into": list[str]}`` with
+    `into` excluding `by` and any column absent from the rows.
+    """
+    present = set(rows[0].keys()) if rows else set()
+    cfg = spec.config.get("drill") if isinstance(spec.config, dict) else None
+    cfg = cfg if isinstance(cfg, dict) else {}
+    if not by:
+        cfg_by = str(cfg.get("by") or "")
+        by = cfg_by if cfg_by in present else ""
+        if not by:
+            dims, _m, _d = _classify_columns(rows)
+            by = dims[0] if dims else ""
+    into_cfg = [c for c in (cfg.get("into") or []) if c in present and c != by]
+    into = into_cfg if into_cfg else _drill_into(rows, by)
+    return {"by": by, "into": into}
+
+
+def _filter_rows_by_value(
+    rows: list[dict[str, Any]], column: str, value: Any
+) -> list[dict[str, Any]]:
+    """Rows whose `column` equals the clicked `value` (string-compared so a
+    numeric/category click matches regardless of dtype). Empty column or value
+    returns the rows unchanged."""
+    if not column:
+        return rows
+    target = str(value)
+    return [r for r in rows if str(r.get(column)) == target]
+
+
+def _apply_xfilter(
+    rows: list[dict[str, Any]], xfilter: dict[str, list[Any]] | None
+) -> list[dict[str, Any]]:
+    """Cross-filter rows by the active selections (Power-BI 'connected canvas').
+
+    ``xfilter`` maps column -> selected value(s). A row is kept when it matches
+    EVERY filtered column (AND across columns); within one column any of the
+    selected values matches (OR), so clicking two departments shows both. String
+    comparison so a click on a numeric/category value matches regardless of dtype.
+    """
+    if not xfilter:
+        return rows
+    active = {c: {str(v) for v in vals} for c, vals in xfilter.items() if vals}
+    if not active:
+        return rows
+    return [
+        r for r in rows
+        if all(str(r.get(c)) in keep for c, keep in active.items())
+    ]
+
+
+_DRILL_DONUT_MAX = 8
+
+
+def _drill_panels(
+    by: str, value: Any, into: list[str], rows: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
+    """Panel specs for a drilled category: one breakdown per `into` dimension,
+    of the measure within the clicked `value`.
+
+    Chart type is data-driven by the dimension's cardinality WITHIN the drilled
+    slice: a low-cardinality breakdown is a donut (the composition reads at a
+    glance and sums to 100% over the filtered rows), while a high-cardinality one
+    is a ranked bar (a donut of 30 slivers is unreadable — data-to-viz). When
+    `rows` is omitted the default is a donut. `y`/`y_format` are filled by the
+    caller from the KPI's own spec."""
+    panels: list[dict[str, Any]] = []
+    for dim in into:
+        chart = "donut"
+        if rows is not None:
+            distinct = len({str(r.get(dim)) for r in rows if dim in r})
+            if distinct > _DRILL_DONUT_MAX:
+                chart = "ranked_bar"
+        panel: dict[str, Any] = {
+            "chart_type": chart,
+            "x": dim,
+            "title": f"By {dim.replace('_', ' ').title()}",
+        }
+        if chart == "ranked_bar":
+            panel["orientation"] = "h"
+            panel["limit"] = 12
+        panels.append(panel)
+    return panels
+
+
+# Chart types the Explore pane can build from a transient spec. Each maps to a
+# branch in `_figure_from_spec`. Kept generic (no domain assumptions) and ordered
+# from most-common to least so the dropdown reads sensibly.
+_EXPLORE_CHART_TYPES: tuple[tuple[str, str], ...] = (
+    ("Bar", "bar"),
+    ("Grouped bar", "grouped_bar"),
+    ("Stacked 100%", "stacked_bar_percent"),
+    ("Line / timeline", "line"),
+    ("Ranked bar (top-N)", "ranked_bar"),
+    ("Donut", "donut"),
+    ("Treemap", "treemap"),
+    ("Heatmap", "heatmap"),
+    ("Stacked area", "stacked_area"),
+)
+
+
+def _explore_chart_options(
+    *, recommended: str = "", fit: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """Dropdown options for the Explore chart-type picker.
+
+    Soft guidance (not enforcement): the recommended chart is marked, and charts
+    that are a poor fit for the current X/measure/series shape are badged ``(not
+    ideal)`` — every option stays selectable so the user can still force any chart.
+    """
+    fit = fit or {}
+    opts: list[dict[str, Any]] = []
+    for label, value in _EXPLORE_CHART_TYPES:
+        verdict = fit.get(value, "ok")
+        if value == recommended:
+            label = f"★ {label}"
+        elif verdict == "poor":
+            label = f"{label} (not ideal)"
+        opts.append({"label": label, "value": value})
+    return opts
+
+
+def _pretty_label(col: str) -> str:
+    """Human axis/label for a result column: drop the agg prefix, de-snake, Title
+    Case, and render a share/percent measure as ``… (%)``. Generic — no workspace
+    vocabulary (``sum_paidamount`` -> ``Paidamount``; ``percentage_share`` ->
+    ``Percentage Share (%)``; ``department_name`` -> ``Department Name``)."""
+    if not col:
+        return ""
+    name = str(col)
+    low = name.lower()
+    for pre in ("sum_", "avg_", "mean_", "count_", "distinct_", "total_"):
+        if low.startswith(pre):
+            name = name[len(pre):]
+            low = name.lower()
+            break
+    pretty = name.replace("_", " ").strip().title()
+    if any(t in low for t in ("percent", "share", "ratio", "rate", "pct")):
+        if "%" not in pretty:
+            pretty = f"{pretty} (%)"
+    return pretty
+
+
+def _distinct_count(rows: list[dict[str, Any]], col: str) -> int:
+    """Distinct non-null values of ``col`` across rows."""
+    if not col:
+        return 0
+    return len({str(r.get(col)) for r in rows if r.get(col) is not None})
+
+
+def _explore_recommendation(
+    rows: list[dict[str, Any]], x: str, series: str | None, measure: str
+) -> tuple[str, str, dict[str, str]]:
+    """Recommend a chart for the chosen X/Breakdown/Measure using the data-to-viz
+    chart-knowledge brain, and rate every chart's FIT for that shape.
+
+    Returns ``(recommended_chart_type, reason, fit)`` where ``fit`` maps each
+    chart_type -> ``"best" | "ok" | "poor"``. This is what makes Explore not
+    "shallow": the same principled selection the KPI panels use now drives the
+    ad-hoc chart picker, so a line-over-departments or a 10-slice donut is flagged
+    instead of silently rendered.
+    """
+    from core.dashboard import chart_knowledge as ck
+
+    if not rows or not x:
+        return "bar", "", {}
+    _dims, measures, date_cols = _classify_columns(rows)
+    is_date = x in (date_cols or [])
+    is_share = any(t in (measure or "").lower() for t in ("percent", "share", "ratio", "rate", "pct"))
+    has_series = bool(series and series != x and series in (rows[0] if rows else {}))
+    distinct_x = _distinct_count(rows, x)
+    x_vals = [r.get(x) for r in rows if r.get(x) is not None]
+    is_ordinal = ck.is_ordinal_categories(x_vals)
+
+    # 1) Pick the recommended chart from the data shape (data-to-viz families).
+    if is_date:
+        choice = ck.choose_trend_chart(
+            series_count=_distinct_count(rows, series) if has_series else 1,
+            is_share=is_share,
+        )
+    elif has_series:
+        choice = ck.choose_two_categorical_chart(
+            distinct_a=distinct_x, distinct_b=_distinct_count(rows, series)
+        ) or ck.ChartChoice(
+            "grouped_bar",
+            "two categorical dimensions with a wide axis read better side-by-side "
+            "than as a heatmap (data-to-viz: grouped bar)",
+        )
+    else:
+        choice = ck.choose_categorical_chart(
+            distinct=distinct_x, is_share=is_share, is_ordinal=is_ordinal
+        )
+    recommended = choice.chart_type
+    reason = choice.reason
+
+    # 2) Rate every selectable chart's fit for this shape (best / ok / poor).
+    fit: dict[str, str] = {}
+    for _label, ct in _EXPLORE_CHART_TYPES:
+        if ct == recommended:
+            fit[ct] = "best"
+            continue
+        verdict = "ok"
+        time_only = ct in ("line", "stacked_area")
+        if time_only and not is_date:
+            verdict = "poor"                                  # a trend chart needs time
+        elif ct == "donut" and (is_date or has_series or is_ordinal or distinct_x > ck.DONUT_CARDINALITY):
+            verdict = "poor"                                  # pie caveat: few non-ordinal slices
+        elif ct == "treemap" and (is_date or has_series or distinct_x > ck.TREEMAP_CARDINALITY):
+            verdict = "poor"
+        elif ct == "heatmap" and not has_series:
+            verdict = "poor"                                  # heatmap needs two categoricals
+        elif ct in ("grouped_bar", "stacked_bar_percent") and not has_series:
+            verdict = "poor"                                  # nothing to split without a breakdown
+        elif ct == "ranked_bar" and is_date:
+            verdict = "poor"
+        elif ct == "bar" and is_date:
+            verdict = "poor"                                  # over time -> line
+        fit[ct] = verdict
+    return recommended, reason, fit
+
+
+def _explore_default_chart_type(x: str, date_cols: list[str], series: str | None) -> str:
+    """Pick a sensible default chart for an X/series choice.
+
+    A date X -> line (timeline). Otherwise a breakdown -> grouped bar; a plain
+    single categorical -> bar.
+    """
+    if x and x in (date_cols or []):
+        return "line"
+    if series:
+        return "grouped_bar"
+    return "bar"
+
+
+def _explore_figure(
+    spec: DashboardSpec,
+    rows: list[dict[str, Any]],
+    *,
+    x: str,
+    series: str | None,
+    measure: str,
+    chart_type: str,
+) -> go.Figure:
+    """Build an Explore figure by assembling a TRANSIENT spec from the dropdown
+    choices and reusing `_figure_from_spec` (the single chart-quality seam).
+
+    Guards invalid/empty combos: an unknown X/measure (not in the live rows)
+    falls back to the first real dimension / measure so the pane never renders a
+    blank or crashes. A date X with a non-line chart still defaults sensibly via
+    the caller; here we only ensure the columns exist and the share/percent flag
+    is derived from the measure name so percent charts read 0-100%.
+    """
+    if not rows:
+        return _figure_from_spec(
+            _panel_spec(spec, {"chart_type": chart_type or "bar", "title": ""}), rows,
+            show_title=False,
+        )
+    dims, measures, date_cols = _classify_columns(rows)
+    present = set(rows[0].keys())
+    # Resolve X: keep the choice if it's a real column, else first dimension/date.
+    if x not in present:
+        x = (dims or date_cols or list(present))[0]
+    # Resolve measure: keep if real & numeric, else first measure, else any column.
+    if measure not in present or measure not in measures:
+        measure = measures[0] if measures else (list(present)[-1])
+    # Series is optional; drop it if it doesn't exist or duplicates X.
+    color = series if (series and series in present and series != x) else ""
+    if not chart_type:
+        chart_type = _explore_default_chart_type(x, date_cols, color or None)
+    # Percent intent is derived from the measure name (generic share vocabulary),
+    # so a share measure renders as a true 0-100% composition.
+    name = (measure or "").lower()
+    y_format = "percent" if any(
+        t in name for t in ("percent", "share", "ratio", "rate", "pct")
+    ) else ""
+    panel = {
+        "chart_type": chart_type,
+        "x": x,
+        "y": measure,
+        "color": color,
+        "title": "",
+    }
+    if y_format:
+        panel["y_format"] = y_format
+    return _figure_from_spec(_panel_spec(spec, panel), rows, show_title=False)
+
+
 def _cap_categories(
     rows: list[dict[str, Any]], x_col: str, color_col: str | None, y_col: str,
     *, max_x: int = 12, max_series: int = 6,
@@ -571,6 +965,16 @@ def _figure_from_spec(
     if chart_type in ("bar", "grouped_bar", "stacked_bar_percent"):
         fig.update_xaxes(tickangle=-35, automargin=True)
         fig.update_yaxes(automargin=True)
+    # Human axis titles: raw result columns (`sum_paidamount`) read as code on an
+    # executive chart. Prettify for axis-based families (the measure/category live
+    # on an axis); heatmap/donut/treemap/maps encode via color/slice, not an axis.
+    if chart_type not in ("heatmap", "donut", "treemap", "bubble_map", "big_number"):
+        if chart_type in ("ranked_bar", "lollipop"):
+            fig.update_xaxes(title_text=_pretty_label(y_col))
+            fig.update_yaxes(title_text=_pretty_label(x_col))
+        else:
+            fig.update_xaxes(title_text=_pretty_label(x_col))
+            fig.update_yaxes(title_text=_pretty_label(y_col))
     return _apply_corporate_theme(fig)
 
 
@@ -725,10 +1129,57 @@ def _kpi_blocker_card(kpi_id: str, gap: dict[str, Any]) -> dbc.Card:
     )
 
 
+# A panel's information value, by chart family: charts that encode MORE of the
+# KPI at once (two categorical dims, or a trend with a series) carry more value
+# than a single-dimension slice. Used to pick the 1-2 default panels per KPI so a
+# dashboard of 20 KPIs is not a wall of 100 charts — the Explore pane gives the
+# user every other comparison on demand. Workspace-agnostic (reads only the spec).
+_PANEL_VALUE_RANK: dict[str, int] = {
+    "heatmap": 6,            # two categorical dims x measure — the richest single view
+    "stacked_bar_percent": 5,
+    "stacked_area": 5,
+    "grouped_bar": 5,
+    "line": 4,              # trend over time
+    "bubble_map": 4,
+    "ranked_bar": 4,        # ranks the primary entity dimension
+    "scatter": 3,
+    "lollipop": 3,
+    "treemap": 3,
+    "bar": 2,
+    "donut": 2,             # single-dimension composition
+    "histogram": 2,
+    "big_number": 1,
+}
+
+
+def _panel_value_score(panel: dict[str, Any]) -> int:
+    """Higher = shows more of the KPI at once. A second encoded dimension
+    (color/series) adds one point so a split chart beats its flat sibling."""
+    score = _PANEL_VALUE_RANK.get(str(panel.get("chart_type") or "bar"), 2)
+    if panel.get("color"):
+        score += 1
+    return score
+
+
+def _default_panel_idxs(panels_cfg: list[dict[str, Any]], *, cap: int = 2) -> list[int]:
+    """Indices of the top-``cap`` highest-value panels, in original display order.
+
+    The KPI shows its 1-2 best (most information-dense) views by default instead
+    of every derived panel; ties keep the earlier panel (the data-to-viz priority
+    order the inference step already chose). Returns at least one index when any
+    panel exists."""
+    n = len(panels_cfg)
+    if n <= cap:
+        return list(range(n))
+    ranked = sorted(range(n), key=lambda i: (_panel_value_score(panels_cfg[i]), -i), reverse=True)
+    return sorted(ranked[:cap])
+
+
 def _dash_index_string(t: DesignTokens) -> str:
-    """Editorial CSS shell for the live app, generated from DESIGN.md tokens.
-    Overview strip + drill detail are sized to fit the viewport (no page scroll;
-    the detail grid is the only scroll region when a KPI has many panels)."""
+    """Claude-style CSS shell for the live app, generated from DESIGN.md tokens.
+    A slim header, a clickable KPI rail, a prominent Explore card, then the KPI's
+    1-2 highest-value panels. Colors come from the workspace tokens (the same
+    tokens drive the Plotly palette, so chart colors are untouched)."""
     fams = "&".join(f"family={f}" for f in t.font_families)
     fonts = (f'<link href="https://fonts.googleapis.com/css2?{fams}&display=swap" rel="stylesheet">'
              if fams else "")
@@ -737,31 +1188,78 @@ def _dash_index_string(t: DesignTokens) -> str:
         f"--paper:{t.paper};--card:{t.card};--ink:{t.ink};--ink-soft:{t.ink_soft};"
         f"--rule:{t.rule};--rule-soft:{t.rule_soft};--accent:{t.accent};--accent-deep:{t.accent_deep};"
         f"--serif:{t.serif};--sans:{t.sans};--mono:{t.mono};"
-        "}"
+        "--shadow:0 1px 2px rgba(40,33,28,.04),0 6px 20px rgba(40,33,28,.06);"
+        "--radius:14px;}"
         "*{box-sizing:border-box;}"
-        "html,body{margin:0;height:100%;font-family:var(--sans);color:var(--ink);background:var(--paper);}"
+        "html,body{margin:0;height:100%;font-family:var(--sans);color:var(--ink);"
+        "background:var(--paper);-webkit-font-smoothing:antialiased;}"
         "#app{display:flex;flex-direction:column;height:100vh;overflow:hidden;}"
-        ".mast{border-bottom:2px solid var(--ink);padding:.7rem 1.2rem;}"
-        ".mast .ey{font-family:var(--mono);font-size:.62rem;letter-spacing:.26em;text-transform:uppercase;color:var(--accent);margin:0;}"
-        ".mast h1{font-family:var(--serif);font-weight:900;font-size:1.5rem;margin:.1rem 0 0;letter-spacing:-.02em;}"
-        ".strip{display:flex;gap:.6rem;overflow-x:auto;padding:.7rem 1.2rem;border-bottom:1px solid var(--rule);flex:0 0 auto;}"
-        ".tile{flex:0 0 auto;min-width:150px;background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:.5rem .7rem;cursor:pointer;transition:border-color .2s,transform .2s;}"
-        ".tile:hover{border-color:var(--ink);transform:translateY(-2px);}"
-        ".tile.sel{border-color:var(--accent);box-shadow:-3px 4px 0 rgba(180,68,28,.12);}"
-        ".tile .t{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-soft);}"
-        ".tile .h{font-family:var(--serif);font-weight:900;font-size:1.15rem;color:var(--accent);}"
-        ".tile .n{font-size:.7rem;color:var(--ink-soft);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
-        ".tile .st{font-family:var(--mono);font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-deep);margin-top:.2rem;}"
-        ".gsep{flex:0 0 auto;align-self:center;writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--mono);font-size:.58rem;letter-spacing:.18em;color:var(--accent-deep);padding:.2rem 0;border-left:2px solid var(--accent-deep);margin-left:.3rem;}"
-        ".ctl{display:flex;gap:1rem;align-items:center;padding:.5rem 1.2rem;border-bottom:1px solid var(--rule-soft);flex:0 0 auto;flex-wrap:wrap;}"
-        ".ctl .lab{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-soft);}"
-        ".detail{flex:1 1 auto;overflow:auto;padding:1rem 1.2rem;}"
-        ".dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:1rem;}"
-        ".pane{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:.5rem .7rem;min-width:0;overflow:hidden;}"
-        ".pane .pt{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.12em;color:var(--accent-deep);margin:.1rem 0 .2rem;}"
-        ".dh{font-family:var(--serif);font-size:1.1rem;margin:0 0 .2rem;}"
-        ".dm{font-family:var(--mono);font-size:.68rem;color:var(--ink-soft);margin-bottom:.6rem;}"
+        # Slim, calm header — no heavy rule, just a soft hairline.
+        ".mast{padding:1rem 1.6rem .9rem;border-bottom:1px solid var(--rule-soft);}"
+        ".mast .ey{font-family:var(--mono);font-size:.62rem;letter-spacing:.24em;text-transform:uppercase;color:var(--accent);margin:0;}"
+        ".mast h1{font-family:var(--serif);font-weight:600;font-size:1.5rem;margin:.15rem 0 0;letter-spacing:-.015em;color:var(--ink);}"
+        # KPI rail — soft rounded pills.
+        ".strip{display:flex;gap:.7rem;overflow-x:auto;padding:1rem 1.6rem;flex:0 0 auto;}"
+        ".tile{flex:0 0 auto;min-width:160px;background:var(--card);border:1px solid var(--rule-soft);"
+        "border-radius:var(--radius);padding:.7rem .9rem;cursor:pointer;box-shadow:var(--shadow);"
+        "transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;}"
+        ".tile:hover{transform:translateY(-2px);border-color:var(--accent);}"
+        ".tile.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),var(--shadow);}"
+        ".tile .t{font-family:var(--mono);font-size:.58rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-soft);}"
+        ".tile .h{font-family:var(--serif);font-weight:700;font-size:1.25rem;color:var(--accent);margin-top:.1rem;}"
+        ".tile .n{font-size:.72rem;color:var(--ink-soft);max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:.15rem;}"
+        ".tile .st{font-family:var(--mono);font-size:.56rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-deep);margin-top:.3rem;}"
+        ".gsep{flex:0 0 auto;align-self:center;writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--mono);font-size:.56rem;letter-spacing:.18em;color:var(--accent-deep);}"
+        # Scroll region holds Explore card + the value panels.
+        ".scroll{flex:1 1 auto;overflow:auto;padding:.2rem 1.6rem 1.6rem;}"
+        # Explore — the promoted customization card, sits at the top.
+        ".explore{background:var(--card);border:1px solid var(--rule-soft);border-radius:var(--radius);"
+        "box-shadow:var(--shadow);padding:1rem 1.1rem;margin-bottom:1.2rem;}"
+        ".explore .xh{display:flex;align-items:baseline;gap:.6rem;margin:0 0 .7rem;}"
+        ".explore .xh b{font-family:var(--serif);font-weight:600;font-size:1.02rem;color:var(--ink);}"
+        ".explore .xh span{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);}"
+        ".ctl{display:flex;gap:.6rem 1.1rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem;}"
+        # Each label+dropdown reads as one grouped control that wraps as a unit.
+        ".cgroup{display:flex;align-items:center;gap:.45rem;}"
+        ".ctl .lab{font-family:var(--mono);font-size:.58rem;text-transform:uppercase;letter-spacing:.12em;"
+        "color:var(--ink-soft);white-space:nowrap;}"
+        # The data-to-viz 'why this chart' note under the Explore controls.
+        ".why{font-family:var(--sans);font-size:.74rem;color:var(--ink-soft);line-height:1.4;"
+        "margin:.1rem 0 .6rem;padding:.4rem .6rem;background:rgba(180,68,28,.05);"
+        "border-left:2px solid var(--accent);border-radius:0 6px 6px 0;}"
+        ".why .why-k{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;color:var(--accent-deep);}"
+        # KPI detail header + value panels.
+        ".dhwrap{margin:.2rem 0 .8rem;display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;}"
+        # Card toolbar — small pill buttons top-right (Table / Export).
+        ".toolbar{display:flex;gap:.5rem;flex:0 0 auto;}"
+        ".tbtn{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;"
+        "cursor:pointer;background:var(--card);color:var(--accent-deep);border:1px solid var(--rule);"
+        "border-radius:8px;padding:.35rem .7rem;transition:border-color .18s,background .18s;}"
+        ".tbtn:hover{border-color:var(--accent);}"
+        ".tbtn.active{background:var(--accent);color:#fff;border-color:var(--accent);}"
+        ".datawrap{background:var(--card);border:1px solid var(--rule-soft);border-radius:var(--radius);"
+        "box-shadow:var(--shadow);padding:.8rem 1rem;margin-top:1rem;}"
+        ".dh{font-family:var(--serif);font-weight:600;font-size:1.2rem;margin:0;letter-spacing:-.01em;}"
+        ".dm{font-family:var(--mono);font-size:.66rem;color:var(--ink-soft);margin-top:.25rem;}"
+        ".dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:1.2rem;}"
+        ".pane{background:var(--card);border:1px solid var(--rule-soft);border-radius:var(--radius);"
+        "box-shadow:var(--shadow);padding:.8rem 1rem;min-width:0;overflow:hidden;}"
+        ".pane .pt{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.12em;color:var(--accent-deep);margin:0 0 .3rem;}"
         ".js-plotly-plot,.plot-container{width:100%!important;}"
+        # Cross-filter chip bar (Power-BI 'connected canvas').
+        ".xbar{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem;margin:0 0 .8rem;}"
+        ".xhint{font-family:var(--mono);font-size:.62rem;letter-spacing:.04em;color:var(--ink-soft);margin:0 0 .8rem;}"
+        ".xchip{display:inline-flex;align-items:center;gap:.4rem;background:rgba(180,68,28,.08);"
+        "border:1px solid var(--accent);border-radius:999px;padding:.18rem .3rem .18rem .65rem;}"
+        ".xchip-t{font-family:var(--sans);font-size:.72rem;color:var(--ink);}"
+        ".xchip-x{cursor:pointer;border:none;background:transparent;color:var(--accent-deep);"
+        "font-size:.8rem;line-height:1;padding:0 .25rem;border-radius:50%;}"
+        ".xchip-x:hover{background:var(--accent);color:#fff;}"
+        ".xclear{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;"
+        "cursor:pointer;background:transparent;color:var(--ink-soft);border:1px solid var(--rule);"
+        "border-radius:8px;padding:.25rem .6rem;margin-left:.3rem;}"
+        ".xclear:hover{border-color:var(--accent);color:var(--accent-deep);}"
+        ".hidden{display:none!important;}"
     )
     return (
         "<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>"
@@ -769,6 +1267,16 @@ def _dash_index_string(t: DesignTokens) -> str:
         + f"<style>{css}</style>{{%favicon%}}{{%css%}}</head>"
         + "<body><div id=\"app\">{%app_entry%}</div><footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>"
     )
+
+
+def _slice_rows(rows: list[dict[str, Any]], col: str, values: list[Any]) -> list[dict[str, Any]]:
+    """Filter ``rows`` to those whose ``col`` is one of ``values`` (Power-BI-style
+    slice). Empty col/values -> unchanged. Compared as strings so the dropdown's
+    string values match numeric/categorical cells alike."""
+    if not col or not values:
+        return rows
+    keep = {str(v) for v in values}
+    return [r for r in rows if str(r.get(col)) in keep]
 
 
 def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
@@ -784,6 +1292,9 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
     set_active_design(tokens)
 
     app = dash.Dash(__name__, title=f"Dashboard — {workspace.name}")
+    # The detail toolbar (Table/Export) lives inside the dynamically-rendered
+    # kpi-detail, so its callbacks reference ids not present in the initial layout.
+    app.config.suppress_callback_exceptions = True
     app.index_string = _dash_index_string(tokens)
 
     definitions = load_kpi_definitions(layout)
@@ -820,6 +1331,9 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             "group": str(defn.get("group") or definition.get("group") or ""),
             "panels_cfg": panels_cfg,
             "panel_titles": [str(p.get("title") or f"View {i + 1}") for i, p in enumerate(panels_cfg)],
+            # Phase 2 drill: each panel's x column tells a click which dimension
+            # it is drilling BY (the clicked bar's category lives on that axis).
+            "panel_x": [str(p.get("x") or "") for p in panels_cfg],
         }
 
     ready_ids = sorted(meta, key=lambda k: (meta[k]["group"], k))  # group together
@@ -868,43 +1382,144 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             className="tile",
         ))
 
-    controls = html.Div([
-        html.Span("KPI", className="lab"),
-        dcc.Dropdown(id="kpi-pick", options=[{"label": meta[k]["title"], "value": k} for k in ready_ids],
-                     value=first, clearable=False, style={"minWidth": "320px"}),
-        html.Span("Views", className="lab"),
-        dcc.Checklist(id="panel-pick", inline=True, style={"display": "flex", "gap": ".5rem", "flexWrap": "wrap"}),
-    ], className="ctl") if ready_ids else html.Div()
+    # The KPI selector is now driven entirely by clicking a tile in the rail, so
+    # the old "KPI | <title> | Views" control row is gone (it read as noise). The
+    # dropdown is KEPT but HIDDEN — it is the single source of "current KPI" that
+    # the detail/explore/drill callbacks all read, and tile clicks write to it.
+    kpi_state = dcc.Dropdown(
+        id="kpi-pick",
+        options=[{"label": meta[k]["title"], "value": k} for k in ready_ids],
+        value=first, clearable=False, className="hidden",
+    ) if ready_ids else dcc.Dropdown(id="kpi-pick", className="hidden")
+
+    # Explore — promoted to a prominent card at the TOP of the scroll region (it is
+    # the comparison/customization surface the board asked for). The four dropdowns
+    # populate from the SELECTED KPI's own result columns (classified by dtype) and
+    # a callback rebuilds the figure via a transient spec -> `_figure_from_spec`.
+    _dd = {"minWidth": "170px", "fontSize": ".8rem"}
+    explore = html.Div([
+        html.Div([
+            html.B("Explore"),
+            html.Span("compare any columns for this KPI", className=""),
+        ], className="xh"),
+        # Each label+dropdown is one .cgroup so a label never wraps away from its
+        # control. The first row is the comparison; the second is the slice.
+        html.Div([
+            html.Div([html.Span("X", className="lab"),
+                      dcc.Dropdown(id="explore-x", clearable=False, style=_dd)], className="cgroup"),
+            html.Div([html.Span("Breakdown", className="lab"),
+                      dcc.Dropdown(id="explore-series", clearable=True, placeholder="(none)", style=_dd)], className="cgroup"),
+            html.Div([html.Span("Measure", className="lab"),
+                      dcc.Dropdown(id="explore-measure", clearable=False, style=_dd)], className="cgroup"),
+            html.Div([html.Span("Chart", className="lab"),
+                      dcc.Dropdown(id="explore-chart", options=_explore_chart_options(),
+                                   clearable=False, style=_dd)], className="cgroup"),
+        ], className="ctl"),
+        # Slice (Power-BI-style filter): pick a dimension + the value(s) to keep;
+        # the chart re-renders to only those rows. This is the slice-and-dice the
+        # chart does on the data itself — no separate table.
+        html.Div([
+            html.Div([html.Span("Slice by", className="lab"),
+                      dcc.Dropdown(id="explore-filter-col", clearable=True,
+                                   placeholder="(no slice)", style=_dd)], className="cgroup"),
+            html.Div([html.Span("Values", className="lab"),
+                      dcc.Dropdown(id="explore-filter-vals", multi=True, placeholder="(all)",
+                                   style={"minWidth": "260px", "fontSize": ".8rem"})], className="cgroup"),
+        ], className="ctl"),
+        # Why this chart — the data-to-viz reason for the recommendation.
+        html.Div(id="explore-reason", className="why"),
+        dcc.Graph(id="explore-graph",
+                  config={"displaylogo": False, "responsive": True},
+                  style={"height": "360px"}),
+    ], id="explore-pane", className="explore") if ready_ids else html.Div()
 
     app.layout = html.Div([
         html.Header([html.P("Workspace Intelligence", className="ey"),
                      html.H1(workspace.name.replace("-", " "))], className="mast"),
         html.Div(strip_children or [html.Div("No KPIs registered yet.", className="n")], className="strip"),
-        controls,
-        html.Div(id="kpi-detail", className="detail"),
+        kpi_state,
+        # Phase 2 drill state: {kpi_id, by, value} when a category is drilled,
+        # else None. A click on a panel bar sets it; "← back" clears it.
+        # Cross-filter state for the current KPI: {column: [selected values]}.
+        # A click on any panel adds/removes a value; chips clear them.
+        dcc.Store(id="xfilter-store", data={}),
+        dcc.Download(id="detail-download"),
+        html.Div([
+            explore,
+            html.Div(id="kpi-detail"),
+        ], className="scroll"),
     ], id="app")
 
-    def _detail_children(kpi_id: str, visible_idxs: list[int] | None) -> Any:
+    def _xfilter_bar(xfilter: dict[str, list[Any]]) -> Any:
+        """The active cross-filter chips (Power-BI 'connected canvas' control).
+
+        One chip per selected (column, value) with an ✕ to remove it, plus a
+        Clear-all. Empty filter -> a hint that clicking a chart filters the page."""
+        chips: list[Any] = []
+        for col, vals in (xfilter or {}).items():
+            for val in vals:
+                chips.append(html.Span([
+                    html.Span(f"{_pretty_label(col)}: {val}", className="xchip-t"),
+                    html.Button("✕", id={"role": "xchip", "col": col, "val": str(val)},
+                                n_clicks=0, className="xchip-x"),
+                ], className="xchip"))
+        if not chips:
+            return html.Div(
+                "Click any bar or slice to filter every chart below; click again to clear.",
+                className="xhint",
+            )
+        return html.Div(
+            [html.Span("Filters", className="lab")] + chips
+            + [html.Button("Clear all", id="xclear", n_clicks=0, className="xclear")],
+            className="xbar",
+        )
+
+    def _detail_children(kpi_id: str, xfilter: dict[str, list[Any]] | None = None) -> Any:
         m = meta.get(kpi_id)
         if not m:
             return html.Div("Select a KPI above.", className="dm")
+        xfilter = xfilter if isinstance(xfilter, dict) else {}
+        # Cross-filter: every panel is rebuilt from the rows kept by the active
+        # selections, so a click on ANY chart filters the whole canvas in place.
+        rows = _apply_xfilter(m["rows"], xfilter)
+        spec = m["spec"]
         n = len(m["panel_titles"])
-        idxs = visible_idxs if visible_idxs is not None else list(range(n))
+        # Default = the 1-2 highest-value panels (not every derived view).
+        idxs = _default_panel_idxs(m["panels_cfg"])
         cells = []
         for i in idxs:
             if i < 0 or i >= n:
                 continue
+            # Rebuild from filtered rows (not the cached full-data figure) so the
+            # panel reflects the cross-filter; the panel id carries its x column
+            # so a click knows which dimension it is filtering by.
+            fig = _figure_from_spec(
+                _panel_spec(spec, m["panels_cfg"][i]), rows, show_title=False
+            )
             cells.append(html.Div([
                 html.Div(m["panel_titles"][i], className="pt"),
-                dcc.Graph(figure=_panel_figure(kpi_id, i),  # built lazily + cached
+                dcc.Graph(figure=fig,
+                          id={"role": "kpi-panel", "kpi_id": kpi_id, "idx": i,
+                              "x": m["panel_x"][i]},
                           config={"displaylogo": False, "responsive": True},
-                          style={"height": "300px"}),
+                          style={"height": "320px"}),
             ], className="pane"))
         return [
-            html.H2(m["title"], className="dh"),
-            html.Div((m["metric"] + ("  ·  cuts: " + m["cuts"] if m["cuts"] else "")) or "", className="dm"),
+            html.Div([
+                html.Div([
+                    html.H2(m["title"], className="dh"),
+                    html.Div((m["metric"] + ("  ·  cuts: " + m["cuts"] if m["cuts"] else "")) or "", className="dm"),
+                ]),
+                # Card toolbar (top-right): toggle the data table / export it.
+                html.Div([
+                    html.Button("Table", id="detail-table-btn", n_clicks=0, className="tbtn"),
+                    html.Button("Export CSV", id="detail-export-btn", n_clicks=0, className="tbtn"),
+                ], className="toolbar"),
+            ], className="dhwrap"),
+            _xfilter_bar(xfilter),
             html.Div(cells, className="dgrid"),
-            _data_view_component(workspace, kpi_id, m["rows"]),
+            html.Div(_data_view_table(workspace, rows),
+                     id="detail-data", className="datawrap hidden"),
         ]
 
     if ready_ids:
@@ -920,24 +1535,75 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
             return no_update
 
         @app.callback(
-            Output("panel-pick", "options"),
-            Output("panel-pick", "value"),
-            Input("kpi-pick", "value"),
-        )
-        def _panels_for_kpi(kpi_id):
-            m = meta.get(kpi_id)
-            if not m:
-                return [], []
-            opts = [{"label": t, "value": i} for i, t in enumerate(m["panel_titles"])]
-            return opts, [o["value"] for o in opts]  # all visible by default
-
-        @app.callback(
             Output("kpi-detail", "children"),
             Input("kpi-pick", "value"),
-            Input("panel-pick", "value"),
+            Input("xfilter-store", "data"),
         )
-        def _render_detail(kpi_id, visible):
-            return _detail_children(kpi_id, list(visible) if visible is not None else None)
+        def _render_detail(kpi_id, xfilter):
+            return _detail_children(kpi_id, xfilter if isinstance(xfilter, dict) else {})
+
+        # --- Cross-filter: click any chart -> filter the whole canvas ------
+        # A click on any panel point toggles {its x column: clicked value} in the
+        # cross-filter; clicking a chip's ✕ removes it; Clear-all / a KPI switch
+        # resets. Selections stack (AND across columns, OR within a column).
+        @app.callback(
+            Output("xfilter-store", "data"),
+            Input({"role": "kpi-panel", "kpi_id": ALL, "idx": ALL, "x": ALL}, "clickData"),
+            Input({"role": "xchip", "col": ALL, "val": ALL}, "n_clicks"),
+            Input("xclear", "n_clicks"),
+            Input("kpi-pick", "value"),
+            State("xfilter-store", "data"),
+            prevent_initial_call=True,
+        )
+        def _set_xfilter(_panel_clicks, _chip_clicks, _clear, _kpi_id, current):
+            trig = ctx.triggered_id
+            xf: dict[str, list[Any]] = {
+                k: list(v) for k, v in (current or {}).items() if v
+            }
+            # KPI switch or Clear-all -> reset the canvas filter.
+            if trig == "kpi-pick" or trig == "xclear":
+                return {}
+            # A chip ✕ -> remove that one (column, value).
+            if isinstance(trig, dict) and trig.get("role") == "xchip":
+                col, val = str(trig.get("col") or ""), str(trig.get("val") or "")
+                vals = [v for v in xf.get(col, []) if str(v) != val]
+                if vals:
+                    xf[col] = vals
+                else:
+                    xf.pop(col, None)
+                return xf
+            # A panel click -> toggle {clicked column: clicked value}.
+            if isinstance(trig, dict) and trig.get("role") == "kpi-panel":
+                col = str(trig.get("x") or "")
+                if not col:
+                    return no_update
+                point = None
+                for entry in (ctx.triggered or []):
+                    val = entry.get("value")
+                    if val and isinstance(val, dict) and val.get("points"):
+                        point = val["points"][0]
+                        break
+                if not point:
+                    return no_update
+                value = point.get("x")
+                if value is None or value == "":
+                    value = point.get("y")
+                if value is None or value == "":
+                    value = point.get("label")  # donut/pie slice
+                if value is None:
+                    return no_update
+                value = str(value)
+                existing = [str(v) for v in xf.get(col, [])]
+                if value in existing:                       # toggle off
+                    existing.remove(value)
+                else:                                       # toggle on (stack)
+                    existing.append(value)
+                if existing:
+                    xf[col] = existing
+                else:
+                    xf.pop(col, None)
+                return xf
+            return no_update
 
         @app.callback(
             Output({"role": "kpi-tile", "kpi_id": ALL}, "className"),
@@ -946,6 +1612,153 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         )
         def _highlight_tile(kpi_id, ids):
             return ["tile sel" if (i or {}).get("kpi_id") == kpi_id else "tile" for i in ids]
+
+        # --- Explore pane (Phase 1) ---------------------------------------
+        @app.callback(
+            Output("explore-x", "options"),
+            Output("explore-x", "value"),
+            Output("explore-series", "options"),
+            Output("explore-series", "value"),
+            Output("explore-measure", "options"),
+            Output("explore-measure", "value"),
+            Output("explore-filter-col", "options"),
+            Output("explore-filter-col", "value"),
+            Input("kpi-pick", "value"),
+        )
+        def _explore_options(kpi_id):
+            """Refill the Explore X/Breakdown/Measure/Slice dropdowns from the
+            selected KPI's columns. The CHART picker is owned by the recommend
+            callback (data-to-viz driven), so it is not set here."""
+            m = meta.get(kpi_id)
+            if not m:
+                return [], None, [], None, [], None, [], None
+            dims, measures, date_cols = _classify_columns(m["rows"])
+            x_cols = date_cols + dims  # date candidates first (timeline-friendly)
+            x_opts = [{"label": c, "value": c} for c in x_cols]
+            series_opts = [{"label": c, "value": c} for c in dims]
+            measure_opts = [{"label": c, "value": c} for c in measures]
+            cfg = m["spec"].config
+            # Seed X/measure from the spec when those columns are real candidates.
+            x_default = cfg.get("x") if cfg.get("x") in x_cols else (x_cols[0] if x_cols else None)
+            m_default = cfg.get("y") if cfg.get("y") in measures else (measures[0] if measures else None)
+            return (
+                x_opts, x_default,
+                series_opts, None,
+                measure_opts, m_default,
+                series_opts, None,   # slice field options (dims), start unset
+            )
+
+        @app.callback(
+            Output("explore-chart", "options"),
+            Output("explore-chart", "value"),
+            Output("explore-reason", "children"),
+            Input("kpi-pick", "value"),
+            Input("explore-x", "value"),
+            Input("explore-series", "value"),
+            Input("explore-measure", "value"),
+            Input("explore-filter-col", "value"),
+            Input("explore-filter-vals", "value"),
+        )
+        def _explore_recommend(kpi_id, x, series, measure, filter_col, filter_vals):
+            """Recommend a chart for the chosen X/Breakdown/Measure (data-to-viz),
+            badge each chart's fit, and set the picker to the recommendation. The
+            chart dropdown is NOT an input, so a manual chart pick is never reset.
+            Recomputes after a slice (the kept rows can change the recommendation)."""
+            m = meta.get(kpi_id)
+            if not m:
+                return _explore_chart_options(), "bar", ""
+            rows = _slice_rows(m["rows"], str(filter_col or ""), list(filter_vals or []))
+            recommended, reason, fit = _explore_recommendation(
+                rows, str(x or ""), str(series) if series else None, str(measure or "")
+            )
+            opts = _explore_chart_options(recommended=recommended, fit=fit)
+            why = (
+                [html.Span("Recommended: ", className="why-k"),
+                 html.Span(f"{recommended.replace('_', ' ')} — {reason}")]
+                if reason else ""
+            )
+            return opts, recommended, why
+
+        @app.callback(
+            Output("explore-filter-vals", "options"),
+            Output("explore-filter-vals", "value"),
+            Input("kpi-pick", "value"),
+            Input("explore-filter-col", "value"),
+        )
+        def _explore_filter_values(kpi_id, col):
+            """Populate the slice VALUES with the distinct values of the chosen
+            slice column for this KPI. Clearing the column clears the values."""
+            m = meta.get(kpi_id)
+            if not m or not col:
+                return [], []
+            seen: list[str] = []
+            for r in m["rows"]:
+                v = r.get(col)
+                if v is None:
+                    continue
+                s = str(v)
+                if s not in seen:
+                    seen.append(s)
+            seen.sort()
+            return [{"label": s, "value": s} for s in seen], []
+
+        @app.callback(
+            Output("explore-graph", "figure"),
+            Input("kpi-pick", "value"),
+            Input("explore-x", "value"),
+            Input("explore-series", "value"),
+            Input("explore-measure", "value"),
+            Input("explore-chart", "value"),
+            Input("explore-filter-col", "value"),
+            Input("explore-filter-vals", "value"),
+        )
+        def _explore_render(kpi_id, x, series, measure, chart_type, filter_col, filter_vals):
+            m = meta.get(kpi_id)
+            if not m:
+                return go.Figure()
+            rows = _slice_rows(m["rows"], str(filter_col or ""), list(filter_vals or []))
+            return _explore_figure(
+                m["spec"], rows,
+                x=str(x or ""), series=str(series) if series else None,
+                measure=str(measure or ""), chart_type=str(chart_type or ""),
+            )
+
+        # --- Card toolbar: Data table toggle + CSV export -----------------
+        @app.callback(
+            Output("detail-data", "className"),
+            Output("detail-table-btn", "className"),
+            Input("detail-table-btn", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def _toggle_data_table(n_clicks):
+            """Show/hide the KPI's data table from the card toolbar."""
+            shown = bool(n_clicks) and (n_clicks % 2 == 1)
+            return (
+                "datawrap" if shown else "datawrap hidden",
+                "tbtn active" if shown else "tbtn",
+            )
+
+        @app.callback(
+            Output("detail-download", "data"),
+            Input("detail-export-btn", "n_clicks"),
+            State("kpi-pick", "value"),
+            prevent_initial_call=True,
+        )
+        def _export_data_csv(n_clicks, kpi_id):
+            """Export the KPI's redacted result rows as CSV (never raw PII)."""
+            m = meta.get(kpi_id)
+            if not n_clicks or not m or not m["rows"]:
+                return no_update
+            import csv as _csv
+            import io as _io
+
+            rows = _redacted_display_rows(workspace, m["rows"])
+            cols = list(rows[0].keys())
+            buf = _io.StringIO()
+            writer = _csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+            return dict(content=buf.getvalue(), filename=f"{kpi_id}_data.csv")
 
     return app
 
@@ -1090,14 +1903,9 @@ def load_kpi_statuses(workspace: Path) -> dict[str, str]:
 _DATA_VIEW_ROWS_LIVE = 200
 
 
-def _data_view_component(workspace: Path, kpi_id: str, rows: list[dict[str, Any]]):
-    """Collapsible Data table for the live app's detail region.
-
-    Rendered surface -> display redaction applies (default PII patterns
-    widened by the workspace's data_policy.json), rows capped.
-    """
-    if not rows:
-        return html.Div()
+def _redacted_display_rows(workspace: Path, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The display-redacted, row-capped view of a KPI's result rows (the only form
+    ever shown or exported — PII patterns + data_policy widening + age Safe Harbor)."""
     from core.governance.data_policy import (
         load_workspace_data_policy,
         policy_redaction_patterns,
@@ -1105,12 +1913,27 @@ def _data_view_component(workspace: Path, kpi_id: str, rows: list[dict[str, Any]
     from core.onboarding.kpi.pii_redaction import (
         DEFAULT_PII_COLUMN_PATTERNS,
         redact_rows,
+        workspace_aggregate_ages,
     )
 
     patterns = DEFAULT_PII_COLUMN_PATTERNS + tuple(
         policy_redaction_patterns(load_workspace_data_policy(workspace))
     )
-    shown = redact_rows(rows[:_DATA_VIEW_ROWS_LIVE], patterns=patterns)
+    return redact_rows(
+        rows[:_DATA_VIEW_ROWS_LIVE],
+        patterns=patterns,
+        aggregate_ages=workspace_aggregate_ages(workspace),
+    )
+
+
+def _data_view_table(workspace: Path, rows: list[dict[str, Any]]):
+    """The Data table itself (no toolbar/disclosure — the card supplies those).
+
+    A rendered surface, so values pass through display redaction first.
+    """
+    if not rows:
+        return html.Div("(no rows)", className="dm")
+    shown = _redacted_display_rows(workspace, rows)
     columns = list(shown[0].keys())
 
     def cell(value: Any) -> str:
@@ -1120,18 +1943,17 @@ def _data_view_component(workspace: Path, kpi_id: str, rows: list[dict[str, Any]
 
     note = (
         f"{len(shown)} of {len(rows)}{'+' if len(rows) > len(shown) else ''} rows"
-        " · PII display-redacted · sortable · export = redacted view"
+        " · PII display-redacted"
     )
     records = [{c: cell(r.get(c)) for c in columns} for r in shown]
     from dash import dash_table
 
     table = dash_table.DataTable(
         data=records,
-        columns=[{"name": c, "id": c} for c in columns],
+        columns=[{"name": _pretty_label(c), "id": c} for c in columns],
         sort_action="native",
-        export_format="csv",  # exports the redacted records above, never raw rows
-        page_size=25,
-        style_table={"maxHeight": "420px", "overflowY": "auto"},
+        page_size=20,
+        style_table={"maxHeight": "360px", "overflowY": "auto"},
         style_cell={
             "fontFamily": "var(--sans)", "fontSize": "0.78rem",
             "textAlign": "left", "padding": "0.3rem 0.6rem",
@@ -1143,10 +1965,7 @@ def _data_view_component(workspace: Path, kpi_id: str, rows: list[dict[str, Any]
             "backgroundColor": "transparent", "fontWeight": "600",
         },
     )
-    return html.Details(
-        [html.Summary("Data"), html.Div(note, className="dm"), table],
-        className="dataview",
-    )
+    return html.Div([html.Div(note, className="dm"), table])
 
 
 def render_kpi_inline(
@@ -1164,7 +1983,11 @@ def render_kpi_inline(
     rows = _execute_sql_view(repo_root, sql_path, view_name) if sql_path else []
     definition = spec.config.get("definition") or {}
 
-    panels = spec.config.get("panels") or []
+    all_panels = spec.config.get("panels") or []
+    # Show only the 1-2 highest-value panels by default — same cap as the live app
+    # (`_default_panel_idxs`) so the static export is a faithful proxy and a 20-KPI
+    # board isn't a wall of 100 charts. The Explore preview below covers the rest.
+    panels = [all_panels[i] for i in _default_panel_idxs(all_panels)] if all_panels else []
     if panels:
         # Smaller per-panel height when there are multiple, so the card stays compact.
         per_h = height if len(panels) == 1 else max(220, int(height * 0.8))
@@ -1198,4 +2021,11 @@ __all__ = [
     "set_active_design",
     "build_dash_app",
     "render_kpi_html",
+    "_classify_columns",
+    "_explore_figure",
+    "_explore_chart_options",
+    "_drill_model",
+    "_drill_into",
+    "_drill_panels",
+    "_filter_rows_by_value",
 ]

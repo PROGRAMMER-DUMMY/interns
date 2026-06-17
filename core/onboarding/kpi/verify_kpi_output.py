@@ -41,7 +41,11 @@ from core.onboarding.kpi.result_view_builder import (
     _split_cuts,
     parse_kpi,
 )
-from core.onboarding.kpi.pii_redaction import redact_table_rows, workspace_redaction_patterns
+from core.onboarding.kpi.pii_redaction import (
+    redact_table_rows,
+    workspace_aggregate_ages,
+    workspace_redaction_patterns,
+)
 from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -419,7 +423,10 @@ class KPIOutputVerifier:
             # Redact PHI/PCI in the verifier's sample table — it is rendered into
             # the self-grill report surfaced to the operator. Ref: ob-kpi-d.md.
             _patterns = workspace_redaction_patterns(self.workspace)
-            rows = redact_table_rows(record.columns, rows, patterns=_patterns)
+            rows = redact_table_rows(
+                record.columns, rows, patterns=_patterns,
+                aggregate_ages=workspace_aggregate_ages(self.workspace),
+            )
             record.sample_output_table = render_markdown_table(record.columns, rows)
             if not record.columns:
                 record.errors.append(f"result view `{record.result_view}` has no columns")

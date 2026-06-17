@@ -72,6 +72,43 @@ def main(argv: list[str] | None = None) -> int:
         help="Host for the Dash server (default 127.0.0.1).",
     )
     parser.add_argument(
+        "--live",
+        action="store_true",
+        help=(
+            "Serve the live Power BI-style dashboard (vendored MinusAnalyst) read from "
+            "the validated medallion gold layer, instead of the legacy renderer. "
+            "Runs the gold parity gate first and refuses on failure unless --force."
+        ),
+    )
+    parser.add_argument(
+        "--theme",
+        default="claude",
+        help="Live dashboard theme: claude (light) or dark. Used with --live.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="With --live/--refresh, publish even if DQ certification reports failures.",
+    )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help=(
+            "Regenerate the live (MinusAnalyst) project + certified-clean data for "
+            "the workspace and exit. DQ-gated: on failure nothing is rewritten "
+            "(last-good snapshot stays). For a scheduler to call after new data lands."
+        ),
+    )
+    parser.add_argument(
+        "--refresh-seconds",
+        type=int,
+        default=0,
+        help=(
+            "With --live, make the running dashboard re-read its data every N "
+            "seconds (auto-pick-up of refreshed data). 0 = off."
+        ),
+    )
+    parser.add_argument(
         "--export",
         action="store_true",
         help="Write static HTML to dashboard/exports/ and exit. Skips the live server.",
@@ -168,6 +205,57 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+
+    if args.refresh:
+        # Regenerate the live project + certified-clean data and exit (DQ-gated).
+        # For a scheduled job to call after the upstream pipeline lands new gold.
+        from core.dashboard.minus_adapter import generate
+
+        res = generate(layout, force=args.force, refresh_seconds=args.refresh_seconds)
+        if args.json:
+            print(json.dumps({"action": "refresh", **res}, indent=2, default=str))
+        elif res.get("ok"):
+            print(f"[ok] refreshed: {res['rows']} rows, pages {res['pages']} "
+                  f"(certified={res['certified']})")
+        else:
+            print(f"[x] refresh blocked: {res.get('reason')} (last-good kept; "
+                  "use --force to override).", file=sys.stderr)
+            for chk in (res.get("failed") or []):
+                print(f"    - {chk.get('check')}: {chk.get('detail')}", file=sys.stderr)
+        return 0 if res.get("ok") else 1
+
+    if args.live:
+        # Generate a vendored-MinusAnalyst project + certified-clean data for this
+        # workspace, then launch the real MinusAnalyst app on it (DQ-gated).
+        from core.dashboard.minus_adapter import generate, minus_root
+
+        res = generate(layout, force=args.force, refresh_seconds=args.refresh_seconds)
+        if not res.get("ok"):
+            print(f"[x] {res.get('reason')}; refusing to serve the live dashboard "
+                  "(use --force to override).", file=sys.stderr)
+            for chk in (res.get("failed") or []):
+                print(f"    - {chk.get('check')}: {chk.get('detail')}", file=sys.stderr)
+            return 1
+        if res.get("force"):
+            print("[~] published with --force despite DQ findings.", file=sys.stderr)
+
+        vendor_dir = repo_root / "vendor"
+        if str(vendor_dir) not in sys.path:
+            sys.path.insert(0, str(vendor_dir))
+        from minus.render.app import create_app  # vendored MinusAnalyst
+
+        app, state = create_app(minus_root(layout))
+        if not is_loopback_host(args.host):
+            attach_token_auth(app, token)
+            print(
+                f"non-loopback bind: requests require Authorization: Bearer "
+                f"<{DASHBOARD_TOKEN_ENV}> (or ?token=...)."
+            )
+        print(f"Live dashboard (MinusAnalyst): http://{args.host}:{args.port}/ "
+              f"(workspace: {args.workspace}, {len(state.pages)} pages, "
+              f"{res['rows']} rows)")
+        app.run(host=args.host, port=args.port, debug=False)
+        return 0
 
     app = build_dash_app(repo_root, args.workspace)
     if not is_loopback_host(args.host):

@@ -1,0 +1,21 @@
+name: 'hospital_a_spike'
+version: '1.0.0'
+config-version: 2
+
+# Phase 2 spike: can the bespoke Python medallion/transform layer be expressed
+# as a standard dbt Core project (over DuckDB) without losing the platform's
+# governance? Scoped to one workspace (Healthcare-RCM-Data-Platform), 3 KPIs.
+
+profile: 'hospital_a_spike'
+
+model-paths: ["models"]
+test-paths: ["tests"]
+
+models:
+  hospital_a_spike:
+    staging:        # L1 raw mirror: casts + renames + PII drop, no joins
+      +materialized: view
+    intermediate:   # L2 business logic: the approved-edge conformed star
+      +materialized: view
+    marts:          # L3 presentation: one fct_ per KPI (reconciles to gold)
+      +materialized: table

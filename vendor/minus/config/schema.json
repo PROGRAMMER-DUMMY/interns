@@ -1,0 +1,968 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MinusAnalyst configuration",
+  "description": "project.yaml uses 'Project'; each dashboards/*.yaml uses 'Dashboard'.",
+  "$defs": {
+    "Project": {
+      "$defs": {
+        "AgentConfig": {
+          "additionalProperties": false,
+          "description": "How the in-app chat panel / `minus edit` reaches your CLI agent.\n\nNo API key. The command is run as a subprocess in the project directory and\nuses whatever auth your CLI already has. ``{prompt}`` is substituted with the\nfully-built instruction (request + schema path + current config + field catalog).",
+          "properties": {
+            "command": {
+              "description": "Argv template. '{prompt}' is replaced with the built instruction.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Command",
+              "type": "array"
+            },
+            "cwd": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Working dir for the agent (defaults to project root).",
+              "title": "Cwd"
+            },
+            "timeout": {
+              "default": 600,
+              "description": "Seconds before the agent call is aborted.",
+              "title": "Timeout",
+              "type": "integer"
+            },
+            "enabled": {
+              "default": true,
+              "description": "Set false to hide the in-app chat panel.",
+              "title": "Enabled",
+              "type": "boolean"
+            }
+          },
+          "title": "AgentConfig",
+          "type": "object"
+        },
+        "Alert": {
+          "additionalProperties": false,
+          "description": "A data-driven threshold alert evaluated by ``minus alerts``.",
+          "properties": {
+            "name": {
+              "description": "Unique alert id.",
+              "title": "Name",
+              "type": "string"
+            },
+            "measure": {
+              "description": "Measure name to evaluate (as a scalar).",
+              "title": "Measure",
+              "type": "string"
+            },
+            "op": {
+              "description": "Comparison operator against 'value'.",
+              "enum": [
+                "<",
+                "<=",
+                ">",
+                ">=",
+                "==",
+                "!="
+              ],
+              "title": "Op",
+              "type": "string"
+            },
+            "value": {
+              "description": "Threshold the measure is compared to.",
+              "title": "Value",
+              "type": "number"
+            },
+            "filters": {
+              "additionalProperties": true,
+              "description": "Optional filters ({'table.column': value}) scoping the measure.",
+              "title": "Filters",
+              "type": "object"
+            },
+            "message": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Custom message when it fires.",
+              "title": "Message"
+            }
+          },
+          "required": [
+            "name",
+            "measure",
+            "op",
+            "value"
+          ],
+          "title": "Alert",
+          "type": "object"
+        },
+        "DataSource": {
+          "additionalProperties": false,
+          "description": "A place data is read from. v1 ships a CSV connector only.",
+          "properties": {
+            "name": {
+              "description": "Unique id, referenced by tables.",
+              "title": "Name",
+              "type": "string"
+            },
+            "type": {
+              "default": "csv",
+              "description": "Connector type: 'csv' (file/folder of CSVs), 'parquet' (file/folder of Parquet), or 'sql' (a sqlite .db file).",
+              "enum": [
+                "csv",
+                "parquet",
+                "sql"
+              ],
+              "title": "Type",
+              "type": "string"
+            },
+            "path": {
+              "description": "File or folder path (relative to project root) for the connector.",
+              "title": "Path",
+              "type": "string"
+            },
+            "options": {
+              "additionalProperties": true,
+              "description": "Connector-specific options, e.g. {'sep': ',', 'encoding': 'utf-8'}.",
+              "title": "Options",
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "path"
+          ],
+          "title": "DataSource",
+          "type": "object"
+        },
+        "Measure": {
+          "additionalProperties": false,
+          "description": "A reusable, named metric.\n\nTwo flavors:\n  * Aggregate \u2014 set ``agg`` + ``field`` (e.g. sum of claims.ClaimAmount).\n  * Derived   \u2014 set ``kind`` + the relevant operands (ratio/percent/yoy/expression).",
+          "properties": {
+            "name": {
+              "description": "Unique id used by widgets, e.g. 'total_claims'.",
+              "title": "Name",
+              "type": "string"
+            },
+            "label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Display name shown on the dashboard.",
+              "title": "Label"
+            },
+            "agg": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "sum",
+                    "avg",
+                    "min",
+                    "max",
+                    "count",
+                    "count_distinct",
+                    "median",
+                    "first"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Aggregation function for a plain measure.",
+              "title": "Agg"
+            },
+            "field": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Dotted 'table.column' to aggregate. Omit for plain count.",
+              "title": "Field"
+            },
+            "table": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Table to aggregate over. Required for 'count' measures that have no field; otherwise inferred from 'field'.",
+              "title": "Table"
+            },
+            "kind": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ratio",
+                    "percent_of_total",
+                    "yoy",
+                    "expression"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Derived measure type. 'ratio'/'percent_of_total'/'yoy'/'expression'.",
+              "title": "Kind"
+            },
+            "numerator": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Measure name for ratio numerator.",
+              "title": "Numerator"
+            },
+            "denominator": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Measure name for ratio denominator.",
+              "title": "Denominator"
+            },
+            "of": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Base measure name for percent_of_total / yoy.",
+              "title": "Of"
+            },
+            "date_field": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Dotted date 'table.column' used by yoy to bucket years.",
+              "title": "Date Field"
+            },
+            "expression": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "For kind='expression': a formula over measure names, e.g. '(paid_amount / claim_amount) * 100'.",
+              "title": "Expression"
+            },
+            "fmt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Display format: 'currency', 'percent', 'int', 'float', or a Python format spec like ',.2f'.",
+              "title": "Fmt"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "title": "Measure",
+          "type": "object"
+        },
+        "NotifyConfig": {
+          "additionalProperties": false,
+          "description": "Where fired alerts / subscription snapshots are delivered.",
+          "properties": {
+            "channel": {
+              "default": "console",
+              "description": "Delivery channel for notifications.",
+              "enum": [
+                "console",
+                "file",
+                "webhook",
+                "email"
+              ],
+              "title": "Channel",
+              "type": "string"
+            },
+            "file": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Path for the 'file' channel (appended).",
+              "title": "File"
+            },
+            "webhook": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "POST URL for the 'webhook' channel.",
+              "title": "Webhook"
+            },
+            "email": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "SMTP settings for 'email': {host, port, sender, recipients:[...], user, password_env}.",
+              "title": "Email"
+            }
+          },
+          "title": "NotifyConfig",
+          "type": "object"
+        },
+        "Relationship": {
+          "additionalProperties": false,
+          "description": "A join between two tables, enabling cross-table widgets (star schema).",
+          "properties": {
+            "from_table": {
+              "description": "The 'many' side table (the fact, usually).",
+              "title": "From Table",
+              "type": "string"
+            },
+            "from_column": {
+              "description": "Foreign-key column on from_table.",
+              "title": "From Column",
+              "type": "string"
+            },
+            "to_table": {
+              "description": "The 'one' side table (the dimension).",
+              "title": "To Table",
+              "type": "string"
+            },
+            "to_column": {
+              "description": "Key column on to_table (its primary key).",
+              "title": "To Column",
+              "type": "string"
+            },
+            "kind": {
+              "default": "many_to_one",
+              "description": "Cardinality from from_table to to_table.",
+              "enum": [
+                "many_to_one",
+                "one_to_many",
+                "one_to_one"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          "required": [
+            "from_table",
+            "from_column",
+            "to_table",
+            "to_column"
+          ],
+          "title": "Relationship",
+          "type": "object"
+        },
+        "Table": {
+          "additionalProperties": false,
+          "description": "A logical table mapped onto a file within a datasource.",
+          "properties": {
+            "name": {
+              "description": "Unique table id used in field refs and relationships.",
+              "title": "Name",
+              "type": "string"
+            },
+            "source": {
+              "description": "Name of the DataSource this table reads from.",
+              "title": "Source",
+              "type": "string"
+            },
+            "file": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "File name within a folder datasource (e.g. 'patients.csv'). Omit when the datasource path is a single file.",
+              "title": "File"
+            },
+            "primary_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Column that uniquely identifies a row (used for joins/counts).",
+              "title": "Primary Key"
+            },
+            "label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Human-friendly display name.",
+              "title": "Label"
+            }
+          },
+          "required": [
+            "name",
+            "source"
+          ],
+          "title": "Table",
+          "type": "object"
+        },
+        "ThemeConfig": {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "default": "claude",
+              "description": "Theme name; 'claude' ships by default.",
+              "title": "Name",
+              "type": "string"
+            },
+            "accent": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Override accent color (hex).",
+              "title": "Accent"
+            },
+            "canvas": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Override page background (hex).",
+              "title": "Canvas"
+            }
+          },
+          "title": "ThemeConfig",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The root config. Lives in ``project.yaml`` at the project root.",
+      "properties": {
+        "name": {
+          "default": "MinusAnalyst",
+          "description": "Report/app name shown in the header.",
+          "title": "Name",
+          "type": "string"
+        },
+        "datasources": {
+          "items": {
+            "$ref": "#/$defs/DataSource"
+          },
+          "title": "Datasources",
+          "type": "array"
+        },
+        "tables": {
+          "items": {
+            "$ref": "#/$defs/Table"
+          },
+          "title": "Tables",
+          "type": "array"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/Relationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "measures": {
+          "description": "Reusable measures available to all pages.",
+          "items": {
+            "$ref": "#/$defs/Measure"
+          },
+          "title": "Measures",
+          "type": "array"
+        },
+        "theme": {
+          "$ref": "#/$defs/ThemeConfig"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentConfig"
+        },
+        "alerts": {
+          "description": "Threshold alerts evaluated by `minus alerts`.",
+          "items": {
+            "$ref": "#/$defs/Alert"
+          },
+          "title": "Alerts",
+          "type": "array"
+        },
+        "notify": {
+          "$ref": "#/$defs/NotifyConfig"
+        },
+        "refresh_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "If set, the running app re-reads source data this often.",
+          "title": "Refresh Seconds"
+        },
+        "dashboards_dir": {
+          "default": "config/dashboards",
+          "description": "Folder (relative to project root) holding one YAML per page.",
+          "title": "Dashboards Dir",
+          "type": "string"
+        }
+      },
+      "title": "Project",
+      "type": "object"
+    },
+    "Dashboard": {
+      "$defs": {
+        "ConditionalRule": {
+          "additionalProperties": false,
+          "description": "Conditional formatting for a measure column in a table widget.",
+          "properties": {
+            "column": {
+              "description": "Measure name (table column) the rule styles.",
+              "title": "Column",
+              "type": "string"
+            },
+            "type": {
+              "description": "data_bar = in-cell bar; color_scale = heat background; icon = \u25b2/\u25bc by sign.",
+              "enum": [
+                "data_bar",
+                "color_scale",
+                "icon"
+              ],
+              "title": "Type",
+              "type": "string"
+            },
+            "color": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Bar/high color (hex). Defaults to accent.",
+              "title": "Color"
+            }
+          },
+          "required": [
+            "column",
+            "type"
+          ],
+          "title": "ConditionalRule",
+          "type": "object"
+        },
+        "Filter": {
+          "additionalProperties": false,
+          "description": "A slicer. Page-level filters apply to every widget on the page.",
+          "properties": {
+            "id": {
+              "description": "Unique id within its page.",
+              "title": "Id",
+              "type": "string"
+            },
+            "field": {
+              "description": "Dotted 'table.column' this filter operates on.",
+              "title": "Field",
+              "type": "string"
+            },
+            "label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Display label for the control.",
+              "title": "Label"
+            },
+            "type": {
+              "default": "dropdown",
+              "description": "Control type.",
+              "enum": [
+                "dropdown",
+                "multi",
+                "date_range",
+                "range"
+              ],
+              "title": "Type",
+              "type": "string"
+            },
+            "default": {
+              "default": null,
+              "description": "Optional default value(s).",
+              "title": "Default"
+            }
+          },
+          "required": [
+            "id",
+            "field"
+          ],
+          "title": "Filter",
+          "type": "object"
+        },
+        "Widget": {
+          "additionalProperties": false,
+          "description": "A single visual tile.",
+          "properties": {
+            "id": {
+              "description": "Unique id within its page.",
+              "title": "Id",
+              "type": "string"
+            },
+            "type": {
+              "description": "Visual type.",
+              "enum": [
+                "kpi",
+                "bar",
+                "hbar",
+                "line",
+                "area",
+                "pie",
+                "donut",
+                "scatter",
+                "heatmap",
+                "table"
+              ],
+              "title": "Type",
+              "type": "string"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Tile heading.",
+              "title": "Title"
+            },
+            "measure": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Measure name for KPI / single-series charts.",
+              "title": "Measure"
+            },
+            "measures": {
+              "description": "Multiple measure names (multi-series charts, table columns).",
+              "items": {
+                "type": "string"
+              },
+              "title": "Measures",
+              "type": "array"
+            },
+            "dimension": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Primary group-by field 'table.column' (x axis / categories).",
+              "title": "Dimension"
+            },
+            "breakdown": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Secondary group-by 'table.column' for color/series split.",
+              "title": "Breakdown"
+            },
+            "sort": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "desc",
+              "description": "Sort direction by the primary measure.",
+              "title": "Sort"
+            },
+            "limit": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Keep only the top-N categories.",
+              "title": "Limit"
+            },
+            "width": {
+              "default": 6,
+              "description": "Grid width in 12-column units.",
+              "maximum": 12,
+              "minimum": 1,
+              "title": "Width",
+              "type": "integer"
+            },
+            "height": {
+              "default": 320,
+              "description": "Tile height in pixels.",
+              "title": "Height",
+              "type": "integer"
+            },
+            "compare": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Dotted 'table.column' date field to compute a period-over-period delta for a KPI.",
+              "title": "Compare"
+            },
+            "compare_period": {
+              "default": "year",
+              "description": "Granularity for the compare delta.",
+              "enum": [
+                "year",
+                "quarter",
+                "month"
+              ],
+              "title": "Compare Period",
+              "type": "string"
+            },
+            "drilldown": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Page id to navigate to when a data point is clicked.",
+              "title": "Drilldown"
+            },
+            "conditional": {
+              "description": "Conditional formatting rules for table widgets (data bars, color scales, icons).",
+              "items": {
+                "$ref": "#/$defs/ConditionalRule"
+              },
+              "title": "Conditional",
+              "type": "array"
+            },
+            "export": {
+              "default": false,
+              "description": "Show a 'CSV' button to download this widget's data.",
+              "title": "Export",
+              "type": "boolean"
+            },
+            "options": {
+              "additionalProperties": true,
+              "description": "Extra plotly/widget options.",
+              "title": "Options",
+              "type": "object"
+            }
+          },
+          "required": [
+            "id",
+            "type"
+          ],
+          "title": "Widget",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "One page of the report.",
+      "properties": {
+        "id": {
+          "description": "Unique page id (used in nav + drilldown targets).",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "description": "Page title shown in the sidebar and header.",
+          "title": "Title",
+          "type": "string"
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional emoji/char for the nav item.",
+          "title": "Icon"
+        },
+        "order": {
+          "default": 100,
+          "description": "Sort order in the sidebar (lower = higher).",
+          "title": "Order",
+          "type": "integer"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Short subtitle under the title.",
+          "title": "Description"
+        },
+        "filters": {
+          "description": "Page-level slicers applied to all widgets.",
+          "items": {
+            "$ref": "#/$defs/Filter"
+          },
+          "title": "Filters",
+          "type": "array"
+        },
+        "widgets": {
+          "description": "Tiles, laid out left-to-right on a 12-col grid.",
+          "items": {
+            "$ref": "#/$defs/Widget"
+          },
+          "title": "Widgets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "title": "Dashboard",
+      "type": "object"
+    }
+  }
+}

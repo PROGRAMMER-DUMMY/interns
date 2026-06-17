@@ -112,6 +112,14 @@ class DuckDBKPISQLGenerator:
         # three engines agree on WHICH columns are sensitive and mask IDENTICALLY
         # (SHA-256 hex). Ref: core-audit ob-kpi-b.md (T2).
         sensitive_cols = load_sensitive_columns(self.layout)
+        # Columns the result view consumes as RAW dates (age/days-since bands,
+        # time-bucket anchors). Masking them in the features view would break the
+        # downstream CAST(... AS DATE) and is pointless — the raw value is a
+        # derivation INPUT, never projected to output (only the derived band is,
+        # which HIPAA Safe Harbor permits). So a sensitive date column like DOB is
+        # left raw HERE but still masked anywhere it would actually be emitted.
+        from core.onboarding.kpi.result_view_builder import raw_date_input_columns
+        raw_date_inputs = raw_date_input_columns(kpi)
 
         for feature in kpi.get("features", []):
             column = self._feature_expression(feature, source_aliases, profile_map)
@@ -122,8 +130,20 @@ class DuckDBKPISQLGenerator:
                 # Mask when the feature's SOURCE COLUMN metadata says it is
                 # sensitive — not by string-splitting the rendered expression
                 # (which mis-detected derived formulas). Ref: ob-kpi-b.md:126.
+                # EXCEPT when the column is only consumed as a raw date-arithmetic
+                # input (see raw_date_inputs above): the raw value never reaches
+                # output, so masking it only breaks the derivation.
+                feat_cols = {
+                    str(sc.get("column") or "").lower()
+                    for sc in (feature.get("source_columns") or [])
+                    if isinstance(sc, dict)
+                }
+                feat_cols.add(str(feat_name).lower())
                 expr = column
-                if is_feature_sensitive(feature, sensitive_cols):
+                if (
+                    is_feature_sensitive(feature, sensitive_cols)
+                    and not (feat_cols & raw_date_inputs)
+                ):
                     expr = mask_sql_expr(column, self.dialect)
 
                 if res_type == "derived_formula":
