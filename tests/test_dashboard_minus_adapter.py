@@ -44,26 +44,23 @@ class TestAdapterReal(unittest.TestCase):
         self.assertNotIn("overview", self.res["pages"])
         self.assertNotIn("detail", self.res["pages"])
 
-    def test_has_collection_rate_and_kpi_measures(self):
-        # generic RCM measures + one measure per gold KPI
-        self.assertIn("collection_rate", self.res["measures"])
-        self.assertIn("days_in_ar", self.res["measures"])   # Days in A/R (RCM KPI)
+    def test_measures_are_fact_numerics_plus_kpi(self):
+        # Measures come from the fact's own numerics + one per gold KPI -- no
+        # domain-derived ratios keyed off "paid"/"amount"/"ar_days" substrings.
         self.assertTrue(any(m.startswith("kpi_") for m in self.res["measures"]))
+        self.assertTrue(any(m == "record_count" for m in self.res["measures"]))
 
-    def test_days_in_ar_is_avg_with_lower_target(self):
-        from minus.config.loader import load_project
-        proj = load_project(minus_root(self.layout))
-        m = proj.measure("days_in_ar")
-        self.assertEqual(m.agg, "avg")
-        self.assertEqual(m.target, 30.0)
-        self.assertEqual(m.goal, "lower")
+    def test_no_domain_derived_measures(self):
+        # Favoured RCM measures were removed (generic, no workspace favoritism).
+        self.assertNotIn("collection_rate", self.res["measures"])
+        self.assertNotIn("days_in_ar", self.res["measures"])
 
     def test_vendored_minus_validates_generated_project(self):
         from minus.config.loader import load_dashboards, load_project
         root = minus_root(self.layout)
         proj = load_project(root)
         pages = load_dashboards(root, proj)
-        self.assertGreaterEqual(len(proj.tables), 2)   # claims + gold KPI tables
+        self.assertGreaterEqual(len(proj.tables), 2)   # conformed fact + gold KPI tables
         self.assertGreaterEqual(len(pages), 2)         # KPIs + Analysis
         page_ids = {p.id for p in pages}
         self.assertIn("kpis", page_ids)
@@ -104,6 +101,56 @@ class TestKpiTargetColor(unittest.TestCase):
         # denial-rate style: 3% <= 5% target -> good (green)
         value_div = self._render(3.0, 5.0, goal="lower")[1]
         self.assertEqual(value_div.style.get("color"), "#3F8C6E")
+
+
+class TestDimensionImportance(unittest.TestCase):
+    """Generic, domain-free 'which cut matters' scoring (Stage: importance)."""
+
+    def _frame(self):
+        import polars as pl
+        # `region` strongly separates the measure (group means far apart);
+        # `noise` is unrelated (group means ~equal). Importance must prefer region.
+        return pl.DataFrame({
+            "region": ["A"] * 50 + ["B"] * 50,
+            "noise":  (["x", "y"] * 50),
+            "value":  [10.0] * 50 + [1000.0] * 50,
+        })
+
+    def test_explanatory_dim_outranks_noise(self):
+        from core.dashboard.importance import rank_dimensions, ranked_names
+        f = self._frame()
+        ranked = ranked_names(f, ["region", "noise"], measure="value")
+        self.assertEqual(ranked[0], "region")
+        scores = dict(rank_dimensions(f, ["region", "noise"], measure="value"))
+        self.assertGreater(scores["region"], scores["noise"])
+
+    def test_constant_and_overcardinality_dropped(self):
+        import polars as pl
+        from core.dashboard.importance import rank_dimensions
+        f = pl.DataFrame({
+            "const": ["only"] * 6,
+            "ids": [f"id{i}" for i in range(6)],
+            "value": [1.0, 2, 3, 4, 5, 6],
+        })
+        ranked = dict(rank_dimensions(f, ["const", "ids"], measure="value",
+                                      max_cardinality=3))
+        self.assertNotIn("const", ranked)   # single value -> no signal
+        self.assertNotIn("ids", ranked)     # 6 distinct > max_cardinality 3
+
+    def test_share_measure_uses_concentration(self):
+        import polars as pl
+        from core.dashboard.importance import score_dimension
+        # concentrated split (one dominant segment) scores higher than an even one
+        f = pl.DataFrame({
+            "skewed": ["A", "B", "C", "D"],
+            "even":   ["A", "B", "C", "D"],
+            "share":  [97.0, 1.0, 1.0, 1.0],
+        })
+        conc = score_dimension(f, "skewed", "share", is_share=True)
+        # an even split of the same column count -> low concentration
+        f2 = pl.DataFrame({"even": ["A", "B", "C", "D"], "share": [25.0, 25, 25, 25]})
+        even = score_dimension(f2, "even", "share", is_share=True)
+        self.assertGreater(conc, even)
 
 
 @unittest.skipUnless((_WS / "interns/state/medallion/bronze").exists(),
@@ -154,8 +201,9 @@ class TestPushdownScan(unittest.TestCase):
         return proj, model, QueryEngine(proj, model)
 
     def test_scan_source_is_read_parquet(self):
-        _, model, _ = self._model_engine()
-        scan = model.scan_source("claims")
+        proj, model, _ = self._model_engine()
+        # conformed fact name is workspace-derived, not a hardcoded "claims".
+        scan = model.scan_source(proj.tables[0].name)
         self.assertIsNotNone(scan)
         self.assertTrue(scan.startswith("read_parquet("), scan)
 
@@ -163,11 +211,12 @@ class TestPushdownScan(unittest.TestCase):
         import polars as pl
         from minus.config.models import Widget
         proj, model, engine = self._model_engine()
+        tbl = proj.tables[0].name  # conformed fact table (workspace-derived)
         # measure total_paid_amount by department_name via the engine (pushdown)
         w = Widget(id="t", type="bar", measure="total_paid_amount",
-                   dimension="claims.department_name")
+                   dimension=f"{tbl}.department_name")
         res = engine.run(w)
-        got = dict(zip(res.frame.get_column("claims.department_name").to_list(),
+        got = dict(zip(res.frame.get_column(f"{tbl}.department_name").to_list(),
                        res.frame.get_column("total_paid_amount").to_list()))
         # ground truth: aggregate the parquet directly
         raw = pl.read_parquet(minus_root(self.layout) / "data" / "conformed.parquet")

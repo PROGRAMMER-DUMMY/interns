@@ -64,6 +64,7 @@ class ConformedModel:
     measures: dict[str, Measure] = field(default_factory=dict)
     dimensions: list[str] = field(default_factory=list)
     edges: list[Edge] = field(default_factory=list)
+    data_through: Any = None                  # last COMPLETE month kept (pl.Date) or None
 
     def measure_names(self) -> list[str]:
         return list(self.measures.keys())
@@ -164,21 +165,48 @@ def _clean_table(
 
 
 def _derive_columns(df: pl.DataFrame) -> pl.DataFrame:
-    """Add common derived columns on the joined star (age is derived earlier,
-    per-table, before DOB redaction). Here: month from a service date, and
-    ar_days (days in A/R = paid date - service date) when both dates exist."""
+    """Add generic derived columns on the joined star (age is derived earlier,
+    per-table, before DOB redaction). Here: a ``month`` bucket from a service
+    date, so any workspace gets a temporal axis. No domain-specific derivations
+    (a paid-vs-service gap / 'days in A/R' is an RCM concept and belongs in that
+    workspace's KPI contract, not in the generic model builder)."""
     exprs = []
     svc = next((c for c in df.columns if c.lower() in ("servicedate", "service_date")), None)
-    paid = next((c for c in df.columns if c.lower() in ("paiddate", "paid_date")), None)
     if svc and df.schema.get(svc) == pl.Date:
         exprs.append(pl.col(svc).dt.truncate("1mo").alias("month"))
-    if svc and paid and df.schema.get(svc) == pl.Date and df.schema.get(paid) == pl.Date:
-        # Days in Accounts Receivable: how long a claim takes to get paid.
-        # A negative gap (paid before service) is a data error -> null it so it
-        # doesn't poison the average (guards the nonsensical value).
-        gap = (pl.col(paid) - pl.col(svc)).dt.total_days()
-        exprs.append(pl.when(gap >= 0).then(gap).otherwise(None).alias("ar_days"))
     return df.with_columns(exprs) if exprs else df
+
+
+def _incomplete_trailing_cutoff(frame: pl.DataFrame):
+    """Last COMPLETE month, when the final month looks like an incomplete load.
+
+    Generic + domain-free: flag the final month as incomplete when its VOLUME
+    (row count) is a severe low-outlier versus a typical month (< half the median
+    of earlier months). Volume -- not calendar days -- because an incomplete load
+    often still spreads across the whole month (day-coverage looks full) yet
+    carries a fraction of the usual records. No 'today', no fixed calendar; purely
+    the data's own shape, so it holds for any workspace and cadence. The 0.5
+    threshold is conservative: normal seasonal dips (60-90% of median) are kept;
+    only a clear completeness gap is flagged.
+
+    Returns the last complete month (``pl.Date``) to report THROUGH, or ``None``
+    when the final month looks complete. NOTE: we never drop rows -- the conformed
+    model stays lossless for the DQ parity gate; this only tells trend charts to
+    mark the trailing period as incomplete.
+    """
+    if "month" not in frame.columns or frame.height == 0:
+        return None
+    cov = (frame.select("month").drop_nulls()
+           .group_by("month").agg(pl.len().alias("rows")).sort("month"))
+    if cov.height < 3:                       # too few periods to judge a baseline
+        return None
+    rows = cov.get_column("rows").to_list()
+    months = cov.get_column("month").to_list()
+    earlier = sorted(rows[:-1])
+    typical = earlier[len(earlier) // 2]     # median of all-but-last
+    if typical <= 0 or rows[-1] >= 0.5 * typical:
+        return None                          # final month looks complete
+    return months[-2]                        # report through the prior month
 
 
 def _build_measures(frame: pl.DataFrame, fact_cols: list[str]) -> dict[str, Measure]:
@@ -232,6 +260,7 @@ def build_conformed_model(layout: WorkspaceLayout) -> ConformedModel | None:
         joined_tables.add(e.right_table)
 
     frame = _derive_columns(frame)
+    data_through = _incomplete_trailing_cutoff(frame)   # mark-only; frame stays lossless
     measures = _build_measures(frame, fact_cols)
     measure_cols = {m.column for m in measures.values()}
     dimensions = [
@@ -242,6 +271,7 @@ def build_conformed_model(layout: WorkspaceLayout) -> ConformedModel | None:
     return ConformedModel(
         layout=layout, fact=fact, frame=frame,
         measures=measures, dimensions=dimensions, edges=edges,
+        data_through=data_through,
     )
 
 

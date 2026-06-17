@@ -374,6 +374,11 @@ class Project(_Base):
         "config/dashboards",
         description="Folder (relative to project root) holding one YAML per page.",
     )
+    data_through: Optional[str] = Field(
+        None,
+        description="Last COMPLETE reporting period (ISO date). Trend charts mark "
+                    "anything after it as an incomplete trailing period.",
+    )
 
     # convenience lookups -------------------------------------------------
     def table(self, name: str) -> Table:

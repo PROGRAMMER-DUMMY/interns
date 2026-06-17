@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
+
 import polars as pl
 import plotly.express as px
 import plotly.graph_objects as go
@@ -183,10 +185,16 @@ def _chart(widget, result, project, page_id, highlight=None, colors=None):
         fn = px.area if t == "area" else px.line
         fig = fn(d, x=dim, y=primary, color=breakdown, labels=labels,
                  markers=(t == "line"), **seq)
+        _flag_incomplete_tail(fig, d, dim, project, colors)
     elif t in ("pie", "donut"):
         fig = px.pie(df, values=primary, names=dim, hole=0.55 if t == "donut" else 0,
                      labels=labels, **seq)
-        fig.update_traces(textposition="inside", textinfo="percent")
+        # Show the actual value AND its share on each slice (e.g. "1,355" + "7.9%"),
+        # not just the percent -- the number is what the reader is after.
+        pmfmt = _measure_fmt(primary, project) if primary else None
+        slice_vals = [format_value(v, pmfmt) for v in df.get_column(primary).to_list()]
+        fig.update_traces(text=slice_vals, textposition="inside",
+                          texttemplate="%{text}<br>%{percent}")
     elif t == "scatter":
         ms = result.measures
         x, y = ms[0], (ms[1] if len(ms) > 1 else ms[0])
@@ -205,12 +213,44 @@ def _chart(widget, result, project, page_id, highlight=None, colors=None):
     else:  # pragma: no cover - guarded by schema
         fig = px.bar(df, x=dim, y=primary, labels=labels, **seq)
 
-    # Data labels on single-series bars so values read without hovering.
-    if t in ("bar", "hbar") and primary and not breakdown and not multi and len(df):
-        mfmt = _measure_fmt(primary, project)
-        texts = [format_value(v, mfmt) for v in df.get_column(primary).to_list()]
-        fig.update_traces(text=texts, textposition="outside", cliponaxis=False,
-                          textfont=dict(size=10.5, color=colors["muted"]))
+    # Data labels: print each bar/segment's value so the chart reads without
+    # hovering -- single-series, grouped (breakdown), stacked, and multi-measure
+    # alike. A breakdown keeps ONE measure (same fmt across its series); a
+    # multi-measure chart maps each trace back to its own measure's fmt.
+    if t in ("bar", "hbar", "stacked_bar") and len(df) and (primary or multi):
+        label_fmt = {_measure_label(mn, project): _measure_fmt(mn, project)
+                     for mn in result.measures} if multi else {}
+        default_fmt = _measure_fmt(primary, project) if primary else None
+        stacked = (t == "stacked_bar") or (t == "hbar" and breakdown)
+        pos = "inside" if stacked else "outside"
+        # Per-segment labels (inside for stacks; tiny ones auto-hide via uniformtext).
+        for tr in fig.data:
+            vals = tr.x if t == "hbar" else tr.y
+            if vals is None:
+                continue
+            mfmt = label_fmt.get(getattr(tr, "name", None), default_fmt)
+            tr.update(text=[format_value(v, mfmt) for v in vals],
+                      texttemplate="%{text}", textposition=pos, cliponaxis=False,
+                      textfont=dict(size=10.5, color=colors["muted"]))
+        # Stacked bars: the per-segment numbers are individually tiny, so also
+        # annotate each category's TOTAL at the end of its bar -- the COMPLETE
+        # share/value of that department/category, read at a glance.
+        if stacked and dim and primary and not multi:
+            tot = (df.group_by(dim, maintain_order=True)
+                     .agg(pl.col(primary).cast(pl.Float64, strict=False).sum().alias("__t")))
+            for cat, v in zip(tot.get_column(dim).to_list(),
+                              tot.get_column("__t").to_list()):
+                if v is None:
+                    continue
+                txt = format_value(v, default_fmt)
+                if t == "hbar":
+                    fig.add_annotation(x=v, y=str(cat), text=txt, showarrow=False,
+                                       xanchor="left", xshift=5, yanchor="middle",
+                                       font=dict(size=10.5, color=colors["ink"]))
+                else:
+                    fig.add_annotation(x=str(cat), y=v, text=txt, showarrow=False,
+                                       yanchor="bottom", yshift=3, xanchor="center",
+                                       font=dict(size=10.5, color=colors["ink"]))
         if t == "hbar":
             fig.update_yaxes(autorange="reversed")  # highest at the top
 
@@ -261,10 +301,10 @@ def _chart(widget, result, project, page_id, highlight=None, colors=None):
 def _style(fig, widget, colors):
     # leave room for outside data labels: above (vertical bars) / right (hbar)
     margin = dict(l=8, r=10, t=8, b=8)
-    if widget.type == "bar":
-        margin["t"] = 24
+    if widget.type in ("bar", "stacked_bar"):
+        margin["t"] = 24          # room for value / stacked-total labels above bars
     elif widget.type == "hbar":
-        margin["r"] = 66
+        margin["r"] = 66          # room for value / stacked-total labels at bar tip
     is_pie = bool(fig.data) and getattr(fig.data[0], "type", "") == "pie"
     legend_shown = is_pie or bool(fig.data and len(fig.data) > 1)
     # Reserve bottom space so the horizontal legend sits BELOW the plot/axis and
@@ -316,6 +356,43 @@ def _style(fig, widget, colors):
 def _hex_rgb(h: str) -> tuple[int, int, int]:
     h = h.lstrip("#")
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _as_date(v):
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    try:
+        return date.fromisoformat(str(v)[:10])
+    except Exception:
+        return None
+
+
+def _flag_incomplete_tail(fig, d, dim, project, colors):
+    """Shade + label the trailing periods beyond ``project.data_through`` so a
+    volume dip from an incomplete final period (e.g. a still-loading extract)
+    isn't misread as a real decline. No-op unless a cutoff is set and the series
+    actually extends past it. Generic: works for any date-bucketed trend."""
+    cutoff_raw = getattr(project, "data_through", None)
+    if not cutoff_raw or dim not in d.columns or d.height == 0:
+        return
+    cutoff = _as_date(cutoff_raw)
+    xs = [x for x in d.get_column(dim).to_list() if x is not None]
+    if cutoff is None or not xs:
+        return
+    last = _as_date(xs[-1])
+    if last is None or last <= cutoff:
+        return
+    try:
+        fig.add_vrect(x0=cutoff, x1=last, fillcolor=colors["muted"], opacity=0.07,
+                      line_width=0, layer="below")
+        fig.add_vline(x=cutoff, line_dash="dot", line_width=1, line_color=colors["muted"])
+        fig.add_annotation(x=last, y=1.0, yref="paper", showarrow=False,
+                           text="incomplete", xanchor="right", yanchor="bottom",
+                           font=dict(size=9, color=colors["muted"]))
+    except Exception:
+        pass
 
 
 def _table(widget, result, project, colors=None):

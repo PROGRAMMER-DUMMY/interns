@@ -6,16 +6,18 @@ MinusAnalyst app (vendor/minus) consumes:
   - project.yaml             datasource + table + reusable measures
   - config/dashboards/*.yaml curated pages (KPI overview + detail)
 
-Workspace-agnostic: measures come from the conformed model's fact numerics
-(+ a derived collection_rate when a paid and a gross amount both exist), and
-chart types are chosen from each dimension's cardinality. Nothing healthcare- or
-workspace-specific is hardcoded.
+Workspace-agnostic: measures come from the conformed model's fact numerics, and
+which cuts are charted (and in what order they drill) is decided by a generic
+importance score -- how much each dimension explains the measure -- not by
+cardinality alone or any favoured column name. Nothing healthcare- or
+workspace-specific is hardcoded. See ``core.dashboard.importance``.
 
 Publishing is DQ-gated: if `dq.certify` fails, we do not (re)write the data, so a
 running dashboard keeps the last-good snapshot.
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -28,9 +30,9 @@ from core.dashboard.model.conformed import ConformedModel, build_conformed_model
 from core.dashboard.model.cuts import build_kpi_model
 from core.dashboard.model.dq import certify
 from core.dashboard.model.layers import list_gold_kpis, read_gold
+from core.dashboard.importance import rank_dimensions, ranked_names
 from core.storage.workspace_layout import WorkspaceLayout
 
-_TABLE = "claims"   # the single conformed (pre-joined) table MinusAnalyst reads
 _DATE_ISH = ("date", "_at", "_dt")
 
 
@@ -38,9 +40,29 @@ def minus_root(layout: WorkspaceLayout) -> Path:
     return layout.state_dir / "minus"
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    """Write a spec file atomically (temp + os.replace) so a concurrently
+    serving dashboard's config watcher never reads a half-written file -- the
+    cause of transient 'config error' flashes when a refresh overlaps a serve."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _slug(name: str) -> str:
     s = re.sub(r"[^0-9a-zA-Z]+", "_", str(name)).strip("_").lower()
     return s or "m"
+
+
+def _fact_table(model: ConformedModel) -> str:
+    """Logical name of the single conformed (pre-joined) table the app reads.
+
+    Derived from the workspace's inferred fact entity -- never a hardcoded
+    domain word like "claims" -- so the generated project + widgets reference a
+    name that reflects the ACTUAL workspace (e.g. ``transactions``) and the
+    dashboard wiring stays workspace-agnostic.
+    """
+    return _slug(model.fact) or "data"
 
 
 def _fact_pk(model: ConformedModel) -> str | None:
@@ -57,32 +79,20 @@ def _fact_pk(model: ConformedModel) -> str | None:
 
 def _measure_specs(model: ConformedModel) -> list[dict[str, Any]]:
     specs: list[dict[str, Any]] = []
-    paid_slug = amount_slug = None
+    table = _fact_table(model)
     for m in model.measures.values():
         slug = _slug(m.name)
         if m.agg == "count":
             specs.append({"name": slug, "label": m.name, "agg": "count",
-                          "table": _TABLE, "fmt": m.fmt or "int"})
+                          "table": table, "fmt": m.fmt or "int"})
         else:
             specs.append({"name": slug, "label": m.name, "agg": m.agg,
-                          "field": f"{_TABLE}.{m.column}", "fmt": m.fmt or "currency"})
-            cl = m.column.lower()
-            if "paid" in cl:
-                paid_slug = slug
-            elif "amount" in cl and amount_slug is None:
-                amount_slug = slug
-    # Collection Rate = paid / gross amount * 100 -- a real RCM KPI when both exist.
-    # Net Collection Rate benchmark is >=96% (RCM 2026), higher is better.
-    if paid_slug and amount_slug:
-        specs.append({"name": "collection_rate", "label": "Collection Rate",
-                      "kind": "expression",
-                      "expression": f"{paid_slug} / {amount_slug} * 100",
-                      "fmt": "percent", "target": 96.0, "goal": "higher"})
-    # Days in A/R = avg(paid date - service date). RCM benchmark <30 days, lower better.
-    if "ar_days" in model.frame.columns:
-        specs.append({"name": "days_in_ar", "label": "Days in A/R", "agg": "avg",
-                      "field": f"{_TABLE}.ar_days", "fmt": "float",
-                      "target": 30.0, "goal": "lower"})
+                          "field": f"{table}.{m.column}", "fmt": m.fmt or "currency"})
+    # NOTE: no domain-derived ratio measures here (was Collection Rate / Days in
+    # A/R, keyed off "paid"/"amount"/"ar_days" substrings -- favoured RCM-shaped
+    # workspaces). A composed/ratio measure must be declared in the workspace's
+    # KPI registry / semantic contract so it applies to that workspace on merit,
+    # not because a column name happened to match.
     return specs
 
 
@@ -123,44 +133,21 @@ def _display_dimensions(model: ConformedModel) -> list[tuple[str, int]]:
     return out
 
 
-def _diversified_chart_widgets(dims: list[tuple[str, int]], measure: str) -> list[dict[str, Any]]:
-    """Assign varied chart types so the canvas is not a wall of donuts:
-    month -> line; up to 2 lowest-card -> donut; mid -> bar; high-card -> hbar."""
-    widgets: list[dict[str, Any]] = []
-    cat = [(d, n) for d, n in dims if d.lower() != "month"]
-    for d, n in [(d, n) for d, n in dims if d.lower() == "month"][:1]:
-        widgets.append({"id": f"w_{_slug(d)}", "type": "line", "measure": measure,
-                        "dimension": f"{_TABLE}.{d}", "title": f"Trend by {_human(d)}",
-                        "width": 12, "height": 340})
-    donut_budget = 2
-    for d, n in sorted(cat, key=lambda x: x[1]):  # lowest cardinality first
-        common = {"id": f"w_{_slug(d)}", "measure": measure,
-                  "dimension": f"{_TABLE}.{d}", "title": f"By {_human(d)}", "height": 340}
-        if n <= 5 and donut_budget > 0:
-            widgets.append({**common, "type": "donut", "width": 5})
-            donut_budget -= 1
-        elif n > 12:
-            widgets.append({**common, "type": "hbar", "limit": 12, "width": 7})
-        else:
-            widgets.append({**common, "type": "bar", "width": 6})
-    return widgets
-
-
-def _widget_for(dim: str, distinct: int, measure_slug: str, idx: int) -> dict[str, Any]:
-    field = f"{_TABLE}.{dim}"
-    common = {"id": f"w_{_slug(dim)}", "measure": measure_slug,
-              "dimension": field, "height": 340}
-    if dim.lower() == "month":
-        return {**common, "type": "line", "title": f"Trend by {_human(dim)}", "width": 12}
-    if distinct <= 6:
-        return {**common, "type": "donut", "title": f"By {_human(dim)}", "width": 5}
-    if distinct <= 12:
-        return {**common, "type": "bar", "title": f"By {_human(dim)}", "width": 6}
-    return {**common, "type": "hbar", "title": f"By {_human(dim)}", "limit": 12, "width": 7}
-
-
 def _human(name: str) -> str:
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(name)).replace("_", " ").strip().title()
+
+
+def _through_note(data_through) -> str:
+    """A short 'reporting window' note for a page description, when the trailing
+    period looks incomplete (empty string otherwise)."""
+    if data_through is None:
+        return ""
+    try:
+        label = data_through.strftime("%b %Y")
+    except Exception:
+        label = str(data_through)
+    return (f" Complete data runs through {label}; the trailing period has far "
+            "fewer records and is shown dashed/flagged on trends as incomplete.")
 
 
 # ---------------------------------------------------------------------------
@@ -193,10 +180,13 @@ def _distinct_keywords(titles: dict[str, str]) -> dict[str, str]:
             for kid, seen in ordered.items()}
 
 
-def _kpi_artifacts(layout: WorkspaceLayout):
+def _kpi_artifacts(layout: WorkspaceLayout, data_through=None):
     """Return (tables, measures, page, exports) for every gold KPI.
 
     exports maps table-name -> gold frame (written to parquet by generate()).
+    ``data_through`` is informational (for the page note); no rows are dropped --
+    the trailing incomplete period is marked on trend charts, not removed, so the
+    KPI totals keep matching the validated gold results.
     """
     tables: list[dict[str, Any]] = []
     measures: list[dict[str, Any]] = []
@@ -265,27 +255,30 @@ def _kpi_artifacts(layout: WorkspaceLayout):
         panels = _kpi_panel_widgets(tname, mslug, km.card_label, km.measure,
                                     gold, km.panels or [])
         if not panels:
-            panels = _kpi_breakdown_charts(tname, mslug, km.card_label, gold, km.cuts)
+            panels = _kpi_breakdown_charts(tname, mslug, km.card_label, gold,
+                                           km.cuts, km.measure, is_share)
         hero = _pick_hero(panels)
         if hero:
             hero["width"] = span          # aligns under its card (n-across)
-            hero["height"] = 360
+            hero["height"] = 420
             hero.pop("tab", None)         # untabbed -> joins the single grid
             if hero["type"] in ("bar", "hbar"):
                 xcol = hero["dimension"].split(".")[-1]
-                # Enrich a single-series hero with a low-cardinality second cut
-                # (a colour split) so each chart carries more than one dimension
-                # -- without adding x categories that would overlap.
+                # Rank the other cuts by how much they explain THIS KPI's measure,
+                # so the colour split and the drill order surface the most
+                # decisive dimension first -- generic, not "first cut that fits".
+                other = [c for c in km.cuts
+                         if c != xcol and c.lower() != "month" and c in gold.columns]
+                ranked = ranked_names(gold, other, measure=km.measure, is_share=is_share)
+                # Enrich a single-series hero with the most-important low-cardinality
+                # second cut (a colour split) -- more signal, no x overlap.
                 if not hero.get("breakdown"):
-                    for c in km.cuts:
-                        if c == xcol or c.lower() == "month" or c not in gold.columns:
-                            continue
+                    for c in ranked:
                         if 2 <= gold.get_column(c).n_unique() <= 6:
                             hero["breakdown"] = f"{tname}.{c}"
                             break
                 bd = (hero.get("breakdown") or "").split(".")[-1]
-                rest = [c for c in km.cuts
-                        if c not in (xcol, bd) and c.lower() != "month"]
+                rest = [c for c in ranked if c != bd]   # most-important first
                 if rest:
                     hero["drill_path"] = [xcol] + rest[:2]   # depth up to 3 levels
             charts.append(hero)
@@ -316,7 +309,7 @@ def _kpi_artifacts(layout: WorkspaceLayout):
         "id": "kpis", "title": "KPIs", "order": 5,
         "description": "Each KPI shows its headline number with a chart beneath it. "
                        "Use the filters to slice every KPI at once; click any bar to "
-                       "drill into it, then '↑ up' to go back.",
+                       "drill into it, then '↑ up' to go back." + _through_note(data_through),
         "filters": kpi_filters[:4],
         "widgets": cards + charts,   # scorecard row, then per-KPI chart tabs
     }
@@ -349,12 +342,19 @@ def _pick_hero(panels: list[dict[str, Any]]) -> dict[str, Any] | None:
     return panels[0]
 
 
-def _kpi_breakdown_charts(tname, mslug, label, gold, cuts) -> list[dict[str, Any]]:
-    """Up to 2 charts per KPI: the measure by its lead cuts, diversified
+def _kpi_breakdown_charts(tname, mslug, label, gold, cuts,
+                          measure=None, is_share=False) -> list[dict[str, Any]]:
+    """Up to 2 charts per KPI: the measure by its MOST IMPORTANT cuts (ranked by
+    how much each explains the measure, not registry order), diversified
     (month -> line, one donut, else bar/hbar), 2-up grid."""
     out: list[dict[str, Any]] = []
     donut_budget = 1
-    for cut in cuts[:2]:
+    cats = [c for c in cuts if c in gold.columns and c.lower() != "month"]
+    ranked = ranked_names(gold, cats, measure=measure, is_share=is_share)
+    # Keep a leading month cut (its story is the trend) ahead of the ranked cats.
+    months = [c for c in cuts if c in gold.columns and c.lower() == "month"]
+    ordered = months + [c for c in ranked if c not in months]
+    for cut in ordered[:2]:
         if cut not in gold.columns:
             continue
         distinct = gold.get_column(cut).n_unique()
@@ -435,18 +435,25 @@ def _kpi_panel_widgets(tname, mslug, label, measure_col, gold, panels) -> list[d
 def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[str, pl.DataFrame]]:
     measures = _measure_specs(model)
     pk = _fact_pk(model)
-    kpi_tables, kpi_measures, kpi_page, kpi_exports = _kpi_artifacts(model.layout)
+    table = _fact_table(model)
+    kpi_tables, kpi_measures, kpi_page, kpi_exports = _kpi_artifacts(
+        model.layout, data_through=model.data_through)
     project = {
         "name": f"{model.layout.project_root.name}",
         "datasources": [{"name": "conformed_src", "type": "parquet", "path": "data"}],
-        "tables": [{"name": _TABLE, "source": "conformed_src",
-                    "file": "conformed.parquet", "primary_key": pk, "label": "Claims"}]
+        "tables": [{"name": table, "source": "conformed_src",
+                    "file": "conformed.parquet", "primary_key": pk,
+                    "label": _human(model.fact) or "Records"}]
                   + kpi_tables,
         "measures": measures + kpi_measures,
         "theme": {"name": "claude"},
         "agent": {"enabled": False},
         "dashboards_dir": "config/dashboards",
     }
+    # Last complete reporting period (ISO) -- trend renderers mark anything beyond
+    # it as an incomplete trailing period (dashed + flagged), without dropping data.
+    if model.data_through is not None:
+        project["data_through"] = str(model.data_through)
 
     mfields = _measure_field_columns(measures)
     dims = [(d, dist) for d, dist in _display_dimensions(model) if d not in mfields]
@@ -465,12 +472,35 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
     small multiples (a trend faceted by a category), a stacked bar (two cuts), a
     grouped bar, one donut, and conditional-format detail tables.
     """
+    table = _fact_table(model)
+    distinct = dict(dims)
+    cat_names = [d for d, _ in dims if d != "month"]
+
+    def _measure_col(m):
+        f = m.get("field") if m else None
+        return f.split(".", 1)[1] if f and "." in f else None
+
+    def _spread(m):  # peak importance of a measure across the available cuts
+        col = _measure_col(m)
+        scores = [s for _, s in rank_dimensions(model.frame, cat_names, measure=col,
+                                                is_share=(m.get("fmt") == "percent"))]
+        return max(scores) if scores else 0.0
+
     sums = [m for m in measures if m.get("agg") == "sum"]
-    primary_m = next((m for m in sums if "paid" in str(m.get("field", "")).lower()),
-                     sums[0] if sums else (measures[0] if measures else None))
+    # Primary = the measure the data MOVES on most across cuts (highest spread),
+    # not a favoured column name. Falls back to first sum, then any measure.
+    if sums and cat_names:
+        primary_m = max(sums, key=_spread)
+    else:
+        primary_m = sums[0] if sums else (measures[0] if measures else None)
     primary = primary_m["name"] if primary_m else "record_count"
     plabel = primary_m["label"] if primary_m else "Value"
-    has_rate = any(m["name"] == "collection_rate" for m in measures)
+    primary_col = _measure_col(primary_m)
+    primary_share = bool(primary_m and primary_m.get("fmt") == "percent")
+    # A generic "rate" line for the combo: any percentage measure other than the
+    # primary (e.g. a registry-declared ratio), if the workspace has one.
+    rate_m = next((m for m in measures
+                   if m.get("fmt") == "percent" and m["name"] != primary), None)
     svc_date = next((c for c in model.frame.columns
                      if c.lower() in ("servicedate", "service_date")), None)
 
@@ -478,20 +508,22 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
         w = {"id": f"a_k_{m['name']}", "type": "kpi", "measure": m["name"],
              "width": 3, "height": 132, "tab": tab}
         if svc_date:
-            w["compare"] = f"{_TABLE}.{svc_date}"
+            w["compare"] = f"{table}.{svc_date}"
             w["compare_period"] = "quarter"
         return w
 
-    _priority = {"record_count": 0, "total_paid_amount": 1, "collection_rate": 2,
-                 "days_in_ar": 3}
-    row = sorted(measures, key=lambda m: _priority.get(m["name"], 9))[:4]
+    # KPI strip: primary first, then the rest in declared order (no hardcoded names).
+    row = ([primary_m] if primary_m else []) + \
+          [m for m in measures if m is not primary_m]
+    row = row[:4]
 
     temporal = "month" if any(d == "month" for d, _ in dims) else None
-    cats_desc = [d for d, _ in sorted([(d, n) for d, n in dims if d != "month"],
-                                      key=lambda x: -x[1])]
-    low = [d for d, n in sorted([(d, n) for d, n in dims if d != "month" and n <= 6],
-                                key=lambda x: -x[1])]  # mid cards first (e.g. visit type)
-    cat1 = cats_desc[0] if cats_desc else None          # highest card (department)
+    # Cuts ranked by how much they explain the primary measure -- the most
+    # decisive dimension leads (drives x, breakdown, drill order, detail tables).
+    ranked_cats = ranked_names(model.frame, cat_names, measure=primary_col,
+                               is_share=primary_share)
+    low = [c for c in ranked_cats if distinct.get(c, 99) <= 6]  # good split cuts
+    cat1 = ranked_cats[0] if ranked_cats else None       # most-important main cut
     facet_cat = low[0] if low else None
     stack_cat = low[1] if len(low) > 1 else facet_cat
     group_cat = low[2] if len(low) > 2 else None
@@ -502,17 +534,17 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
     # ---- Trends: KPI strip + combo (value+rate+target) + small multiples ----
     A += [kpi_card(m, "Trends") for m in row]
     if temporal:
-        if has_rate:
+        if rate_m:
             A.append({"id": "a_combo", "type": "combo",
-                      "measures": [primary, "collection_rate"],
-                      "dimension": f"{_TABLE}.{temporal}",
-                      "title": f"{plabel} (bars) & Collection Rate (line) over Month",
-                      "width": 12, "height": 340, "tab": "Trends"})
+                      "measures": [primary, rate_m["name"]],
+                      "dimension": f"{table}.{temporal}",
+                      "title": f"{plabel} (bars) & {rate_m['label']} (line) over Month",
+                      "width": 12, "height": 410, "tab": "Trends"})
         else:
             A.append({"id": "a_trend", "type": "line", "measure": primary,
-                      "dimension": f"{_TABLE}.{temporal}",
+                      "dimension": f"{table}.{temporal}",
                       "title": f"{plabel} over Month", "width": 12,
-                      "height": 320, "tab": "Trends"})
+                      "height": 410, "tab": "Trends"})
         if facet_cat:
             # Judge by cardinality, don't hardcode: a few series read best
             # OVERLAID on one line chart (direct comparison); many series would
@@ -520,8 +552,8 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
             facet_n = dict(dims).get(facet_cat, 99)
             sm_type = "line" if facet_n <= 7 else "small_multiples"
             A.append({"id": "a_sm", "type": sm_type, "measure": primary,
-                      "dimension": f"{_TABLE}.{temporal}",
-                      "breakdown": f"{_TABLE}.{facet_cat}",
+                      "dimension": f"{table}.{temporal}",
+                      "breakdown": f"{table}.{facet_cat}",
                       "title": f"{plabel} over Month, by {_human(facet_cat)}",
                       "width": 12, "height": 320, "tab": "Trends"})
 
@@ -533,40 +565,52 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
         return [xcol] + rest if rest else []
 
     if cat1 and stack_cat and cat1 != stack_cat:
-        A.append({"id": "a_stack", "type": "stacked_bar", "measure": primary,
-                  "dimension": f"{_TABLE}.{cat1}", "breakdown": f"{_TABLE}.{stack_cat}",
-                  "title": f"{plabel} by {_human(cat1)}, split by {_human(stack_cat)}",
-                  "width": 12, "height": 380, "tab": "Breakdowns",
-                  "drill_path": _drill(cat1, {cat1, stack_cat})})
+        # Many categories on a vertical stacked bar = unreadable wall of bars.
+        # Generic rule: beyond ~12 categories, go horizontal and keep the top-N
+        # by value -- stakeholders read the leaders + each bar's total at a glance.
+        many = distinct.get(cat1, 0) > 12
+        w = {"id": "a_stack", "type": "hbar" if many else "stacked_bar",
+             "measure": primary, "dimension": f"{table}.{cat1}",
+             "breakdown": f"{table}.{stack_cat}",
+             "title": (f"Top {_human(cat1)} by {plabel}, split by {_human(stack_cat)}"
+                       if many else
+                       f"{plabel} by {_human(cat1)}, split by {_human(stack_cat)}"),
+             "width": 12, "height": 440, "tab": "Breakdowns",
+             "drill_path": _drill(cat1, {cat1, stack_cat})}
+        if many:
+            w["limit"] = 12
+        A.append(w)
     if group_cat and facet_cat and group_cat != facet_cat:
         A.append({"id": "a_group", "type": "bar", "measure": primary,
-                  "dimension": f"{_TABLE}.{group_cat}", "breakdown": f"{_TABLE}.{facet_cat}",
+                  "dimension": f"{table}.{group_cat}", "breakdown": f"{table}.{facet_cat}",
                   "title": f"{plabel} by {_human(group_cat)} x {_human(facet_cat)}",
                   "width": 6, "height": 340, "tab": "Breakdowns",
                   "drill_path": _drill(group_cat, {group_cat, facet_cat})})
     if donut_cat:
         A.append({"id": "a_donut", "type": "donut", "measure": "record_count",
-                  "dimension": f"{_TABLE}.{donut_cat}",
+                  "dimension": f"{table}.{donut_cat}",
                   "title": f"Records by {_human(donut_cat)}", "width": 6,
                   "height": 340, "tab": "Breakdowns"})
 
-    # ---- Detail: conditional-format tables for the top categorical dims ----
+    # ---- Detail: conditional-format tables for the most-important dims ----
     table_measures = [m["name"] for m in measures][:4]
     conditional = [{"column": mn,
                     "type": "color_scale" if next((m for m in measures if m["name"] == mn), {}).get("fmt") == "percent"
                             else "data_bar"} for mn in table_measures]
-    for cat in cats_desc[:2]:
+    for cat in ranked_cats[:2]:
         A.append({"id": f"a_tbl_{_slug(cat)}", "type": "table", "title": f"By {_human(cat)}",
-                  "dimension": f"{_TABLE}.{cat}", "measures": table_measures,
+                  "dimension": f"{table}.{cat}", "measures": table_measures,
                   "sort": "desc", "limit": 50, "width": 12, "height": 460,
                   "export": True, "conditional": conditional, "tab": "Detail"})
 
-    filters = [{"id": f"f_{_slug(d)}", "field": f"{_TABLE}.{d}", "label": _human(d),
-                "type": "multi"} for d, dist in dims if dist <= 40][:4]
+    # Slicers: the most-important cuts first (so the top filters are the decisive
+    # dimensions), capped to readable cardinality.
+    filters = [{"id": f"f_{_slug(d)}", "field": f"{table}.{d}", "label": _human(d),
+                "type": "multi"} for d in ranked_cats if distinct.get(d, 99) <= 40][:4]
     return {
         "id": "analysis", "title": "Analysis", "order": 10,
         "description": "Silver-layer exploration with dense, multi-cut charts. "
-                       "Click any element to cross-filter the page.",
+                       "Click any element to cross-filter the page." + _through_note(model.data_through),
         "filters": filters,
         "widgets": A,
     }
@@ -607,16 +651,16 @@ def generate(layout: WorkspaceLayout, *, force: bool = False,
         project["refresh_seconds"] = int(refresh_seconds)
     for tname, frame in kpi_exports.items():
         frame.write_parquet(data_dir / f"{tname}.parquet")
-    (root / "project.yaml").write_text(
-        yaml.safe_dump(project, sort_keys=False, allow_unicode=True, width=100),
-        encoding="utf-8")
-    # clear stale page files, then write
+    _atomic_write(root / "project.yaml",
+                  yaml.safe_dump(project, sort_keys=False, allow_unicode=True, width=100))
+    # clear stale page files, then write each spec atomically
+    keep = {f"{p['id']}.yaml" for p in pages}
     for old in dash_dir.glob("*.y*ml"):
-        old.unlink()
+        if old.name not in keep:
+            old.unlink()
     for page in pages:
-        (dash_dir / f"{page['id']}.yaml").write_text(
-            yaml.safe_dump(page, sort_keys=False, allow_unicode=True, width=100),
-            encoding="utf-8")
+        _atomic_write(dash_dir / f"{page['id']}.yaml",
+                      yaml.safe_dump(page, sort_keys=False, allow_unicode=True, width=100))
     return {
         "ok": True, "published": True, "root": str(root),
         "fact": model.fact, "rows": model.frame.height,
