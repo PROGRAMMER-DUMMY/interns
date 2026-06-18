@@ -219,6 +219,14 @@ class Widget(_Base):
     breakdown: Optional[str] = Field(
         None, description="Secondary group-by 'table.column' for color/series split."
     )
+    base_filters: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Built-in scope filters ({'table.column': value}) baked into this "
+        "widget, e.g. a KPI's intrinsic 'LineOfBusiness = Commercial'. They are the "
+        "DEFAULT view but are overridden by any page slicer / cross-filter selection on "
+        "the same column, so the chart can be re-scoped interactively without changing "
+        "what the KPI means by default.",
+    )
 
     sort: Optional[Literal["asc", "desc"]] = Field(
         "desc", description="Sort direction by the primary measure."

@@ -1208,27 +1208,38 @@ class WorkspaceOnboarder:
             )
         except (json.JSONDecodeError, OSError):
             profile_index = {}
-        seen: set[str] = set()
+        allowlisted: set[str] = set()
         for profile in profile_index.get("profiles") or []:
-            schema = profile.get("schema") if isinstance(profile, dict) else None
+            if not isinstance(profile, dict):
+                continue
+            # Table identity disambiguates a bare ``name`` column (PHI only on a
+            # person entity); see phi_gate.identifier_category.
+            table = profile.get("path") or profile.get("dataset")
+            schema = profile.get("schema")
             names = (
                 list(schema.keys())
                 if isinstance(schema, dict)
                 else [c.get("name") for c in schema or [] if isinstance(c, dict)]
             )
             for name in names:
-                if not isinstance(name, str) or name in seen:
+                if not isinstance(name, str):
                     continue
-                seen.add(name)
+                if name in allowlisted:
+                    continue
                 if is_allowlisted(policy, name):
                     columns[name] = {
                         "is_sensitive": False,
                         "source": "workspace_data_policy_allowlist",
                     }
+                    allowlisted.add(name)
+                    continue
+                # A column already marked sensitive on another table stays
+                # sensitive — never downgrade it from a later non-person table.
+                if columns.get(name, {}).get("is_sensitive"):
                     continue
                 category = (
                     policy_category_for_column(policy, name)
-                    or identifier_category(name)
+                    or identifier_category(name, table=table)
                     or pci_identifier_category(name)
                 )
                 if category:

@@ -1535,13 +1535,33 @@ may be used by trusted executable generation. Profile-only relationships remain 
 
 ### workspace-dashboard
 
-Commands:
+Commands (server lifecycle):
 
 ```powershell
-uv run workspace-dashboard --workspace workspaces/<project>            # live Dash app (127.0.0.1:8060)
-uv run workspace-dashboard --workspace workspaces/<project> --export  # static HTML to dashboard/exports/
-uv run workspace-dashboard --workspace workspaces/<project> --screen  # export + screenshot + visual checks
+# START (default = --live): regenerate (DQ-gated) + serve; writes a PID file.
+uv run workspace-dashboard --workspace workspaces/<project> --live              # http://127.0.0.1:8060
+# STOP / KILL: terminate the running server (PID file, fallback scan of --port). Idempotent, cross-platform.
+uv run workspace-dashboard --workspace workspaces/<project> --stop
+# ON-DEMAND REFRESH (new data landed): regenerate-and-exit, DQ-gated (bad load -> last-good kept).
+uv run workspace-dashboard --workspace workspaces/<project> --refresh
+# LIVE AUTO-PICKUP: running server re-reads data every N seconds.
+uv run workspace-dashboard --workspace workspaces/<project> --live --refresh-seconds 300
+# QA visual screener: headless screenshot of every page + deterministic checks.
+uv run workspace-dashboard --workspace workspaces/<project> --screen
 ```
+
+**Live vs static — read first.** The dashboard IS the live `--live` app (a served process). The
+standalone `--export` flag was removed; the live app is the single deliverable. Any
+`dashboard/exports/*.html` still on disk are **legacy leftover artifacts** from the old static
+renderer — stale, never updated by current code, and NOT the dashboard. Always serve `--live`; do
+not open those HTML files. The live app builds from the workspace's `interns/` bronze/gold
+(gitignored), so a fresh clone must run the pipeline before it can serve.
+
+**New-data flow:** `new raw data -> re-run KPI pipeline (refresh bronze/gold) -> --refresh (or
+--refresh-seconds picks it up) -> view updates`. A **data** refresh needs no restart (config-watcher
++ atomic spec writes); a **code/schema change** needs `--stop` then `--live` (a running process
+keeps its old Python classes in memory — the cause of stale `Extra inputs are not permitted`
+config errors).
 
 The per-workspace BI dashboard: clickable KPI tile strip with status badges,
 per-panel view toggles, charts chosen by the data-to-viz knowledge base

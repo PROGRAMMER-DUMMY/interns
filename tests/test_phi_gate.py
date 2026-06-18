@@ -72,6 +72,32 @@ class IdentifierDetectionTests(unittest.TestCase):
         for col in ("PaidAmount", "DepartmentName", "ClaimCount", "ServiceDate", "Gender"):
             self.assertIsNone(identifier_category(col), col)
 
+    def test_bare_name_is_phi_only_on_person_entity(self):
+        # A bare "Name" is ambiguous: an individual's name (PHI) on a person
+        # table, but an organizational label on a department/payor/org table.
+        self.assertEqual(identifier_category("Name", table="patients.csv"), "name")
+        self.assertEqual(identifier_category("Name", table="EMR/members.parquet"), "name")
+        # Non-person entities: a "Name" column is a label, not PHI — so it is
+        # never hashed in results (the departments.Name regression).
+        self.assertIsNone(identifier_category("Name", table="departments.csv"))
+        self.assertIsNone(identifier_category("Name", table="payors"))
+        self.assertIsNone(identifier_category("Name", table="cptcodes/codes.csv"))
+        # Unknown/missing table: fail to label (not PHI) rather than hash a dim.
+        self.assertIsNone(identifier_category("Name"))
+        # Person-qualified names stay PHI regardless of table.
+        self.assertEqual(identifier_category("PatientName", table="departments.csv"), "name")
+        self.assertEqual(identifier_category("FirstName"), "name")
+
+    def test_bare_name_detected_on_person_table_only(self):
+        idx = _profile_index({
+            "patients.csv": ["Name", "PaidAmount"],
+            "departments.csv": ["Name", "DeptCode"],
+        })
+        findings = detect_phi_columns(idx)
+        hits = {(f.dataset, f.column) for f in findings}
+        self.assertIn(("patients.csv", "Name"), hits)
+        self.assertNotIn(("departments.csv", "Name"), hits)
+
     def test_detect_phi_columns_finds_incident_schema(self):
         # The real incident schema (column names only — no values).
         idx = _profile_index({

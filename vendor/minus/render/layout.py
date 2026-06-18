@@ -185,10 +185,57 @@ def _distinct(state, field: str, limit: int = 500) -> list:
 # ---------------------------------------------------------------------------
 
 
+def _col_of(ref: str) -> str:
+    """Column name from a field ref, dotted ('t.Col'->'Col') or bare ('Col'->'Col')."""
+    return str(ref).split(".")[-1]
+
+
+def _stack_by_multiselect(w, filters):
+    """When a page slicer is multi-selected, a single-series bar conveys more by
+    SPLITTING into a stacked bar on that dimension (e.g. top payers split by the
+    chosen lines of business). Generic: any multi-valued slicer whose column is
+    not already the chart's x and isn't already a breakdown. Returns the widget
+    unchanged when no promotion applies."""
+    if w.type not in ("bar", "hbar") or w.breakdown or not w.dimension:
+        return w
+    xcol = _col_of(w.dimension).lower()
+    base_tbl = split_field(w.dimension)[0]
+    for field, val in (filters or {}).items():
+        if not isinstance(val, (list, tuple)) or len(val) < 2:
+            continue
+        col = _col_of(field)
+        if col.lower() == xcol:
+            continue
+        # Split on the multi-selected dimension, bound to this chart's own table
+        # so applicable_filters keeps it; vertical bars stack, wide ones stay hbar.
+        return w.model_copy(update={
+            "type": "stacked_bar" if w.type == "bar" else "hbar",
+            "breakdown": f"{base_tbl}.{col}",
+        })
+    return w
+
+
+def _apply_base_filters(w, filters, crossfilter):
+    """Merge a widget's built-in ``base_filters`` (default scope) under the active
+    page slicers / cross-filter, dropping any default whose column the user has
+    actively selected -- so a KPI's intrinsic scope is the default view yet fully
+    overridable (change the line of business and the chart re-scopes)."""
+    base = dict(getattr(w, "base_filters", {}) or {})
+    if base:
+        active_cols = {_col_of(k).lower()
+                       for k in {**(filters or {}), **(crossfilter or {})}}
+        base = {k: v for k, v in base.items()
+                if _col_of(k).lower() not in active_cols}
+    wf = dict(base)
+    wf.update(filters)
+    wf.update(crossfilter)
+    return wf
+
+
 def _render_tile(w, state, page, filters, crossfilter, drill=None):
     try:
-        wf = dict(filters)
-        wf.update(crossfilter)
+        w = _stack_by_multiselect(w, filters)
+        wf = _apply_base_filters(w, filters, crossfilter)
         highlight = None
         if w.dimension and w.dimension in crossfilter:
             wf.pop(w.dimension, None)          # don't self-filter the clicked chart
@@ -215,6 +262,23 @@ def _render_tile(w, state, page, filters, crossfilter, drill=None):
             crumb = build_drill_crumb(page.id, w.id, ds.get("trail", []), path[level])
 
         result = state.engine.run(eff, wf)
+        # Honest empty-state: a chart with no rows for the current selection reads
+        # as broken. Say so plainly, and name the KPI's fixed scope when that's
+        # why (e.g. a Medicare-only KPI under a Medicaid filter).
+        if eff.type != "kpi" and getattr(result, "frame", None) is not None \
+                and result.frame.height == 0:
+            scoped = ", ".join(
+                f"{_col_of(k)} = {v}"
+                for k, v in (getattr(eff, "base_filters", {}) or {}).items()
+                if not isinstance(v, dict)
+            )
+            note = ("No rows for this selection"
+                    + (f" - this KPI is scoped to {scoped}." if scoped
+                       else ". Try clearing a filter."))
+            return html.Div(
+                className="tile", style={"gridColumn": f"span {eff.width}"},
+                children=[html.P(eff.title or eff.id, className="tile-title"),
+                          html.Div(note, className="empty")])
         return render_widget(eff, result, state.project, page.id, highlight, crumb)
     except Exception as exc:  # surface per-tile errors instead of crashing the page
         return html.Div(

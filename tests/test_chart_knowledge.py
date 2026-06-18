@@ -236,69 +236,38 @@ class NewFamilyDetectionTest(unittest.TestCase):
 
 
 class ScreenerChecksTest(unittest.TestCase):
-    def test_render_failure_annotation_detected(self) -> None:
-        from core.dashboard.screener import _check_html
+    """The screener now checks the LIVE MinusAnalyst app's rendered DOM
+    (post-callback) rather than a static export's HTML string."""
 
-        finding = _check_html(
-            '<div>(chart render failed: KeyError &#x27;x&#x27;)</div>', "kpi_001.html", 2
+    def test_render_failure_tile_detected(self) -> None:
+        from core.dashboard.screener import _check_rendered_dom
+
+        # A tile whose render raised shows "⚠ <exc>" with class "empty".
+        finding = _check_rendered_dom(
+            '<div class="tile"><div class="empty">⚠ KeyError x</div></div>', "kpis", 2
         )
         self.assertFalse(finding.ok)
 
-    def test_zero_plots_against_spec_detected(self) -> None:
-        from core.dashboard.screener import _check_html
+    def test_zero_plots_against_chart_widgets_detected(self) -> None:
+        from core.dashboard.screener import _check_rendered_dom
 
-        finding = _check_html("<html><body>no charts</body></html>", "kpi_002.html", 3)
+        finding = _check_rendered_dom("<html><body>no charts</body></html>", "analysis", 3)
         self.assertFalse(finding.ok)
 
     def test_clean_page_passes(self) -> None:
-        from core.dashboard.screener import _check_html
+        from core.dashboard.screener import _check_rendered_dom
 
-        finding = _check_html(
-            '<div class="js-plotly-plot"></div><script src="https://cdn.plot.ly/x.js">',
-            "kpi_003.html",
-            1,
+        finding = _check_rendered_dom(
+            '<div class="js-plotly-plot"></div>', "kpis", 1
         )
         self.assertTrue(finding.ok)
 
-    def test_missing_data_view_on_ready_page_is_an_error(self) -> None:
-        from core.dashboard.screener import _check_html
+    def test_empty_dom_is_not_an_error(self) -> None:
+        # No headless browser -> empty DOM; the screenshot path reports the
+        # browser-unavailable warning, so the DOM check must not double-error.
+        from core.dashboard.screener import _check_rendered_dom
 
-        finding = _check_html(
-            '<div class="js-plotly-plot"></div>', "kpi_001.html", 2,
-            expects_data_view=True,
-        )
-        self.assertFalse(finding.ok)
-        self.assertTrue(any("Data section" in e for e in finding.errors))
-
-    def test_sensitive_header_without_redaction_is_an_error(self) -> None:
-        from core.dashboard.screener import _check_html
-
-        html = (
-            '<div class="js-plotly-plot"></div><details class="dataview">'
-            "<summary>Data</summary><div>10 of 10 rows</div>"
-            "<table><thead><tr><th>ssn</th></tr></thead>"
-            "<tbody><tr><td>123-45-6789</td></tr></tbody></table></details>"
-        )
-        finding = _check_html(
-            html, "kpi_001.html", 1,
-            expects_data_view=True, redaction_patterns=(r"^ssn$",),
-        )
-        self.assertFalse(finding.ok)
-        self.assertTrue(any("without redaction" in e for e in finding.errors))
-
-    def test_redacted_data_view_passes(self) -> None:
-        from core.dashboard.screener import _check_html
-
-        html = (
-            '<div class="js-plotly-plot"></div><details class="dataview">'
-            "<summary>Data</summary><div>10 of 10 rows</div>"
-            "<table><thead><tr><th>ssn</th></tr></thead>"
-            "<tbody><tr><td>&lt;redacted-pii&gt;</td></tr></tbody></table></details>"
-        )
-        finding = _check_html(
-            html, "kpi_001.html", 1,
-            expects_data_view=True, redaction_patterns=(r"^ssn$",),
-        )
+        finding = _check_rendered_dom("", "kpis", 3)
         self.assertTrue(finding.ok)
 
     def test_blank_png_heuristic(self) -> None:
