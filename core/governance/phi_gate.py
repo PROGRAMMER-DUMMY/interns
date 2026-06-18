@@ -35,7 +35,15 @@ from core.failures import StructuredFailure, remote_denied
 # ---------------------------------------------------------------------------
 
 HIPAA_IDENTIFIER_PATTERNS: dict[str, tuple[str, ...]] = {
-    "name": (r"^(first|last|middle|full|patient|member|provider|guarantor)?[_ ]?name$",),
+    # Person-qualified names only. A BARE ``name`` is intentionally NOT here:
+    # it is an individual's name (PHI) only on a person entity and is handled
+    # by ``identifier_category`` via ``_is_person_entity_table`` — otherwise a
+    # ``departments.Name`` / ``payors.Name`` label would be wrongly hashed.
+    "name": (
+        r"^(first|last|middle|full|maiden|given|sur|patient|member|subscriber|"
+        r"beneficiary|guarantor|provider|guardian|dependent|insured|"
+        r"policy[_ ]?holder)[_ ]?name$",
+    ),
     "ssn": (r"^ssn$", r"^social[_ ]?security([_ ]?(no|number))?$"),
     "date_of_birth": (r"^dob$", r"^date[_ ]?of[_ ]?birth$", r"^birth[_ ]?date$"),
     "phone": (r"^(phone|mobile|cell|fax)([_ ]?(no|number))?$",),
@@ -120,9 +128,53 @@ def _match_category(
     return None
 
 
-def identifier_category(column_name: str) -> str | None:
-    """Return the HIPAA identifier category a column name matches, else None."""
-    return _match_category(column_name, _COMPILED)
+# A BARE ``name`` column (no person-qualifying prefix) is an *individual's*
+# name — and therefore HIPAA PHI — only when it belongs to a table describing
+# PEOPLE. On a non-person entity (department, payor, organization, facility,
+# product, code, ...) a "Name" column is an organizational/label field, not
+# PHI, so hashing it would destroy a legitimate reporting dimension. This stays
+# workspace-agnostic: matched on GENERIC person-entity tokens, never
+# workspace/domain vocabulary.
+_PERSON_ENTITY_TOKENS: tuple[str, ...] = (
+    "patient", "member", "subscriber", "beneficiary", "guarantor",
+    "person", "people", "individual", "employee", "staff", "provider",
+    "physician", "doctor", "nurse", "clinician", "customer", "client",
+    "contact", "user", "guardian", "dependent", "policyholder", "insured",
+)
+
+_BARE_NAME_RE = re.compile(r"^name$", re.IGNORECASE)
+
+
+def _is_person_entity_table(table: Any) -> bool:
+    """True when ``table`` (a dataset path or table name) describes people, so a
+    bare ``name`` column on it is an individual's name (PHI).
+
+    Non-person tables AND an unknown/missing table return False — a bare
+    ``name`` there is treated as a label, not PHI.
+    """
+    if not isinstance(table, str) or not table.strip():
+        return False
+    leaf = re.split(r"[\\/]", table.strip().lower())[-1]
+    leaf = re.sub(r"\.[a-z0-9]+$", "", leaf)
+    return any(token in leaf for token in _PERSON_ENTITY_TOKENS)
+
+
+def identifier_category(column_name: str, table: Any = None) -> str | None:
+    """Return the HIPAA identifier category a column name matches, else None.
+
+    ``table`` is the column's dataset/table identity (path or name) and only
+    affects the ambiguous bare ``name`` column: it is classified as a person
+    name (PHI) on a person-entity table, but is treated as an organizational
+    label (not PHI) on a non-person/unknown table. Every other identifier
+    (``ssn``, ``patient_name``, ``dob`` ...) is table-independent.
+    """
+    category = _match_category(column_name, _COMPILED)
+    if category:
+        return category
+    name = column_name if isinstance(column_name, str) else ""
+    if _BARE_NAME_RE.match(name.strip()) and _is_person_entity_table(table):
+        return "name"
+    return None
 
 
 def pci_identifier_category(column_name: str) -> str | None:
@@ -198,7 +250,7 @@ def detect_phi_columns(profile_index: dict[str, Any] | None) -> list[PHIFinding]
     """Scan a profile_index.json payload for HIPAA-identifier columns (names only)."""
     findings: list[PHIFinding] = []
     for dataset, column in _iter_profile_columns(profile_index):
-        category = identifier_category(column)
+        category = identifier_category(column, table=dataset)
         if category:
             findings.append(PHIFinding(dataset=dataset, column=column, identifier_category=category))
     return findings

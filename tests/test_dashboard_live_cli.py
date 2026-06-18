@@ -41,13 +41,11 @@ class TestLiveCli(unittest.TestCase):
         stub = _StubApp()
         ok = {"ok": True, "published": True, "rows": 10000, "force": False,
               "measures": ["total_paid"], "pages": ["overview"]}
-        with mock.patch.object(cli, "build_dash_app") as legacy, \
-             mock.patch("core.dashboard.minus_adapter.generate", return_value=ok) as gen, \
+        with mock.patch("core.dashboard.minus_adapter.generate", return_value=ok) as gen, \
              mock.patch("minus.render.app.create_app",
                         return_value=(stub, _StubState())) as create:
             rc = cli.main(["--workspace", _WS_REL, "--live", "--no-refresh", "--port", "8098"])
         self.assertEqual(rc, 0)
-        legacy.assert_not_called()        # legacy renderer NOT used on --live
         gen.assert_called_once()
         create.assert_called_once()       # launched the vendored MinusAnalyst app
         self.assertEqual(stub.ran_with.get("port"), 8098)

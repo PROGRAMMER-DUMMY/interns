@@ -1038,17 +1038,18 @@ class WorkspaceFlow:
                 {"error": str(exc)},
             )
           else:
-            # Export static HTML and show it: KPI completion ends with the
-            # dashboard in front of the user, not just files on disk. Outside
-            # test runs the SCREENER wraps the export: every page is
-            # screenshotted and checked (render failures, blank pages, missing
-            # data viewer, redaction, palette) and its findings ride into the
-            # step record as warnings — visualization defects surface at
-            # completion instead of waiting for a manual look. Opt out with
-            # AUTORESEARCH_SCREEN_DASHBOARD=0.
+            # KPI completion ends with the LIVE MinusAnalyst dashboard in front
+            # of the user. Outside test runs the SCREENER generates + serves the
+            # app headless, screenshots every page, and checks it (render
+            # failures, blank pages, palette); its findings ride into the step
+            # record. Opt out with AUTORESEARCH_SCREEN_DASHBOARD=0. The legacy
+            # static-HTML export was removed; the live app is the deliverable.
             import sys as _sys
 
-            dash_index_path = ""
+            live_url = "http://127.0.0.1:8060/"
+            live_cmd = (
+                f"uv run workspace-dashboard --workspace {self.workspace_rel} --live"
+            )
             _screen_ok = (
                 _os.environ.get("AUTORESEARCH_SCREEN_DASHBOARD", "") != "0"
                 and "unittest" not in _sys.modules
@@ -1066,59 +1067,51 @@ class WorkspaceFlow:
                             f"see {screen_summary.get('report_md')} and review the "
                             "staged screenshots"
                         )
-                    export_dir = "dashboard/exports"
-                else:
-                    from core.dashboard.export import export_static_html
-
-                    export_summary = export_static_html(self.repo_root, self.workspace_rel)
-                    dash_summary = {**dash_summary, "export": export_summary}
-                    export_dir = export_summary["export_dir"]
-                dash_index_path = f"{self.workspace_rel}/{export_dir}/index.html"
-                dash_summary = {**dash_summary, "dashboard_index": dash_index_path}
+                dash_summary = {
+                    **dash_summary,
+                    "dashboard_live_command": live_cmd,
+                    "dashboard_url": live_url,
+                }
             except Exception as exc:
-                dash_summary = {**dash_summary, "export_error": str(exc)}
+                dash_summary = {**dash_summary, "screen_error": str(exc)}
             self._record_step(
                 state,
                 "refresh_workspace_dashboard",
                 "ok",
                 dash_summary,
             )
-            if dash_index_path:
-                # The result packet ends with the dashboard link so the
-                # completion output always shows where the dashboard lives.
-                # current.md and runs/<date>/results.md are verbatim-forward
-                # twins (BUG-015 contract) — append to BOTH or neither.
-                link_line = f"\n**Dashboard:** `{dash_index_path}`\n"
-                packet_paths = [
-                    self.workspace / "interns" / "reports" / "kpi_results" / "current.md"
-                ]
-                runs_dir = self.workspace / "interns" / "runs"
-                if runs_dir.is_dir():
-                    dated = sorted(d for d in runs_dir.iterdir() if d.is_dir())
-                    if dated:
-                        packet_paths.append(dated[-1] / "results.md")
-                try:
-                    for packet_path in packet_paths:
-                        if packet_path.exists():
-                            content = packet_path.read_text(encoding="utf-8")
-                            if "**Dashboard:**" not in content:
-                                packet_path.write_text(
-                                    content + link_line, encoding="utf-8"
-                                )
-                except OSError:
-                    pass
-            import sys as _sys
+            # The result packet points at the LIVE dashboard (a command + URL),
+            # not a static file. current.md and runs/<date>/results.md are
+            # verbatim-forward twins (BUG-015 contract) — append to BOTH or neither.
+            link_line = (
+                f"\n**Dashboard (live MinusAnalyst):** `{live_cmd}` -> {live_url}\n"
+            )
+            packet_paths = [
+                self.workspace / "interns" / "reports" / "kpi_results" / "current.md"
+            ]
+            runs_dir = self.workspace / "interns" / "runs"
+            if runs_dir.is_dir():
+                dated = sorted(d for d in runs_dir.iterdir() if d.is_dir())
+                if dated:
+                    packet_paths.append(dated[-1] / "results.md")
+            try:
+                for packet_path in packet_paths:
+                    if packet_path.exists():
+                        content = packet_path.read_text(encoding="utf-8")
+                        if "**Dashboard" not in content:
+                            packet_path.write_text(
+                                content + link_line, encoding="utf-8"
+                            )
+            except OSError:
+                pass
 
-            _open_flag = _os.environ.get("AUTORESEARCH_OPEN_DASHBOARD", "")
-            _in_test_run = "unittest" in _sys.modules or "pytest" in _sys.modules
-            _open_ok = _open_flag == "1" or (_open_flag != "0" and not _in_test_run)
-            if dash_index_path and _open_ok:
-                try:
-                    import webbrowser
-
-                    webbrowser.open((self.repo_root / dash_index_path).resolve().as_uri())
-                except Exception:
-                    pass  # showing the path in the packet is the fallback
+            # Auto-open is OPT-IN (AUTORESEARCH_OPEN_DASHBOARD=1): opening the live
+            # app means starting a server, so we never spawn one implicitly or in
+            # tests. Best-effort; the packet always carries the command as fallback.
+            if _os.environ.get("AUTORESEARCH_OPEN_DASHBOARD", "") == "1" and not (
+                "unittest" in _sys.modules or "pytest" in _sys.modules
+            ):
+                self._open_live_dashboard(live_url)
             self._delegate_and_record(
                 state,
                 agent="dashboard-engineer",
@@ -1127,6 +1120,48 @@ class WorkspaceFlow:
                 verdict_fn=lambda: verdict_from_dashboard_summary(dash_summary),
             )
         return wiki_paths
+
+    def _open_live_dashboard(self, url: str) -> None:
+        """Spawn the live MinusAnalyst server detached and open the browser to it.
+
+        Best-effort and never raises — the result packet always carries the
+        ``--live`` command as a fallback. Opt-in via AUTORESEARCH_OPEN_DASHBOARD=1.
+        """
+        import subprocess
+        import sys as _sys
+        import threading
+        import time
+        import webbrowser
+
+        try:
+            kwargs: dict[str, Any] = {}
+            if _os.name == "nt":
+                kwargs["creationflags"] = (
+                    subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                )
+            else:
+                kwargs["start_new_session"] = True
+            subprocess.Popen(
+                [
+                    _sys.executable, "-m", "tools.workspace_dashboard",
+                    "--workspace", self.workspace_rel, "--live", "--no-refresh",
+                ],
+                cwd=str(self.repo_root),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                **kwargs,
+            )
+
+            def _open_when_up() -> None:
+                time.sleep(2.5)  # give the server time to bind
+                try:
+                    webbrowser.open(url)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_open_when_up, daemon=True).start()
+        except Exception:
+            pass  # the packet shows the command as the fallback
 
     def _workflow_checkpoint(self, state: dict[str, Any], *, mode: str) -> WorkspaceFlowResult:
         checkpoint = WorkspaceWorkflowOrchestrator(

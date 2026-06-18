@@ -1,14 +1,20 @@
-"""`workspace-dashboard` CLI: serve or export the per-workspace BI dashboard.
+"""`workspace-dashboard` CLI: serve / refresh / screen the live MinusAnalyst dashboard.
 
-Generic across workspaces. Reads dashboard specs from
-`workspaces/<ws>/dashboard/`, refreshes machine_defaults from the KPI
-registry (preserving user_overrides), and either:
+Generic across workspaces. The per-workspace dashboard IS the vendored
+MinusAnalyst app (Power BI-style), built on a DQ-certified conformed model from
+the medallion gold layer. The legacy static-HTML export + its Dash renderer were
+removed; the live app is the single deliverable.
 
-- starts a Dash app on the chosen port (default 8060), or
-- writes static HTML to `workspaces/<ws>/dashboard/exports/` with --export.
+Modes:
+- (default) / --live : generate the MinusAnalyst project + certified data, then
+  serve it on a Dash server (loopback by default).
+- --refresh          : regenerate the project + data and exit (for a scheduler).
+- --screen           : serve headless, screenshot every page, run visual checks,
+  write interns/reports/dashboard_screener/, exit nonzero on findings.
+- --record-vision-review : mark the latest screener report's vision review done.
 
-The refresh happens on every invocation so the dashboard is always
-consistent with the latest registry/spec changes.
+The machine_defaults spec refresh still runs each invocation (preserving
+user_overrides) because the MinusAnalyst panel selection reads that per-KPI spec.
 """
 from __future__ import annotations
 
@@ -19,8 +25,6 @@ import os
 import sys
 from pathlib import Path
 
-from core.dashboard.export import export_static_html
-from core.dashboard.renderer import build_dash_app
 from core.dashboard.spec import refresh_workspace_dashboard
 from core.paths import PROJECT_ROOT
 from core.storage.workspace_layout import WorkspaceLayout
@@ -56,6 +60,102 @@ def attach_token_auth(app, token: str) -> None:
             abort(401)
 
 
+# ---------------------------------------------------------------------------
+# Server lifecycle: a per-workspace PID file lets `--stop` find and terminate a
+# running live server without the user hunting PIDs by hand. Generic + cross
+# platform (Windows taskkill / POSIX signals); a port scan is the fallback for
+# orphaned servers started without a PID file.
+# ---------------------------------------------------------------------------
+
+
+def _pidfile(layout: WorkspaceLayout) -> Path:
+    # Same location as the MinusAnalyst root (gitignored); no heavy import needed.
+    return layout.state_dir / "minus" / ".dashboard_server.json"
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        if os.name == "nt":
+            import subprocess
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                                 capture_output=True, text=True).stdout
+            return str(pid) in out
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def _terminate_pid(pid: int) -> bool:
+    try:
+        if os.name == "nt":
+            import subprocess
+            return subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                  capture_output=True, text=True).returncode == 0
+        import signal
+        os.kill(pid, signal.SIGTERM)
+        return True
+    except Exception:
+        return False
+
+
+def _pids_on_port(port: int) -> list[int]:
+    """PIDs listening on ``port`` (best-effort; covers servers with no PID file)."""
+    import subprocess
+    pids: set[int] = set()
+    try:
+        if os.name == "nt":
+            out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True).stdout
+            for line in out.splitlines():
+                if "LISTENING" in line and f":{port} " in line:
+                    parts = line.split()
+                    if parts and parts[-1].isdigit():
+                        pids.add(int(parts[-1]))
+        else:
+            out = subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+                                 capture_output=True, text=True).stdout
+            pids.update(int(p) for p in out.split() if p.strip().isdigit())
+    except Exception:
+        pass
+    return sorted(pids)
+
+
+def _write_pidfile(layout: WorkspaceLayout, host: str, port: int) -> Path:
+    pf = _pidfile(layout)
+    pf.parent.mkdir(parents=True, exist_ok=True)
+    pf.write_text(json.dumps({"pid": os.getpid(), "host": host, "port": port}),
+                  encoding="utf-8")
+    return pf
+
+
+def _stop_server(layout: WorkspaceLayout, port: int) -> int:
+    """Terminate the live server for this workspace (PID file first, then a scan
+    of ``port`` for orphans). Idempotent: a no-op when nothing is running."""
+    killed: list[int] = []
+    pf = _pidfile(layout)
+    if pf.exists():
+        try:
+            info = json.loads(pf.read_text(encoding="utf-8"))
+            pid = int(info.get("pid"))
+            port = int(info.get("port", port))
+        except Exception:
+            pid = 0
+        if pid and _pid_alive(pid) and _terminate_pid(pid):
+            killed.append(pid)
+        try:
+            pf.unlink()
+        except OSError:
+            pass
+    for pid in _pids_on_port(port):
+        if pid not in killed and _terminate_pid(pid):
+            killed.append(pid)
+    if killed:
+        print(f"[ok] stopped dashboard server(s): {', '.join(map(str, killed))}")
+    else:
+        print(f"[~] no running dashboard server found (workspace pidfile + port {port})")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="workspace-dashboard")
     parser.add_argument("--workspace", required=True)
@@ -64,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         "--port",
         type=int,
         default=8060,
-        help="Port for the live Dash server (default 8060). Ignored with --export.",
+        help="Port for the live Dash server (default 8060).",
     )
     parser.add_argument(
         "--host",
@@ -75,28 +175,36 @@ def main(argv: list[str] | None = None) -> int:
         "--live",
         action="store_true",
         help=(
-            "Serve the live Power BI-style dashboard (vendored MinusAnalyst) read from "
-            "the validated medallion gold layer, instead of the legacy renderer. "
-            "Runs the gold parity gate first and refuses on failure unless --force."
+            "Serve the live MinusAnalyst dashboard (the default action). Kept for "
+            "backward compatibility; serving live is now the default when no other "
+            "mode flag is given."
         ),
     )
     parser.add_argument(
         "--theme",
         default="claude",
-        help="Live dashboard theme: claude (light) or dark. Used with --live.",
+        help="Live dashboard theme: claude (light) or dark.",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="With --live/--refresh, publish even if DQ certification reports failures.",
+        help="With serve/--refresh, publish even if DQ certification reports failures.",
     )
     parser.add_argument(
         "--refresh",
         action="store_true",
         help=(
-            "Regenerate the live (MinusAnalyst) project + certified-clean data for "
-            "the workspace and exit. DQ-gated: on failure nothing is rewritten "
+            "Regenerate the MinusAnalyst project + certified-clean data for the "
+            "workspace and exit. DQ-gated: on failure nothing is rewritten "
             "(last-good snapshot stays). For a scheduler to call after new data lands."
+        ),
+    )
+    parser.add_argument(
+        "--stop",
+        action="store_true",
+        help=(
+            "Stop the running live server for this workspace (PID file, with a "
+            "fallback scan of --port for orphans) and exit. Idempotent."
         ),
     )
     parser.add_argument(
@@ -104,20 +212,15 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=0,
         help=(
-            "With --live, make the running dashboard re-read its data every N "
+            "When serving, make the running dashboard re-read its data every N "
             "seconds (auto-pick-up of refreshed data). 0 = off."
         ),
-    )
-    parser.add_argument(
-        "--export",
-        action="store_true",
-        help="Write static HTML to dashboard/exports/ and exit. Skips the live server.",
     )
     parser.add_argument(
         "--screen",
         action="store_true",
         help=(
-            "Export, screenshot every page, run deterministic visual checks, "
+            "Serve headless, screenshot every page, run deterministic visual checks, "
             "and write interns/reports/dashboard_screener/. Exits nonzero on findings."
         ),
     )
@@ -134,12 +237,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-refresh",
         action="store_true",
-        help="Skip the machine_defaults refresh. Use to render exactly what's on disk.",
+        help="Skip the machine_defaults spec refresh. Use to render exactly what's on disk.",
     )
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Print machine-readable refresh/export summary instead of human text.",
+        help="Print machine-readable refresh/screen summary instead of human text.",
     )
     args = parser.parse_args(argv)
 
@@ -149,6 +252,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"workspace not found: {workspace}", file=sys.stderr)
         return 2
     layout = WorkspaceLayout(project_root=workspace)
+
+    # Stop is a pure lifecycle action: no regenerate, no serve.
+    if args.stop:
+        return _stop_server(layout, args.port)
 
     refresh_summary = None
     if not args.no_refresh:
@@ -185,16 +292,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"screenshots (for agent vision review): {screen_summary['screenshot_dir']}")
         return 0 if screen_summary["ok"] else 1
 
-    if args.export:
-        export_summary = export_static_html(repo_root, args.workspace)
-        result = {"action": "export", "refresh": refresh_summary, "export": export_summary}
-        if args.json:
-            print(json.dumps(result, indent=2))
-        else:
-            print(f"Dashboard exported to: {workspace}/{export_summary['export_dir']}/index.html")
-            print(f"KPIs exported: {len(export_summary['files']) - 1}")
-        return 0
-
     token = os.environ.get(DASHBOARD_TOKEN_ENV, "")
     if not is_loopback_host(args.host) and not token:
         print(
@@ -206,12 +303,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    if args.refresh:
-        # Regenerate the live project + certified-clean data and exit (DQ-gated).
-        # For a scheduled job to call after the upstream pipeline lands new gold.
-        from core.dashboard.minus_adapter import generate
+    # Generate the MinusAnalyst project + certified-clean data (DQ-gated).
+    from core.dashboard.minus_adapter import generate, minus_root
 
-        res = generate(layout, force=args.force, refresh_seconds=args.refresh_seconds)
+    res = generate(layout, force=args.force, refresh_seconds=args.refresh_seconds)
+
+    if args.refresh:
+        # Regenerate-and-exit (for a scheduled job after the pipeline lands new gold).
         if args.json:
             print(json.dumps({"action": "refresh", **res}, indent=2, default=str))
         elif res.get("ok"):
@@ -224,60 +322,37 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"    - {chk.get('check')}: {chk.get('detail')}", file=sys.stderr)
         return 0 if res.get("ok") else 1
 
-    if args.live:
-        # Generate a vendored-MinusAnalyst project + certified-clean data for this
-        # workspace, then launch the real MinusAnalyst app on it (DQ-gated).
-        from core.dashboard.minus_adapter import generate, minus_root
+    # Default action: serve the live MinusAnalyst app.
+    if not res.get("ok"):
+        print(f"[x] {res.get('reason')}; refusing to serve the live dashboard "
+              "(use --force to override).", file=sys.stderr)
+        for chk in (res.get("failed") or []):
+            print(f"    - {chk.get('check')}: {chk.get('detail')}", file=sys.stderr)
+        return 1
+    if res.get("force"):
+        print("[~] published with --force despite DQ findings.", file=sys.stderr)
 
-        res = generate(layout, force=args.force, refresh_seconds=args.refresh_seconds)
-        if not res.get("ok"):
-            print(f"[x] {res.get('reason')}; refusing to serve the live dashboard "
-                  "(use --force to override).", file=sys.stderr)
-            for chk in (res.get("failed") or []):
-                print(f"    - {chk.get('check')}: {chk.get('detail')}", file=sys.stderr)
-            return 1
-        if res.get("force"):
-            print("[~] published with --force despite DQ findings.", file=sys.stderr)
+    vendor_dir = repo_root / "vendor"
+    if str(vendor_dir) not in sys.path:
+        sys.path.insert(0, str(vendor_dir))
+    from minus.render.app import create_app  # vendored MinusAnalyst
 
-        vendor_dir = repo_root / "vendor"
-        if str(vendor_dir) not in sys.path:
-            sys.path.insert(0, str(vendor_dir))
-        from minus.render.app import create_app  # vendored MinusAnalyst
-
-        app, state = create_app(minus_root(layout))
-        if not is_loopback_host(args.host):
-            attach_token_auth(app, token)
-            print(
-                f"non-loopback bind: requests require Authorization: Bearer "
-                f"<{DASHBOARD_TOKEN_ENV}> (or ?token=...)."
-            )
-        print(f"Live dashboard (MinusAnalyst): http://{args.host}:{args.port}/ "
-              f"(workspace: {args.workspace}, {len(state.pages)} pages, "
-              f"{res['rows']} rows)")
-        app.run(host=args.host, port=args.port, debug=False)
-        return 0
-
-    app = build_dash_app(repo_root, args.workspace)
+    app, state = create_app(minus_root(layout))
     if not is_loopback_host(args.host):
         attach_token_auth(app, token)
         print(
-            f"non-loopback bind: requests require Authorization: Bearer <{DASHBOARD_TOKEN_ENV}> "
-            "(or ?token=...)."
+            f"non-loopback bind: requests require Authorization: Bearer "
+            f"<{DASHBOARD_TOKEN_ENV}> (or ?token=...)."
         )
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "action": "serve",
-                    "refresh": refresh_summary,
-                    "url": f"http://{args.host}:{args.port}/",
-                    "workspace": args.workspace,
-                },
-                indent=2,
-            )
-        )
-    else:
-        print(f"Workspace dashboard: http://{args.host}:{args.port}/ (workspace: {args.workspace})")
+    # Record this server so `--stop` can find and terminate it; clean up on exit.
+    import atexit
+    pidfile = _write_pidfile(layout, args.host, args.port)
+    atexit.register(lambda: pidfile.unlink(missing_ok=True))
+
+    print(f"Live dashboard (MinusAnalyst): http://{args.host}:{args.port}/ "
+          f"(workspace: {args.workspace}, {len(state.pages)} pages, "
+          f"{res['rows']} rows)")
+    print(f"Stop with: uv run workspace-dashboard --workspace {args.workspace} --stop")
     app.run(host=args.host, port=args.port, debug=False)
     return 0
 

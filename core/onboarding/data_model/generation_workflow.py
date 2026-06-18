@@ -695,7 +695,7 @@ def _table_from_profile(profile: dict[str, Any], patterns: dict[str, Any]) -> di
             "state": "candidate",
             "columns": primary_key,
         },
-        "pii_columns": _pii_columns(columns),
+        "pii_columns": _pii_columns(columns, table=name),
         "primary_key": primary_key,
         "columns": columns,
         "approval": {"state": "draft"},
@@ -1231,13 +1231,23 @@ def _load_pattern_for(pattern_id: str) -> str:
     return "needs_review"
 
 
-def _pii_columns(columns: list[dict[str, Any]]) -> list[str]:
-    pii_tokens = ("email", "phone", "address", "dob", "birth", "ssn", "name")
-    return [
-        str(column.get("name") or "")
-        for column in columns
-        if any(token in _norm(column.get("name", "")) for token in pii_tokens)
-    ]
+def _pii_columns(columns: list[dict[str, Any]], *, table: str | None = None) -> list[str]:
+    """Sensitive column names for an entity, via the canonical phi_gate detector
+    (HIPAA + PCI) so medallion PII hashing agrees with the PHI gate.
+
+    ``table`` disambiguates a bare ``name`` column: it is an individual's name
+    (PHI) only on a person entity, not on a department/org/payor table.
+    """
+    from core.governance.phi_gate import identifier_category, pci_identifier_category
+
+    out: list[str] = []
+    for column in columns:
+        col = str(column.get("name") or "")
+        if not col:
+            continue
+        if identifier_category(col, table=table) or pci_identifier_category(col):
+            out.append(col)
+    return out
 
 
 def _supported_operations() -> list[dict[str, Any]]:

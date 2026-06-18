@@ -180,14 +180,20 @@ def _distinct_keywords(titles: dict[str, str]) -> dict[str, str]:
             for kid, seen in ordered.items()}
 
 
-def _kpi_artifacts(layout: WorkspaceLayout, data_through=None):
+def _kpi_artifacts(model: ConformedModel, fact_table: str,
+                   fact_measures: list[dict[str, Any]], data_through=None):
     """Return (tables, measures, page, exports) for every gold KPI.
 
     exports maps table-name -> gold frame (written to parquet by generate()).
     ``data_through`` is informational (for the page note); no rows are dropped --
     the trailing incomplete period is marked on trend charts, not removed, so the
     KPI totals keep matching the validated gold results.
+
+    ``fact_table`` / ``fact_measures`` describe the conformed row-grain table; a
+    KPI's hero chart is re-rooted onto it (so every slicer can filter it) when that
+    provably reproduces the gold result -- see ``_reroot_hero_to_fact``.
     """
+    layout = model.layout
     tables: list[dict[str, Any]] = []
     measures: list[dict[str, Any]] = []
     cards: list[dict[str, Any]] = []     # ALL KPI cards together (one scorecard row)
@@ -281,6 +287,15 @@ def _kpi_artifacts(layout: WorkspaceLayout, data_through=None):
                 rest = [c for c in ranked if c != bd]   # most-important first
                 if rest:
                     hero["drill_path"] = [xcol] + rest[:2]   # depth up to 3 levels
+            # Re-root onto the row-grain fact when it provably reproduces gold, so
+            # every page slicer can filter the chart (gold-bound otherwise). The
+            # KPI's intrinsic scope (incl. ranges like age>50) comes from its own
+            # SQL, carried as overridable base_filters.
+            sql_scope = _kpi_sql_scope(layout, kpi_id, list(model.frame.columns))
+            rerooted = _reroot_hero_to_fact(hero, km, gold, fact_table,
+                                            model.frame, fact_measures, sql_scope)
+            if rerooted is not None:
+                hero = rerooted
             charts.append(hero)
 
     if not cards:
@@ -314,6 +329,135 @@ def _kpi_artifacts(layout: WorkspaceLayout, data_through=None):
         "widgets": cards + charts,   # scorecard row, then per-KPI chart tabs
     }
     return tables, measures, page, exports
+
+
+def _kpi_sql_scope(layout: WorkspaceLayout, kpi_id: str, fact_columns: list[str]):
+    """The KPI's intrinsic scope parsed from its generated SQL, or None when it
+    can't be safely/fully captured (then the chart stays gold-bound)."""
+    from core.dashboard.kpi_scope import scope_from_sql
+
+    sql_path = layout.solutions_dir / f"{kpi_id}.sql"
+    if not sql_path.exists():
+        return None
+    try:
+        return scope_from_sql(sql_path.read_text(encoding="utf-8"), fact_columns)
+    except Exception:
+        return None
+
+
+def _ci_col(name: str, cols: list[str]) -> str | None:
+    """Case-insensitive column lookup ('payorid' -> 'PayorID'), or None."""
+    if name in cols:
+        return name
+    low = name.lower()
+    return next((c for c in cols if c.lower() == low), None)
+
+
+def _apply_scope_filter(frame: pl.DataFrame, scope: dict[str, Any]) -> pl.DataFrame:
+    """Filter ``frame`` by a scope of equality + range predicates (the same forms
+    carried as ``base_filters`` and understood by the query engine)."""
+    for col, val in scope.items():
+        if isinstance(val, dict):
+            if val.get("from") is not None:
+                frame = frame.filter(pl.col(col) >= val["from"])
+            if val.get("to") is not None:
+                frame = frame.filter(pl.col(col) <= val["to"])
+            if val.get("gt") is not None:
+                frame = frame.filter(pl.col(col) > val["gt"])
+            if val.get("lt") is not None:
+                frame = frame.filter(pl.col(col) < val["lt"])
+        else:
+            frame = frame.filter(pl.col(col) == val)
+    return frame
+
+
+def _reroot_hero_to_fact(hero, km, gold, fact_table, fact_frame,
+                         fact_measures, sql_scope=None) -> dict[str, Any] | None:
+    """Re-source a KPI's gold-bound hero chart onto the row-grain conformed table
+    so EVERY page slicer (gender, line of business, ...) can filter it -- but only
+    when doing so PROVABLY reproduces the validated gold result.
+
+    The KPI's intrinsic scope (e.g. ``LineOfBusiness = 'Commercial'``) lives only
+    in its SQL, not in any structured field. We recover the equality part of that
+    scope generically as the gold columns that are constant across every gold row,
+    then verify: recomputing the measure from conformed under that scope must match
+    gold at the chart's grain (within rounding). If it matches we rebind the chart
+    to conformed and carry the scope as overridable ``base_filters`` (so the KPI's
+    meaning is the default view, yet the user can re-scope it). If it does NOT match
+    -- a range scope like ``age > 50``, a precomputed share, an unmapped measure --
+    we return None and the chart stays gold-bound, untouched. Never changes the KPI.
+    """
+    if hero.get("type") not in ("bar", "hbar", "line") or not hero.get("dimension"):
+        return None
+    fcols = list(fact_frame.columns)
+    gcols = list(gold.columns)
+    x_name = hero["dimension"].split(".")[-1]
+    xf = _ci_col(x_name, fcols)
+    xg = _ci_col(x_name, gcols)
+    if xf is None or xg is None:
+        return None
+
+    # Scope = the KPI's intrinsic WHERE. Prefer the authoritative scope parsed
+    # from the KPI's own SQL (captures ranges like age>50, not just equalities);
+    # fall back to constant gold columns when SQL scope is unavailable.
+    if sql_scope is not None:
+        scope = {(_ci_col(k, fcols) or k): v for k, v in sql_scope.items()}
+        if any(_ci_col(k, fcols) is None for k in sql_scope):
+            return None                # a scope column isn't in the row grain
+    else:
+        chart_dims = {x_name.lower()}
+        if hero.get("breakdown"):
+            chart_dims.add(hero["breakdown"].split(".")[-1].lower())
+        scope = {}
+        for c in gcols:
+            if c == km.measure or c.lower() in chart_dims:
+                continue
+            uniq = gold.get_column(c).drop_nulls().unique()
+            if uniq.len() == 1:
+                fc = _ci_col(c, fcols)
+                if fc is not None:
+                    scope[fc] = uniq.item()
+
+    # Gold reference at the chart's x grain: {x_value: measure_value}.
+    gref = gold.group_by(xg).agg(pl.col(km.measure).sum().alias("__m"))
+    gmap = {r[xg]: round(float(r["__m"]), 2) for r in gref.iter_rows(named=True)
+            if r["__m"] is not None}
+    if not gmap:
+        return None
+
+    sub = _apply_scope_filter(fact_frame, scope)
+
+    # Try each additive sum measure on the fact; the first that reproduces gold wins.
+    for fm in fact_measures:
+        if fm.get("agg") != "sum" or not fm.get("field"):
+            continue
+        src = _ci_col(fm["field"].split(".")[-1], fcols)
+        if src is None:
+            continue
+        rec = sub.group_by(xf).agg(pl.col(src).sum().round(2).alias("__m"))
+        rmap = {r[xf]: round(float(r["__m"]), 2) for r in rec.iter_rows(named=True)
+                if r["__m"] is not None}
+        if all(abs(rmap.get(k, float("inf")) - v) <= 0.01 for k, v in gmap.items()):
+            new = dict(hero)
+            new["measure"] = fm["name"]
+            new.pop("measures", None)
+            new["dimension"] = f"{fact_table}.{xf}"
+            if scope:
+                new["base_filters"] = {f"{fact_table}.{k}": v for k, v in scope.items()}
+            # Gold is the KPI's top-N result, so its x-cardinality is N: keep the
+            # chart top-N (re-ranked live from conformed, so re-scoping recomputes it).
+            if hero["type"] in ("bar", "hbar"):
+                new["limit"] = gold.get_column(xg).n_unique()
+            if hero.get("breakdown"):
+                bc = _ci_col(hero["breakdown"].split(".")[-1], fcols)
+                new["breakdown"] = f"{fact_table}.{bc}" if bc else None
+                if not bc:
+                    new.pop("breakdown", None)
+            if hero.get("drill_path"):
+                dp = [_ci_col(c, fcols) for c in hero["drill_path"]]
+                new["drill_path"] = [c for c in dp if c]
+            return new
+    return None
 
 
 def _pick_hero(panels: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -437,7 +581,7 @@ def build_minus_project(model: ConformedModel) -> tuple[dict, list[dict], dict[s
     pk = _fact_pk(model)
     table = _fact_table(model)
     kpi_tables, kpi_measures, kpi_page, kpi_exports = _kpi_artifacts(
-        model.layout, data_through=model.data_through)
+        model, table, measures, data_through=model.data_through)
     project = {
         "name": f"{model.layout.project_root.name}",
         "datasources": [{"name": "conformed_src", "type": "parquet", "path": "data"}],

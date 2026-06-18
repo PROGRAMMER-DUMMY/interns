@@ -1,15 +1,17 @@
-"""Dashboard screener: export, screenshot, and check every dashboard page.
+"""Dashboard screener: serve, screenshot, and check every MinusAnalyst page.
 
 Run via ``uv run workspace-dashboard --workspace <ws> --screen``. It:
 
-1. exports the static dashboard (same path KPI completion uses),
-2. screenshots index.html + every KPI page with a headless browser
-   (agent-browser when installed, else headless Edge/Chrome),
-3. runs deterministic checks per page — render-failure annotations, missing
-   pages, zero-trace charts, panel-count vs spec, blank/truncated screenshots,
-   design-token color clashes (delta-E) and low contrast via the existing
-   dashboard-verify helpers,
-4. writes ``interns/reports/dashboard_screener/current.json`` + ``current.md``
+1. generates (DQ-gated) the MinusAnalyst project + certified-clean data for the
+   workspace (same artifacts ``--live`` serves),
+2. launches the vendored MinusAnalyst app on a loopback ephemeral port in a
+   background thread,
+3. screenshots every page (KPIs / Analysis / ...) with a headless browser
+   (Edge/Chrome) and dumps the rendered DOM,
+4. runs deterministic checks per page — render-failure tiles, chart widgets that
+   produced no plotly divs, blank/invalid screenshots — plus design-token color
+   clashes (delta-E) via the dashboard-verify helpers,
+5. writes ``interns/reports/dashboard_screener/current.json`` + ``current.md``
    listing findings and screenshot paths.
 
 The SUBJECTIVE visual pass (color mismatch against intent, misalignment,
@@ -17,18 +19,32 @@ crowding, anything a human would squint at) is deliberately left to the
 orchestrating CLI agent: the report's "vision review" section lists every
 screenshot for the agent to Read and judge — same pattern as the resolver's
 LLM-via-CLI-agent fallback (no vision SDK calls from the platform).
+
+This screens the LIVE MinusAnalyst deliverable; the legacy static export was
+removed. The visual-QA gate (vision review) is unchanged in shape.
 """
 from __future__ import annotations
 
+import contextlib
 import json
-import re
 import shutil
+import socket
 import struct
 import subprocess
+import sys
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+# MinusAnalyst widget types that render a plotly figure (vs kpi cards / tables).
+_CHART_TYPES = {
+    "line", "area", "stacked_area", "bar", "grouped_bar", "stacked_bar",
+    "stacked_bar_percent", "ranked_bar", "hbar", "donut", "pie", "heatmap",
+    "scatter", "combo", "small_multiples",
+}
 
 _EDGE_CANDIDATES = (
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -71,6 +87,24 @@ def _screenshot(url: str, out_png: Path, *, width: int = 1500, height: int = 170
     return "" if out_png.is_file() and out_png.stat().st_size > 0 else "screenshot file not written"
 
 
+def _dump_dom(url: str) -> str:
+    """Headless rendered-DOM dump (after JS/callbacks). '' on failure/no browser."""
+    browser = _browser_bin()
+    if not browser:
+        return ""
+    try:
+        proc = subprocess.run(
+            [
+                browser, "--headless", "--disable-gpu",
+                "--virtual-time-budget=12000", "--dump-dom", url,
+            ],
+            capture_output=True, timeout=90, text=True,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return ""
+    return proc.stdout or ""
+
+
 def _png_size(path: Path) -> tuple[int, int] | None:
     try:
         with path.open("rb") as fh:
@@ -92,6 +126,42 @@ def _looks_blank(path: Path, width: int, height: int) -> bool:
         return True
 
 
+def _free_port() -> int:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+@contextlib.contextmanager
+def _serve_live(root: Path):
+    """Serve the vendored MinusAnalyst app on a loopback ephemeral port.
+
+    Yields ``(port, state)``; shuts the server down on exit. The vendor package
+    lives under ``vendor/`` and is added to ``sys.path`` the same way the live
+    CLI does it.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    vendor_dir = str(repo_root / "vendor")
+    if vendor_dir not in sys.path:
+        sys.path.insert(0, vendor_dir)
+    from werkzeug.serving import make_server
+
+    from minus.render.app import create_app
+
+    app, state = create_app(root)
+    port = _free_port()
+    server = make_server("127.0.0.1", port, app.server, threaded=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    time.sleep(1.0)  # let the server bind + Dash register routes
+    try:
+        yield port, state
+    finally:
+        server.shutdown()
+
+
 @dataclass
 class PageFinding:
     page: str
@@ -104,129 +174,57 @@ class PageFinding:
         return not self.errors
 
 
-def _check_html(
-    html: str,
-    page: str,
-    spec_panel_count: int | None,
-    *,
-    expects_data_view: bool = False,
-    redaction_patterns: tuple[str, ...] = (),
-) -> PageFinding:
-    finding = PageFinding(page=page)
-    if "chart render failed" in html:
-        failures = re.findall(r"chart render failed: ([^\"<]{0,120})", html)
-        finding.errors.append(
-            f"render-failure annotation in page: {failures[:3] or ['(unparsed)']}"
-        )
-    plot_count = html.count("js-plotly-plot")
-    if spec_panel_count is not None and plot_count == 0 and spec_panel_count > 0:
-        finding.errors.append(
-            f"spec declares {spec_panel_count} panels but page has 0 plotly divs"
-        )
-    if "plotly" in html and "cdn.plot.ly" not in html and "Plotly" not in html:
-        finding.warnings.append("plotly assets not referenced; charts may be empty")
-    if expects_data_view:
-        finding = _check_data_view(html, finding, redaction_patterns)
-    return finding
+def _check_rendered_dom(dom: str, page: str, chart_widgets: int) -> PageFinding:
+    """Structural checks on the rendered (post-callback) DOM of a live page.
 
-
-def _check_data_view(
-    html: str, finding: PageFinding, redaction_patterns: tuple[str, ...]
-) -> PageFinding:
-    """The data viewer is the newest rendered surface — guard it explicitly.
-
-    A ready KPI page must carry a Data section; its row-count note must be
-    self-consistent; and when a table column matches a redaction pattern
-    (default PII or the workspace data policy), the body must actually show
-    the redaction placeholder, never raw values.
+    Empty ``dom`` (no headless browser) is not an error here — the screenshot
+    path reports the browser-unavailable warning so it isn't double-counted.
     """
-    if 'class="dataview"' not in html:
-        finding.errors.append("ready KPI page has no Data section (dataview)")
+    finding = PageFinding(page=page)
+    if not dom:
         return finding
-    note = re.search(r"(\d+) of ([\d,]+)\+? rows", html)
-    if note:
-        shown, total = int(note.group(1)), int(note.group(2).replace(",", ""))
-        if shown > total:
-            finding.errors.append(
-                f"data viewer note inconsistent: shows {shown} of {total} rows"
-            )
-    else:
-        finding.warnings.append("data viewer present but row-count note not found")
-    headers = re.findall(r"<th>([^<]{1,80})</th>", html)
-    sensitive_headers = [
-        h for h in headers
-        if any(re.match(p, h, re.IGNORECASE) for p in redaction_patterns)
-    ]
-    if sensitive_headers and "&lt;redacted-pii&gt;" not in html:
+    # A tile whose query/render raised shows "⚠ <exc>" with class "empty".
+    if "⚠" in dom or "chart render failed" in dom:
+        finding.errors.append("render-failure tile in rendered page")
+    plot_count = dom.count("js-plotly-plot")
+    if chart_widgets > 0 and plot_count == 0:
         finding.errors.append(
-            "data viewer shows sensitive column(s) "
-            f"{sensitive_headers[:3]} without redaction placeholders"
+            f"page declares {chart_widgets} chart widget(s) but rendered 0 plotly divs"
         )
     return finding
 
 
 def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
-    """Export + screenshot + check every dashboard page; write the report."""
-    from core.dashboard.export import export_static_html
-    from core.dashboard.spec import load_kpi_spec
+    """Generate + serve + screenshot + check every MinusAnalyst page; write the report."""
+    from core.dashboard.minus_adapter import generate, minus_root
     from core.storage.workspace_layout import WorkspaceLayout
     from tools.dashboard_verify import _delta_e
 
     repo_root = Path(repo_root).resolve()
     workspace = (repo_root / workspace_rel).resolve()
     layout = WorkspaceLayout(project_root=workspace)
-    export = export_static_html(repo_root, workspace_rel)
     report_dir = workspace / "interns" / "reports" / "dashboard_screener"
     shots_dir = report_dir / "shots"
     shots_dir.mkdir(parents=True, exist_ok=True)
 
-    from core.governance.data_policy import (
-        load_workspace_data_policy,
-        policy_redaction_patterns,
-    )
-    from core.onboarding.kpi.pii_redaction import DEFAULT_PII_COLUMN_PATTERNS
-
-    redaction_patterns = DEFAULT_PII_COLUMN_PATTERNS + tuple(
-        policy_redaction_patterns(load_workspace_data_policy(workspace))
-    )
-
     findings: list[PageFinding] = []
-    pages = [p for p in export.get("files") or [] if p.endswith(".html")]
-    for rel in pages:
-        page_path = workspace / rel
-        name = page_path.stem
-        kpi_spec = load_kpi_spec(layout, name) if name.startswith("kpi_") else None
-        panel_count = (
-            len(kpi_spec.config.get("panels") or []) if kpi_spec else None
+    gen = generate(layout)
+    if not gen.get("ok"):
+        # DQ-gated publish failed: nothing to screen. Surface as a finding so the
+        # gate blocks rather than silently passing on a stale/empty dashboard.
+        reason = gen.get("reason") or "MinusAnalyst project not generated"
+        detail = "; ".join(
+            f"{c.get('check')}: {c.get('detail')}" for c in (gen.get("failed") or [])
         )
-        try:
-            html = page_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            finding = PageFinding(page=rel, errors=[f"unreadable page: {exc}"])
+        findings.append(PageFinding(
+            page="(generate)",
+            errors=[f"MinusAnalyst publish failed: {reason}" + (f" [{detail}]" if detail else "")],
+        ))
+    else:
+        for name, chart_widgets, shot_rel, finding in _screen_live_pages(
+            layout, workspace, shots_dir
+        ):
             findings.append(finding)
-            continue
-        finding = _check_html(
-            html,
-            rel,
-            panel_count,
-            expects_data_view=bool(kpi_spec and kpi_spec.config.get("sql_path")),
-            redaction_patterns=redaction_patterns,
-        )
-
-        shot = shots_dir / f"{name}.png"
-        err = _screenshot(page_path.resolve().as_uri(), shot)
-        if err:
-            finding.warnings.append(f"screenshot unavailable: {err}")
-        else:
-            finding.screenshot = str(shot.relative_to(workspace).as_posix())
-            size = _png_size(shot)
-            if size is None:
-                finding.errors.append("screenshot is not a valid PNG")
-            elif _looks_blank(shot, *size):
-                finding.errors.append(
-                    "screenshot is nearly blank - page likely failed to render"
-                )
-        findings.append(finding)
 
     # Design-token sanity: accent vs paper must be distinguishable (delta-E).
     from core.dashboard.design_md import load_design_tokens
@@ -253,7 +251,7 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
     ok = all(f.ok for f in findings) and not palette_findings
     report = {
         "artifact_type": "dashboard_screener/current.json",
-        "version": 1,
+        "version": 2,
         "workspace": workspace_rel,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "ok": ok,
@@ -285,7 +283,7 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
     )
 
     lines = [
-        "# Dashboard Screener",
+        "# Dashboard Screener (MinusAnalyst live)",
         "",
         f"- Workspace: `{workspace_rel}`",
         f"- Pages: {len(findings)}  |  Status: {'[ok]' if ok else '[x] findings below'}",
@@ -325,6 +323,36 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
         "page_count": len(findings),
         "error_count": report["error_count"],
     }
+
+
+def _screen_live_pages(layout, workspace: Path, shots_dir: Path):
+    """Serve the live app and yield (name, chart_widgets, shot_rel, finding) per page."""
+    from core.dashboard.minus_adapter import minus_root
+
+    with _serve_live(minus_root(layout)) as (port, state):
+        for page in state.pages:
+            name = page.id
+            chart_widgets = sum(
+                1 for w in page.widgets if getattr(w, "type", None) in _CHART_TYPES
+            )
+            url = f"http://127.0.0.1:{port}/{name}"
+            dom = _dump_dom(url)
+            finding = _check_rendered_dom(dom, name, chart_widgets)
+
+            shot = shots_dir / f"{name}.png"
+            err = _screenshot(url, shot)
+            if err:
+                finding.warnings.append(f"screenshot unavailable: {err}")
+            else:
+                finding.screenshot = str(shot.relative_to(workspace).as_posix())
+                size = _png_size(shot)
+                if size is None:
+                    finding.errors.append("screenshot is not a valid PNG")
+                elif _looks_blank(shot, *size):
+                    finding.errors.append(
+                        "screenshot is nearly blank - page likely failed to render"
+                    )
+            yield name, chart_widgets, finding.screenshot, finding
 
 
 def record_vision_review(

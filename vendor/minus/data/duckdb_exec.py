@@ -154,13 +154,13 @@ def _filter_sql(field: str, val: Any) -> Optional[str]:
     if val is None or val == [] or val == "":
         return None
     col = _col_ref(field)
-    if isinstance(val, dict) and ("from" in val or "to" in val):
-        lo, hi = val.get("from"), val.get("to")
+    if isinstance(val, dict) and any(k in val for k in
+                                     ("from", "to", "ge", "le", "gt", "lt")):
         parts = []
-        if lo is not None:
-            parts.append(f"{col} >= {_sql_literal(lo)}")
-        if hi is not None:
-            parts.append(f"{col} <= {_sql_literal(hi)}")
+        for key, op in (("from", ">="), ("ge", ">="), ("to", "<="), ("le", "<="),
+                        ("gt", ">"), ("lt", "<")):
+            if val.get(key) is not None:
+                parts.append(f"{col} {op} {_sql_literal(val[key])}")
         if not parts:
             return None
         return " AND ".join(parts)

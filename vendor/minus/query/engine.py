@@ -309,12 +309,20 @@ def _apply_filters(df: pl.DataFrame, filters: Filters) -> pl.DataFrame:
         if col not in df.columns or val is None or val == [] or val == "":
             continue
         dtype = df.schema[col]
-        if isinstance(val, dict) and ("from" in val or "to" in val):
-            lo, hi = val.get("from"), val.get("to")
+        if isinstance(val, dict) and any(k in val for k in
+                                         ("from", "to", "ge", "le", "gt", "lt")):
+            # Inclusive (from/ge, to/le) and exclusive (gt, lt) bounds, so a KPI's
+            # intrinsic range scope (e.g. age > 50) maps exactly to its predicate.
+            lo = val.get("from", val.get("ge"))
+            hi = val.get("to", val.get("le"))
             if lo is not None:
                 df = df.filter(pl.col(col) >= _bound(dtype, lo))
             if hi is not None:
                 df = df.filter(pl.col(col) <= _bound(dtype, hi))
+            if val.get("gt") is not None:
+                df = df.filter(pl.col(col) > _bound(dtype, val["gt"]))
+            if val.get("lt") is not None:
+                df = df.filter(pl.col(col) < _bound(dtype, val["lt"]))
         elif isinstance(val, (list, tuple)):
             df = df.filter(pl.col(col).is_in(list(val)))
         else:

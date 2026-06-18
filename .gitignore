@@ -34,3 +34,8 @@ __pycache__/
 node_modules/
 dist/
 build/
+
+# --- Working/implementation plans: kept locally under docs/plans/, not committed ---
+/PLAN_*.md
+/docs/plans/*
+# (already-committed shared plans stay tracked; gitignore only hides new/untracked ones)

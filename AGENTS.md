@@ -575,9 +575,34 @@ the matching `### <command>` section of `TOOLS.md` for the one command you are a
 | Generation + execution | `run-kpi-pipeline`, `workspace-flow`, `generate-kpi-sql`, `generate-kpi-engines`, `kpi-proof-packet` |
 | Validation + QA | `validate-workspace-artifacts`, `validate-project-harness`, `harness reliability`, `harness workflow-guardrails`, `harness data-quality`, `prepare-duplicate-review-panel`, `apply-duplicate-review-answer`, `harness layered-pipeline`, `harness pipeline-execution`, `validate-git-hygiene`, `validate-memory-health` |
 | Evidence + reporting | `record-workspace-trajectory`, `build-workspace-evidence-graph`, `export-kpi-registry-excel`, `export-workspace-presentation`, `prepare-wiki-memory`, `prepare-workspace-bug-report`, `record-engine-evolution` |
-| Dashboard | `workspace-dashboard` (serve / `--export` / `--screen` visual screener), `dashboard-verify` (single-page DOM/color gate) |
+| Dashboard | `workspace-dashboard` (start `--live` / `--stop` / `--refresh` / `--refresh-seconds` / `--screen`), `dashboard-verify` (single-page DOM/color gate) — see "Dashboard server lifecycle" below |
 | Context + budget | `context-router`, `resource-preflight`, `cleanup-workspace-references` |
 | Dev + harness | `prepare-agent-benchmark`, `harness ai-app`, `harness ai-cli`, `prepare-workspace-workflow`, `profiler.py`, `optimizer_finder.py`, `methodology_parser.py`, `generate-skill-adapters`, Databricks tools |
+
+Dashboard server lifecycle:
+
+The per-workspace dashboard is the **live MinusAnalyst app** (served process), NOT a static
+file. The standalone static export was removed; any `dashboard/exports/*.html` still on disk are
+legacy leftover artifacts — stale, never updated by current code, and not the dashboard. Always
+serve the live app. The live app builds from the
+workspace's `interns/` bronze/gold (gitignored), so a fresh clone must run the pipeline before it
+can serve. Commands (all `uv run workspace-dashboard --workspace workspaces/<project> ...`):
+
+- **start** — `--live` (default). Regenerates the model (DQ-gated) and serves at
+  `http://127.0.0.1:8060`. Writes a PID file so it can be stopped cleanly.
+- **stop / kill** — `--stop`. Terminates the running server via its PID file, with a fallback
+  scan of `--port` for orphans. Idempotent (no-op if nothing is running). Cross-platform.
+- **on-demand refresh (new data landed today)** — `--refresh`: regenerate-and-exit. DQ-gated, so
+  a bad/new load that fails certification leaves the last-good snapshot in place. Intended for a
+  scheduler to call after the KPI pipeline re-ingests new data (new data flow:
+  `new raw data -> re-run pipeline (bronze/gold) -> --refresh -> view updates`).
+- **live auto-pickup** — `--live --refresh-seconds <N>`: the running server re-reads data every N
+  seconds, so a `--refresh` write appears without a restart.
+
+Operating rule: a **data** refresh needs no restart (config-watcher + atomic spec writes handle
+it); a **code/schema change** (e.g. a new spec field) needs a restart, because a long-running
+process keeps its old Python classes in memory (cause of stale `data_through: Extra inputs are not
+permitted`-style config errors — fix is `--stop` then `--live`).
 
 Hard registry-read gate:
 
