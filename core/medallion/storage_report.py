@@ -67,6 +67,12 @@ def build_storage_report(
     DuckDB warehouse connection; ``bronze_dir`` is the on-disk Delta bronze root
     (optional). ``raw_source_bytes`` is the total size of the raw source files,
     for the compression ratio."""
+    # Flush in-memory/WAL data to disk blocks so block accounting + the file size
+    # reflect the materialized tables (a fresh CREATE may not be checkpointed yet).
+    try:
+        con.execute("CHECKPOINT")
+    except Exception:
+        pass
     block_size = _duckdb_block_size(con)
     tables: list[dict[str, Any]] = []
     table_bytes_sum = 0
