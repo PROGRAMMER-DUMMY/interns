@@ -222,7 +222,17 @@ class KPIFeatureResolver:
     ) -> dict[str, Any]:
         metric = str(kpi.get("metric", "") or "")
         cuts = str(kpi.get("cuts", "") or "")
-        expression_context = " ".join(value for value in [metric, cuts] if value)
+        # A multi-measure question ("...and the average base cost", "...and the
+        # total amount") names a SECOND measure column the single `metric` field
+        # dropped. Feed that column phrase into the extraction context so the
+        # resolver binds it -- the SQL builder's secondary-measure detection then
+        # emits it alongside the primary. Generic; binds only a real column.
+        secondary_cols = _secondary_measure_phrases(
+            str(kpi.get("name") or kpi.get("business_question") or "")
+        )
+        expression_context = " ".join(
+            value for value in [metric, cuts, *secondary_cols] if value
+        )
         full_context = _kpi_context(kpi)
         from core.onboarding.lexicon.vocabulary import terms_for as _vocab_terms_for
         extracted = extract_expression(
@@ -1276,6 +1286,22 @@ def _semantic_tokens(value: str) -> set[str]:
 def _split_identifier(value: str) -> str:
     value = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(value))
     return value.replace("_", " ").replace("-", " ")
+
+
+def _secondary_measure_phrases(name: str) -> list[str]:
+    """Column phrases for a SECOND measure named in the question prose
+    ("...and the average base cost" -> "base cost"). Reuses the SQL builder's
+    secondary-measure patterns so resolution and emission agree. Generic."""
+    from core.onboarding.kpi.result_view_builder import _SECONDARY_AVG, _SECONDARY_SUM
+
+    phrases: list[str] = []
+    for pattern in (_SECONDARY_AVG, _SECONDARY_SUM):
+        match = pattern.search(name or "")
+        if match:
+            phrase = match.group(1).strip()
+            if phrase:
+                phrases.append(phrase)
+    return phrases
 
 
 def _kpi_context(kpi: dict[str, Any]) -> str:

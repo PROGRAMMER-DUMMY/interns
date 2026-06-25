@@ -69,15 +69,12 @@ def classify_measure(*, agg: str, y_format: str, metric: str) -> tuple[str, bool
     return "sum", True
 
 
-# Generic money tokens (no domain words): a measure is currency only when its
-# metric/column names a monetary quantity. Mirrors the financial vocabulary used
-# elsewhere; kept here so the dashboard layer has ONE source of truth for
-# format/aggregation and never defaults a non-money measure to currency.
-_MONEY_TOKENS = (
-    "amount", "cost", "price", "revenue", "spend", "sales", "paid", "charge",
-    "claim", "fee", "balance", "payment", "income", "margin", "dollars", "usd",
-)
-_AGG_FUNCS = ("count", "avg", "mean", "median", "sum", "min", "max")
+# A measure is currency only when its metric/column names a monetary quantity.
+# Reuse the project's single canonical financial vocabulary instead of a private
+# (and slightly insurance-leaning) duplicate -- 'amount'/'cost' already cover the
+# real cases (paid_amount, claim_cost). Generic; no domain words.
+from core.onboarding.workspace.research import GENERIC_FINANCIAL_SEED as _MONEY_TOKENS
+_AGG_FUNCS = ("count", "avg", "mean", "median", "stddev", "variance", "sum", "min", "max")
 
 
 def measure_func(metric: str, measure: str = "") -> str:

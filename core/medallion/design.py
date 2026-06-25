@@ -612,10 +612,9 @@ def _merged_schema_cols(dss: list[dict[str, Any]]) -> dict[str, str]:
     return cols
 
 
-_MONEY_HINTS = (
-    "cost", "amount", "claim", "coverage", "price", "total", "revenue",
-    "payment", "fee", "balance", "charge", "spend",
-)
+# Reuse the project's canonical financial vocabulary (was a private, slightly
+# insurance-leaning duplicate). 'amount'/'cost' cover paid_amount, claim_cost, etc.
+from core.onboarding.workspace.research import GENERIC_FINANCIAL_SEED as _MONEY_HINTS
 
 
 def _seed_accuracy_assertions(schema_cols: dict[str, str], *, exclude: set[str]) -> list[dict[str, Any]]:

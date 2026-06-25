@@ -628,13 +628,22 @@ class PySparkKPIGenerator:
             return f'F.round(F.sum(F.col("{col}")), 2)'
         if m.fn == "avg":
             return f'F.round(F.avg(F.col("{col}")), 2)'
+        if m.fn == "median":
+            # exact median (matches DuckDB MEDIAN / polars .median()); percentile
+            # is exact whereas percentile_approx would drift from the other engines.
+            return f'F.round(F.expr("percentile(`{col}`, 0.5)"), 2)'
+        if m.fn == "stddev":
+            return f'F.round(F.stddev(F.col("{col}")), 2)'     # stddev_samp
+        if m.fn == "variance":
+            return f'F.round(F.variance(F.col("{col}")), 2)'   # var_samp
         if m.fn == "count" and m.distinct:
-            return f'F.countDistinct(F.col("{col}"))'
+            return f'F.count_distinct(F.col("{col}"))'
         if m.fn == "count":
             return "F.count(F.lit(1))"
         if m.fn in {"min", "max"}:
             return f'F.{m.fn}(F.col("{col}"))'
-        return f'F.sum(F.col("{col}"))'
+        # No silent fall-through to sum (would compute wrong numbers + break parity).
+        raise ValueError(f"unsupported aggregation function for pyspark: {m.fn!r}")
 
     def _agg_expr(self, metric) -> tuple[str, str]:
         if not metric:

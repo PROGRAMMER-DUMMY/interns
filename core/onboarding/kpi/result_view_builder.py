@@ -35,11 +35,20 @@ _TIME_BUCKET_PATTERNS: list[tuple[str, str]] = [
     ("day", "day"),
 ]
 _AGG_FN_PATTERN = re.compile(
-    r"\b(sum|avg|count|min|max)\s*\(\s*(distinct\s+|disitnct\s+)?([^()]+?)\s*\)",
+    r"\b(sum|avg|mean|count|min|max|median|stddev|std|variance|var)\s*"
+    r"\(\s*(distinct\s+|disitnct\s+)?([^()]+?)\s*\)",
     re.IGNORECASE,
 )
+# Canonicalise aggregate-function aliases to one name per dialect renderer.
+_AGG_FN_ALIASES = {"mean": "avg", "std": "stddev", "var": "variance"}
 _PREDICATE_IN_COUNT = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*['\"]([^'\"]+)['\"]\s*$")
 _TOP_N_IN_NAME = re.compile(r"\btop\s+(\d+)\b", re.IGNORECASE)
+# Ranking intent without an explicit "top N": "which X had the MOST Y",
+# "the HIGHEST / LARGEST ...". Ranks the measure DESC and caps the result so a
+# leaderboard question returns the leaders, not every row. DESC-only words on
+# purpose (fewest/lowest would need ASC, handled separately if needed).
+_RANK_HINT = re.compile(r"\b(?:most|highest|largest|greatest|maximum)\b", re.IGNORECASE)
+_DEFAULT_RANK_LIMIT = 20
 _TIME_BUCKET_HINT = re.compile(
     r"\b(year|quarter|month|week|day)\b(?:\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\))?",
     re.IGNORECASE,
@@ -427,6 +436,51 @@ def _detect_time_bucket(token: str) -> tuple[str, str, str] | None:
     return bucket, source, bucket
 
 
+# A KPI question often asks for TWO measures ("...the top 10 procedures AND the
+# average base cost for each", "...AND the number of times they were performed"),
+# but the registry's single `metric` field keeps only one. These patterns recover
+# the dropped second measure from the question prose. Generic; no domain words.
+_SECONDARY_AVG = re.compile(
+    r"\b(?:and|,|with)\s+(?:the\s+)?(?:average|avg|mean)\s+([a-z][a-z0-9_ ]+?)"
+    r"(?:\s+(?:for|per|of|each|by|and)\b|[.?]|$)", re.IGNORECASE)
+_SECONDARY_SUM = re.compile(
+    r"\b(?:and|,|with)\s+(?:the\s+)?total\s+([a-z][a-z0-9_ ]+?)"
+    r"(?:\s+(?:for|per|of|each|by|and)\b|[.?]|$)", re.IGNORECASE)
+_SECONDARY_COUNT = re.compile(
+    r"\b(?:and|,|with)\s+(?:the\s+)?(?:number of times|number of them|"
+    r"how many times|count of how many|times they were)\b", re.IGNORECASE)
+
+
+def _detect_secondary_measure(
+    name_text: str, lookup: dict[str, str], primary_fn: str
+) -> Aggregation | None:
+    """A second measure asked for in the question prose but missing from the
+    single-valued registry `metric`. Returns one extra Aggregation or None.
+    Never duplicates the primary aggregation's function."""
+    real = {_norm(c) for c in _emitted_columns(lookup)}
+
+    def resolved(token: str) -> str | None:
+        col = _resolve_column(token.strip(), lookup)
+        # Only accept a column that actually exists in the KPI's resolved feature
+        # set -- otherwise the second measure would reference a phantom column
+        # (e.g. "base cost") and emit invalid SQL.
+        return col if col and _norm(col) in real else None
+
+    if _SECONDARY_COUNT.search(name_text) and primary_fn != "count":
+        return Aggregation(fn="count", column="*", alias="row_count")
+    m = _SECONDARY_AVG.search(name_text)
+    if m and primary_fn != "avg":
+        col = resolved(m.group(1))
+        if col:
+            return Aggregation(fn="avg", column=col, alias=_norm_alias(f"avg_{col}"))
+    m = _SECONDARY_SUM.search(name_text)
+    if m and primary_fn != "sum":
+        col = resolved(m.group(1))
+        if col:
+            return Aggregation(fn="sum", column=col, alias=_norm_alias(f"sum_{col}"))
+    return None
+
+
 def _parse_aggregation(text: str, lookup: dict[str, str]) -> Aggregation | None:
     text = text.strip()
     if not text:
@@ -437,6 +491,7 @@ def _parse_aggregation(text: str, lookup: dict[str, str]) -> Aggregation | None:
     if not match:
         return None
     fn = match.group(1).lower()
+    fn = _AGG_FN_ALIASES.get(fn, fn)
     distinct = bool(match.group(2))
     inner_raw = match.group(3).strip()
     predicate_match = _PREDICATE_IN_COUNT.match(inner_raw)
@@ -1114,40 +1169,39 @@ def parse_kpi(
                 # (Filters are parsed AFTER this point; the filtered-numerator
                 # rewrite happens at the end of parse_kpi.)
                 base_agg = replace(agg, project=False)
-                total_agg = Aggregation(
-                    fn=agg.fn, column=agg.column,
-                    alias=_norm_alias(f"total_{agg.alias}"),
-                    distinct=agg.distinct, window=WindowSpec(),
-                    project=False,
-                )
-                parsed.aggregations.extend([base_agg, total_agg])
+                parsed.aggregations.append(base_agg)
                 parsed.extra_select_exprs.append(
                     (
                         f"CAST({_agg_expr_no_alias(base_agg)} AS DOUBLE) "
-                        f"/ NULLIF({_agg_expr_no_alias(total_agg)}, 0) * 100",
+                        f"/ NULLIF(SUM({_agg_expr_no_alias(base_agg)}) OVER (), 0) * 100",
                         "percent_of_total",
                     )
                 )
             elif kind == "percent_of_group":
                 group_col = _resolve_column(window_intent["group"], lookup)
-                # Same single-metric-column rule: inline base + per-group
-                # denominator, emit only cuts + percent_of_<group>.
-                base_agg = replace(agg, project=False)
-                group_agg = Aggregation(
-                    fn=agg.fn, column=agg.column,
-                    alias=_norm_alias(f"{agg.alias}_per_{group_col}"),
-                    distinct=agg.distinct,
-                    window=WindowSpec(partition_by=(_quote(group_col),)),
-                    project=False,
-                )
-                parsed.aggregations.extend([base_agg, group_agg])
-                parsed.extra_select_exprs.append(
-                    (
-                        f"CAST({_agg_expr_no_alias(base_agg)} AS DOUBLE) "
-                        f"/ NULLIF({_agg_expr_no_alias(group_agg)}, 0) * 100",
-                        f"percent_of_{_norm_alias(group_col)}",
+                if group_col.lower() not in lookup:
+                    # Fallback to percent_of_total if the matched group name is not a valid column in lookup
+                    base_agg = replace(agg, project=False)
+                    parsed.aggregations.append(base_agg)
+                    parsed.extra_select_exprs.append(
+                        (
+                            f"CAST({_agg_expr_no_alias(base_agg)} AS DOUBLE) "
+                            f"/ NULLIF(SUM({_agg_expr_no_alias(base_agg)}) OVER (), 0) * 100",
+                            "percent_of_total",
+                        )
                     )
-                )
+                else:
+                    # Same single-metric-column rule: inline base + per-group
+                    # denominator, emit only cuts + percent_of_<group>.
+                    base_agg = replace(agg, project=False)
+                    parsed.aggregations.append(base_agg)
+                    parsed.extra_select_exprs.append(
+                        (
+                            f"CAST({_agg_expr_no_alias(base_agg)} AS DOUBLE) "
+                            f"/ NULLIF(SUM({_agg_expr_no_alias(base_agg)}) OVER (PARTITION BY {_quote(group_col)}), 0) * 100",
+                            f"percent_of_{_norm_alias(group_col)}",
+                        )
+                    )
             elif kind == "running_total":
                 running = Aggregation(
                     fn=agg.fn, column=agg.column,
@@ -1181,6 +1235,15 @@ def parse_kpi(
                 parsed.aggregations.append(rank_agg)
             else:
                 parsed.aggregations.append(agg)
+                # Recover a second measure the single-valued `metric` dropped
+                # ("...and the average base cost", "...and the number of times").
+                # Simple metrics only -- the special window/share branches above
+                # are never reached here.
+                secondary = _detect_secondary_measure(name_text, lookup, agg.fn)
+                if secondary is not None and not any(
+                    a.alias == secondary.alias for a in parsed.aggregations
+                ):
+                    parsed.aggregations.append(secondary)
         elif metric_text:
             parsed.fallback_reason = f"unrecognized metric shape: `{metric_text}`"
 
@@ -1274,6 +1337,11 @@ def parse_kpi(
             parsed.limit = int(top_match.group(1))
         except (TypeError, ValueError):
             parsed.limit = None
+    elif _RANK_HINT.search(name_text):
+        # Leaderboard question ("which patients had the MOST readmissions") with
+        # no explicit "top N": rank by the measure DESC and cap. Only meaningful
+        # when there is a measure to rank by, which the emit step verifies.
+        parsed.limit = _DEFAULT_RANK_LIMIT
 
     # Date arithmetic (age, days-since) — must run BEFORE prose filter detection
     # so the date_diff dimension exists when we look for it.
@@ -1378,7 +1446,7 @@ def _window_sql(window: WindowSpec) -> str:
     return "OVER (" + " ".join(parts) + ")"
 
 
-_ROUND_FNS = {"sum", "avg"}
+_ROUND_FNS = {"sum", "avg", "median", "stddev", "variance"}
 
 def _agg_expr_no_alias(agg: Aggregation, dialect: str = "duckdb") -> str:
     """Render an aggregation's SQL expression WITHOUT the trailing ``AS alias``.

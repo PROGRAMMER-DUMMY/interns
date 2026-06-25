@@ -650,13 +650,21 @@ class PolarsKPIGenerator:
             return f'pl.col("{col}").sum().round(2)'
         if m.fn == "avg":
             return f'pl.col("{col}").mean().round(2)'
+        if m.fn == "median":
+            return f'pl.col("{col}").median().round(2)'
+        if m.fn == "stddev":
+            return f'pl.col("{col}").std().round(2)'      # sample std (ddof=1)
+        if m.fn == "variance":
+            return f'pl.col("{col}").var().round(2)'      # sample variance (ddof=1)
         if m.fn == "count" and m.distinct:
             return f'pl.col("{col}").n_unique()'
         if m.fn == "count":
             return "pl.len()"
         if m.fn in {"min", "max"}:
             return f'pl.col("{col}").{m.fn}()'
-        return f'pl.col("{col}").sum()'
+        # No silent fall-through to sum: an unhandled function would otherwise be
+        # computed as a SUM, silently producing wrong numbers + breaking parity.
+        raise ValueError(f"unsupported aggregation function for polars: {m.fn!r}")
 
     def _agg_expr(self, metric) -> tuple[str, str]:
         if not metric:
