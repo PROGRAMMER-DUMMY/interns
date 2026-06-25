@@ -104,6 +104,20 @@ CURATED_MODULES: tuple[str, ...] = (
     # (a quantity in mixed units yields a JSON-backed UOM-normalization option;
     # honest blocker stays when no mixed-unit evidence exists).
     "tests.test_derived_option_synthesis",
+    # Session 2026-06: dashboard de-RCM + medallion production hardening +
+    # storage measurement/strategy + pipeline orchestration + shape gate.
+    # Registered so the gate protects them against regression.
+    "tests.test_dashboard_measure_semantics",
+    "tests.test_workspace_shape_matrix",
+    "tests.test_medallion_production_hardening",
+    "tests.test_medallion_p2_p3",
+    "tests.test_referential_integrity",
+    "tests.test_storage_report",
+    "tests.test_compute_decision_executable",
+    "tests.test_pipeline_orchestration",
+    "tests.test_kpi_secondary_measure",
+    "tests.test_blocker_panel_renderer_previews",
+    "tests.test_export_decimal_safety",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

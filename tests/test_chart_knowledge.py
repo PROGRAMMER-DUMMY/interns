@@ -402,7 +402,9 @@ class VisionReviewTest(unittest.TestCase):
             findings = harness._check_vision_review_done()
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0]["code"], "dashboard_vision_review_pending")
-            self.assertEqual(findings[0]["severity"], "warning")
+            # Promoted warning -> error: a dashboard is not done until its staged
+            # screenshots are vision-reviewed (mandatory QA gate, 2026-06).
+            self.assertEqual(findings[0]["severity"], "error")
 
 
 class DecidePanelsIntegrationTest(unittest.TestCase):
