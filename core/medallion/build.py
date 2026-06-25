@@ -139,6 +139,15 @@ def _run_build(
     else:
         target = declared_target
 
+    # 4b. ACT ON the recorded compute decision: if the volume-derived
+    # architecture decision recommends DISTRIBUTED (Spark) but the run target is
+    # local single-node (duckdb), surface a clear mismatch warning. Makes the
+    # decision executable (the operator is told) instead of advisory-only. Never
+    # blocks -- the Spark target is opt-in via --target delta.
+    compute_warning = _compute_decision_mismatch(paths["medallion"], target)
+    if compute_warning:
+        print(f"[build-medallion] WARNING: {compute_warning}")
+
     # 5-6. Create run_id and state dir
     manifest_hash = manifest.inputs_hash
     run_id = new_run_id(manifest_hash)
@@ -788,6 +797,32 @@ def _check_design_panel(layout: WorkspaceLayout, force: bool) -> None:
             )
     except json.JSONDecodeError:
         pass
+
+
+def _compute_decision_mismatch(medallion_dir: Path, target: str) -> Optional[str]:
+    """Warn when the recorded compute decision recommends distributed (Spark)
+    but the run target is local single-node (duckdb). Reads
+    architecture_decisions.json; returns a message or None. Generic, advisory."""
+    if target not in ("duckdb", "auto"):
+        return None  # already on a distributed/delta target
+    path = medallion_dir / "architecture_decisions.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    rec = str(((data.get("decisions") or {}).get("compute_engine") or {})
+              .get("recommendation") or "")
+    if "distributed" in rec.lower() or "spark" in rec.lower():
+        measured = (data.get("measured") or {}).get("total_source_bytes")
+        return (
+            f"compute decision recommends `{rec}` for this workspace's volume "
+            f"({measured} bytes) but the build target is local `{target}`. "
+            "Re-run with `--target delta` on a Spark/Databricks runtime for "
+            "distributed compute, or accept single-node for this volume."
+        )
+    return None
 
 
 def _row_count(con, fqn: str) -> int:
