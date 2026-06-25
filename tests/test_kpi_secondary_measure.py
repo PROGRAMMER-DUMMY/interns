@@ -62,5 +62,40 @@ class SecondaryMeasureTests(unittest.TestCase):
         self.assertEqual(len(parse_kpi(kpi).aggregations), 1)
 
 
+class ProseTemporalGrainTests(unittest.TestCase):
+    """A per-period question with EMPTY cuts synthesizes a time bucket -- but only
+    from a date column that is a resolved feature (no fabrication). kpi_008 shape."""
+
+    def _kpi(self, name, cols, cuts=""):
+        return {
+            "metric": "count(distinct PATIENT)", "cuts": cuts, "name": name,
+            "features": [
+                {"feature": c, "state": "proven_direct",
+                 "source_columns": [{"dataset": "encounters.csv", "column": c}]}
+                for c in cols
+            ],
+        }
+
+    def test_each_quarter_over_time_synthesizes_bucket(self):
+        kpi = self._kpi("How many unique patients were admitted each quarter over time?",
+                        ["PATIENT", "START"])
+        dims = {d.alias for d in parse_kpi(kpi).dimensions}
+        self.assertIn("quarter", dims)
+
+    def test_no_temporal_prose_no_synthesis(self):
+        kpi = self._kpi("How many unique patients are there?", ["PATIENT", "START"])
+        self.assertEqual(parse_kpi(kpi).dimensions, [])
+
+    def test_no_date_feature_no_fabrication(self):
+        kpi = self._kpi("patients each quarter over time", ["PATIENT"])
+        self.assertEqual(parse_kpi(kpi).dimensions, [])
+
+    def test_explicit_cut_not_double_added(self):
+        kpi = self._kpi("patients each quarter over time", ["PATIENT", "START"],
+                        cuts="Quarter(START)")
+        quarters = [d for d in parse_kpi(kpi).dimensions if d.alias == "quarter"]
+        self.assertEqual(len(quarters), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

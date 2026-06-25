@@ -49,6 +49,43 @@ _TOP_N_IN_NAME = re.compile(r"\btop\s+(\d+)\b", re.IGNORECASE)
 # purpose (fewest/lowest would need ASC, handled separately if needed).
 _RANK_HINT = re.compile(r"\b(?:most|highest|largest|greatest|maximum)\b", re.IGNORECASE)
 _DEFAULT_RANK_LIMIT = 20
+# Temporal-grain intent stated only in the QUESTION (not in cuts): "each quarter
+# over time", "per month", "monthly trend". Generalises kpi_008 -- the cut was
+# empty but the question asked for a per-period breakdown. Captures the period.
+_PROSE_TEMPORAL = re.compile(
+    r"\b(?:each|per|every|by)\s+(year|quarter|month|week|day)\b"
+    r"|\b(year|quarter|month|week|dai)ly\b"
+    r"|\b(year|quarter|month|week|day)\s+over\s+(?:the\s+)?(?:year|time)\b",
+    re.IGNORECASE,
+)
+# Date-ish column-name hints (generic; no domain words). Used only to pick a
+# date column that is ALREADY a resolved feature -- never to invent one.
+_DATE_COL_HINT = ("date", "start", "stop", "_at", "timestamp", "time")
+
+
+def _prose_temporal_unit(name_text: str) -> str | None:
+    """The period a question asks to break out by ('each quarter over time' ->
+    'quarter'), or None. 'daily' normalises to 'day'."""
+    m = _PROSE_TEMPORAL.search(name_text or "")
+    if not m:
+        return None
+    unit = next((g for g in m.groups() if g), "")
+    return "day" if unit == "dai" else (unit or None)
+
+
+def _date_column_from_lookup(lookup: dict[str, str]) -> str | None:
+    """A date-typed column already in the resolved feature set, by name hint.
+    Prefers an event/start column. Returns the physical column or None -- never
+    fabricates a column that is not a resolved feature."""
+    cols = [c for c in lookup.values() if c]
+    for pref in ("start", "service", "event", "order", "date"):
+        for c in cols:
+            if pref in c.lower():
+                return c
+    for c in cols:
+        if any(h in c.lower() for h in _DATE_COL_HINT):
+            return c
+    return None
 _TIME_BUCKET_HINT = re.compile(
     r"\b(year|quarter|month|week|day)\b(?:\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\))?",
     re.IGNORECASE,
@@ -1275,6 +1312,20 @@ def parse_kpi(
         parsed.dimensions.append(
             Dimension(expression=_quote(column), alias=_norm_alias(column))
         )
+
+    # Prose temporal grain: the question asks for a per-period breakdown ("each
+    # quarter over time") but `cuts` carried no time bucket. Synthesize the
+    # bucket ONLY when a date column is already a resolved feature (no
+    # fabrication) and no temporal dimension exists yet. Generalises kpi_008.
+    _temporal_aliases = {"year", "quarter", "month", "week", "day"}
+    if not any(d.alias in _temporal_aliases for d in parsed.dimensions):
+        unit = _prose_temporal_unit(name_text)
+        if unit:
+            date_col = _date_column_from_lookup(lookup)
+            if date_col:
+                expr = f"date_trunc('{unit}', CAST({_quote(date_col)} AS DATE))"
+                parsed.dimensions.insert(
+                    0, Dimension(expression=expr, alias=_norm_alias(unit)))
 
     # Prose categorical filter: "for <value> <lob_col>" pattern.
     # Strategy: find any dimension whose source column name appears AFTER "for <value>"
