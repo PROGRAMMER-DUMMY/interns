@@ -244,9 +244,16 @@ def design_medallion(
     # over THIS workspace's measured volume + shape so the recommended compute /
     # table-format / modeling / SCD are recorded per workspace instead of a single
     # RCM-shaped default. Advisory artifact; never blocks the build.
+    arch_decisions = _build_architecture_decisions(workspace, workspace_name, star_schema)
     (paths["medallion"] / "architecture_decisions.json").write_text(
-        json.dumps(_build_architecture_decisions(workspace, workspace_name, star_schema), indent=2),
-        encoding="utf-8")
+        json.dumps(arch_decisions, indent=2), encoding="utf-8")
+    # Storage strategy (compression / partitioning / compaction), derived from
+    # measured volume + the event column. Written for the emitters to apply and
+    # for operators to see WHY (e.g. partitioning skipped on a small workspace to
+    # avoid the small-file problem).
+    storage_strategy = _build_storage_strategy(arch_decisions, sla_contract)
+    (paths["medallion"] / "storage_strategy.json").write_text(
+        json.dumps(storage_strategy, indent=2), encoding="utf-8")
 
     lineage_path = paths["medallion"] / "lineage.json"
     lineage_path.write_text(json.dumps(lineage.to_dict(), indent=2), encoding="utf-8")
@@ -256,7 +263,8 @@ def design_medallion(
     silver_files = _emit_silver_sql_duckdb(manifest, silver_contract, paths["silver"])
 
     # P2: emit Gold DuckDB SQL + Spark files for all layers
-    _emit_gold_sql_all(manifest, paths, repo_root, workspace, workspace_name, silver_contract)
+    _emit_gold_sql_all(manifest, paths, repo_root, workspace, workspace_name,
+                       silver_contract, storage_strategy)
 
     # P5: rebuild lineage with column-level edges parsed from emitted SQL
     lineage = _build_lineage_with_columns(workspace_name, manifest, silver_contract, paths)
@@ -914,6 +922,56 @@ def _build_sla_contract(workspace_name: str, manifest: Manifest, contract: Silve
     }
 
 
+# Partition only above this volume: below it, directory-per-partition creates the
+# small-file problem (more overhead than scan savings). Generic threshold.
+_PARTITION_VOLUME_FLOOR = 1 * 1024 * 1024 * 1024  # 1 GB
+
+
+def _build_storage_strategy(arch_decisions: dict[str, Any], sla_contract: dict[str, Any]) -> dict[str, Any]:
+    """Compression / partitioning / compaction strategy from measured volume +
+    the event column. zstd compression always (better analytical reads than the
+    snappy default); partitioning + OPTIMIZE only above the volume floor, so a
+    small workspace is not over-partitioned into tiny files. Generic."""
+    total_bytes = int((arch_decisions.get("measured") or {}).get("total_source_bytes") or 0)
+    large = total_bytes >= _PARTITION_VOLUME_FLOOR
+    # Event column for the partition key: the first table's freshness column.
+    event_col = None
+    for t in sla_contract.get("tables") or []:
+        if t.get("freshness_column"):
+            event_col = t["freshness_column"]
+            break
+    partition_by = None
+    if large and event_col:
+        # Partition by the MONTH of the event column (date-grain directories);
+        # raw per-day/timestamp would be too granular at the directory level.
+        partition_by = {"column": event_col, "granularity": "month"}
+    return {
+        "artifact_type": "storage_strategy.json",
+        "version": 1,
+        "generated_by": "medallion-design",
+        "measured_total_bytes": total_bytes,
+        "compression": "zstd",
+        "partition_by": partition_by,
+        "optimize": bool(large),
+        "rationale": (
+            f"{_human_bytes_simple(total_bytes)} >= 1 GB: partition by "
+            f"month({event_col}) + OPTIMIZE compaction."
+            if partition_by else
+            f"{_human_bytes_simple(total_bytes)} < 1 GB: no partitioning "
+            "(directory-per-partition would create the small-file problem); "
+            "zstd compression only."
+        ),
+    }
+
+
+def _human_bytes_simple(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(n) < 1024:
+            return f"{n:.0f} {unit}"
+        n /= 1024
+    return f"{n:.0f} PB"
+
+
 def _build_architecture_decisions(
     workspace: Path, workspace_name: str, star_schema: StarSchema
 ) -> dict[str, Any]:
@@ -1205,6 +1263,7 @@ def _emit_gold_sql_all(
     workspace: Path,
     workspace_name: str,
     silver_contract: SilverContract,
+    storage_strategy: dict[str, Any] | None = None,
 ) -> None:
     """Emit Gold DuckDB SQL and Spark files for all layers (P2)."""
     from core.medallion.delta_emitter import (
@@ -1217,11 +1276,14 @@ def _emit_gold_sql_all(
 
     # Spark files — emitted for all targets; build-medallion --target delta executes them
     for b in manifest.bronze:
-        emit_bronze_spark(b, paths["bronze"], workspace_name, repo_root, workspace)
+        emit_bronze_spark(b, paths["bronze"], workspace_name, repo_root, workspace,
+                          storage_strategy=storage_strategy)
     for s in manifest.silver:
-        emit_silver_spark(s, paths["silver"], workspace_name, silver_contract)
+        emit_silver_spark(s, paths["silver"], workspace_name, silver_contract,
+                          storage_strategy=storage_strategy)
     for g in manifest.gold:
-        emit_gold_spark(g, paths["gold"], workspace_name)
+        emit_gold_spark(g, paths["gold"], workspace_name,
+                        storage_strategy=storage_strategy)
 
 
 # ── P5: Column-level lineage from parsed SQL ──────────────────────────────────
