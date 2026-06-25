@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import unittest
 
-from core.onboarding.kpi.blocker_question_panel import _render_markdown
+from core.onboarding.kpi.blocker_question_panel import (
+    _render_markdown,
+    _render_markdown_compact,
+)
 
 
 def _legacy_panel() -> dict:
@@ -263,6 +266,83 @@ class RenderMarkdownPreviewSectionsTests(unittest.TestCase):
         self.assertIn("#### Sample (DuckDB, LIMIT 5)", out)
         self.assertIn("Preview unavailable: deadline exceeded after 30s", out)
         self.assertNotIn("> Executed in 30000ms.", out)
+
+
+class RenderMarkdownCompactTests(unittest.TestCase):
+    def _physical_panel(self) -> dict:
+        panel = _legacy_panel()
+        panel["workspace"] = "workspaces/Hospital_Patient_Records"
+        panel["kpi_source_truth"] = [
+            {
+                "kpi_id": "kpi_001",
+                "business_question": "How many total encounters occurred each year?",
+                "metric": "count(distinct Id)",
+                "cuts": ["year(START)"],
+            }
+        ]
+        panel["options"] = [
+            {
+                "option_id": "option_a",
+                "label": "encounters.Id",
+                "business_summary": (
+                    "RECOMMENDED. `encounters.Id` — PK, unique encounter id. "
+                    "Sample values: 'a', 'b'. Source: `encounters.csv`."
+                ),
+                "evidence_summary": "PK, unique encounter id",
+                "confidence": "high",
+                "is_recommended": True,
+                "json_backed": True,
+                "physical_column_option": {
+                    "observed_values": ["0002c38a", "00059b24", "00091c5b", "00092210"],
+                },
+            },
+            {
+                "option_id": "custom",
+                "label": "Enter a custom definition",
+                "business_summary": "Provide a different rule.",
+                "json_backed": False,
+            },
+        ]
+        return panel
+
+    def test_compact_leads_with_kpi_and_options(self) -> None:
+        out = _render_markdown_compact(self._physical_panel())
+        # Header, KPI truth, decision, and options are all present and ordered.
+        self.assertIn("# Blocker: paid_amount", out)
+        self.assertIn("**kpi_001** — How many total encounters occurred each year?", out)
+        self.assertIn("Metric: `count(distinct Id)`", out)
+        self.assertIn("## Decide", out)
+        self.assertIn("## Options", out)
+        self.assertIn("1. [RECOMMENDED] `option_a` · encounters.Id  (confidence: high)", out)
+        self.assertIn("   PK, unique encounter id", out)
+        self.assertIn("   Samples: 0002c38a, 00059b24, 00091c5b", out)  # capped at 3
+        self.assertIn("2. `custom` · Enter a custom definition", out)
+
+    def test_compact_includes_apply_command(self) -> None:
+        out = _render_markdown_compact(self._physical_panel())
+        self.assertIn(
+            "uv run apply-kpi-panel-answer "
+            "--workspace workspaces/Hospital_Patient_Records "
+            "--domain <domain> --answer option_a",
+            out,
+        )
+        self.assertIn("Full proof & evidence: `current_full.md`", out)
+
+    def test_compact_omits_machine_guidance_and_raw_json(self) -> None:
+        """The compact card must not carry the agent-only contract sections or a
+        raw JSON evidence dump -- those belong in current_full.md / current.json."""
+        panel = self._physical_panel()
+        panel["interaction_contract"] = {"instruction": "x", "display_mode": "y"}
+        panel["panel_contract"] = {"display_shape": "full_kpi_truth_packet"}
+        panel["output_dialect"] = {"label": "SQL (default)"}
+        panel["immutable_kpi_policy"] = {"rule": "hard truth"}
+        out = _render_markdown_compact(panel)
+        self.assertNotIn("## Interaction Contract", out)
+        self.assertNotIn("## Panel Contract", out)
+        self.assertNotIn("## Output Dialect", out)
+        self.assertNotIn("## Immutable KPI Policy", out)
+        self.assertNotIn("## KPI Understanding Review", out)
+        self.assertNotIn("```json", out)
 
 
 if __name__ == "__main__":

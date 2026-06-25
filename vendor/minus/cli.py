@@ -139,6 +139,21 @@ def _cmd_report(args) -> int:
     return 0
 
 
+def _cmd_pptx(args) -> int:
+    from minus_deck import build_deck
+    res = build_deck(args.root, args.out, theme=args.theme, charts=args.charts)
+    print(f"{OK} MinusDeck -> {res['path']} ({res['slides']} slides, {res['pages']} pages, "
+          f"{res['native_charts']} native charts)")
+    return 0
+
+
+def _cmd_pdf(args) -> int:
+    from minus_press import build_pdf
+    res = build_pdf(args.root, args.out, theme=args.theme)
+    print(f"{OK} MinusPress -> {res['path']} ({res['pages']} pages, {res['charts']} charts)")
+    return 0
+
+
 def _cmd_refresh(args) -> int:
     from minus.render.app import AppState
     st = AppState(args.root)
@@ -193,6 +208,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     rf = sub.add_parser("refresh", help="Re-read source data and report row counts.")
     rf.set_defaults(func=_cmd_refresh)
+
+    pp = sub.add_parser("pptx", help="Export an interactive PowerPoint (MinusDeck).")
+    pp.add_argument("--out", default="MinusDeck.pptx", help="Output .pptx path.")
+    pp.add_argument("--theme", default=None, help="Override theme (claude / dark).")
+    pp.add_argument("--charts", choices=["native", "image"], default="native",
+                    help="native = editable Excel-backed charts; image = dashboard images.")
+    pp.set_defaults(func=_cmd_pptx)
+
+    pd = sub.add_parser("pdf", help="Export a rich PDF (MinusPress).")
+    pd.add_argument("--out", default="MinusPress.pdf", help="Output .pdf path.")
+    pd.add_argument("--theme", default=None, help="Override theme (claude / dark).")
+    pd.set_defaults(func=_cmd_pdf)
     return p
 
 

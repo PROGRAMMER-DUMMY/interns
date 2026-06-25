@@ -39,6 +39,9 @@ dependencies = [
     "pdfplumber>=0.11.9",
     "pyyaml>=6.0",
     "openpyxl>=3.1.5",
+    "python-pptx>=1.0.2",
+    "kaleido>=1.3.0",
+    "reportlab>=5.0.0",
 ]
 
 [project.scripts]
@@ -79,6 +82,9 @@ prepare-workspace-workflow = "core.onboarding.workspace.workflow:prepare_main"
 workspace-flow = "core.onboarding.workspace.flow:main"
 run-kpi-pipeline = "core.onboarding.workspace.flow:pipeline_main"
 workspace-dashboard = "tools.workspace_dashboard:main"
+workspace-dashboard-deck = "tools.workspace_pptx:main"
+workspace-dashboard-pdf = "tools.workspace_pdf:main"
+dataops = "tools.dataops:main"
 suggest-kpi-improvements = "core.dashboard.suggestions:main"
 prepare-bronze-silver-standards = "core.onboarding.bronze_silver_standards:main"
 prepare-wiki-memory = "core.onboarding.memory.wiki_memory:prepare_main"

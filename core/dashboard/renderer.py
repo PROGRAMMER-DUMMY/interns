@@ -1833,7 +1833,19 @@ def _kpi_headline(rows: list[dict[str, Any]], spec: DashboardSpec) -> str:
         segments = len({str(r.get(x_col)) for r in rows if x_col in r}) if x_col else len(rows)
         return f"{segments} segments"
     if vals:
-        return _format_measure(sum(vals), y_col, percent=percent)
+        # Collapse pre-aggregated rows by the metric's MEANING: an average must
+        # not be summed (sum-of-averages is meaningless); counts/sums sum.
+        from core.dashboard.model.cuts import headline_agg
+        agg = headline_agg(str(config.get("metric") or ""), y_col, str(config.get("y_format") or ""))
+        if agg == "avg":
+            value = sum(vals) / len(vals)
+        elif agg == "max":
+            value = max(vals)
+        elif agg == "min":
+            value = min(vals)
+        else:
+            value = sum(vals)
+        return _format_measure(value, y_col, percent=percent)
     return "—"
 
 

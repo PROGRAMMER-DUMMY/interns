@@ -122,6 +122,23 @@ def _kpi(widget, result, project):
 
 
 def _chart(widget, result, project, page_id, highlight=None, colors=None):
+    """Dash wrapper: build the themed figure, then mount it as a cross-filterable Graph."""
+    colors = colors or chart_colors(project)
+    fig = build_chart_figure(widget, result, project, highlight=highlight, colors=colors)
+    dim = result.dimensions[0] if result.dimensions else None
+    cf_id = {"kind": "graph", "page": page_id, "wid": widget.id,
+             "dim": dim or "", "drill": widget.drilldown or ""}
+    return dcc.Graph(figure=fig, id=cf_id, config={"displayModeBar": False},
+                     style={"height": "100%"})
+
+
+def build_chart_figure(widget, result, project, *, highlight=None, colors=None) -> go.Figure:
+    """Build the themed Plotly figure for a non-KPI/table widget.
+
+    Extracted from the Dash renderer so the static exporters (the MinusDeck PPTX
+    and MinusPress PDF vendors) draw the EXACT figure the live app shows --
+    identical palette, data labels, axis styling, and theme colours.
+    """
     colors = colors or chart_colors(project)
     df = result.frame
     dim = result.dimensions[0] if result.dimensions else None
@@ -292,10 +309,7 @@ def _chart(widget, result, project, page_id, highlight=None, colors=None):
                       f"<br><span style='font-size:9px'>{_measure_label(primary, project)}</span>"),
                 font=dict(size=15, color=colors["ink"], family="Fraunces, Georgia, serif"))
 
-    cf_id = {"kind": "graph", "page": page_id, "wid": widget.id,
-             "dim": dim or "", "drill": widget.drilldown or ""}
-    return dcc.Graph(figure=fig, id=cf_id, config={"displayModeBar": False},
-                     style={"height": "100%"})
+    return fig
 
 
 def _style(fig, widget, colors):

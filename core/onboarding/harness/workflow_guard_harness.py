@@ -159,6 +159,7 @@ class WorkflowGuardHarness:
         findings.extend(self._check_hand_edited_generated_artifacts())
         findings.extend(self._check_throwaway_reader_scripts())
         findings.extend(self._check_vision_review_done())
+        findings.extend(self._check_dashboard_screener_clean())
         error_count = sum(1 for item in findings if item["severity"] == "error")
         warning_count = sum(1 for item in findings if item["severity"] == "warning")
         report = {
@@ -224,20 +225,59 @@ class WorkflowGuardHarness:
         )
         return [
             _finding(
-                "warning",
+                "error",
                 "dashboard_vision_review_pending",
-                "Dashboard screener ran but its staged screenshots were never "
-                "vision-reviewed; visual defects (misalignment, color mismatch) "
-                "may be unexamined.",
+                "Dashboard screener ran but its staged screenshots/chart crops were "
+                "never vision-reviewed; the dashboard cannot be marked done until "
+                "every staged image is read and judged.",
                 artifact=report_rel,
                 recommendation=(
-                    "Read the screenshots under interns/reports/dashboard_screener/shots/, "
-                    "then record the pass: uv run workspace-dashboard --workspace "
-                    f"{self.workspace_rel} --record-vision-review --reviewed-by <name> "
-                    "--notes <findings>"
+                    "Read EVERY image under interns/reports/dashboard_screener/shots/ "
+                    "(each page, each sub-tab, each per-chart crop), then record the "
+                    f"pass: uv run workspace-dashboard --workspace {self.workspace_rel} "
+                    "--record-vision-review --reviewed-by <name> --notes <findings>"
                 ),
             )
         ]
+
+    def _check_dashboard_screener_clean(self) -> list[dict[str, Any]]:
+        """A dashboard whose screener found DETERMINISTIC defects (empty chart,
+        currency-on-count, summed averages, empty tab) must not be marked done.
+        These are hard, machine-checkable findings -- distinct from the subjective
+        vision review -- so they block regardless of whether a human looked."""
+        findings: list[dict[str, Any]] = []
+        for sub in ("dashboard_screener", "dashboard_export_screener"):
+            path = self.layout.reports_dir / sub / "current.json"
+            if not path.exists():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if data.get("ok", True):
+                continue
+            defects: list[str] = []
+            for page in data.get("pages") or data.get("artifacts") or []:
+                for err in page.get("errors") or []:
+                    defects.append(f"{page.get('page') or page.get('kind')}: {err}")
+            defects.extend(data.get("measure_semantics_findings") or [])
+            defects.extend(data.get("palette_findings") or [])
+            message = (
+                f"{sub} found deterministic defects: " + "; ".join(defects[:6])
+                if defects else f"{sub} reported not-ok."
+            )
+            findings.append(_finding(
+                "error",
+                f"{sub}_defects",
+                message,
+                artifact=f"{self.workspace_rel}/interns/reports/{sub}/current.json",
+                recommendation=(
+                    "Fix the flagged charts/measures, regenerate the dashboard, and "
+                    f"re-run: uv run workspace-dashboard --workspace {self.workspace_rel} "
+                    "--screen"
+                ),
+            ))
+        return findings
 
     def _check_generated_sql_raw_paths(self) -> list[dict[str, Any]]:
         """Flag a raw dataset reader (read_csv_auto/read_parquet of a literal

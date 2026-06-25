@@ -63,6 +63,9 @@ spark.sql("CREATE SCHEMA IF NOT EXISTS {bronze_schema}")
          .write
          .format("delta")
          .mode("append")
+         # Bronze stays SCHEMA-FLEXIBLE: an upstream column added later is
+         # captured here without failing the load (Step 6: schema evolution).
+         .option("mergeSchema", "true")
          .saveAsTable(TARGET)
 )
 '''

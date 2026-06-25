@@ -87,8 +87,15 @@ def scaffold_from_folder(folder: Path | str, root: Path | str,
             continue
         if fact_dtypes[col].is_numeric() and NUMERIC_HINT.search(col):
             mname = f"total_{_slug(col)}"
+            # Currency only for a column that names a monetary quantity -- a flat
+            # `currency` default mislabels plain numeric sums (counts, quantities)
+            # as money. Generic; no domain assumptions.
+            money = any(t in col.lower() for t in (
+                "amount", "cost", "price", "revenue", "spend", "sales", "paid",
+                "charge", "claim", "fee", "balance", "payment", "income"))
             measures.append({"name": mname, "label": f"Total {col}",
-                             "agg": "sum", "field": f"{fact}.{col}", "fmt": "currency"})
+                             "agg": "sum", "field": f"{fact}.{col}",
+                             "fmt": "currency" if money else "int"})
             measure_names.append(mname)
     # always provide a row count + a distinct-entity count
     measures.append({"name": f"{fact}_count", "label": f"# {fact.title()}",

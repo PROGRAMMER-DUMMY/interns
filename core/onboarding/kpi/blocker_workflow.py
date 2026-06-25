@@ -117,7 +117,9 @@ def prepare_kpi_blocker_panel(
         question_count=panel_result.question_count,
         validation=validation.summary(),
         next_step=(
-            f"Render {panel_result.current_markdown} as-is, reading it ONCE. Do not summarize it, "
+            f"Render {panel_result.current_markdown} as-is, reading it ONCE. It is the compact "
+            f"decision card (KPI + decision + options); the full evidence/proof render is in "
+            f"{panel_result.current_full_markdown} for drill-down only. Do not summarize the card, "
             f"write a second blocker prompt, re-read it in another form, or delegate to a subagent "
             f"to read it: a `... first N lines hidden ...` notice means the read SUCCEEDED "
             f"(UI truncation, not a failure). Apply answers only from {panel_result.current_json}."

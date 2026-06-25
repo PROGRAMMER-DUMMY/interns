@@ -27,7 +27,7 @@ import yaml
 
 from core.dashboard.model.aggregate import resolve_column
 from core.dashboard.model.conformed import ConformedModel, build_conformed_model
-from core.dashboard.model.cuts import build_kpi_model
+from core.dashboard.model.cuts import build_kpi_model, headline_agg, measure_fmt
 from core.dashboard.model.dq import certify
 from core.dashboard.model.layers import list_gold_kpis, read_gold
 from core.dashboard.importance import rank_dimensions, ranked_names
@@ -87,7 +87,8 @@ def _measure_specs(model: ConformedModel) -> list[dict[str, Any]]:
                           "table": table, "fmt": m.fmt or "int"})
         else:
             specs.append({"name": slug, "label": m.name, "agg": m.agg,
-                          "field": f"{table}.{m.column}", "fmt": m.fmt or "currency"})
+                          "field": f"{table}.{m.column}",
+                          "fmt": m.fmt or measure_fmt(f"{m.agg}({m.column})", m.column, "")})
     # NOTE: no domain-derived ratio measures here (was Collection Rate / Days in
     # A/R, keyed off "paid"/"amount"/"ar_days" substrings -- favoured RCM-shaped
     # workspaces). A composed/ratio measure must be declared in the workspace's
@@ -115,11 +116,28 @@ def _measure_field_columns(measures: list[dict[str, Any]]) -> set[str]:
 # higher-cardinality columns (procedure/diagnosis codes, ids) make poor overview
 # charts and are excluded (still reachable via Detail / drill).
 _MAX_DIM_CARDINALITY = 50
+# A dimension whose single most-common value covers more than this fraction of
+# rows is effectively constant -- charting it yields a degenerate/empty figure
+# (e.g. a SUFFIX column that is 97.7% blank). Excluded from overview charts.
+_MAX_DIM_CONCENTRATION = 0.9
+
+
+def _top_value_share(model: ConformedModel, column: str) -> float:
+    """Fraction of rows held by the single most-common value of ``column``."""
+    height = model.frame.height
+    if not height:
+        return 0.0
+    try:
+        vc = model.frame.get_column(column).value_counts(sort=True)
+        return int(vc[vc.columns[-1]][0]) / height
+    except Exception:
+        return 0.0
 
 
 def _display_dimensions(model: ConformedModel) -> list[tuple[str, int]]:
     """(dimension, distinct) worth charting, ordered low-cardinality first,
-    skipping raw dates (keep 'month'), constants, and high-cardinality columns."""
+    skipping raw dates (keep 'month'), constants, near-constant (dominant-value)
+    columns, and high-cardinality columns."""
     out: list[tuple[str, int]] = []
     for d in model.dimensions:
         dl = d.lower()
@@ -127,6 +145,10 @@ def _display_dimensions(model: ConformedModel) -> list[tuple[str, int]]:
             continue
         distinct = model.frame.get_column(d).n_unique()
         if distinct <= 1 or (dl != "month" and distinct > _MAX_DIM_CARDINALITY):
+            continue
+        # Concentration guard: skip a dimension dominated by one value (>90%) --
+        # it can't make a meaningful chart and renders near-empty.
+        if dl != "month" and _top_value_share(model, d) > _MAX_DIM_CONCENTRATION:
             continue
         out.append((d, distinct))
     out.sort(key=lambda t: (t[0].lower() != "month", t[1]))  # month first, then low-card
@@ -219,12 +241,17 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
     for kpi_id, km, gold in infos:
         tname = kpi_id
         mslug = _slug(f"{kpi_id}_{km.measure}")
-        is_share = (km.y_format or "").lower() == "percent" or "share" in km.measure.lower()
-        fmt = "percent" if is_share else "currency"
+        is_share = km.kind == "share"
+        # fmt + headline aggregation derive from the metric's MEANING (count vs
+        # money vs average vs share), never a flat currency/sum default. The old
+        # `percent else currency` + `agg:"sum"` was fit to RCM's all-money KPIs
+        # and silently mislabelled counts as `$` and summed per-group averages.
+        fmt = measure_fmt(km.metric, km.measure, km.y_format)
+        agg = headline_agg(km.metric, km.measure, km.y_format)
         exports[tname] = gold
         tables.append({"name": tname, "source": "conformed_src",
                        "file": f"{tname}.parquet", "label": km.card_label})
-        measures.append({"name": mslug, "label": km.card_label, "agg": "sum",
+        measures.append({"name": mslug, "label": km.card_label, "agg": agg,
                          "field": f"{tname}.{km.measure}", "fmt": fmt})
 
         name = km.card_label

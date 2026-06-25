@@ -166,6 +166,7 @@ def _serve_live(root: Path):
 class PageFinding:
     page: str
     screenshot: str = ""
+    shots: list[str] = field(default_factory=list)   # per-chart crops for this view
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -221,10 +222,7 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
             errors=[f"MinusAnalyst publish failed: {reason}" + (f" [{detail}]" if detail else "")],
         ))
     else:
-        for name, chart_widgets, shot_rel, finding in _screen_live_pages(
-            layout, workspace, shots_dir
-        ):
-            findings.append(finding)
+        findings.extend(_screen_live_pages(layout, workspace, shots_dir))
 
     # Design-token sanity: accent vs paper must be distinguishable (delta-E).
     from core.dashboard.design_md import load_design_tokens
@@ -248,7 +246,14 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
                 )
         seen.append(color)
 
-    ok = all(f.ok for f in findings) and not palette_findings
+    # Deterministic measure-semantics guard: format/aggregation must match the
+    # metric (no currency-on-count, no summed averages/shares). These are hard
+    # findings -- they fail the gate without needing the vision review.
+    from core.dashboard.minus_adapter import minus_root
+
+    semantic_findings = _check_measure_semantics(minus_root(layout))
+
+    ok = all(f.ok for f in findings) and not palette_findings and not semantic_findings
     report = {
         "artifact_type": "dashboard_screener/current.json",
         "version": 2,
@@ -256,21 +261,25 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "ok": ok,
         "page_count": len(findings),
-        "error_count": sum(len(f.errors) for f in findings) + len(palette_findings),
+        "error_count": (sum(len(f.errors) for f in findings)
+                        + len(palette_findings) + len(semantic_findings)),
         "palette_findings": palette_findings,
+        "measure_semantics_findings": semantic_findings,
         # The subjective pass is the agent's job; it starts PENDING and is
         # flipped by `workspace-dashboard --record-vision-review` with
         # provenance (Human-Gate Provenance Rule: empty reviewer -> agent).
         # The workflow guard flags completed workflows that never flipped it.
         "vision_review": {
             "status": "pending",
-            "shots": [f.screenshot for f in findings if f.screenshot],
+            "shots": [s for f in findings for s in
+                      ([f.screenshot] if f.screenshot else []) + f.shots],
         },
         "pages": [
             {
                 "page": f.page,
                 "ok": f.ok,
                 "screenshot": f.screenshot,
+                "shots": f.shots,
                 "errors": f.errors,
                 "warnings": f.warnings,
             }
@@ -298,6 +307,12 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
             lines.append(f"- [~] {w}")
         if f.screenshot:
             lines.append(f"- screenshot: `{f.screenshot}`")
+        for s in f.shots:
+            lines.append(f"  - chart crop: `{s}`")
+        lines.append("")
+    if semantic_findings:
+        lines.append("## [x] Measure semantics")
+        lines.extend(f"- [x] {s}" for s in semantic_findings)
         lines.append("")
     if palette_findings:
         lines.append("## [x] Palette")
@@ -325,34 +340,189 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
     }
 
 
-def _screen_live_pages(layout, workspace: Path, shots_dir: Path):
-    """Serve the live app and yield (name, chart_widgets, shot_rel, finding) per page."""
+def _check_measure_semantics(root: Path) -> list[str]:
+    """Deterministic guard: a measure's display format / aggregation must not
+    contradict its metric. Catches the RCM-shaped-default class of bug (counts
+    formatted as currency, per-group averages summed) automatically, instead of
+    relying on the subjective vision review. Reads the generated MinusAnalyst
+    ``project.yaml`` measures; generic across workspaces.
+    """
+    import yaml
+
+    from core.dashboard.model.cuts import measure_func
+
+    proj_path = root / "project.yaml"
+    if not proj_path.exists():
+        return []
+    try:
+        project = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+    findings: list[str] = []
+    for m in project.get("measures") or []:
+        name = str(m.get("name") or "")
+        fmt = str(m.get("fmt") or "")
+        agg = str(m.get("agg") or "")
+        field = str(m.get("field") or "")
+        column = field.split(".", 1)[1] if "." in field else field
+        func = measure_func("", name) or measure_func("", column)
+        if func == "count" and fmt == "currency":
+            findings.append(
+                f"measure `{name}` is a count but is formatted as currency "
+                "($) -- counts are not money (fix fmt -> int)")
+        if func in ("avg", "mean", "median") and agg == "sum":
+            findings.append(
+                f"measure `{name}` is an average but is aggregated by sum "
+                "-- summing per-group averages is meaningless (fix agg -> avg)")
+        if fmt == "percent" and agg == "sum":
+            findings.append(
+                f"measure `{name}` is a share/percent but is aggregated by sum "
+                "-- summing shares = 100% (fix agg -> max)")
+    return findings
+
+
+# JS read out of every plotly chart on the current view: trace + data-point
+# counts (to catch an empty chart), whether it carries any title/axis label, and
+# its on-page bounding box (for a clear per-chart crop).
+_CHART_PROBE_JS = """
+Array.from(document.querySelectorAll('.js-plotly-plot')).map(function(gd){
+  var d = gd.data || [];
+  var pts = d.reduce(function(a,t){return a + (
+    (t.x&&t.x.length)||(t.y&&t.y.length)||(t.values&&t.values.length)||
+    (t.labels&&t.labels.length)||(t.z&&t.z.length)||0);}, 0);
+  var lay = gd.layout || {};
+  function tt(o){try{return (o&&o.title&&(o.title.text||o.title))||'';}catch(e){return '';}}
+  var labelled = !!(tt(lay) || tt(lay.xaxis) || tt(lay.yaxis));
+  var r = gd.getBoundingClientRect();
+  return {traces:d.length, points:pts, labelled:labelled,
+          x:r.x+window.scrollX, y:r.y+window.scrollY, w:r.width, h:r.height};
+})
+"""
+_TABLE_PROBE_JS = (
+    "document.querySelectorAll('.dash-table-container,table,.dash-spreadsheet').length"
+)
+_TAB_PROBE_JS = (
+    "Array.from(document.querySelectorAll('.tab,[role=tab],.dash-tab,.dcc-tab'))"
+    ".map(function(e){return e.innerText.trim();}).filter(Boolean)"
+)
+
+
+def _slug(text: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "_", str(text).lower()).strip("_") or "page"
+
+
+def _screen_live_pages(layout, workspace: Path, shots_dir: Path) -> list[PageFinding]:
+    """Serve the live app and capture it STRUCTURE-AWARE: every page, every
+    sub-tab, and a clear per-chart crop, with deterministic per-chart checks
+    (empty data, unlabelled, empty tab). Uses a CDP-driven browser so sub-tabs
+    and chart data are actually reachable; falls back to the legacy single-shot
+    capture if CDP is unavailable."""
     from core.dashboard.minus_adapter import minus_root
 
     with _serve_live(minus_root(layout)) as (port, state):
+        try:
+            return _capture_cdp(state, port, workspace, shots_dir)
+        except Exception as exc:  # CDP unavailable/failed -> never break screening
+            findings = _capture_fallback(state, port, workspace, shots_dir)
+            if findings:
+                findings[0].warnings.append(
+                    f"structure-aware capture unavailable ({exc}); used single-shot fallback")
+            return findings
+
+
+def _capture_cdp(state, port: int, workspace: Path, shots_dir: Path) -> list[PageFinding]:
+    from core.dashboard.cdp import CDPBrowser
+
+    findings: list[PageFinding] = []
+    with CDPBrowser() as browser:
         for page in state.pages:
-            name = page.id
             chart_widgets = sum(
                 1 for w in page.widgets if getattr(w, "type", None) in _CHART_TYPES
             )
-            url = f"http://127.0.0.1:{port}/{name}"
-            dom = _dump_dom(url)
-            finding = _check_rendered_dom(dom, name, chart_widgets)
+            browser.navigate(f"http://127.0.0.1:{port}/{page.id}")
+            tabs = _unique(browser.evaluate(_TAB_PROBE_JS) or [])
+            views = tabs or [None]
+            for view in views:
+                label = page.id if view is None else f"{page.id} / {view}"
+                if view is not None and not browser.click_text(view):
+                    continue
+                findings.append(
+                    _capture_view(browser, label, page.id, chart_widgets if view is None else 0,
+                                  workspace, shots_dir)
+                )
+    return findings
 
-            shot = shots_dir / f"{name}.png"
-            err = _screenshot(url, shot)
-            if err:
-                finding.warnings.append(f"screenshot unavailable: {err}")
-            else:
-                finding.screenshot = str(shot.relative_to(workspace).as_posix())
-                size = _png_size(shot)
-                if size is None:
-                    finding.errors.append("screenshot is not a valid PNG")
-                elif _looks_blank(shot, *size):
-                    finding.errors.append(
-                        "screenshot is nearly blank - page likely failed to render"
-                    )
-            yield name, chart_widgets, finding.screenshot, finding
+
+def _capture_view(browser, label: str, page_id: str, chart_widgets: int,
+                  workspace: Path, shots_dir: Path) -> PageFinding:
+    finding = PageFinding(page=label)
+    charts = browser.evaluate(_CHART_PROBE_JS) or []
+    n_tables = int(browser.evaluate(_TABLE_PROBE_JS) or 0)
+
+    shot = shots_dir / f"{_slug(label)}.png"
+    if browser.screenshot(shot):
+        finding.screenshot = str(shot.relative_to(workspace).as_posix())
+        size = _png_size(shot)
+        if size is None:
+            finding.errors.append("screenshot is not a valid PNG")
+        elif _looks_blank(shot, *size):
+            finding.errors.append("view is nearly blank - likely failed to render")
+    else:
+        finding.warnings.append("screenshot unavailable")
+
+    # Per-chart deterministic checks + a clear isolated crop for each chart.
+    for i, c in enumerate(charts, start=1):
+        if int(c.get("traces") or 0) > 0 and int(c.get("points") or 0) == 0:
+            finding.errors.append(f"chart {i} rendered with 0 data points (empty chart)")
+        if not c.get("labelled"):
+            finding.warnings.append(f"chart {i} has no title or axis labels")
+        if c.get("w") and c.get("h"):
+            crop = shots_dir / f"{_slug(label)}_chart{i}.png"
+            if browser.screenshot(crop, clip={"x": c["x"], "y": c["y"],
+                                              "width": c["w"], "height": c["h"]}):
+                finding.shots.append(str(crop.relative_to(workspace).as_posix()))
+
+    # An empty view: declared charts but rendered none, or no chart AND no table.
+    if chart_widgets > 0 and not charts:
+        finding.errors.append(
+            f"view declares {chart_widgets} chart widget(s) but rendered 0 charts")
+    elif not charts and n_tables == 0:
+        finding.warnings.append("view has no chart or table (appears empty)")
+    return finding
+
+
+def _capture_fallback(state, port: int, workspace: Path, shots_dir: Path) -> list[PageFinding]:
+    """Legacy single-shot-per-page capture (no sub-tabs/interaction)."""
+    findings: list[PageFinding] = []
+    for page in state.pages:
+        chart_widgets = sum(
+            1 for w in page.widgets if getattr(w, "type", None) in _CHART_TYPES
+        )
+        url = f"http://127.0.0.1:{port}/{page.id}"
+        finding = _check_rendered_dom(_dump_dom(url), page.id, chart_widgets)
+        shot = shots_dir / f"{page.id}.png"
+        if _screenshot(url, shot):
+            finding.warnings.append("screenshot unavailable")
+        else:
+            finding.screenshot = str(shot.relative_to(workspace).as_posix())
+            size = _png_size(shot)
+            if size is None:
+                finding.errors.append("screenshot is not a valid PNG")
+            elif _looks_blank(shot, *size):
+                finding.errors.append("screenshot is nearly blank - page likely failed to render")
+        findings.append(finding)
+    return findings
+
+
+def _unique(items: list) -> list:
+    seen: set = set()
+    out = []
+    for it in items:
+        if it not in seen:
+            seen.add(it)
+            out.append(it)
+    return out
 
 
 def record_vision_review(
@@ -376,13 +546,24 @@ def record_vision_review(
     if not report_path.exists():
         raise FileNotFoundError(f"no screener report to review: {report_path}")
     report = json.loads(report_path.read_text(encoding="utf-8"))
+    # A deterministically-broken dashboard cannot be vision-passed: the eyeball
+    # gate is for subjective aesthetics, not for waving through machine-detected
+    # defects (empty charts, currency-on-count, summed averages). Fix them and
+    # re-screen first.
+    if not report.get("ok", True):
+        raise ValueError(
+            "cannot record vision review: the screener found deterministic defects "
+            "(see interns/reports/dashboard_screener/current.md). Fix them and "
+            "re-run --screen before reviewing.")
     review = report.get("vision_review") or {}
+    shots = review.get("shots") or []
     review.update(
         {
             "status": "done",
             "reviewed_by": reviewed_by,
             "source": "human" if reviewed_by else "agent",
             "notes": notes,
+            "shots_reviewed": len(shots),
             "reviewed_at": datetime.now(timezone.utc).isoformat(),
         }
     )

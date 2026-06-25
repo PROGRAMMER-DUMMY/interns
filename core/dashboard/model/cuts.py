@@ -50,6 +50,7 @@ class KpiModel:
     y_format: str = ""
     panels: list[dict[str, Any]] = field(default_factory=list)
     card_label: str = ""               # short measure name for KPI cards/nav
+    metric: str = ""                   # raw metric expression, e.g. count(distinct Id)
 
 
 def classify_measure(*, agg: str, y_format: str, metric: str) -> tuple[str, bool]:
@@ -66,6 +67,77 @@ def classify_measure(*, agg: str, y_format: str, metric: str) -> tuple[str, bool
     if (agg or "").lower() in {"avg", "mean"} or _RATIO_RE.search(metric_l):
         return "ratio", False
     return "sum", True
+
+
+# Generic money tokens (no domain words): a measure is currency only when its
+# metric/column names a monetary quantity. Mirrors the financial vocabulary used
+# elsewhere; kept here so the dashboard layer has ONE source of truth for
+# format/aggregation and never defaults a non-money measure to currency.
+_MONEY_TOKENS = (
+    "amount", "cost", "price", "revenue", "spend", "sales", "paid", "charge",
+    "claim", "fee", "balance", "payment", "income", "margin", "dollars", "usd",
+)
+_AGG_FUNCS = ("count", "avg", "mean", "median", "sum", "min", "max")
+
+
+def measure_func(metric: str, measure: str = "") -> str:
+    """Leading aggregate function of a KPI measure: count|avg|sum|min|max|median|''.
+
+    Reads the metric expression first (``count(distinct Id)`` -> ``count``); if
+    that is empty, falls back to the measure COLUMN name (``avg_base_cost`` ->
+    ``avg``, ``count_distinct_id`` -> ``count``). Generic; no domain vocabulary.
+    """
+    m = (metric or "").strip().lower()
+    for fn in _AGG_FUNCS:
+        if m.startswith(fn + "(") or m.startswith(fn + " ") or m == fn:
+            return "avg" if fn == "mean" else fn
+    ml = (measure or "").strip().lower()
+    for fn in _AGG_FUNCS:
+        if ml.startswith(fn + "_") or ml == fn:
+            return "avg" if fn == "mean" else fn
+    return ""
+
+
+def _is_money_measure(metric: str, measure: str) -> bool:
+    text = f"{metric} {measure}".lower()
+    return any(token in text for token in _MONEY_TOKENS)
+
+
+def measure_fmt(metric: str, measure: str, y_format: str) -> str:
+    """Display format derived from the measure's meaning -- never a flat currency
+    default. ``percent`` for shares, ``int`` for counts, ``currency`` only for a
+    genuine money quantity, ``float`` for a non-money average."""
+    if (y_format or "").lower() == "percent" \
+            or _SHARE_RE.search((metric or "").lower()) \
+            or _SHARE_RE.search((measure or "").lower()):
+        return "percent"
+    fn = measure_func(metric, measure)
+    if fn == "count":
+        return "int"
+    if _is_money_measure(metric, measure):
+        return "currency"
+    if fn in ("avg", "median"):
+        return "float"
+    return "int"
+
+
+def headline_agg(metric: str, measure: str, y_format: str) -> str:
+    """How to collapse pre-aggregated gold rows into ONE headline number.
+
+    Counts/sums partition cleanly -> ``sum``. Averages must NOT be summed
+    (sum-of-averages is meaningless) -> ``avg``. Shares -> ``max`` (largest
+    segment, since summing shares = 100%). Generic across workspaces.
+    """
+    if (y_format or "").lower() == "percent" or _SHARE_RE.search((metric or "").lower()):
+        return "max"
+    fn = measure_func(metric, measure)
+    if fn in ("avg", "median"):
+        return "avg"
+    if fn == "min":
+        return "min"
+    if fn == "max":
+        return "max"
+    return "sum"
 
 
 def _split_camel(token: str) -> str:
@@ -89,6 +161,9 @@ def clean_measure_name(metric: str, measure: str, y_format: str) -> str:
     token = inner.group(1) if inner else (measure or "")
     token = re.sub(r"\bdistinct\b", "", token, flags=re.IGNORECASE).strip()
     token = re.sub(r"^(sum|avg|mean|count|total|min|max)[_ ]?", "", token, flags=re.IGNORECASE)
+    # `count(*)` (and similar) leaves a bare `*`/empty token -- never a label.
+    # Fall back to the measure column name so a card never reads "*" / blank.
+    token = token.strip(" *")
     label = _split_camel(token)
     return label or _split_camel(measure) or "Value"
 
@@ -153,7 +228,11 @@ def build_kpi_model(
         y_format=y_format,
         panels=panels,
         card_label=clean_measure_name(metric, measure, y_format),
+        metric=metric,
     )
 
 
-__all__ = ["KpiModel", "build_kpi_model", "classify_measure", "clean_measure_name"]
+__all__ = [
+    "KpiModel", "build_kpi_model", "classify_measure", "clean_measure_name",
+    "measure_func", "measure_fmt", "headline_agg",
+]

@@ -59,6 +59,7 @@ class BlockerQuestionPanelResult:
     output_dir: str
     current_json: str
     current_markdown: str
+    current_full_markdown: str
     index_json: str
     question_count: int
     current_feature: str
@@ -183,9 +184,18 @@ class BlockerQuestionPanelBuilder:
 
         current_json = self.output_dir / "current.json"
         current_markdown = self.output_dir / "current.md"
+        current_full_markdown = self.output_dir / "current_full.md"
         index_json = self.output_dir / "index.json"
         current_json.write_text(json.dumps(current, indent=2, default=str) + "\n", encoding="utf-8")
-        current_markdown.write_text(_render_markdown(current), encoding="utf-8")
+        # current.md is the compact decision card -- it leads with the affected
+        # KPI(s), the decision, and the options, which is all a human needs to
+        # answer the blocker. The full evidence/proof render (feature-resolution
+        # tables, source-truth packets, per-option proof packets, raw JSON) goes
+        # to current_full.md for drill-down; current.json stays the machine
+        # contract. Mirrors the results.md / results_full.md compact-vs-full
+        # convention so operators are not buried under a wall of evidence.
+        current_markdown.write_text(_render_markdown_compact(current), encoding="utf-8")
+        current_full_markdown.write_text(_render_markdown(current), encoding="utf-8")
         index_json.write_text(
             json.dumps(
                 {
@@ -206,6 +216,7 @@ class BlockerQuestionPanelBuilder:
             output_dir=_rel(self.output_dir, self.repo_root),
             current_json=_rel(current_json, self.repo_root),
             current_markdown=_rel(current_markdown, self.repo_root),
+            current_full_markdown=_rel(current_full_markdown, self.repo_root),
             index_json=_rel(index_json, self.repo_root),
             question_count=len(questions),
             current_feature=str(current.get("feature", "")),
@@ -2041,6 +2052,127 @@ def _empty_panel(mapping: dict[str, Any], workspace: Path, repo_root: Path) -> d
         except Exception:  # pragma: no cover - routing is advisory
             pass
     return panel
+
+
+def _render_markdown_compact(panel: dict[str, Any]) -> str:
+    """Compact, decision-first blocker card written to ``current.md``.
+
+    Leads with the affected KPI(s), the decision, and the options -- the only
+    things a human needs to answer the blocker. The full evidence/proof render
+    (feature-resolution tables, source-truth packets, per-option proof packets,
+    raw JSON) lives in ``current_full.md``; the machine contract lives in
+    ``current.json``. Stays generic across every ``answer_type`` because it only
+    reads fields that every branch of ``_question_for_cluster`` populates.
+    """
+    feature = panel.get("feature") or "None"
+    workspace = str(panel.get("workspace") or "")
+    ws_label = workspace.split("/")[-1] if workspace else ""
+    applies = panel.get("applies_to_kpis") or []
+    recommended_id = str(panel.get("recommended_option_id") or "")
+    lines = [f"# Blocker: {feature}", ""]
+
+    context_bits = []
+    if ws_label:
+        context_bits.append(f"Workspace: {ws_label}")
+    if applies:
+        context_bits.append("Affects: " + ", ".join(str(k) for k in applies))
+    if panel.get("answer_type"):
+        context_bits.append(f"Type: {panel.get('answer_type')}")
+    if context_bits:
+        lines.extend([" · ".join(context_bits), ""])
+
+    # Affected KPI truth -- the "exactly what's needed" anchor, one tight block.
+    source_truth = panel.get("kpi_source_truth") or []
+    for truth in source_truth:
+        kpi_id = str(truth.get("kpi_id") or "")
+        question = str(truth.get("business_question") or "")
+        lines.append(f"**{kpi_id}** — {question}" if kpi_id else question)
+        meta = []
+        metric = str(truth.get("metric") or "")
+        cuts = ", ".join(str(c) for c in (truth.get("cuts") or []))
+        if metric:
+            meta.append(f"Metric: `{metric}`")
+        if cuts:
+            meta.append(f"Cuts: {cuts}")
+        if meta:
+            lines.append("  " + "   ".join(meta))
+    if source_truth:
+        lines.append("")
+
+    # The decision: blocker (why) + question (what to answer).
+    lines.extend(["## Decide", ""])
+    if panel.get("blocker"):
+        lines.extend([str(panel.get("blocker")), ""])
+    lines.extend([str(panel.get("question") or ""), ""])
+
+    # Options: one identity line + at most one reason line + one samples line.
+    lines.extend(["## Options", ""])
+    for idx, option in enumerate(panel.get("options") or [], start=1):
+        option_id = str(option.get("option_id") or "")
+        label = str(option.get("label") or "")
+        is_recommended = bool(
+            option.get("is_recommended")
+            or (recommended_id and option_id == recommended_id)
+        )
+        marker = " [RECOMMENDED]" if is_recommended else ""
+        confidence = str(option.get("confidence") or "")
+        conf_text = f"  (confidence: {confidence})" if confidence else ""
+        lines.append(f"{idx}.{marker} `{option_id}` · {label}{conf_text}")
+        reason = _compact_option_reason(option)
+        if reason:
+            lines.append(f"   {reason}")
+        samples = _compact_option_samples(option)
+        if samples:
+            lines.append("   Samples: " + ", ".join(str(s) for s in samples))
+    lines.append("")
+
+    # How to answer.
+    apply_target = recommended_id or "<option_id>"
+    apply_ws = workspace or "<workspace>"
+    lines.extend(
+        [
+            "## Answer",
+            "",
+            "```text",
+            f"uv run apply-kpi-panel-answer --workspace {apply_ws} --domain <domain> --answer {apply_target}",
+            "```",
+            "",
+            "Full proof & evidence: `current_full.md` · machine contract: `current.json`.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _compact_option_reason(option: dict[str, Any]) -> str:
+    """One short reason line for an option, without the proof-packet dump."""
+    reason = str(option.get("evidence_summary") or "").strip()
+    if not reason:
+        summary = str(option.get("business_summary") or "").strip()
+        if summary.startswith("RECOMMENDED. "):
+            summary = summary[len("RECOMMENDED. "):]
+        # Drop sample/source boilerplate the compact view re-derives below.
+        for token in (" Sample values:", " Samples:", " Source:"):
+            pos = summary.find(token)
+            if pos != -1:
+                summary = summary[:pos]
+        reason = summary.split(". ")[0].strip().rstrip(".")
+    return reason
+
+
+def _compact_option_samples(option: dict[str, Any], limit: int = 3) -> list[Any]:
+    """Up to ``limit`` sample values for an option, from whichever evidence
+    shape it carries (physical column, proof packet, or derived feature)."""
+    physical = option.get("physical_column_option") or {}
+    samples = list(physical.get("observed_values") or [])
+    if not samples:
+        proof = option.get("proof_packet") or {}
+        required = proof.get("required_columns") or []
+        if required:
+            samples = list((required[0] or {}).get("sample_values") or [])
+    if not samples:
+        derived = option.get("derived_feature_option") or {}
+        samples = list(derived.get("observed_values") or [])
+    return samples[:limit]
 
 
 def _render_markdown(panel: dict[str, Any]) -> str:

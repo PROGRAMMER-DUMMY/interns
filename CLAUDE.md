@@ -145,6 +145,36 @@ Default = the compact packet above (same content as `interns/runs/<date>/results
 "full results" forward `interns/reports/kpi_results/current_full.md` (= `runs/<date>/results_full.md`)
 verbatim instead. See `AGENTS.md` > Compact vs full results.
 
+## Dashboard QA gate (mandatory)
+
+A dashboard is a deliverable, not done when it merely renders. After building or
+regenerating a workspace dashboard you MUST run the screener
+(`uv run workspace-dashboard --workspace <ws> --screen`) and clear its gates:
+
+- The screener captures STRUCTURE-AWARE: every page, every sub-tab, and a clear
+  per-chart crop. Read EVERY staged image under
+  `interns/reports/dashboard_screener/shots/` (each page, each sub-tab such as
+  Trends/Breakdowns/Detail, each per-chart crop) and judge it: correct headline
+  numbers and formats (counts are not `$`, averages are not summed), axis/series
+  names present, no clipped/overlapping labels, header not over the plot, charts
+  actually show data, nothing renders as an empty frame. Do the same for every
+  PPTX/PDF page from the export screener.
+- Deterministic defects (empty chart, currency-on-count, summed average, empty
+  tab, measure-semantics contradictions) FAIL the screener (`ok:false`) and the
+  workflow guard (`dashboard_screener_defects`, error). Fix the adapter/spec and
+  regenerate -- never hand-wave past them.
+- You cannot record the vision review while `ok:false`
+  (`record_vision_review` refuses). Only after the screener is clean AND you have
+  read every image, record the pass with provenance:
+  `uv run workspace-dashboard --workspace <ws> --record-vision-review --reviewed-by <name> --notes <findings>`.
+  A pending vision review is an ERROR in the workflow guard -- the dashboard is
+  not done until it is reviewed.
+
+Format/aggregation are workspace-agnostic and derive from the metric function
+(`core/dashboard/model/cuts.py`: `measure_fmt` / `headline_agg`): count->int/sum,
+avg->float-or-currency/avg, share->percent/max, money-sum->currency/sum. Never
+reintroduce a flat `currency`/`sum` default fit to one workspace's KPI shape.
+
 ## Token Discipline
 
 Per-run token cost is ~44 pp of quota. These habits reduce it:

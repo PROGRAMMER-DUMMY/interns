@@ -229,6 +229,18 @@ def design_medallion(
     silver_contract_path.write_text(json.dumps(silver_contract.to_dict(), indent=2), encoding="utf-8")
     (paths["medallion"] / "silver_contract.md").write_text(render_silver_contract_md(silver_contract), encoding="utf-8")
 
+    # SLA / freshness contract (Step 6: non-functional latency SLA). Per silver
+    # table, the freshness column + a default batch-daily lag budget; the build
+    # can assert max(now - freshness_col) <= max_lag_hours.
+    sla_contract = _build_sla_contract(workspace_name, manifest, silver_contract)
+    (paths["medallion"] / "sla_contract.json").write_text(
+        json.dumps(sla_contract, indent=2), encoding="utf-8")
+    # Freshness observability (non-fatal): per-table lag vs SLA, for the build's
+    # observability pass to report (not a hard gate -- historical loads are stale
+    # by design).
+    (paths["medallion"] / "_freshness_checks.sql").write_text(
+        _emit_freshness_checks(sla_contract), encoding="utf-8")
+
     lineage_path = paths["medallion"] / "lineage.json"
     lineage_path.write_text(json.dumps(lineage.to_dict(), indent=2), encoding="utf-8")
     (paths["medallion"] / "lineage.md").write_text(render_lineage_md(lineage), encoding="utf-8")
@@ -486,13 +498,26 @@ def _seed_proposal(inputs: dict[str, Any]) -> dict[str, Any]:
                 pii_lookup, _dataset_name_key(ds), ds.get("schema")
             )
         })
+        # Derive the data contract from the actual schema (deterministic, generic):
+        #  - key_rename canonicalises the raw natural key (e.g. Id) to <entity>_id
+        #    so the dedup_keys / MERGE / assertions reference a column that exists;
+        #  - type_casts convert temporal columns to TIMESTAMP in Silver.
+        schema_cols = _merged_schema_cols(dss)
+        canonical_pk = f"{logical}_id"
+        nat_key = _detect_natural_key({c: "" for c in schema_cols}, logical)
+        key_rename = {nat_key[0]: canonical_pk} if nat_key else {}
+        type_casts = _seed_type_casts(schema_cols, exclude=set(pii_cols) | set(key_rename))
         silver_tables[logical] = {
-            "primary_key": ["source_system", f"{logical}_id"],
-            "type_casts": {},
-            "null_policies": {},
-            "dedup_keys": ["source_system", f"{logical}_id"],
+            "primary_key": ["source_system", canonical_pk],
+            "type_casts": type_casts,
+            # PK must never be null -- enforced as a hard assertion (no_null_pk).
+            "null_policies": {canonical_pk: "error"},
+            "dedup_keys": ["source_system", canonical_pk],
             "pii_hash_columns": pii_cols,
+            "key_rename": key_rename,
             "derived_columns": {},
+            # Accuracy (DQ dimension): money/quantity columns must be non-negative.
+            "assertions": _seed_accuracy_assertions(schema_cols, exclude=set(pii_cols)),
         }
 
     confirmed_reviews = [r for r in inputs.get("derived_feature_reviews", []) if isinstance(r, dict)]
@@ -564,6 +589,68 @@ def _seed_proposal(inputs: dict[str, Any]) -> dict[str, Any]:
         },
         "silver_tables": silver_tables,
     }
+
+
+_TEMPORAL_NAME_HINTS = (
+    "date", "time", "start", "stop", "_at", "dob", "birth", "death", "timestamp",
+)
+
+
+def _merged_schema_cols(dss: list[dict[str, Any]]) -> dict[str, str]:
+    """Union of {column_name: dtype} across a logical entity's datasets. Tolerates
+    both dict-shaped (name->dtype) and list-shaped ([{name,dtype}]) schemas."""
+    cols: dict[str, str] = {}
+    for ds in dss:
+        schema = ds.get("schema")
+        if isinstance(schema, dict):
+            for name, dtype in schema.items():
+                cols[str(name)] = str(dtype)
+        elif isinstance(schema, list):
+            for col in schema:
+                if isinstance(col, dict) and col.get("name"):
+                    cols[str(col["name"])] = str(col.get("dtype") or col.get("type") or "")
+    return cols
+
+
+_MONEY_HINTS = (
+    "cost", "amount", "claim", "coverage", "price", "total", "revenue",
+    "payment", "fee", "balance", "charge", "spend",
+)
+
+
+def _seed_accuracy_assertions(schema_cols: dict[str, str], *, exclude: set[str]) -> list[dict[str, Any]]:
+    """Accuracy DQ checks: monetary columns must be non-negative. Money columns
+    are inherently numeric, so this keys off the (generic) name hint and stays
+    safe when dtype metadata is absent. PII-hashed columns are excluded."""
+    out: list[dict[str, Any]] = []
+    for name in schema_cols:
+        if name in exclude:
+            continue
+        if any(h in name.lower() for h in _MONEY_HINTS):
+            out.append({
+                "id": f"nonneg_{name.lower()}",
+                "type": "range",
+                "columns": [name],
+                "min_value": 0,
+            })
+    return out
+
+
+def _seed_type_casts(schema_cols: dict[str, str], *, exclude: set[str]) -> dict[str, Any]:
+    """Deterministic type casts: temporal-looking columns -> TIMESTAMP. Generic
+    (name + dtype heuristics, no domain words); PII-hashed and renamed PK columns
+    are excluded so the cast never collides with their projection."""
+    casts: dict[str, Any] = {}
+    for name, dtype in schema_cols.items():
+        if name in exclude:
+            continue
+        dl = name.lower()
+        dt = (dtype or "").lower()
+        is_temporal = ("date" in dt or "time" in dt
+                       or any(h in dl for h in _TEMPORAL_NAME_HINTS))
+        if is_temporal:
+            casts[name] = {"from": dtype or "string", "to": "TIMESTAMP"}
+    return casts
 
 
 def _pii_lookup_from_semantic(semantic: Any) -> dict[str, list[str]]:
@@ -672,6 +759,62 @@ def _build_star_schema(workspace_name: str, proposal: dict[str, Any]) -> StarSch
     )
 
 
+def _build_sla_contract(workspace_name: str, manifest: Manifest, contract: SilverContract) -> dict[str, Any]:
+    """Freshness/latency SLA per silver table. The freshness column is a temporal
+    (TIMESTAMP-cast) column, preferring an event-start column; the default budget
+    is batch-daily. Generic; no domain assumptions."""
+    tables: list[dict[str, Any]] = []
+    for s in manifest.silver:
+        tc = contract.tables.get(s.name)
+        if tc is None:
+            continue
+        temporal = list(tc.type_casts.keys())
+        fresh = None
+        for pref in ("start", "event", "created", "order", "timestamp", "date"):
+            fresh = next((c for c in temporal if pref in c.lower()), None)
+            if fresh:
+                break
+        if not fresh and temporal:
+            fresh = temporal[0]
+        tables.append({
+            "table": f"silver.{s.name}",
+            "freshness_column": fresh,
+            "max_lag_hours": 24,
+            "mode": "batch",
+            "availability_target": "99.0%",
+        })
+    return {
+        "artifact_type": "sla_contract.json",
+        "version": 1,
+        "generated_by": "medallion-design",
+        "workspace": workspace_name,
+        "default_latency_sla": {"mode": "batch", "max_lag_hours": 24},
+        "retention_policy": {"bronze_days": "forever", "silver_days": 365, "gold_days": 730},
+        "tables": tables,
+    }
+
+
+def _emit_freshness_checks(sla_contract: dict[str, Any]) -> str:
+    """SQL that reports each table's freshness lag against its SLA. Observability
+    (lag vs budget), not a fatal assertion."""
+    lines = ["-- Freshness observability (lag vs SLA). Non-fatal: report, don't block.\n"]
+    for entry in sla_contract.get("tables") or []:
+        table = str(entry.get("table") or "")
+        col = entry.get("freshness_column")
+        sla = entry.get("max_lag_hours", 24)
+        if not table or not col:
+            continue
+        tname = table.split(".", 1)[-1]
+        lines.append(
+            f"SELECT '{tname}' AS table_name,\n"
+            f"       date_diff('hour', max(\"{col}\"), now()) AS lag_hours,\n"
+            f"       {sla} AS sla_hours,\n"
+            f"       date_diff('hour', max(\"{col}\"), now()) > {sla} AS breached\n"
+            f"FROM silver.{tname};\n"
+        )
+    return "\n".join(lines)
+
+
 def _build_silver_contract(workspace_name: str, proposal: dict[str, Any]) -> SilverContract:
     raw_tables = proposal.get("silver_tables") or {}
     tables: dict[str, TableContract] = {}
@@ -699,11 +842,16 @@ def _build_silver_contract(workspace_name: str, proposal: dict[str, Any]) -> Sil
             assertions.append(Assertion(id="pk_unique", type="unique", columns=pk))
         if not any(a.id == "no_null_pk" for a in assertions) and pk:
             assertions.append(Assertion(id="no_null_pk", type="not_null", columns=pk))
+        # Completeness (DQ dimension): a silver load that yields zero rows is a
+        # silent pipeline failure -- assert the table is non-empty.
+        if not any(a.id == "not_empty" for a in assertions):
+            assertions.append(Assertion(id="not_empty", type="not_empty"))
         tables[tname] = TableContract(
             type_casts=type_casts,
             null_policies=null_policies,
             dedup_keys=dedup,
             pii_hash_columns=pii,
+            key_rename=dict(body.get("key_rename") or {}),
             derived_columns=derived,
             assertions=assertions,
         )
@@ -938,6 +1086,23 @@ def _emit_silver_sql_duckdb(manifest: Manifest, contract: SilverContract, out_di
             f"sha256(coalesce(cast({col} AS VARCHAR), '') || $salt) AS {col}"
             for col in tc.pii_hash_columns
         ]
+        # Canonical PK rename (raw `Id` -> `<entity>_id`): project it explicitly and
+        # EXCLUDE the raw column from the star so the PK the dedup/MERGE/assertions
+        # key on actually exists.
+        rename_items = [f"    {raw} AS {canon}," for raw, canon in tc.key_rename.items()]
+        exclude_cols = [raw for raw in tc.key_rename]
+        # Contract type casts (e.g. temporal -> TIMESTAMP), applied via REPLACE.
+        cast_replacements = [
+            f"CAST({col} AS {cast.to_type}) AS {col}"
+            for col, cast in tc.type_casts.items()
+            if col not in tc.pii_hash_columns and col not in exclude_cols
+        ]
+        replacements = cast_replacements + pii_replacements
+        exclude_clause = f" EXCLUDE ({', '.join(exclude_cols)})" if exclude_cols else ""
+        replace_clause = (
+            "\n    REPLACE (\n        " + ",\n        ".join(replacements) + "\n    )"
+            if replacements else ""
+        )
         derived_lines: list[str] = []
         for dname, dc in tc.derived_columns.items():
             duck = dc.formula_templates.duckdb_sql or ""
@@ -948,20 +1113,16 @@ def _emit_silver_sql_duckdb(manifest: Manifest, contract: SilverContract, out_di
         assertion_path.write_text(_render_assertions_sql(s.name, tc), encoding="utf-8")
         sql_path = out_dir / f"{s.name}.duckdb.sql"
         body = (
-            f"-- silver.{s.name}: MERGE-on-PK from {', '.join(sources)}\n"
-            f"-- (P0: emitted as CREATE OR REPLACE; MERGE semantics added in P1)\n"
+            f"-- silver.{s.name}: cleaned from {', '.join(sources)}\n"
+            f"-- Contract applied: PK canonicalisation + type casts + PII hashing\n"
+            f"-- (silver_contract.json#/{s.name}). Build rewrites this to an\n"
+            f"-- idempotent MERGE-on-PK (merge_emitter.emit_silver_merge).\n"
             f"CREATE OR REPLACE TABLE silver.{s.name} AS\n"
             f"WITH unioned AS (\n{union_sql}\n)\n"
             f"SELECT\n"
-            f"    -- TODO(P1): apply type casts from silver_contract.json#/{s.name}/type_casts\n"
-            f"    -- TODO(P1): apply null policies\n"
+            + ("\n".join(rename_items) + "\n" if rename_items else "")
             + (derived_block + "\n" if derived_block else "")
-            + (
-                "    * REPLACE (\n        "
-                + ",\n        ".join(pii_replacements)
-                + "\n    )\n"
-                if pii_replacements else "    *\n"
-            )
+            + f"    *{exclude_clause}{replace_clause}\n"
             + "FROM unioned;\n\n"
             + f"\n-- Post-load assertions: see {assertion_path.name}\n"
         )
@@ -998,6 +1159,26 @@ def _render_assertions_sql(table: str, tc: TableContract) -> str:
                 f"FROM {child_table} c\n"
                 f"LEFT JOIN {parent_table} p ON p.{parent_col} = c.{child_col}\n"
                 f"WHERE c.{child_col} IS NOT NULL AND p.{parent_col} IS NULL;\n"
+            )
+        elif a.type == "range" and a.columns:
+            # Accuracy: each value must fall within [min_value, max_value].
+            col = a.columns[0]
+            conds = []
+            if a.min_value is not None:
+                conds.append(f"{col} < {a.min_value}")
+            if a.max_value is not None:
+                conds.append(f"{col} > {a.max_value}")
+            if conds:
+                lines.append(
+                    f"SELECT '{a.id}' AS assertion_id, COUNT(*) AS violations\n"
+                    f"FROM silver.{table} WHERE {' OR '.join(conds)};\n"
+                )
+        elif a.type == "not_empty":
+            # Completeness: the table must carry rows after the load.
+            lines.append(
+                f"SELECT '{a.id}' AS assertion_id, "
+                f"CASE WHEN COUNT(*) = 0 THEN 1 ELSE 0 END AS violations\n"
+                f"FROM silver.{table};\n"
             )
     return "\n".join(lines)
 

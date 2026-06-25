@@ -13,7 +13,14 @@ validated layers and re-aggregating them consistently with the validated headlin
 from __future__ import annotations
 
 from core.dashboard.model.aggregate import NonAdditiveError, aggregate
-from core.dashboard.model.cuts import KpiModel, build_kpi_model, classify_measure
+from core.dashboard.model.cuts import (
+    KpiModel,
+    build_kpi_model,
+    classify_measure,
+    headline_agg,
+    measure_fmt,
+    measure_func,
+)
 from core.dashboard.model.layers import (
     list_gold_kpis,
     read_gold,
@@ -28,6 +35,9 @@ __all__ = [
     "build_kpi_model",
     "check_parity",
     "classify_measure",
+    "headline_agg",
+    "measure_fmt",
+    "measure_func",
     "list_gold_kpis",
     "parity_report",
     "read_gold",

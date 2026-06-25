@@ -21,6 +21,56 @@ from typing import Optional
 from core.sql_safety import assert_safe_identifier
 
 
+def emit_scd2_merge(
+    table_name: str,
+    business_key: list[str],
+    attribute_columns: list[str],
+    select_body: str,
+    *,
+    schema: str = "gold",
+) -> str:
+    """Emit an idempotent SCD Type 2 upsert for a dimension (Step 3 / Step 6).
+
+    Tracks history with ``valid_from`` / ``valid_to`` (null ``valid_to`` = the
+    current row). When a tracked attribute changes for a business key, the open
+    row is closed (``valid_to = now``) and a fresh current row is inserted.
+    Re-running with the same source is a no-op (idempotent): an unchanged key
+    already has an identical open row. All identifiers are injection-validated.
+    """
+    safe_table = assert_safe_identifier(table_name, context="scd2 table")
+    bk = [assert_safe_identifier(c, context="scd2 business key") for c in business_key]
+    attrs = [assert_safe_identifier(c, context="scd2 attribute") for c in attribute_columns]
+    all_cols = bk + attrs
+    col_list = ", ".join(all_cols)
+    src_list = ", ".join(f"src.{c}" for c in all_cols)
+    bk_join = " AND ".join(f"tgt.{c} = src.{c}" for c in bk)
+    changed = " OR ".join(f"tgt.{c} IS DISTINCT FROM src.{c}" for c in attrs) or "FALSE"
+    fqn = f"{schema}.{safe_table}"
+    src = f"(\n{_indent(select_body, 8)}\n    ) AS src"
+    return (
+        f"-- SCD2: create {fqn} with history columns on first run\n"
+        f"CREATE TABLE IF NOT EXISTS {fqn} AS (\n"
+        f"    SELECT {col_list}, CAST(NULL AS TIMESTAMP) AS valid_from,\n"
+        f"           CAST(NULL AS TIMESTAMP) AS valid_to\n"
+        f"    FROM (\n{_indent(select_body, 8)}\n    ) AS _seed LIMIT 0\n"
+        f");\n\n"
+        f"-- SCD2: close out rows whose tracked attributes changed (open -> now)\n"
+        f"UPDATE {fqn} AS tgt SET valid_to = now()\n"
+        f"WHERE tgt.valid_to IS NULL AND EXISTS (\n"
+        f"    SELECT 1 FROM {src}\n"
+        f"    WHERE {bk_join} AND ({changed})\n"
+        f");\n\n"
+        f"-- SCD2: insert a current row for any key lacking an identical open row\n"
+        f"INSERT INTO {fqn} ({col_list}, valid_from, valid_to)\n"
+        f"SELECT {src_list}, now(), CAST(NULL AS TIMESTAMP)\n"
+        f"FROM {src}\n"
+        f"WHERE NOT EXISTS (\n"
+        f"    SELECT 1 FROM {fqn} tgt\n"
+        f"    WHERE {bk_join} AND tgt.valid_to IS NULL AND NOT ({changed})\n"
+        f");\n"
+    )
+
+
 def emit_silver_merge(
     table_name: str,
     primary_key: list[str],

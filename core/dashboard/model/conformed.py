@@ -170,11 +170,27 @@ def _derive_columns(df: pl.DataFrame) -> pl.DataFrame:
     date, so any workspace gets a temporal axis. No domain-specific derivations
     (a paid-vs-service gap / 'days in A/R' is an RCM concept and belongs in that
     workspace's KPI contract, not in the generic model builder)."""
-    exprs = []
-    svc = next((c for c in df.columns if c.lower() in ("servicedate", "service_date")), None)
-    if svc and df.schema.get(svc) == pl.Date:
-        exprs.append(pl.col(svc).dt.truncate("1mo").alias("month"))
-    return df.with_columns(exprs) if exprs else df
+    if "month" in df.columns or df.height == 0:
+        return df
+    # Pick ANY Date/Datetime column for the temporal axis (preferring an
+    # event/start column). The previous rule only matched a pl.Date column named
+    # `servicedate` -- an RCM-shaped assumption that left other workspaces (whose
+    # event column is e.g. START/Datetime) with no trend axis.
+    temporal = None
+    for c in df.columns:
+        dt = df.schema.get(c)
+        if dt == pl.Date or dt == pl.Datetime:
+            temporal = c
+            if any(h in c.lower() for h in ("start", "service", "event", "order", "date")):
+                break
+    if temporal is None:
+        return df
+    try:
+        return df.with_columns(
+            pl.col(temporal).dt.truncate("1mo").cast(pl.Date).alias("month")
+        )
+    except Exception:
+        return df
 
 
 def _incomplete_trailing_cutoff(frame: pl.DataFrame):

@@ -1280,7 +1280,7 @@ diff --git a/model.sql b/model.sql
             self.assertIn("query", current["options"][0])
             self.assertIn("result_demo_table", current["options"][0])
             self.assertIn("derivation_reasoning", current["options"][0]["derived_feature_option"])
-            markdown = (root / result.current_markdown).read_text(encoding="utf-8")
+            markdown = (root / result.current_full_markdown).read_text(encoding="utf-8")
             self.assertIn("# Blocker Question Panel: Age", markdown)
             self.assertIn("## KPI Source Truth", markdown)
             self.assertIn("## Output Dialect", markdown)
@@ -1343,7 +1343,10 @@ diff --git a/model.sql b/model.sql
             self.assertFalse(
                 any("workspaces/demo/datasets/transactions.csv.PaidAmount" in label for label in labels)
             )
-            markdown = (root / result.question_panel_markdown_path).read_text(encoding="utf-8")
+            # Full evidence/proof render lives in current_full.md (the compact
+            # current.md is the decision card); assert the deep content there.
+            full_md = str(result.question_panel_markdown_path).replace("current.md", "current_full.md")
+            markdown = (root / full_md).read_text(encoding="utf-8")
             self.assertIn("physical column candidates", markdown)
             self.assertIn("SQL mapping and source evidence", markdown)
             self.assertIn("transactions.PaidAmount", markdown)
@@ -1593,7 +1596,7 @@ diff --git a/model.sql b/model.sql
             self.assertEqual(current["options"][0]["physical_column_option"]["column"], "Name")
             samples = current["options"][0]["proof_packet"]["required_columns"][0]["sample_values"]
             self.assertIn("Cardiology", samples)
-            markdown = (root / result.current_markdown).read_text(encoding="utf-8")
+            markdown = (root / result.current_full_markdown).read_text(encoding="utf-8")
             self.assertIn("departments.Name", markdown)
             self.assertIn("workspaces/demo/datasets/EMR/hospital-a/departments.csv", markdown)
             self.assertIn("Cardiology", markdown)
@@ -1706,7 +1709,7 @@ diff --git a/model.sql b/model.sql
             self.assertIn("source_columns", current["options"][0]["expected_answer_shape"])
             # The markdown card surfaces the agent instruction so any CLI
             # reading current.md (Claude, Gemini, Codex) sees it verbatim.
-            markdown = (root / result.current_markdown).read_text(encoding="utf-8")
+            markdown = (root / result.current_full_markdown).read_text(encoding="utf-8")
             self.assertIn("## CLI Agent Task", markdown)
             self.assertIn("## CLI Agent Evidence Pack", markdown)
             self.assertIn("apply-kpi-panel-answer", markdown)

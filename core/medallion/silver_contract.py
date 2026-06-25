@@ -163,6 +163,8 @@ class Assertion:
     child: Optional[str] = None                     # for referential_integrity
     parent: Optional[str] = None
     property: Optional[str] = None                  # for sql_plan_property
+    min_value: Optional[float] = None               # for range (accuracy)
+    max_value: Optional[float] = None               # for range (accuracy)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"id": self.id, "type": self.type}
@@ -176,6 +178,10 @@ class Assertion:
             out["parent"] = self.parent
         if self.property is not None:
             out["property"] = self.property
+        if self.min_value is not None:
+            out["min_value"] = self.min_value
+        if self.max_value is not None:
+            out["max_value"] = self.max_value
         return out
 
     @classmethod
@@ -188,6 +194,8 @@ class Assertion:
             child=d.get("child"),
             parent=d.get("parent"),
             property=d.get("property"),
+            min_value=d.get("min_value"),
+            max_value=d.get("max_value"),
         )
 
 
@@ -202,6 +210,10 @@ class TableContract:
     hash_salt_ref: str = "workspace.medallion_salt"
     derived_columns: dict[str, DerivedColumn] = field(default_factory=dict)
     assertions: list[Assertion] = field(default_factory=list)
+    # Canonical primary-key rename: raw source column -> canonical name, e.g.
+    # {"Id": "encounter_id"}. The silver projection emits `<raw> AS <canonical>`
+    # so the PK the dedup_keys / MERGE / assertions reference actually exists.
+    key_rename: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -210,6 +222,7 @@ class TableContract:
             "dedup_keys": list(self.dedup_keys),
             "pii_hash_columns": list(self.pii_hash_columns),
             "hash_salt_ref": self.hash_salt_ref,
+            "key_rename": dict(self.key_rename),
             "derived_columns": {n: dc.to_dict() for n, dc in self.derived_columns.items()},
             "assertions": [a.to_dict() for a in self.assertions],
         }
@@ -222,6 +235,7 @@ class TableContract:
             dedup_keys=list(d.get("dedup_keys", [])),
             pii_hash_columns=list(d.get("pii_hash_columns", [])),
             hash_salt_ref=d.get("hash_salt_ref", "workspace.medallion_salt"),
+            key_rename=dict(d.get("key_rename", {})),
             derived_columns={n: DerivedColumn.from_dict(n, v) for n, v in d.get("derived_columns", {}).items()},
             assertions=[Assertion.from_dict(a) for a in d.get("assertions", [])],
         )
