@@ -254,6 +254,15 @@ def design_medallion(
     storage_strategy = _build_storage_strategy(arch_decisions, sla_contract)
     (paths["medallion"] / "storage_strategy.json").write_text(
         json.dumps(storage_strategy, indent=2), encoding="utf-8")
+    # Referential-integrity checks from PROVEN foreign keys: each FK becomes a
+    # silver orphan-row query (child FK value with no matching parent PK). Run as
+    # a NON-FATAL integrity report at build (not a per-table blocking gate -- that
+    # would impose a cross-table build order). Matches the framework's "verify the
+    # order's restaurant id exists in the master directory" relational check.
+    (paths["medallion"] / "_referential_integrity.sql").write_text(
+        _emit_referential_integrity_checks(inputs.get("relationship_contracts"),
+                                           silver_contract),
+        encoding="utf-8")
 
     lineage_path = paths["medallion"] / "lineage.json"
     lineage_path.write_text(json.dumps(lineage.to_dict(), indent=2), encoding="utf-8")
@@ -1029,6 +1038,39 @@ def _build_architecture_decisions(
     except Exception as exc:  # pragma: no cover - vendor optional
         out["engine_unavailable"] = str(exc)
     return out
+
+
+def _emit_referential_integrity_checks(
+    relationship_contracts: Any, contract: SilverContract
+) -> str:
+    """One orphan-row query per PROVEN foreign key: count child rows whose FK
+    value has no matching parent PK in silver. Non-fatal observability. Joins on
+    the CANONICAL silver key (the contract's key_rename), so the parent column is
+    the renamed <entity>_id, not the raw Id."""
+    rels, _dims = _star_from_relationships(
+        relationship_contracts, set(contract.tables.keys()))
+    rename_by_entity = {
+        e: dict(getattr(tc, "key_rename", {}) or {})
+        for e, tc in contract.tables.items()
+    }
+
+    def _canon(entity: str, col: str) -> str:
+        return rename_by_entity.get(entity, {}).get(col, col)
+
+    lines = ["-- Referential integrity (proven FKs). Non-fatal: report orphans.\n"]
+    for r in rels:
+        child_e, parent_e = r["_left_entity"], r["_right_entity"]
+        child_col = r["from_column"]                 # FK col on the child (fact)
+        parent_col = _canon(parent_e, r["to_column"])  # canonical PK on the parent
+        rid = f"fk_{child_e}_{child_col}__{parent_e}".lower()
+        lines.append(
+            f"SELECT '{rid}' AS assertion_id, COUNT(*) AS violations\n"
+            f"FROM silver.{child_e} c\n"
+            f"LEFT JOIN silver.{parent_e} p "
+            f'ON p."{parent_col}" = c."{child_col}"\n'
+            f'WHERE c."{child_col}" IS NOT NULL AND p."{parent_col}" IS NULL;\n'
+        )
+    return "\n".join(lines)
 
 
 def _emit_freshness_checks(sla_contract: dict[str, Any]) -> str:

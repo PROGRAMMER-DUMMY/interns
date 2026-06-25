@@ -267,6 +267,33 @@ def _run_build(
             state.per_table_status.setdefault(
                 "storage.report", TableRunStatus(status="skipped", error=str(exc)))
 
+        # 13. Referential-integrity report (non-fatal): run the proven-FK orphan
+        # checks and record counts. Observability, not a gate -- a cross-table
+        # blocking assertion would impose a build order; orphans are surfaced for
+        # review instead.
+        try:
+            ri_path = paths["medallion"] / "_referential_integrity.sql"
+            if ri_path.exists():
+                ri_results: dict[str, int] = {}
+                for stmt in ri_path.read_text(encoding="utf-8").split(";"):
+                    if "assertion_id" not in stmt:
+                        continue
+                    try:
+                        aid, viol = con.execute(stmt).fetchone()
+                        ri_results[str(aid)] = int(viol)
+                    except Exception:
+                        continue
+                if ri_results:
+                    orphans = sum(ri_results.values())
+                    state.per_table_status["referential_integrity"] = TableRunStatus(
+                        status="ok" if orphans == 0 else "warning",
+                        assertions={k: ("pass" if v == 0 else f"orphans:{v}")
+                                    for k, v in ri_results.items()},
+                    )
+        except Exception as exc:  # never break the build on the RI report
+            state.per_table_status.setdefault(
+                "referential_integrity", TableRunStatus(status="skipped", error=str(exc)))
+
     finally:
         con.close()
         refresh.save(paths["state"])
