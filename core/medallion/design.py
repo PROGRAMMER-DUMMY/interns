@@ -240,6 +240,13 @@ def design_medallion(
     # by design).
     (paths["medallion"] / "_freshness_checks.sql").write_text(
         _emit_freshness_checks(sla_contract), encoding="utf-8")
+    # Requirements-derived architecture decisions: run the dataops decision engine
+    # over THIS workspace's measured volume + shape so the recommended compute /
+    # table-format / modeling / SCD are recorded per workspace instead of a single
+    # RCM-shaped default. Advisory artifact; never blocks the build.
+    (paths["medallion"] / "architecture_decisions.json").write_text(
+        json.dumps(_build_architecture_decisions(workspace, workspace_name, star_schema), indent=2),
+        encoding="utf-8")
 
     lineage_path = paths["medallion"] / "lineage.json"
     lineage_path.write_text(json.dumps(lineage.to_dict(), indent=2), encoding="utf-8")
@@ -811,6 +818,65 @@ def _build_sla_contract(workspace_name: str, manifest: Manifest, contract: Silve
         "retention_policy": {"bronze_days": "forever", "silver_days": 365, "gold_days": 730},
         "tables": tables,
     }
+
+
+def _build_architecture_decisions(
+    workspace: Path, workspace_name: str, star_schema: StarSchema
+) -> dict[str, Any]:
+    """Run the dataops decision engine over the workspace's measured volume +
+    shape, recording per-workspace architecture recommendations (compute,
+    table-format, modeling, SCD, batch/stream). Advisory; degrades gracefully if
+    the vendor engine is unavailable. Generic -- no domain assumptions."""
+    # Measured daily volume = total bytes of the raw source files (a conservative
+    # one-day proxy; the engine's thresholds are order-of-magnitude).
+    total_bytes = 0
+    try:
+        for p in workspace.glob("*.csv"):
+            total_bytes += p.stat().st_size
+        for p in workspace.glob("*.parquet"):
+            total_bytes += p.stat().st_size
+    except OSError:
+        pass
+    volume_str = f"{total_bytes}B"
+    # Shape signals from the star schema: a dimension that mutates -> SCD2 worth it.
+    has_dimensions = bool(getattr(star_schema, "dimensions", []))
+    out: dict[str, Any] = {
+        "artifact_type": "architecture_decisions.json",
+        "version": 1,
+        "generated_by": "medallion-design",
+        "workspace": workspace_name,
+        "measured": {"total_source_bytes": total_bytes},
+        "decisions": {},
+    }
+    try:
+        import sys as _sys
+        from core.paths import PROJECT_ROOT as _ROOT
+        vendor = str(_ROOT / "vendor")
+        if vendor not in _sys.path:
+            _sys.path.insert(0, vendor)
+        from minus_dataops import decisions as _dec
+
+        calls = {
+            "compute_engine": {"volume_per_day": volume_str},
+            "table_format": {"concurrent_writes": True, "needs_acid": True},
+            "storage_format": {"workload": "analytics"},
+            "modeling_shape": {"predictable_dashboard": True, "many_consumers": has_dimensions},
+            "scd_type": {"track_history": has_dimensions},
+            "batch_vs_stream": {"latency": "1d"},
+        }
+        for rule, kwargs in calls.items():
+            try:
+                d = _dec.decide(rule, **kwargs)
+                out["decisions"][rule] = {
+                    "recommendation": d.recommendation,
+                    "rationale": d.rationale,
+                    "confidence": d.confidence,
+                }
+            except Exception as exc:  # pragma: no cover - defensive per-rule
+                out["decisions"][rule] = {"error": str(exc)}
+    except Exception as exc:  # pragma: no cover - vendor optional
+        out["engine_unavailable"] = str(exc)
+    return out
 
 
 def _emit_freshness_checks(sla_contract: dict[str, Any]) -> str:
