@@ -138,11 +138,13 @@ def apply_kpi_panel_answer(
     custom_definition: str = "",
     evidence_note: str = "",
     via_cli_agent: bool = False,
+    feature: str | None = None,
 ) -> ApplyPanelAnswerResult:
     root = Path(repo_root).resolve()
     workspace_path = (root / workspace).resolve()
     layout = WorkspaceLayout(project_root=workspace_path)
-    panel_path = layout.reports_dir / "blocker_question_panel" / "current.json"
+    panel_dir = layout.reports_dir / "blocker_question_panel"
+    panel_path = panel_dir / "current.json"
     if not panel_path.exists():
         raise FileNotFoundError(f"question panel not found: {_rel(panel_path, root)}")
     validation = WorkspaceArtifactValidator(root, _rel(workspace_path, root)).run()
@@ -155,6 +157,24 @@ def apply_kpi_panel_answer(
             )
         )
     panel = json.loads(panel_path.read_text(encoding="utf-8"))
+    # --feature targets a SPECIFIC blocker from the all-blockers overview, not
+    # only the active `current` one. Look it up in index.json's question set so
+    # any listed decision is answerable directly (batch-friendly). Falls back to
+    # `current` when no feature is given or it matches current.
+    if feature and feature != str(panel.get("feature") or ""):
+        index_path = panel_dir / "index.json"
+        target = None
+        if index_path.exists():
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            for q in index.get("questions") or []:
+                if str(q.get("feature") or "") == feature:
+                    target = q
+                    break
+        if target is None:
+            raise ValueError(
+                f"no open blocker for feature `{feature}` in the panel; "
+                f"see {_rel(panel_dir / 'all_blockers.md', root)}")
+        panel = target
     option = _resolve_answer(panel, answer)
     feature = str(panel.get("feature") or "")
     apply_summary = _apply_option(

@@ -90,6 +90,15 @@ def apply_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--domain", default="generic")
     parser.add_argument("--answer", required=True, help="Option id, exact label, or unambiguous friendly answer.")
+    parser.add_argument(
+        "--feature",
+        default=None,
+        help=(
+            "Target a SPECIFIC blocker by feature name (from all_blockers.md) "
+            "instead of the active `current` one. Lets you answer any listed "
+            "decision directly."
+        ),
+    )
     parser.add_argument("--custom-definition", default="")
     parser.add_argument("--evidence-note", default="")
     parser.add_argument(
@@ -167,6 +176,7 @@ def apply_main(argv: list[str] | None = None) -> int:
                     custom_definition=args.custom_definition,
                     evidence_note=args.evidence_note,
                     via_cli_agent=args.via_cli_agent,
+                    feature=args.feature,
                 )
     except WorkspaceLockTimeout as exc:
         record_trajectory_event_safe(

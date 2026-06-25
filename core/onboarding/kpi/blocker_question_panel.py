@@ -196,6 +196,15 @@ class BlockerQuestionPanelBuilder:
         # convention so operators are not buried under a wall of evidence.
         current_markdown.write_text(_render_markdown_compact(current), encoding="utf-8")
         current_full_markdown.write_text(_render_markdown(current), encoding="utf-8")
+        # all_blockers.md: the whole open-decision surface at once (overview table
+        # + each blocker's compact card), so an operator can SEE every pending
+        # decision rather than only the single `current` one. Each is answerable
+        # by feature via `apply-kpi-panel-answer --feature <name>`.
+        (self.output_dir / "all_blockers.md").write_text(
+            _render_all_blockers_overview(
+                questions, _rel(self.workspace, self.repo_root)),
+            encoding="utf-8",
+        )
         index_json.write_text(
             json.dumps(
                 {
@@ -2052,6 +2061,44 @@ def _empty_panel(mapping: dict[str, Any], workspace: Path, repo_root: Path) -> d
         except Exception:  # pragma: no cover - routing is advisory
             pass
     return panel
+
+
+def _render_all_blockers_overview(questions: list[dict[str, Any]], workspace_rel: str) -> str:
+    """The full open-decision surface: a summary table of every blocker plus each
+    one's compact card. Lets an operator see and plan ALL pending decisions, not
+    just the single `current` one. Generic across answer types."""
+    ws_label = workspace_rel.split("/")[-1] if workspace_rel else ""
+    n = len(questions)
+    lines = [
+        f"# Blocker Panel — {n} open decision{'s' if n != 1 else ''} ({ws_label})",
+        "",
+    ]
+    if not questions:
+        lines.append("No open blockers. All features are resolved.")
+        return "\n".join(lines) + "\n"
+    lines += [
+        "Answer any or all below. Some auto-resolve once a related one is answered",
+        "(workspace-level mappings + KPI definitions cascade), so the panel",
+        "re-derives after each answer. [REC] marks the recommended default.",
+        "",
+        "| # | Decision | Affects | Type | Recommended |",
+        "|---|----------|---------|------|-------------|",
+    ]
+    for i, q in enumerate(questions, start=1):
+        rec = str(q.get("recommended_option_id") or "")
+        opts = {str(o.get("option_id")): o for o in q.get("options") or []}
+        rec_label = str((opts.get(rec) or {}).get("label") or rec) or "—"
+        affects = ", ".join(str(k) for k in q.get("applies_to_kpis") or []) or "—"
+        lines.append(
+            f"| {i} | `{q.get('feature', '')}` | {affects} | "
+            f"{q.get('answer_type', '')} | {rec}: {rec_label} |"
+        )
+    lines.append("")
+    for i, q in enumerate(questions, start=1):
+        lines.append(f"## {i}. {q.get('feature', '')}")
+        lines.append("")
+        lines.append(_render_markdown_compact(q))
+    return "\n".join(lines) + "\n"
 
 
 def _render_markdown_compact(panel: dict[str, Any]) -> str:
