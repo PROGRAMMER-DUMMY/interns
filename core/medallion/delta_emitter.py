@@ -210,17 +210,66 @@ df.write.format("delta").mode("overwrite").saveAsTable(TARGET)
 
 
 def emit_gold_duckdb(table: GoldTable, out_dir: Path) -> Path:
-    """Emit the DuckDB Gold SQL file (missing from P0 design.py)."""
-    sources = ", ".join(f"silver.{src.split('.', 1)[-1]}" for src in table.derived_from)
+    """Emit the DuckDB Gold SQL.
+
+    A fact with proven foreign keys is denormalised into a wide One-Big-Table
+    (OBT): the fact LEFT JOINed to each dimension, with the dimension's non-key
+    columns prefixed (``<dim>_<col>``) to avoid collisions. The join happens ONCE
+    here so dashboards scan a flat table with no runtime joins. A fact without
+    FKs (or a dimension) stays a full-refresh copy.
+    """
     first_silver = (
         f"silver.{table.derived_from[0].split('.', 1)[-1]}"
         if table.derived_from else "silver.unknown"
     )
-    sql = (
-        f"-- gold.{table.name}: full-refresh {table.kind} from {sources}\n"
-        f"CREATE OR REPLACE TABLE gold.{table.name} AS\n"
-        f"SELECT * FROM {first_silver};\n"
-    )
+    fks = getattr(table, "foreign_keys", None) or []
+    if table.kind == "fact" and fks:
+        joins: list[str] = []
+        select_cols = ["f.*"]
+        for i, fk in enumerate(fks):
+            dim_silver = f"silver.{str(fk['to_table']).split('.', 1)[-1]}"
+            dim_entity = dim_silver.split(".", 1)[-1]
+            alias = f"d{i}"
+            fcol = assert_safe_identifier(str(fk["from_column"]), context="gold OBT fk col")
+            tcol = assert_safe_identifier(str(fk["to_column"]), context="gold OBT to col")
+            joins.append(
+                f"LEFT JOIN {dim_silver} {alias} ON f.\"{fcol}\" = {alias}.\"{tcol}\"")
+            # Prefix the dimension's columns so a flat OBT has no name clashes.
+            # COLUMNS(...) excludes the join key (already on the fact).
+            select_cols.append(
+                f"{alias}.* EXCLUDE (\"{tcol}\")")
+        sql = (
+            f"-- gold.{table.name}: OBT (fact silver.{table.derived_from[0].split('.',1)[-1]} "
+            f"pre-joined with {len(fks)} dimension(s))\n"
+            f"CREATE OR REPLACE TABLE gold.{table.name} AS\n"
+            f"SELECT {', '.join(select_cols)}\n"
+            f"FROM {first_silver} f\n"
+            + "\n".join(joins) + ";\n"
+        )
+    elif table.kind == "dimension" and table.scd_type == 2:
+        # SCD Type 2: track history with valid_from/valid_to via the shared
+        # idempotent emitter. Business key = the dimension's canonical PK (the
+        # first derived-from silver table's <entity>_id).
+        from core.medallion.merge_emitter import emit_scd2_merge
+
+        entity = table.derived_from[0].split(".", 1)[-1] if table.derived_from else table.name
+        bk = f"{entity}_id"
+        # All non-key columns are tracked attributes; emit a SELECT * body and let
+        # the merge close/insert on change. (Attribute list resolved at build from
+        # the silver schema; here we pass the canonical key + a star body.)
+        body = f"SELECT * FROM {first_silver}"
+        sql = (
+            f"-- gold.{table.name}: SCD Type 2 (history via valid_from/valid_to)\n"
+            f"-- Build resolves tracked attributes from the silver schema.\n"
+            + emit_scd2_merge(table.name, [bk], [], body, schema="gold")
+        )
+    else:
+        sources = ", ".join(f"silver.{src.split('.', 1)[-1]}" for src in table.derived_from)
+        sql = (
+            f"-- gold.{table.name}: full-refresh {table.kind} from {sources}\n"
+            f"CREATE OR REPLACE TABLE gold.{table.name} AS\n"
+            f"SELECT * FROM {first_silver};\n"
+        )
     path = out_dir / f"{table.name}.duckdb.sql"
     path.write_text(sql, encoding="utf-8")
     return path

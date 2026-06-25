@@ -76,7 +76,10 @@ class MedallionP2P3Tests(unittest.TestCase):
             [path] = _emit_silver_sql_duckdb(manifest, contract, out_dir)
             generated = path.read_text(encoding="utf-8")
 
-            self.assertIn("* REPLACE", generated)
+            # The star may carry a canonical-PK rename / EXCLUDE before REPLACE,
+            # so `*` and `REPLACE` are no longer adjacent -- assert the REPLACE
+            # clause exists rather than the exact `* REPLACE` adjacency.
+            self.assertIn("REPLACE (", generated)
             self.assertIn("sha256(coalesce(cast(PatientName AS VARCHAR), '') || $salt) AS PatientName", generated)
             self.assertNotIn("{salt}", generated)
 

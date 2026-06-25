@@ -90,6 +90,10 @@ class GoldTable:
     load_strategy: str = "full_refresh"
     grain: Optional[str] = None         # required for facts
     scd_type: Optional[int] = None      # required for dimensions (1 or 2)
+    # OBT join spec for a fact: each entry pre-joins a dimension into the wide
+    # gold table -> {"from_column","to_table","to_column"}. Empty = no join
+    # (degenerate single-table fact).
+    foreign_keys: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -103,6 +107,7 @@ class GoldTable:
             load_strategy=d.get("load_strategy", "full_refresh"),
             grain=d.get("grain"),
             scd_type=d.get("scd_type"),
+            foreign_keys=list(d.get("foreign_keys", [])),
         )
 
 

@@ -205,7 +205,7 @@ def design_medallion(
     silver_contract = _build_silver_contract(workspace_name, proposal)
     bronze_tables = _build_bronze_tables(inputs, semantic_contract=inputs.get("semantic_contract") or {}, repo_root=repo_root)
     silver_tables = _build_silver_table_entries(silver_contract, bronze_tables)
-    gold_tables = _build_gold_tables(star_schema)
+    gold_tables = _build_gold_tables(star_schema, silver_contract)
 
     manifest = Manifest(
         workspace=workspace_name,
@@ -363,6 +363,7 @@ def _load_workspace_inputs(layout: WorkspaceLayout) -> dict[str, Any]:
         "kpi_feature_mapping": _read(layout.contracts_dir / "kpi_feature_mapping.json"),
         "semantic_contract": _read(layout.contracts_dir / "semantic_contract.json"),
         "workspace_feature_definitions": _read(layout.contracts_dir / "workspace_feature_definitions.json"),
+        "relationship_contracts": _read(layout.contracts_dir / "relationship_contracts.json"),
         "profile_index": _read(layout.profiles_dir / "profile_index.json"),
     }
     review_dir = layout.reports_dir / "derived_feature_reviews" / "json"
@@ -580,24 +581,54 @@ def _seed_proposal(inputs: dict[str, Any]) -> dict[str, Any]:
             "computed_once_reused_by_kpis": [kpi_id] if kpi_id else [],
         }
 
+    # Classify entities into facts vs dimensions from PROVEN foreign-key evidence
+    # (relationship_contracts.json). An entity that is the TARGET of a high-
+    # confidence FK is a dimension (it is referenced/looked-up); the rest stay
+    # facts. This builds a real star schema from evidence instead of treating
+    # every table as an isolated fact. No fabrication: only proven_data_model /
+    # user_confirmed relationships above the confidence floor are used.
+    star_rels, dim_entities = _star_from_relationships(
+        inputs.get("relationship_contracts"), set(silver_tables.keys())
+    )
+    fact_entities = [e for e in sorted(silver_tables.keys()) if e not in dim_entities]
+    fk_by_fact: dict[str, dict[str, str]] = {}
+    for rel in star_rels:
+        fk_by_fact.setdefault(rel["_left_entity"], {})[rel["from_column"]] = (
+            f"dim_{rel['_right_entity']}"
+        )
+    # Strip the internal helper fields so each relationship matches Relationship.from_dict.
+    star_rels = [{k: v for k, v in r.items() if not k.startswith("_")} for r in star_rels]
     facts = [{
         "name": logical,
         "grain": f"one row per source row from silver.{logical}",
         "source_silver_tables": [f"silver.{logical}"],
         "measures": [],
-        "foreign_keys": {},
-        "reasoning": "Seed proposal — grain copied from Silver row; refine with LLM or human ratification.",
-        "evidence_sources": ["seed_fallback"],
+        "foreign_keys": fk_by_fact.get(logical, {}),
+        "reasoning": (
+            "Fact entity (not a FK target). Foreign keys lifted from proven "
+            "relationship_contracts." if logical in fk_by_fact
+            else "Fact entity; no outgoing proven foreign keys."
+        ),
+        "evidence_sources": ["relationship_contracts"] if logical in fk_by_fact else ["seed_fallback"],
         "needs_user_confirmation": True,
-    } for logical in sorted(silver_tables.keys())]
-    dimensions: list[dict[str, Any]] = []
+    } for logical in fact_entities]
+    dimensions = [{
+        "name": entity,
+        "source_silver_tables": [f"silver.{entity}"],
+        # SCD Type 1 by default (overwrite); a mutating dimension can be promoted
+        # to Type 2 at ratification. Recorded so the gold emitter knows the policy.
+        "scd_type": 1,
+        "reasoning": "Dimension entity: target of a proven foreign key.",
+        "evidence_sources": ["relationship_contracts"],
+        "needs_user_confirmation": True,
+    } for entity in sorted(dim_entities)]
 
     return {
         "star_schema": {
             "facts": facts,
             "dimensions": dimensions,
-            "relationships": [],
-            "conformed_dimensions": [],
+            "relationships": star_rels,
+            "conformed_dimensions": sorted(dim_entities),
             "derivation_reasoning": (
                 "Deterministic seed proposal (no LLM call). Every fact mirrors a Silver table. "
                 "Human ratification required for grain, dimension extraction, and relationships."
@@ -677,6 +708,69 @@ def _seed_type_casts(schema_cols: dict[str, str], *, exclude: set[str]) -> dict[
         if is_temporal:
             casts[name] = {"from": dtype or "string", "to": "TIMESTAMP"}
     return casts
+
+
+_STAR_FK_CONFIDENCE_FLOOR = 0.9
+_STAR_FK_STATES = {"proven_data_model", "user_confirmed"}
+
+
+def _star_from_relationships(
+    relationship_contracts: Any, entities: set[str]
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """Derive (relationships, dimension-entities) from proven foreign keys.
+
+    A FK target above the confidence floor is a dimension (it is looked up). Only
+    proven_data_model / user_confirmed relationships are used -- candidates are
+    advisory and never promote an entity to a dimension. Self-references and
+    cross-dimension (low-confidence Id-collision) links are excluded. Generic.
+    """
+    rels: list[dict[str, Any]] = []
+    dim_entities: set[str] = set()
+    if not isinstance(relationship_contracts, dict):
+        return rels, dim_entities
+
+    def _entity(path: str) -> str:
+        return _logical_entity_from_path(path)
+
+    for r in relationship_contracts.get("relationships") or []:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("state")) not in _STAR_FK_STATES:
+            continue
+        try:
+            conf = float(r.get("confidence") or 0)
+        except (TypeError, ValueError):
+            conf = 0.0
+        if conf < _STAR_FK_CONFIDENCE_FLOOR:
+            continue
+        if str(r.get("relationship_type")) not in ("foreign_key", ""):
+            continue
+        left = _entity(str(r.get("left_dataset") or ""))
+        right = _entity(str(r.get("right_dataset") or ""))
+        if not left or not right or left == right:
+            continue
+        if left not in entities or right not in entities:
+            continue
+        rels.append({
+            "from_table": f"silver.{left}",
+            "from_column": str(r.get("left_column") or ""),
+            "to_table": f"silver.{right}",
+            "to_column": str(r.get("right_column") or ""),
+            "cardinality": "many_to_one",
+            "confidence": conf,
+            "evidence": [f"relationship_contracts:{r.get('relationship_id', '')}"],
+            "needs_user_confirmation": True,
+            # internal helper fields (stripped before Relationship.from_dict)
+            "_left_entity": left,
+            "_right_entity": right,
+        })
+        dim_entities.add(right)
+    # An entity that is BOTH a FK target and a FK source (e.g. encounters, which
+    # procedures reference but which itself references patients) stays a FACT --
+    # it carries measures and is the grain. Only pure lookup targets are dims.
+    fk_sources = {rel["_left_entity"] for rel in rels}
+    dim_entities -= fk_sources
+    return rels, dim_entities
 
 
 def _pii_lookup_from_semantic(semantic: Any) -> dict[str, list[str]]:
@@ -1021,15 +1115,39 @@ def _build_silver_table_entries(contract: SilverContract, bronze: list[BronzeTab
     return out
 
 
-def _build_gold_tables(star_schema: StarSchema) -> list[GoldTable]:
+def _build_gold_tables(star_schema: StarSchema, contract: SilverContract | None = None) -> list[GoldTable]:
+    # Silver canonicalises a single natural key (Id -> <entity>_id), so a FK that
+    # targets the raw `Id` must join on the renamed canonical column in gold.
+    rename_by_entity: dict[str, dict[str, str]] = {}
+    if contract is not None:
+        for entity, tc in contract.tables.items():
+            rename_by_entity[entity] = dict(getattr(tc, "key_rename", {}) or {})
+
+    def _silver_col(table: str, col: str) -> str:
+        entity = table.split(".", 1)[-1]
+        return rename_by_entity.get(entity, {}).get(col, col)
+
+    # Index proven relationships by their source (fact) silver table so each fact
+    # gold table carries the joins that denormalise it into a wide OBT.
+    fks_by_source: dict[str, list[dict[str, str]]] = {}
+    for r in star_schema.relationships:
+        fks_by_source.setdefault(r.from_table, []).append({
+            "from_column": _silver_col(r.from_table, r.from_column),
+            "to_table": r.to_table,        # silver.<dim>
+            "to_column": _silver_col(r.to_table, r.to_column),
+        })
     out: list[GoldTable] = []
     for f in star_schema.facts:
         name = f.name if f.name.startswith("fact_") else f"fact_{f.name}"
+        fks = []
+        for src in f.source_silver_tables:
+            fks.extend(fks_by_source.get(src, []))
         out.append(GoldTable(
             name=name,
             kind="fact",
             derived_from=list(f.source_silver_tables),
             grain=f.grain,
+            foreign_keys=fks,
         ))
     for d in star_schema.dimensions:
         name = d.name if d.name.startswith("dim_") else f"dim_{d.name}"
