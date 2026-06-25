@@ -138,11 +138,21 @@ def _display_dimensions(model: ConformedModel) -> list[tuple[str, int]]:
     """(dimension, distinct) worth charting, ordered low-cardinality first,
     skipping raw dates (keep 'month'), constants, near-constant (dominant-value)
     columns, and high-cardinality columns."""
+    import polars as _pl
     out: list[tuple[str, int]] = []
     for d in model.dimensions:
         dl = d.lower()
         if dl != "month" and any(t in dl for t in _DATE_ISH):
             continue
+        # Continuous (Float) columns are MEASURES, not categories: a money/decimal
+        # column makes a meaningless donut/bar dimension even at low cardinality
+        # (e.g. BASE_ENCOUNTER_COST = 85.55, 142.58, ...). Exclude floats; keep Int
+        # (a genuine low-cardinality code/rating can be a real category).
+        try:
+            if model.frame.schema.get(d) in (_pl.Float32, _pl.Float64):
+                continue
+        except Exception:
+            pass
         distinct = model.frame.get_column(d).n_unique()
         if distinct <= 1 or (dl != "month" and distinct > _MAX_DIM_CARDINALITY):
             continue

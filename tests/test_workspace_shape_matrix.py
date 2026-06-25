@@ -175,6 +175,21 @@ class FrameShapeTests(unittest.TestCase):
         self.assertNotIn("SUFFIX", dims, "97%-dominated column must be dropped")
         self.assertIn("RACE", dims, "balanced dimension must be kept")
 
+    def test_continuous_float_column_is_not_a_dimension(self):
+        # A money/decimal Float column is a MEASURE, not a category -- it makes a
+        # meaningless donut/bar dimension even at low cardinality (BASE_ENCOUNTER_
+        # COST = 85.55, 142.58, ...). Float excluded; Int category + string kept.
+        df = pl.DataFrame({
+            "BASE_COST": [85.55, 142.58, 136.80, 85.55, 142.58],   # Float measure
+            "RATING": [1, 2, 3, 1, 2],                              # Int category
+            "CLASS": ["a", "b", "a", "b", "a"],                    # string category
+        })
+        model = self._model(df, ["BASE_COST", "RATING", "CLASS"])
+        dims = {d for d, _ in _display_dimensions(model)}
+        self.assertNotIn("BASE_COST", dims, "continuous Float must not be a dimension")
+        self.assertIn("CLASS", dims)
+        self.assertIn("RATING", dims, "low-cardinality Int category must be kept")
+
 
 if __name__ == "__main__":
     unittest.main()
