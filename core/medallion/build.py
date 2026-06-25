@@ -233,6 +233,31 @@ def _run_build(
                     status="skipped",
                 )
 
+        # 12. Storage-efficiency measurement (while the warehouse is open):
+        # per-table bytes / rows / files + raw->stored compression ratio. You
+        # cannot tune compression/partitioning without measuring it first.
+        try:
+            from core.medallion.storage_report import (
+                build_storage_report, write_storage_report,
+            )
+
+            raw_bytes = 0
+            try:
+                for src in workspace.glob("*.csv"):
+                    raw_bytes += src.stat().st_size
+            except OSError:
+                pass
+            report = build_storage_report(
+                con, workspace=workspace,
+                bronze_dir=paths["state"] / "bronze",
+                raw_source_bytes=raw_bytes,
+            )
+            write_storage_report(
+                report, layout.reports_dir / "medallion_storage")
+        except Exception as exc:  # never break the build on measurement
+            state.per_table_status.setdefault(
+                "storage.report", TableRunStatus(status="skipped", error=str(exc)))
+
     finally:
         con.close()
         refresh.save(paths["state"])
