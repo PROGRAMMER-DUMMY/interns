@@ -1009,18 +1009,14 @@ class WorkspaceArtifactValidator:
         # check 2: inputs_hash matches
         from core.medallion.manifest import compute_inputs_hash
         recorded = manifest_dict.get("inputs_hash", "")
-        candidates = [
-            self.layout.contracts_dir / "domain_model.json",
-            self.layout.contracts_dir / "kpi_registry.json",
-            self.layout.contracts_dir / "kpi_feature_mapping.json",
-            self.layout.contracts_dir / "semantic_contract.json",
-            self.layout.contracts_dir / "workspace_feature_definitions.json",
-            self.layout.profiles_dir / "profile_index.json",
-        ]
-        review_dir = self.layout.reports_dir / "derived_feature_reviews" / "json"
-        if review_dir.exists():
-            candidates.extend(sorted(review_dir.glob("*.json")))
-        recomputed = compute_inputs_hash(candidates)
+        # Use the SAME input set design-medallion hashes (see design._hashable_paths)
+        # so the validator and generator agree. The KPI feature mapping is
+        # deliberately EXCLUDED: medallion structure (bronze/silver/gold) derives
+        # from datasets + domain model + semantic contract, not from KPI resolution
+        # -- including it made the manifest spuriously "stale" every time KPIs were
+        # re-resolved mid-pipeline.
+        from core.medallion.design import _hashable_paths
+        recomputed = compute_inputs_hash(_hashable_paths(self.layout))
         if recorded != recomputed:
             self._error(
                 manifest_path,

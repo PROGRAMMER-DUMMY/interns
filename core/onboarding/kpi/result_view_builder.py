@@ -458,13 +458,20 @@ def _detect_secondary_measure(
     single-valued registry `metric`. Returns one extra Aggregation or None.
     Never duplicates the primary aggregation's function."""
     real = {_norm(c) for c in _emitted_columns(lookup)}
+    # The features view emits `<column> AS <feature-label>` (e.g. BASE_COST AS
+    # "cost"), so the result view must reference the EMITTED name (the label),
+    # not the raw column. Build column -> emitted-label so the secondary measure
+    # references what the staging view actually projects.
+    col_to_label = {col: label for label, col in lookup.items() if col}
 
     def resolved(token: str) -> str | None:
         col = _resolve_column(token.strip(), lookup)
         # Only accept a column that actually exists in the KPI's resolved feature
         # set -- otherwise the second measure would reference a phantom column
         # (e.g. "base cost") and emit invalid SQL.
-        return col if col and _norm(col) in real else None
+        if not col or _norm(col) not in real:
+            return None
+        return col_to_label.get(col, col)
 
     if _SECONDARY_COUNT.search(name_text) and primary_fn != "count":
         return Aggregation(fn="count", column="*", alias="row_count")

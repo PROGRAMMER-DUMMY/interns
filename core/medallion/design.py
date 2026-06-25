@@ -316,10 +316,13 @@ def _preflight(layout: WorkspaceLayout) -> None:
 
 
 def _hashable_paths(layout: WorkspaceLayout) -> list[Path]:
+    # Medallion structure (bronze/silver/gold) depends on the datasets, domain
+    # model, semantic contract, and accepted feature definitions -- NOT on KPI
+    # resolution. kpi_registry / kpi_feature_mapping are intentionally excluded:
+    # re-resolving KPIs (a normal pipeline step) rewrites the mapping and would
+    # otherwise make this manifest spuriously stale on every run.
     candidates = [
         layout.contracts_dir / "domain_model.json",
-        layout.contracts_dir / "kpi_registry.json",
-        layout.contracts_dir / "kpi_feature_mapping.json",
         layout.contracts_dir / "semantic_contract.json",
         layout.contracts_dir / "workspace_feature_definitions.json",
         layout.profiles_dir / "profile_index.json",
@@ -503,16 +506,26 @@ def _seed_proposal(inputs: dict[str, Any]) -> dict[str, Any]:
         #    so the dedup_keys / MERGE / assertions reference a column that exists;
         #  - type_casts convert temporal columns to TIMESTAMP in Silver.
         schema_cols = _merged_schema_cols(dss)
-        canonical_pk = f"{logical}_id"
         nat_key = _detect_natural_key({c: "" for c in schema_cols}, logical)
-        key_rename = {nat_key[0]: canonical_pk} if nat_key else {}
+        if nat_key:
+            # Single natural key -> canonicalise it to <entity>_id.
+            canonical_pk = f"{logical}_id"
+            key_rename = {nat_key[0]: canonical_pk}
+            pk_cols = [canonical_pk]
+            null_policies = {canonical_pk: "error"}
+        else:
+            # No single id: dedup on the full row (composite key). No canonical
+            # rename, and no not-null policy on a single PK column.
+            key_rename = {}
+            pk_cols = [c for c in schema_cols if c not in pii_cols] or list(schema_cols)
+            null_policies = {}
         type_casts = _seed_type_casts(schema_cols, exclude=set(pii_cols) | set(key_rename))
         silver_tables[logical] = {
-            "primary_key": ["source_system", canonical_pk],
+            "primary_key": ["source_system", *pk_cols],
             "type_casts": type_casts,
             # PK must never be null -- enforced as a hard assertion (no_null_pk).
-            "null_policies": {canonical_pk: "error"},
-            "dedup_keys": ["source_system", canonical_pk],
+            "null_policies": null_policies,
+            "dedup_keys": ["source_system", *pk_cols],
             "pii_hash_columns": pii_cols,
             "key_rename": key_rename,
             "derived_columns": {},
@@ -591,9 +604,13 @@ def _seed_proposal(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-_TEMPORAL_NAME_HINTS = (
-    "date", "time", "start", "stop", "_at", "dob", "birth", "death", "timestamp",
-)
+# Substrings that reliably indicate a temporal column. Deliberately NOT "birth"/
+# "death" (they match BIRTHPLACE/DEATHPLACE, which are locations) -- BIRTHDATE/
+# DEATHDATE are caught by "date".
+_TEMPORAL_NAME_SUBSTR = ("date", "time", "timestamp", "datetime", "_at")
+# Exact column names that are temporal on their own (avoids matching e.g.
+# STARTING_BID via a loose "start" substring).
+_TEMPORAL_NAME_EXACT = ("start", "stop", "dob", "ts")
 
 
 def _merged_schema_cols(dss: list[dict[str, Any]]) -> dict[str, str]:
@@ -645,8 +662,11 @@ def _seed_type_casts(schema_cols: dict[str, str], *, exclude: set[str]) -> dict[
             continue
         dl = name.lower()
         dt = (dtype or "").lower()
-        is_temporal = ("date" in dt or "time" in dt
-                       or any(h in dl for h in _TEMPORAL_NAME_HINTS))
+        is_temporal = (
+            "date" in dt or "time" in dt
+            or any(h in dl for h in _TEMPORAL_NAME_SUBSTR)
+            or dl in _TEMPORAL_NAME_EXACT
+        )
         if is_temporal:
             casts[name] = {"from": dtype or "string", "to": "TIMESTAMP"}
     return casts
@@ -839,8 +859,19 @@ def _build_silver_contract(workspace_name: str, proposal: dict[str, Any]) -> Sil
         pii = list(body.get("pii_hash_columns") or [])
         if not any(a.id == "pk_unique" for a in assertions) and pk:
             assertions.append(Assertion(id="pk_unique", type="unique", columns=pk))
-        if not any(a.id == "no_null_pk" for a in assertions) and pk:
-            assertions.append(Assertion(id="no_null_pk", type="not_null", columns=pk))
+        # no_null_pk only for columns the contract declares NOT-NULL (a canonical
+        # single PK gets `null_policies[pk] = error`). A COMPOSITE dedup key over a
+        # full row must NOT force every column non-null -- nullable columns (e.g.
+        # an optional reason code) are legitimate, so only `pk_unique` (dedup)
+        # applies there. The not-null check covers the declared-error columns plus
+        # source_system (the partition key), never the whole composite key.
+        not_null_cols = [c for c in pk
+                         if c == "source_system"
+                         or (c in null_policies and null_policies[c].policy == "error")]
+        has_declared_pk = any(c != "source_system" and c in null_policies
+                              and null_policies[c].policy == "error" for c in pk)
+        if has_declared_pk and not any(a.id == "no_null_pk" for a in assertions):
+            assertions.append(Assertion(id="no_null_pk", type="not_null", columns=not_null_cols))
         # Completeness (DQ dimension): a silver load that yields zero rows is a
         # silent pipeline failure -- assert the table is non-empty.
         if not any(a.id == "not_empty" for a in assertions):
@@ -871,6 +902,15 @@ def _build_bronze_tables(inputs: dict[str, Any], *, semantic_contract: Any, repo
         name = f"{logical}__{source_system}" if source_system else logical
         schema = ds.get("schema", {}) or {}
         natural_key = _detect_natural_key(schema, logical)
+        if not natural_key:
+            # No single-column id (an event table keyed by a composite, or a
+            # non-entity file). Fall back to ALL columns as a composite natural
+            # key: a deterministic dedup key (drops exact-duplicate rows) instead
+            # of an empty key that breaks the contract + validator. Generic.
+            cols = list(schema.keys()) if isinstance(schema, dict) else [
+                str(c.get("name")) for c in schema if isinstance(c, dict) and c.get("name")
+            ]
+            natural_key = [c for c in cols if c]
         watermark = _detect_watermark(schema)
         pii_cols = _sensitive_cols_for_dataset(pii_by_ds, Path(path).stem, schema)
         rel_path = _safe_relative_posix(Path(path), repo_root)
@@ -1091,8 +1131,11 @@ def _emit_silver_sql_duckdb(manifest: Manifest, contract: SilverContract, out_di
         rename_items = [f"    {raw} AS {canon}," for raw, canon in tc.key_rename.items()]
         exclude_cols = [raw for raw in tc.key_rename]
         # Contract type casts (e.g. temporal -> TIMESTAMP), applied via REPLACE.
+        # TRY_CAST (not CAST): a single malformed value nulls that cell instead of
+        # aborting the whole silver load -- a stray non-date in a temporal column
+        # should not fail the pipeline.
         cast_replacements = [
-            f"CAST({col} AS {cast.to_type}) AS {col}"
+            f"TRY_CAST({col} AS {cast.to_type}) AS {col}"
             for col, cast in tc.type_casts.items()
             if col not in tc.pii_hash_columns and col not in exclude_cols
         ]
