@@ -62,5 +62,34 @@ class DagsterWiringTests(unittest.TestCase):
                 dagster_defs.build_definitions("workspaces/demo")
 
 
+class AirflowWiringTests(unittest.TestCase):
+    def test_module_imports_without_airflow(self):
+        from core.orchestration import airflow_dag
+        self.assertTrue(hasattr(airflow_dag, "build_dag"))
+
+    def test_build_dag_requires_airflow_clearly(self):
+        from core.orchestration import airflow_dag
+        try:
+            import airflow  # noqa: F401
+        except ImportError:
+            with self.assertRaises(SystemExit):
+                airflow_dag.build_dag("workspaces/demo")
+
+
+class OrchestratorChoiceTests(unittest.TestCase):
+    def test_recommends_by_situation(self):
+        from core.orchestration.pipeline_stages import recommend_orchestrator
+        self.assertEqual(
+            recommend_orchestrator()["recommended"], "pipeline-run")
+        self.assertEqual(
+            recommend_orchestrator(scheduled=True, existing_airflow=True)["recommended"],
+            "airflow")
+        self.assertEqual(
+            recommend_orchestrator(scheduled=True, want_backfills=True)["recommended"],
+            "dagster")
+        self.assertEqual(
+            recommend_orchestrator(scheduled=True)["recommended"], "dagster")
+
+
 if __name__ == "__main__":
     unittest.main()

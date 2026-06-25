@@ -106,4 +106,38 @@ def command_for(stage: Stage, workspace: str) -> str:
     return stage.command.replace("{ws}", workspace)
 
 
-__all__ = ["Stage", "STAGES", "stage_map", "topological_order", "command_for"]
+def recommend_orchestrator(
+    *,
+    scheduled: bool = False,
+    existing_airflow: bool = False,
+    want_lineage_ui: bool = False,
+    want_backfills: bool = False,
+) -> dict[str, str]:
+    """Recommend an execution surface from the situation. Three surfaces share
+    the one `STAGES` topology, so this is purely about operational fit:
+
+    - plain `pipeline-run` (no deps): a one-shot / CI / local end-to-end run.
+    - Dagster: artifact-centric -- lineage UI, stale-only re-materialization,
+      partition-aware backfills.
+    - Airflow: task-centric -- when you already run Airflow or need its scheduler
+      / operator breadth.
+    """
+    if not scheduled and not existing_airflow and not want_lineage_ui and not want_backfills:
+        choice, why = ("pipeline-run", "One-shot/CI/local run with no scheduling "
+                       "needs -> the dependency-free sequential runner.")
+    elif existing_airflow and not (want_lineage_ui or want_backfills):
+        choice, why = ("airflow", "An Airflow platform already exists and the "
+                       "needs are scheduling/operators -> reuse it.")
+    elif want_lineage_ui or want_backfills:
+        choice, why = ("dagster", "Artifact lineage UI and/or stale-only "
+                       "backfills -> Dagster's asset model fits best.")
+    else:
+        choice, why = ("dagster", "Scheduled run with no existing Airflow -> "
+                       "Dagster (asset-based) is the platform default.")
+    return {"recommended": choice, "rationale": why}
+
+
+__all__ = [
+    "Stage", "STAGES", "stage_map", "topological_order", "command_for",
+    "recommend_orchestrator",
+]
