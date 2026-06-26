@@ -103,11 +103,16 @@ def _kpi(widget, result, project):
                 html.Span("● ", style={"color": "#3F8C6E" if on_target else "#C0563F"}),
                 html.Span(f"Target {format_value(target, m.fmt)}", className="kpi-delta-label"),
             ]))
-    # Period-over-period trend (▲/▼ % vs prev period), when configured.
+    # Period-over-period trend (▲/▼ % vs prev period), when configured. The ARROW
+    # shows the actual direction; the COLOR shows GOOD vs BAD per the metric's
+    # goal -- so a fall in a lower-is-better metric (cost, denial, readmission)
+    # reads green, not red.
     if result.delta is not None:
         up = result.delta >= 0
+        higher_better = getattr(m, "goal", "higher") == "higher"
+        good = up if higher_better else (not up)
         children.append(html.Div(
-            className="kpi-delta " + ("up" if up else "down"),
+            className="kpi-delta " + ("up" if good else "down"),
             children=[
                 html.Span(f"{'▲' if up else '▼'} {abs(result.delta):.1f}%",
                           className="kpi-delta-val"),

@@ -20,6 +20,7 @@ from core.dashboard.model.cuts import (
     headline_agg,
     measure_fmt,
     measure_func,
+    metric_goal,
 )
 from core.dashboard.model.layers import (
     list_gold_kpis,
@@ -38,6 +39,7 @@ __all__ = [
     "headline_agg",
     "measure_fmt",
     "measure_func",
+    "metric_goal",
     "list_gold_kpis",
     "parity_report",
     "read_gold",

@@ -27,7 +27,7 @@ import yaml
 
 from core.dashboard.model.aggregate import resolve_column
 from core.dashboard.model.conformed import ConformedModel, build_conformed_model
-from core.dashboard.model.cuts import build_kpi_model, headline_agg, measure_fmt
+from core.dashboard.model.cuts import build_kpi_model, headline_agg, measure_fmt, metric_goal
 from core.dashboard.model.dq import certify
 from core.dashboard.model.layers import list_gold_kpis, read_gold
 from core.dashboard.importance import rank_dimensions, ranked_names
@@ -419,11 +419,15 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
         # and silently mislabelled counts as `$` and summed per-group averages.
         fmt = measure_fmt(km.metric, km.measure, km.y_format)
         agg = headline_agg(km.metric, km.measure, km.y_format)
+        # goal drives SEMANTIC delta/target color: for a lower-is-better metric
+        # (cost, denial, readmission, aging) a down-trend is GOOD (green), so the
+        # renderer colors by good/bad, not raw direction.
+        goal = metric_goal(km.metric, km.measure, km.title)
         exports[tname] = gold
         tables.append({"name": tname, "source": "conformed_src",
                        "file": f"{tname}.parquet", "label": km.card_label})
         measures.append({"name": mslug, "label": km.card_label, "agg": agg,
-                         "field": f"{tname}.{km.measure}", "fmt": fmt})
+                         "field": f"{tname}.{km.measure}", "fmt": fmt, "goal": goal})
 
         name = km.card_label
         if label_freq.get(km.card_label, 0) > 1 and kws.get(kpi_id):

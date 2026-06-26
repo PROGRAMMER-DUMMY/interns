@@ -100,6 +100,27 @@ def _is_money_measure(metric: str, measure: str) -> bool:
     return any(token in text for token in _MONEY_TOKENS)
 
 
+# Tokens whose metric is "better when LOWER" -- a down-trend is GOOD, so a ▼
+# colors green. Generic business vocabulary (cost/aging/error/wait/denial), no
+# workspace words. Everything else defaults to higher-is-better.
+_LOWER_BETTER_TOKENS = (
+    "cost", "expense", "spend", "denial", "denied", "reject", "error", "defect",
+    "aging", "days_in", "days in", "wait", "delay", "lag", "overdue", "outstanding",
+    "churn", "loss", "leakage", "backlog", "downtime", "readmission", "readmit",
+    "mortality", "complication", "infection", "fraud", "risk",
+)
+
+
+def metric_goal(metric: str, measure: str, title: str = "") -> str:
+    """'higher' or 'lower' -- whether a bigger value is better, for semantic delta
+    /target coloring. Lower-is-better for cost/denial/aging/error-style metrics;
+    higher-is-better otherwise. The KPI title is included so a metric whose
+    bad-direction word lives only in the question ("how many were READMITTED")
+    is still classified. Generic; no domain assumptions."""
+    text = f"{metric} {measure} {title}".lower()
+    return "lower" if any(t in text for t in _LOWER_BETTER_TOKENS) else "higher"
+
+
 def measure_fmt(metric: str, measure: str, y_format: str) -> str:
     """Display format derived from the measure's meaning -- never a flat currency
     default. ``percent`` for shares, ``int`` for counts, ``currency`` only for a

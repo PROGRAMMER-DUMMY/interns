@@ -263,10 +263,30 @@ class QueryEngine:
             periods = sorted(df.get_column("_period").unique().to_list())
             if len(periods) < 2:
                 return None, None
-            prev_v = self._scalar_for_subset(df.filter(pl.col("_period") == periods[-2]),
-                                             ms, agg_fields)
-            latest_v = self._scalar_for_subset(df.filter(pl.col("_period") == periods[-1]),
-                                               ms, agg_fields)
+            # Per-period value of the measure (gold is pre-aggregated, so a
+            # row-count test is useless -- the VALUE series carries the signal).
+            vals = {
+                p: self._scalar_for_subset(
+                    df.filter(pl.col("_period") == p), ms, agg_fields)
+                for p in periods
+            }
+            # Drop an INCOMPLETE trailing period before the delta: when the data
+            # ends mid-period the final value is artificially low, so a naive delta
+            # shows a fake collapse (e.g. -94%). If the last period's value is a
+            # severe low-outlier (< half the median of earlier periods, with >=3
+            # periods to judge), exclude it and compare the two prior COMPLETE
+            # periods. Generic; mirrors the conformed model's trailing-period flag.
+            if len(periods) >= 3:
+                earlier = sorted(v for p in periods[:-1]
+                                 if (v := vals[p]) is not None and not _isnan(v))
+                last = vals[periods[-1]]
+                if earlier and last is not None and not _isnan(last):
+                    typical = earlier[len(earlier) // 2]
+                    if typical > 0 and last < 0.5 * typical:
+                        periods = periods[:-1]
+                        if len(periods) < 2:
+                            return None, None
+            prev_v, latest_v = vals[periods[-2]], vals[periods[-1]]
             if prev_v in (None, 0) or _isnan(prev_v) or _isnan(latest_v):
                 return None, None
             return float((latest_v - prev_v) / prev_v * 100.0), f"vs prev {widget.compare_period}"
