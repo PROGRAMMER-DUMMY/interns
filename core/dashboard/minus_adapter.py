@@ -182,6 +182,43 @@ def _justify_widget_widths(widgets: list[dict[str, Any]]) -> None:
         w["width"] = width
 
 
+# Promote heroes only when the scorecard is dense enough that hierarchy helps; a
+# small scorecard (e.g. 3 KPIs) reads fine as equal tiles and shouldn't change.
+_HERO_MIN_CARDS = 6
+_HERO_MAX = 3
+
+
+def _apply_hero_hierarchy(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Split KPI cards into a prominent HERO row + a compact secondary strip and
+    return them reordered (heroes first). Heroes are the highest ``_hero_score``
+    cards (clean single-number stories, ideally with a trend), capped at
+    ``_HERO_MAX``; they get ``options.emphasis='hero'`` and a wider span. Each
+    group is justified independently so neither row is ragged. No-op (uniform)
+    for small scorecards. The transient ``_hero_score`` key is stripped."""
+    if len(cards) < _HERO_MIN_CARDS:
+        for c in cards:
+            c.pop("_hero_score", None)
+        return cards
+    ordered = sorted(
+        enumerate(cards), key=lambda it: (-it[1].get("_hero_score", 0), it[0])
+    )
+    hero_ids = {id(it[1]) for it in ordered[:_HERO_MAX]}
+    heroes = [c for c in cards if id(c) in hero_ids]
+    secondary = [c for c in cards if id(c) not in hero_ids]
+    for c in heroes:
+        opts = dict(c.get("options") or {})
+        opts["emphasis"] = "hero"
+        c["options"] = opts
+        c["height"] = 170
+    for c in secondary:
+        c["height"] = 132
+    _justify_widget_widths(heroes)      # e.g. 3 heroes -> [4,4,4]
+    _justify_widget_widths(secondary)   # e.g. 7 -> [3,3,3,3,3,2,...]
+    for c in cards:
+        c.pop("_hero_score", None)
+    return heroes + secondary
+
+
 _TEMPORAL_BUCKET_NAMES = {"month": "month", "quarter": "quarter", "year": "year"}
 
 
@@ -435,13 +472,15 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
         question = _card_subtitle(km.title)
 
         # A summed share = 100% (meaningless headline) -> show the largest
-        # segment's share instead (max), with a clear label.
+        # segment's share instead (max). The card shows the BUSINESS label
+        # ("% Over 24 Hours"); "Largest Segment" stays only as the internal
+        # measure label, not the cryptic card title.
         if is_share:
             card_measure = _slug(f"{kpi_id}_top")
             measures.append({"name": card_measure, "label": "Largest Segment",
                              "agg": "max", "field": f"{tname}.{km.measure}",
                              "fmt": "percent"})
-            card_title = "Largest Segment" if name == km.card_label else f"Largest Segment - {kws.get(kpi_id, '')}".rstrip(" -")
+            card_title = name
         else:
             card_measure = mslug
             card_title = name
@@ -457,6 +496,13 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
         if datecol:
             card["compare"] = f"{tname}.{datecol}"
             card["compare_period"] = period
+        # Hero-worthiness: a clean single-number story with a trend makes the best
+        # headline tile; a top-N ranking is really a chart, not a hero number.
+        is_rank = bool(re.search(r"\btop\b|\bmost\b|\bhighest\b|\bwhich\b",
+                                 (km.title or "").lower()))
+        card["_hero_score"] = ((2 if datecol else 0)
+                               + (1 if not is_rank and not is_share else 0)
+                               + (-1 if is_rank else 0))
         cards.append(card)
 
         # ONE compact analytics view (no per-KPI tabs): under each KPI card sits
@@ -525,11 +571,16 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
         if max(g.get_column(col).n_unique() for g in golds) <= 40:
             kpi_filters.append({"id": f"kf_{_slug(col)}", "field": col,
                                 "label": _human(col), "type": "multi"})
-    # Justify each widget GROUP to the 12-col grid so no row is ragged: the cards
-    # row and the hero-charts row each fill the width (heroes don't have to align
-    # 1:1 under cards once both rows are individually justified). A full-width
-    # (12) item is left as-is. Verified by the screener's layout-balance check.
-    _justify_widget_widths(cards)
+    # Visual hierarchy: with enough cards to feel dense, promote the top few
+    # (clean single-number stories with a trend) to a prominent HERO row and
+    # demote the rest to a compact strip -- so a stakeholder sees what matters
+    # first instead of 10 equal tiles. Small scorecards (RCM's 3) stay uniform.
+    cards = _apply_hero_hierarchy(cards)
+    # Justify each widget GROUP to the 12-col grid so no row is ragged. A full-
+    # width (12) item is left as-is. Verified by the screener's layout-balance
+    # check. (Hero hierarchy already set widths for its two groups.)
+    if not any(c.get("options", {}).get("emphasis") == "hero" for c in cards):
+        _justify_widget_widths(cards)
     _justify_widget_widths(charts)
     page = {
         "id": "kpis", "title": "KPIs", "order": 5,

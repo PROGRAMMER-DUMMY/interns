@@ -35,8 +35,11 @@ def render_widget(widget: Widget, result: QueryResult, project: Project,
                   page_id: str, highlight=None, drill_crumb=None) -> html.Div:
     style = {"gridColumn": f"span {widget.width}", "height": f"{widget.height}px"}
     if widget.type == "kpi":
-        return html.Div(_kpi(widget, result, project), className="tile kpi kpi-accent",
-                        style=style)
+        # A hero KPI gets a more prominent tile (bigger value, accent bar) so the
+        # scorecard has a clear visual hierarchy instead of N equal tiles.
+        emphasis = (getattr(widget, "options", None) or {}).get("emphasis")
+        cls = "tile kpi kpi-accent" + (" kpi-hero" if emphasis == "hero" else "")
+        return html.Div(_kpi(widget, result, project), className=cls, style=style)
     colors = chart_colors(project)
     if widget.type == "table":
         body = _table(widget, result, project, colors)

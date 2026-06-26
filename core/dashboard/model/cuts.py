@@ -186,6 +186,65 @@ def clean_measure_name(metric: str, measure: str, y_format: str) -> str:
     return label or _split_camel(measure) or "Value"
 
 
+# Business-label extraction: turn a KPI's QUESTION into a short noun-phrase label
+# (a stakeholder reads "Total Encounters", not the measure column "ID"/"row_count").
+# Pure heuristic, domain-free: strip question stems + trailing clauses, drop filler,
+# prefix the aggregation verb (Avg / % / Top). Generic across workspaces.
+_LABEL_STEMS = (
+    r"^for each [\w\s]+?,\s*", r"^how many\s+", r"^how much\s+",
+    r"^what (?:is|are|was|were)\s+(?:the\s+)?", r"^what percentage of\s+",
+    r"^what proportion of\s+", r"^which\s+", r"^what\s+",
+)
+_LABEL_TRAIL = (
+    r"\s+occurred\b.*$", r"\s+belonged\b.*$", r"\s+performed\b.*$",
+    r"\s+broken down by\b.*$", r"\s+for each\b.*$", r"\s+over time\b.*$",
+    r"\s+of a previous\b.*$", r"\s+were admitted\b.*$", r"\s+with the\b.*$",
+    r"\s+and the\b.*$", r"\s+versus\b.*$", r"\s+within\b.*$", r",.*$",
+)
+_LABEL_NOISE = (
+    r"\b(the|a|an|of|all|were|was|had|is|are|each|most|total number|number"
+    r"|times|they|this|represent|does)\b"
+)
+_LABEL_RANK_NOISE = r"\b(top\s*\d*|highest|lowest|frequent|average|avg|with)\b"
+_LABEL_TRAIL_PREP = r"\s+(for|by|in|with|over|to|from|versus|under|and|each)$"
+
+
+def business_label(metric: str, measure: str, fmt: str, title: str,
+                   *, max_words: int = 4) -> str:
+    """A short, stakeholder-facing card label derived from the KPI QUESTION --
+    'How many total encounters occurred each year?' -> 'Total Encounters';
+    'What is the average total claim cost...' -> 'Avg Total Claim Cost'. Falls
+    back to the cleaned measure name when the title yields nothing. Generic."""
+    raw = title or ""
+    t = raw.strip().rstrip("?.").lower()
+    if not t:
+        return clean_measure_name(metric, measure, fmt)
+    is_rank = bool(re.search(r"\btop\s*\d+|\bmost\b|\bhighest\b|\bwhich\b", t))
+    for s in _LABEL_STEMS:
+        t = re.sub(s, "", t, flags=re.IGNORECASE)
+    for tr in _LABEL_TRAIL:
+        t = re.sub(tr, "", t, flags=re.IGNORECASE)
+    mfn = re.match(r"\s*(\w+)", metric or "")
+    fn = mfn.group(1).lower() if mfn else "count"
+    is_share = (fmt or "").lower() == "percent" \
+        or "percent" in (metric + raw).lower() or "proportion" in t
+    t = re.sub(_LABEL_NOISE, " ", t)
+    if is_rank or fn in ("avg", "mean"):
+        t = re.sub(_LABEL_RANK_NOISE, " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    core = " ".join(t.split()[:max_words])
+    for _ in range(3):
+        core = re.sub(_LABEL_TRAIL_PREP, "", core, flags=re.IGNORECASE).strip()
+    core = core.title()
+    if is_share:
+        return f"% {core}".strip() if core else "Share"
+    if is_rank:
+        return f"Top {core}".strip() if core else "Top"
+    if fn in ("avg", "mean"):
+        return f"Avg {core}".strip() if core else "Average"
+    return core or clean_measure_name(metric, measure, fmt)
+
+
 def _choose_measure(columns: list[str], schema: dict[str, Any], hint: str | None) -> str:
     """Resolve the measure column: spec `y` if it maps to a real gold column,
     else a measure-named numeric, else the last numeric column (generator puts
@@ -235,9 +294,16 @@ def build_kpi_model(
     panels = hints.get("panels") if isinstance(hints.get("panels"), list) else []
     metric = str(hints.get("metric") or "")
     y_format = str(hints.get("y_format") or "")
+    title = str(hints.get("title") or kpi_id)
+    # Card label = a business noun-phrase from the QUESTION ("Total Encounters"),
+    # not the raw measure column ("ID"/"row_count"). Falls back to the cleaned
+    # measure name when the title is just the kpi_id (no real question).
+    fmt = measure_fmt(metric, measure, y_format)
+    label = business_label(metric, measure, fmt, title) if title != kpi_id \
+        else clean_measure_name(metric, measure, y_format)
     return KpiModel(
         kpi_id=kpi_id,
-        title=str(hints.get("title") or kpi_id),
+        title=title,
         gold_columns=columns,
         measure=measure,
         cuts=cuts,
@@ -245,12 +311,12 @@ def build_kpi_model(
         additive=additive,
         y_format=y_format,
         panels=panels,
-        card_label=clean_measure_name(metric, measure, y_format),
+        card_label=label,
         metric=metric,
     )
 
 
 __all__ = [
     "KpiModel", "build_kpi_model", "classify_measure", "clean_measure_name",
-    "measure_func", "measure_fmt", "headline_agg",
+    "business_label", "measure_func", "measure_fmt", "headline_agg", "metric_goal",
 ]

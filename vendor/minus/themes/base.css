@@ -280,6 +280,17 @@ body::before {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
 .kpi-accent .kpi-value { color: var(--accent-ink); }
+/* Hero KPI: a prominent headline tile -- larger numerals, a faint accent-tinted
+   surface, and a thicker accent edge -- so the top KPIs stand out from the
+   compact secondary strip and the scorecard has a clear visual hierarchy. */
+.kpi-hero {
+  background: linear-gradient(180deg,
+              color-mix(in srgb, var(--accent-bright) 7%, var(--card)) 0%,
+              var(--card) 70%);
+}
+.kpi-hero::before { width: 5px; }
+.kpi-hero .kpi-value { font-size: clamp(26px, 2.8vw, 38px); }
+.kpi-hero .kpi-label { font-size: 11.5px; color: var(--ink); }
 .kpi-delta { display: flex; gap: 5px; align-items: baseline; font-size: 11.5px; font-weight: 600; }
 .kpi-delta.up { color: #3F8C6E; }
 .kpi-delta.down { color: #C0563F; }
