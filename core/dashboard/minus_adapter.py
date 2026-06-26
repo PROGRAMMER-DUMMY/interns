@@ -165,6 +165,23 @@ def _display_dimensions(model: ConformedModel) -> list[tuple[str, int]]:
     return out
 
 
+def _justify_widget_widths(widgets: list[dict[str, Any]]) -> None:
+    """Reassign each widget's `width` so the group tiles the 12-col grid with no
+    ragged rows (in place). A single full-width (12) widget keeps full width.
+    Uses the shared layout planner, so the result passes the screener's
+    layout-balance check."""
+    from core.dashboard.layout_planner import plan_widths
+
+    n = len(widgets)
+    if n == 0:
+        return
+    if n == 1:
+        widgets[0]["width"] = 12
+        return
+    for w, width in zip(widgets, plan_widths(n)):
+        w["width"] = width
+
+
 _TEMPORAL_BUCKET_NAMES = {"month": "month", "quarter": "quarter", "year": "year"}
 
 
@@ -504,6 +521,12 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
         if max(g.get_column(col).n_unique() for g in golds) <= 40:
             kpi_filters.append({"id": f"kf_{_slug(col)}", "field": col,
                                 "label": _human(col), "type": "multi"})
+    # Justify each widget GROUP to the 12-col grid so no row is ragged: the cards
+    # row and the hero-charts row each fill the width (heroes don't have to align
+    # 1:1 under cards once both rows are individually justified). A full-width
+    # (12) item is left as-is. Verified by the screener's layout-balance check.
+    _justify_widget_widths(cards)
+    _justify_widget_widths(charts)
     page = {
         "id": "kpis", "title": "KPIs", "order": 5,
         "description": "Each KPI shows its headline number with a chart beneath it. "
@@ -896,7 +919,9 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
     A: list[dict[str, Any]] = []
 
     # ---- Trends: KPI strip + combo (value+rate+target) + small multiples ----
-    A += [kpi_card(m, "Trends") for m in row]
+    _trend_cards = [kpi_card(m, "Trends") for m in row]
+    _justify_widget_widths(_trend_cards)   # fill the row (3 cards -> 4,4,4)
+    A += _trend_cards
     if temporal:
         if rate_m:
             A.append({"id": "a_combo", "type": "combo",

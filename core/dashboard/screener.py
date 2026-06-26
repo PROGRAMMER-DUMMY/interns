@@ -466,6 +466,33 @@ def _screen_live_pages(layout, workspace: Path, shots_dir: Path) -> list[PageFin
             return findings
 
 
+def _wait_for_charts(browser, expected: int, *, timeout_ms: int = 9000) -> int:
+    """Poll until at least ``expected`` plotly charts are present (or the count
+    stops growing, or timeout). Returns the final count. Makes chart-presence
+    checks robust to slow Dash callback rendering."""
+    import time as _t
+    if expected <= 0:
+        browser.wait(800)
+        return 0
+    deadline = _t.time() + timeout_ms / 1000.0
+    last = -1
+    stable = 0
+    while _t.time() < deadline:
+        try:
+            n = int(browser.evaluate(
+                "document.querySelectorAll('.js-plotly-plot').length") or 0)
+        except Exception:
+            n = 0
+        if n >= expected:
+            return n
+        stable = stable + 1 if n == last else 0
+        if n > 0 and stable >= 3:        # count plateaued below expected -> stop
+            return n
+        last = n
+        browser.wait(500)
+    return last if last > 0 else 0
+
+
 def _capture_cdp(state, port: int, workspace: Path, shots_dir: Path) -> list[PageFinding]:
     from core.dashboard.cdp import CDPBrowser
 
@@ -476,12 +503,18 @@ def _capture_cdp(state, port: int, workspace: Path, shots_dir: Path) -> list[Pag
                 1 for w in page.widgets if getattr(w, "type", None) in _CHART_TYPES
             )
             browser.navigate(f"http://127.0.0.1:{port}/{page.id}")
+            # Wait for Dash callbacks to render the declared charts before judging
+            # (a fixed settle can fire before a busy page paints its plots, falsely
+            # flagging "0 charts"). Poll until the chart count reaches expectations
+            # or stabilizes.
+            _wait_for_charts(browser, chart_widgets)
             tabs = _unique(browser.evaluate(_TAB_PROBE_JS) or [])
             views = tabs or [None]
             for view in views:
                 label = page.id if view is None else f"{page.id} / {view}"
                 if view is not None and not browser.click_text(view):
                     continue
+                _wait_for_charts(browser, 1)   # let the tab's charts paint too
                 findings.append(
                     _capture_view(browser, label, page.id, chart_widgets if view is None else 0,
                                   workspace, shots_dir)
