@@ -287,6 +287,16 @@ def build_chart_figure(widget, result, project, *, highlight=None, colors=None) 
             fig.update_traces(marker_color=marks)
         elif t in ("pie", "donut"):
             fig.update_traces(marker=dict(colors=marks))
+    # Value-graded shading for a single-series bar: darker = higher, so bars
+    # differentiate within the chart and the page doesn't read as one flat
+    # accent block. Only when not highlighting and no breakdown/multi series.
+    elif t in ("bar", "hbar") and dim and not breakdown and not multi \
+            and isinstance(val, str):
+        try:
+            vals = df.get_column(val).cast(pl.Float64, strict=False).to_list()
+            fig.update_traces(marker_color=_value_grade(vals, colors["accent"]))
+        except Exception:
+            pass
 
     _style(fig, widget, colors)
 
@@ -403,6 +413,30 @@ def _truncate_category_ticks(fig, widget, *, max_len: int = 28) -> None:
 def _hex_rgb(h: str) -> tuple[int, int, int]:
     h = h.lstrip("#")
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _value_grade(vals: list, accent: str, *, lo: float = 0.45, hi: float = 1.0) -> list:
+    """Per-bar colors graded by value: the accent blended toward white, lighter
+    for low values, full accent for the max. Gives a single-series bar visual
+    depth (highest bars pop) without inventing a fake category dimension."""
+    nums = [v for v in vals if isinstance(v, (int, float)) and v == v]
+    if not nums:
+        return [accent] * len(vals)
+    vmin, vmax = min(nums), max(nums)
+    rng = (vmax - vmin) or 1.0
+    r, g, b = _hex_rgb(accent)
+    out = []
+    for v in vals:
+        if not isinstance(v, (int, float)) or v != v:
+            out.append(accent)
+            continue
+        t = lo + (hi - lo) * ((v - vmin) / rng)   # 0.45..1.0 intensity
+        # blend toward white at low intensity
+        rr = round(r * t + 255 * (1 - t))
+        gg = round(g * t + 255 * (1 - t))
+        bb = round(b * t + 255 * (1 - t))
+        out.append(f"rgb({rr},{gg},{bb})")
+    return out
 
 
 def _as_date(v):
