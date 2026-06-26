@@ -192,9 +192,13 @@ def clean_measure_name(metric: str, measure: str, y_format: str) -> str:
 # prefix the aggregation verb (Avg / % / Top). Generic across workspaces.
 _LABEL_STEMS = (
     r"^for each [\w\s]+?,\s*", r"^how many\s+", r"^how much\s+",
-    r"^what (?:is|are|was|were)\s+(?:the\s+)?", r"^what percentage of\s+",
-    r"^what proportion of\s+", r"^which\s+", r"^what\s+",
+    r"^what (?:is|are|was|were)\s+(?:the\s+)?(?:trend (?:for|of|in)\s+)?",
+    r"^what percentage of\s+", r"^what proportion of\s+",
+    r"^which\s+", r"^what\s+", r"^trend (?:for|of|in)\s+",
 )
+# When the "%" prefix is added for a share, drop a redundant "percentage share/
+# share/percentage" already inside the core (avoids "% Percentage Share Lives").
+_LABEL_SHARE_NOISE = r"\b(percentage share|percentage|proportion|share)\b"
 _LABEL_TRAIL = (
     r"\s+occurred\b.*$", r"\s+belonged\b.*$", r"\s+performed\b.*$",
     r"\s+broken down by\b.*$", r"\s+for each\b.*$", r"\s+over time\b.*$",
@@ -231,6 +235,8 @@ def business_label(metric: str, measure: str, fmt: str, title: str,
     t = re.sub(_LABEL_NOISE, " ", t)
     if is_rank or fn in ("avg", "mean"):
         t = re.sub(_LABEL_RANK_NOISE, " ", t)
+    if is_share:
+        t = re.sub(_LABEL_SHARE_NOISE, " ", t)   # avoid "% Percentage Share ..."
     t = re.sub(r"\s+", " ", t).strip()
     core = " ".join(t.split()[:max_words])
     for _ in range(3):
