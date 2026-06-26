@@ -34,6 +34,18 @@ brand purity per the dashboard quality contract):
 - DON'T sacrifice series separability to brand color — the verify gate enforces
   perceptual distance and contrast.
 
+## 8. Design References (idea galleries — for layout/color inspiration only)
+External galleries to study for executive-grade layout, semantic color, hero-KPI
+pill rows, and one-chart-per-question density. Reference ideas only; the shipped
+look stays the Editorial Data Desk tokens below.
+- Power BI dashboard & report examples (hundreds; finance/healthcare/KPI/HR/CRM):
+  https://zoomcharts.com/en/microsoft-power-bi-custom-visuals/dashboard-and-report-examples/
+- Tableau RCM / healthcare starter kit (revenue-cycle layout):
+  https://www.tableau.com/blog/starter-kit-II-revenue-cycle-management-dashboard
+- Patterns observed worth adopting: hero KPI "pill" row (4-6, not 10); semantic
+  green/amber/red on deltas & vs-target; one lead chart + detail table per page;
+  distinct per-category chart color (bad = red); generous whitespace.
+
 ```design-tokens
 paper: #f3efe6
 card: #fbf9f3
