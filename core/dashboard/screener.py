@@ -252,6 +252,10 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
     from core.dashboard.minus_adapter import minus_root
 
     semantic_findings = _check_measure_semantics(minus_root(layout))
+    # Layout-balance: every dashboard row must fill the 12-col grid (no ragged
+    # trailing gaps, no overflow). The CLI both DECIDES the layout (planner) and
+    # VERIFIES it here, so a differently-shaped workspace can't ship a broken grid.
+    semantic_findings += _check_layout_balance(minus_root(layout))
 
     ok = all(f.ok for f in findings) and not palette_findings and not semantic_findings
     report = {
@@ -338,6 +342,37 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
         "page_count": len(findings),
         "error_count": report["error_count"],
     }
+
+
+def _check_layout_balance(root: Path) -> list[str]:
+    """Verify every generated dashboard tab tiles the 12-column grid cleanly --
+    no ragged gaps, no overflow. Reads the emitted dashboard YAMLs and runs the
+    layout planner's balance check per row of widgets (grouped by tab). Generic."""
+    import yaml
+
+    from core.dashboard.layout_planner import layout_findings
+
+    findings: list[str] = []
+    dash_dir = root / "config" / "dashboards"
+    if not dash_dir.exists():
+        return []
+    for path in sorted(dash_dir.glob("*.yaml")):
+        try:
+            dash = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        # Group widget widths by tab (untabbed = one group); each group tiles its
+        # own grid. KPI cards + their heroes share a span so they align.
+        by_tab: dict[str, list[int]] = {}
+        for w in dash.get("widgets") or []:
+            tab = str(w.get("tab") or "_main")
+            width = int(w.get("width") or 0)
+            if width:
+                by_tab.setdefault(tab, []).append(width)
+        for tab, widths in by_tab.items():
+            for f in layout_findings(widths):
+                findings.append(f"{path.stem}/{tab}: {f}")
+    return findings
 
 
 def _check_measure_semantics(root: Path) -> list[str]:

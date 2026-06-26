@@ -272,6 +272,16 @@ def build_conformed_model(layout: WorkspaceLayout) -> ConformedModel | None:
         rk = resolve_column(e.right_col, dim.columns)
         if lk is None or rk is None:
             continue
+        # Disambiguate colliding columns: two dimensions (patient, organization,
+        # payer) all carry CITY/ADDRESS/ZIP, so a plain join produces a `CITY_right`
+        # that collides with the next dim's CITY. Prefix each dim's non-key columns
+        # that already exist in the frame with the entity name (e.g.
+        # organization_CITY) so every joined column is unique. Generic.
+        existing = set(frame.columns)
+        collide = {c: f"{e.right_table}_{c}"
+                   for c in dim.columns if c != rk and c in existing}
+        if collide:
+            dim = dim.rename(collide)
         frame = frame.join(dim, how="left", left_on=lk, right_on=rk)
         joined_tables.add(e.right_table)
 

@@ -247,8 +247,16 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
         label_freq[km.card_label] = label_freq.get(km.card_label, 0) + 1
 
     n = max(1, len(infos))
-    span = max(3, 12 // n)               # cards + charts fill the 12-col row evenly
-    for kpi_id, km, gold in infos:
+    # Justified 12-column layout: each card/hero gets a span so EVERY row fills
+    # the grid -- no ragged trailing gaps for any KPI count (the old
+    # `max(3, 12//n)` only tiled cleanly when n divided 12: 3/4/6/12). Cards and
+    # their heroes share the same per-position width so heroes stay column-aligned
+    # under their card. Generic across workspaces; verified by the screener's
+    # layout-balance check.
+    from core.dashboard.layout_planner import plan_widths
+    card_widths = plan_widths(n)
+    for idx, (kpi_id, km, gold) in enumerate(infos):
+        span = card_widths[idx]
         tname = kpi_id
         mslug = _slug(f"{kpi_id}_{km.measure}")
         is_share = km.kind == "share"
