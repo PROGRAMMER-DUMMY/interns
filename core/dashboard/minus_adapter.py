@@ -134,6 +134,22 @@ def _top_value_share(model: ConformedModel, column: str) -> float:
         return 0.0
 
 
+def _measure_concentration(model: ConformedModel, dim: str, measure_col: str) -> float:
+    """Share of the measure total held by the single biggest category of ``dim``.
+    High -> one category dominates, so a grouped/absolute bar squishes the rest
+    into invisibility (use a heatmap or share view instead). Generic."""
+    try:
+        import polars as _pl
+        g = (model.frame.select([dim, measure_col]).drop_nulls()
+             .group_by(dim).agg(_pl.col(measure_col).sum().alias("__m")))
+        total = g.get_column("__m").sum()
+        if not total or total <= 0:
+            return 0.0
+        return float(g.get_column("__m").max()) / float(total)
+    except Exception:
+        return 0.0
+
+
 def _display_dimensions(model: ConformedModel) -> list[tuple[str, int]]:
     """(dimension, distinct) worth charting, ordered low-cardinality first,
     skipping raw dates (keep 'month'), constants, near-constant (dominant-value)
@@ -1187,11 +1203,18 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
             w["limit"] = 12
         A.append(w)
     if group_cat and facet_cat and group_cat != facet_cat:
-        A.append({"id": "a_group", "type": "bar", "measure": primary,
+        # A grouped bar across a SKEWED category (one race/payer holds most of the
+        # measure) squishes every other group to an invisible sliver. When that
+        # happens, render the two cuts as a HEATMAP instead -- every cell is
+        # visible by color regardless of magnitude, so the small categories read.
+        skew = _measure_concentration(model, group_cat, primary_col)
+        g_type = "heatmap" if skew > 0.45 else "bar"
+        A.append({"id": "a_group", "type": g_type, "measure": primary,
                   "dimension": f"{table}.{group_cat}", "breakdown": f"{table}.{facet_cat}",
                   "title": f"{plabel} by {_human(group_cat)} x {_human(facet_cat)}",
                   "width": 6, "height": 340, "tab": "Breakdowns",
-                  "drill_path": _drill(group_cat, {group_cat, facet_cat})})
+                  "drill_path": ([] if g_type == "heatmap"
+                                 else _drill(group_cat, {group_cat, facet_cat}))})
     if donut_cat:
         A.append({"id": "a_donut", "type": "donut", "measure": "record_count",
                   "dimension": f"{table}.{donut_cat}",
