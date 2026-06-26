@@ -360,6 +360,34 @@ def _style(fig, widget, colors):
                      title_text="", tickfont=dict(size=11, color=colors["muted"]))
     fig.update_yaxes(showgrid=True, gridcolor=colors["grid"], zeroline=False,
                      automargin=True, title_text="", tickfont=dict(size=11, color=colors["muted"]))
+    # Truncate long CATEGORY tick labels (e.g. procedure descriptions) so they
+    # don't clip/overflow the tile; the full text stays on hover. Applied to the
+    # categorical axis only (x for vertical bars, y for hbar). Generic.
+    _truncate_category_ticks(fig, widget)
+
+
+def _truncate_category_ticks(fig, widget, *, max_len: int = 28) -> None:
+    """Replace over-long categorical tick labels with an ellipsized version,
+    keeping the full value as the underlying category (hover shows it). Only on
+    string categories; numeric/temporal axes are left alone."""
+    if not fig.data:
+        return
+    cat_axis = "y" if widget.type == "hbar" else "x"
+    try:
+        cats = getattr(fig.data[0], cat_axis, None)
+    except Exception:
+        cats = None
+    if cats is None:
+        return
+    vals = [str(c) for c in cats]
+    if not any(len(v) > max_len for v in vals):
+        return
+    ticktext = [(v[: max_len - 1] + "…") if len(v) > max_len else v for v in vals]
+    upd = dict(tickmode="array", tickvals=list(cats), ticktext=ticktext)
+    if cat_axis == "y":
+        fig.update_yaxes(**upd)
+    else:
+        fig.update_xaxes(**upd)
 
 
 # ---------------------------------------------------------------------------

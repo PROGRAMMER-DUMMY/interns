@@ -165,6 +165,29 @@ def _display_dimensions(model: ConformedModel) -> list[tuple[str, int]]:
     return out
 
 
+_TEMPORAL_BUCKET_NAMES = {"month": "month", "quarter": "quarter", "year": "year"}
+
+
+def _trend_column(gold) -> tuple[str | None, str]:
+    """A (column, period) to drive a KPI card's period-over-period trend, or
+    (None, '') when the KPI has no time grain. Prefers a real Date/Datetime
+    column; falls back to a temporal BUCKET column (year/quarter/month) the KPI
+    grouped by. Period follows the bucket. Generic -- no domain name list."""
+    import polars as _pl
+    # 1. A genuine temporal column -> compare by quarter.
+    for c in gold.columns:
+        try:
+            if gold.schema.get(c) in (_pl.Date, _pl.Datetime):
+                return c, "quarter"
+        except Exception:
+            pass
+    # 2. A temporal bucket column (the KPI's own grain), compared at that grain.
+    for c in gold.columns:
+        if c.lower() in _TEMPORAL_BUCKET_NAMES:
+            return c, _TEMPORAL_BUCKET_NAMES[c.lower()]
+    return None, ""
+
+
 def _human(name: str) -> str:
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(name)).replace("_", " ").strip().title()
 
@@ -291,12 +314,15 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
 
         card = {"id": f"k_{tname}", "type": "kpi", "measure": card_measure,
                 "title": card_title, "subtitle": question, "width": span, "height": 150}
-        # Period-over-period trend when the KPI's gold carries a date column.
-        datecol = next((c for c in gold.columns
-                        if c.lower() in ("month", "servicedate", "service_date", "date")), None)
+        # Period-over-period trend (▲/▼ % vs prior). Generic temporal detection,
+        # not an RCM-shaped name list: any Date/Datetime column, OR a temporal
+        # BUCKET column (year/quarter/month) the KPI grouped by -- so a KPI whose
+        # gold is bucketed by year still shows a trend. Period granularity follows
+        # the bucket (year-bucket -> compare by year).
+        datecol, period = _trend_column(gold)
         if datecol:
             card["compare"] = f"{tname}.{datecol}"
-            card["compare_period"] = "quarter"
+            card["compare_period"] = period
         cards.append(card)
 
         # ONE compact analytics view (no per-KPI tabs): under each KPI card sits
@@ -547,15 +573,25 @@ def _kpi_breakdown_charts(tname, mslug, label, gold, cuts,
         if cut not in gold.columns:
             continue
         distinct = gold.get_column(cut).n_unique()
+        # Long category labels (procedure/diagnosis descriptions) are unreadable
+        # as rotated x-ticks on a VERTICAL bar -- they clip/overlap. A horizontal
+        # bar reads them naturally left-to-right. Detect from the actual values.
+        try:
+            _vals = gold.get_column(cut).cast(str, strict=False).drop_nulls().to_list()
+            long_labels = bool(_vals) and (
+                sum(len(v) for v in _vals[:20]) / min(len(_vals), 20)) > 16
+        except Exception:
+            long_labels = False
         common = {"id": f"c_{tname}_{_slug(cut)}", "measure": mslug,
                   "dimension": f"{tname}.{cut}",
                   "title": f"{label} by {_human(cut)}", "height": 320, "width": 6}
         if cut.lower() == "month":
             out.append({**common, "type": "line"})
-        elif distinct <= 5 and donut_budget > 0:
+        elif distinct <= 5 and donut_budget > 0 and not long_labels:
             out.append({**common, "type": "donut"})
             donut_budget -= 1
-        elif distinct > 12:
+        elif distinct > 12 or long_labels:
+            # Horizontal bar for high-cardinality OR long-label categories.
             out.append({**common, "type": "hbar", "limit": 12})
         else:
             out.append({**common, "type": "bar"})
@@ -604,6 +640,17 @@ def _kpi_panel_widgets(tname, mslug, label, measure_col, gold, panels) -> list[d
             continue
         seen.add(key)
         wtype = _CHART_TYPE_MAP.get(ct, "bar")
+        # A vertical bar with LONG category labels (procedure/diagnosis names)
+        # clips/overlaps its x-ticks. Switch a plain bar to a horizontal bar when
+        # the category values are long, so labels read left-to-right. Generic.
+        if wtype == "bar" and not color:
+            try:
+                _v = gold.get_column(x).cast(str, strict=False).drop_nulls().to_list()
+                if _v and (sum(len(s) for s in _v[:20]) / min(len(_v), 20)) > 16:
+                    wtype = "hbar"
+                    panel = {**panel, "limit": panel.get("limit") or 12}
+            except Exception:
+                pass
         w = {"id": f"p_{tname}_{i}", "type": wtype, "measure": mslug,
              "dimension": f"{tname}.{x}",
              "title": _clean_panel_title(panel.get("title"), measure_col, label, x),

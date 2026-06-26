@@ -237,14 +237,27 @@ class QueryEngine:
             df = _apply_filters(self.model.assemble(base, ref_fields), filters)
 
             col = pl.col(widget.compare)
-            if not df.schema[widget.compare].is_temporal():
-                col = col.str.to_datetime(strict=False)
-            if widget.compare_period == "year":
-                pexpr = col.dt.year()
-            elif widget.compare_period == "quarter":
-                pexpr = col.dt.year() * 10 + col.dt.quarter()
+            dtype = df.schema[widget.compare]
+            if dtype.is_temporal():
+                if widget.compare_period == "year":
+                    pexpr = col.dt.year()
+                elif widget.compare_period == "quarter":
+                    pexpr = col.dt.year() * 10 + col.dt.quarter()
+                else:
+                    pexpr = col.dt.year() * 100 + col.dt.month()
+            elif dtype.is_numeric():
+                # The compare column is ALREADY a period bucket (e.g. a `year`
+                # column of ints): use it directly as the period.
+                pexpr = col
             else:
-                pexpr = col.dt.year() * 100 + col.dt.month()
+                # A string date -> parse, then bucket by the requested period.
+                col = col.str.to_datetime(strict=False)
+                if widget.compare_period == "year":
+                    pexpr = col.dt.year()
+                elif widget.compare_period == "quarter":
+                    pexpr = col.dt.year() * 10 + col.dt.quarter()
+                else:
+                    pexpr = col.dt.year() * 100 + col.dt.month()
 
             df = df.with_columns(pexpr.alias("_period")).drop_nulls("_period")
             periods = sorted(df.get_column("_period").unique().to_list())
