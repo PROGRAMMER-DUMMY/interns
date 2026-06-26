@@ -286,10 +286,35 @@ class KPIExecutionHarness:
             if record.row_count == 0:
                 record.warnings.append(f"final result view `{result_view}` returned zero rows")
             record.status = "passed"
+            # Materialize the verified result to gold as a Delta table when the KPI
+            # has no gold yet (e.g. derived-formula KPIs the Polars generator skips,
+            # so they otherwise never reach the dashboard). The result is already
+            # validated above; this just persists the SQL-path output. Non-fatal.
+            self._maybe_write_gold(conn, kpi_id, result_view)
             return record
         except Exception as exc:
             record.errors.append(str(exc))
             return record
+
+    def _maybe_write_gold(self, conn, kpi_id: str, result_view: str) -> None:
+        """Persist a verified KPI result view to gold as a Delta table when no
+        gold exists yet for this KPI. Lets KPIs the Polars generator skips
+        (derived-formula self-joins) still reach the dashboard via the SQL path.
+        Never raises -- gold materialization must not fail the harness."""
+        try:
+            gold_dir = self.layout.gold_dir / f"{kpi_id}_results"
+            if gold_dir.exists():
+                return  # a Polars/other writer already produced this gold
+            import polars as pl
+            from deltalake import write_deltalake
+
+            df = conn.execute(f'SELECT * FROM "{result_view}"').pl()
+            if df.height == 0:
+                return
+            gold_dir.parent.mkdir(parents=True, exist_ok=True)
+            write_deltalake(str(gold_dir), df.to_arrow(), mode="overwrite")
+        except Exception:
+            return
 
     def _semantic_errors(self, kpi_id: str, sql: str) -> list[str]:
         kpi = self._kpi_registry_by_id().get(kpi_id)

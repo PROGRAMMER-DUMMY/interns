@@ -521,7 +521,13 @@ class PolarsKPIGenerator:
         lines.append(
             "lf = lf.group_by([" + ", ".join(group_exprs) + f"]).agg([{base}.alias(\"group_val\")])"
         )
-        if share.kind == "percent_of_group" and share.partition:
+        # A within-group share uses `.over(<partition>)` ONLY when the partition is
+        # a real grain dimension. The sentinel "all" (and any non-grain partition)
+        # means grand total -- mirror the SQL `OVER ()` form (plain .sum()), not a
+        # `.over("all")` that references a non-existent column.
+        grain_cols = {self._dim_out_name(d, band_width) for d in intent.dims}
+        if (share.kind == "percent_of_group" and share.partition
+                and share.partition in grain_cols):
             lines.append(
                 f'lf = lf.with_columns((pl.col("group_val") / pl.col("group_val").sum()'
                 f'.over("{share.partition}") * 100).alias("{share.alias}"))'
