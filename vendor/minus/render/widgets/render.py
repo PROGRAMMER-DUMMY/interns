@@ -62,9 +62,29 @@ def render_widget(widget: Widget, result: QueryResult, project: Project,
     return html.Div(header + [body] + extras, className="tile", style=style)
 
 
+def _crumb_label(dim: str, label) -> str:
+    """Human label for a drill step -- a temporal grain shows a clean period
+    (2011, Q1 2011, Jan 2011) rather than a raw bucket date."""
+    grain = (dim or "").lower()
+    if grain in ("year", "quarter", "month", "day"):
+        try:
+            d = _as_date(label)
+            if d is not None:
+                if grain == "year":
+                    return str(d.year)
+                if grain == "quarter":
+                    return f"Q{(d.month - 1) // 3 + 1} {d.year}"
+                if grain == "month":
+                    return d.strftime("%b %Y")
+                return d.strftime("%d %b %Y")
+        except Exception:
+            pass
+    return str(label)
+
+
 def drill_crumb(page_id: str, wid: str, trail: list, next_dim: str) -> html.Div:
     """Breadcrumb + 'up' control for a drilled-down chart."""
-    steps = [html.Span(f"{_short(dim)}: {label}", className="drill-step")
+    steps = [html.Span(f"{_short(dim)}: {_crumb_label(dim, label)}", className="drill-step")
              for dim, label in trail]
     return html.Div(className="drill-crumb", children=[
         html.Button("↑ up", id={"kind": "drill-up", "page": page_id, "wid": wid},
@@ -210,6 +230,23 @@ def build_chart_figure(widget, result, project, *, highlight=None, colors=None) 
         fn = px.area if t == "area" else px.line
         fig = fn(d, x=dim, y=primary, color=breakdown, labels=labels,
                  markers=(t == "line"), **seq)
+        # Faint background bars (the same per-period values) sit BEHIND a
+        # single-series trend line: they give the eye a "block per period" to read
+        # magnitude and -- when the chart is temporally drillable -- a clickable
+        # target to drill into that period. Light theme (low-opacity accent),
+        # drawn first so the line stays on top.
+        if t == "line" and not breakdown and primary:
+            try:
+                xs = d.get_column(dim).to_list()
+                ys = d.get_column(primary).cast(pl.Float64, strict=False).to_list()
+                bg = go.Bar(x=xs, y=ys, name="", marker_color=_rgba(colors["accent"], 0.12),
+                            marker_line_width=0, hoverinfo="skip", showlegend=False)
+                fig.add_trace(bg)
+                # Put the bar trace first (behind) and keep the line on top.
+                fig.data = (fig.data[-1],) + fig.data[:-1]
+            except Exception:
+                pass
+        _format_temporal_axis(fig, dim, d)
         _flag_incomplete_tail(fig, d, dim, project, colors)
     elif t in ("pie", "donut"):
         fig = px.pie(df, values=primary, names=dim, hole=0.55 if t == "donut" else 0,
@@ -440,6 +477,33 @@ def _value_grade(vals: list, accent: str, *, lo: float = 0.45, hi: float = 1.0) 
         bb = round(b * t + 255 * (1 - t))
         out.append(f"rgb({rr},{gg},{bb})")
     return out
+
+
+def _format_temporal_axis(fig, dim: str, d) -> None:
+    """Make a temporal-grain x-axis read cleanly: a `year` column shows "2011",
+    `quarter` shows "Q1 2011", `month` shows "Jan 2011", `day` shows "05 Jan 2011"
+    -- instead of a raw bucket date like 2011-01-01. Detected from the dimension
+    column name; no-op for non-temporal axes."""
+    grain = (dim or "").split(".")[-1].lower()
+    if grain not in ("year", "quarter", "month", "day"):
+        return
+    try:
+        xs = d.get_column(dim).to_list()      # frame uses the FULL field name
+    except Exception:
+        return
+    if not xs:
+        return
+    if grain == "quarter":
+        # No %q in d3 time format -> build explicit tick labels.
+        def _q(v):
+            try:
+                return f"Q{(v.month - 1) // 3 + 1} {v.year}"
+            except Exception:
+                return str(v)
+        fig.update_xaxes(tickmode="array", tickvals=xs, ticktext=[_q(v) for v in xs])
+        return
+    fmt = {"year": "%Y", "month": "%b %Y", "day": "%d %b %Y"}[grain]
+    fig.update_xaxes(tickformat=fmt)
 
 
 def _as_date(v):

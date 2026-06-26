@@ -220,6 +220,41 @@ def _apply_hero_hierarchy(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 _TEMPORAL_BUCKET_NAMES = {"month": "month", "quarter": "quarter", "year": "year"}
+# Grain ladder, coarse -> fine, for the drillable trend.
+_TEMPORAL_LADDER = ("year", "quarter", "month", "day")
+_TREND_MIN_BLOCKS = 2          # a grain needs >=2 periods to be a useful start
+_TREND_MAX_START_BLOCKS = 40   # too many blocks at the start = unreadable; go coarser
+
+
+def _temporal_drill(model, table: str) -> tuple[str, list[str]]:
+    """Pick (start_grain, drill_path) for the lead trend from the grains actually
+    present in the conformed frame. Start at the coarsest grain that has a
+    readable number of blocks (>=2, not hundreds) so each period is a clickable
+    bar; the drill path is that grain plus every finer grain present. Falls back
+    to 'month' (always derived) when nothing else qualifies. Generic."""
+    frame = getattr(model, "frame", None)
+    if frame is None:
+        return "month", ["month"]
+    present = [g for g in _TEMPORAL_LADDER if g in frame.columns]
+    if not present:
+        return "month", ["month"]
+    counts = {}
+    for g in present:
+        try:
+            counts[g] = frame.get_column(g).n_unique()
+        except Exception:
+            counts[g] = 0
+    # Coarsest grain with >=2 blocks; prefer one that isn't absurdly dense.
+    start = None
+    for g in present:                       # coarse -> fine
+        if counts.get(g, 0) >= _TREND_MIN_BLOCKS:
+            start = g
+            if counts[g] <= _TREND_MAX_START_BLOCKS:
+                break
+    if start is None:
+        return "month", ["month"]
+    drill = present[present.index(start):]  # start grain + every finer grain
+    return start, drill
 
 
 def _trend_column(gold) -> tuple[str | None, str]:
@@ -973,6 +1008,11 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
     row = row[:4]
 
     temporal = "month" if any(d == "month" for d, _ in dims) else None
+    # Temporal DRILL ladder for the lead trend: start at the coarsest grain that
+    # has enough blocks to read (so each period is a big, clickable bar behind the
+    # line), and drill finer on click -- year -> quarter -> month -> day. Only
+    # grains actually present with >=2 distinct values are used.
+    trend_start, trend_drill = _temporal_drill(model, table)
     # Cuts ranked by how much they explain the primary measure -- the most
     # decisive dimension leads (drives x, breakdown, drill order, detail tables).
     ranked_cats = ranked_names(model.frame, cat_names, measure=primary_col,
@@ -998,10 +1038,16 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
                       "title": f"{plabel} (bars) & {rate_m['label']} (line) over Month",
                       "width": 12, "height": 410, "tab": "Trends"})
         else:
-            A.append({"id": "a_trend", "type": "line", "measure": primary,
-                      "dimension": f"{table}.{temporal}",
-                      "title": f"{plabel} over Month", "width": 12,
-                      "height": 410, "tab": "Trends"})
+            # Drillable trend: starts coarse (e.g. Year), light bars behind the
+            # line mark each period, click a period to drill finer (-> quarter ->
+            # month -> day) with an "up" crumb. Reuses the dimension-drill machinery.
+            w = {"id": "a_trend", "type": "line", "measure": primary,
+                 "dimension": f"{table}.{trend_start}",
+                 "title": f"{plabel} over {_human(trend_start)}", "width": 12,
+                 "height": 410, "tab": "Trends"}
+            if len(trend_drill) > 1:
+                w["drill_path"] = trend_drill
+            A.append(w)
         if facet_cat:
             # Judge by cardinality, don't hardcode: a few series read best
             # OVERLAID on one line chart (direct comparison); many series would

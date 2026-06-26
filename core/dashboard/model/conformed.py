@@ -186,9 +186,23 @@ def _derive_columns(df: pl.DataFrame) -> pl.DataFrame:
     if temporal is None:
         return df
     try:
-        return df.with_columns(
-            pl.col(temporal).dt.truncate("1mo").cast(pl.Date).alias("month")
-        )
+        # A small ladder of temporal grain buckets (each a truncated Date, so all
+        # rows in a period share one value -> filtering a coarse grain keeps the
+        # whole period, and the next-finer grain re-buckets it). This is what lets
+        # a trend chart DRILL: click a year -> its quarters -> its months -> days.
+        col = pl.col(temporal)
+        # A tz-aware datetime truncated then cast to Date shifts to UTC and lands
+        # on the wrong calendar day (e.g. Jan 1 Asia/Calcutta -> Dec 31 UTC). Drop
+        # the zone first so the LOCAL calendar date is preserved.
+        _dt = df.schema.get(temporal)
+        if isinstance(_dt, pl.Datetime) and getattr(_dt, "time_zone", None):
+            col = col.dt.replace_time_zone(None)
+        return df.with_columns([
+            col.dt.truncate("1y").cast(pl.Date).alias("year"),
+            col.dt.truncate("1q").cast(pl.Date).alias("quarter"),
+            col.dt.truncate("1mo").cast(pl.Date).alias("month"),
+            col.dt.truncate("1d").cast(pl.Date).alias("day"),
+        ])
     except Exception:
         return df
 
