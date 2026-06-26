@@ -235,6 +235,113 @@ def _distinct_keywords(titles: dict[str, str]) -> dict[str, str]:
             for kid, seen in ordered.items()}
 
 
+# Generic descriptive-column names a dimension table uses for its human label.
+# No domain words -- these are universal "what is this row called" columns.
+_DIM_NAME_COLUMNS = ("name", "description", "label", "title", "display_name")
+
+
+def _build_fk_name_maps(layout) -> dict[str, dict[str, str]]:
+    """Map each foreign-key column -> {fk_value: dimension_name}, from PROVEN
+    relationships whose parent table has a descriptive column. Lets the dashboard
+    replace a UUID/code FK with its readable name. Generic; empty on any missing
+    evidence so it never breaks generation."""
+    import json as _json
+
+    out: dict[str, dict[str, str]] = {}
+    try:
+        from core.dashboard.model.layers import list_bronze_tables, read_bronze
+        from core.medallion.design_naming import logical_entity_from_path
+
+        contracts_path = (layout.contracts_dir / "relationship_contracts.json")
+        if not contracts_path.exists():
+            return out
+        contracts = _json.loads(contracts_path.read_text(encoding="utf-8"))
+        bronze_tables = list(list_bronze_tables(layout))
+    except Exception:
+        return out
+
+    def _bronze_for(entity: str):
+        # Match the bronze table for a logical entity. Bronze names vary across
+        # medallion variants: "<entity>__<source>", the plural CSV stem
+        # ("payers"), or the singular. Match on the normalized stem.
+        e = entity.rstrip("s").lower()
+        for bt in bronze_tables:
+            stem = bt.split("__", 1)[0].rstrip("s").lower()
+            if stem == e:
+                return bt
+        return entity
+    for r in contracts.get("relationships") or []:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("state")) not in ("proven_data_model", "user_confirmed"):
+            continue
+        try:
+            if float(r.get("confidence") or 0) < 0.9:
+                continue
+        except (TypeError, ValueError):
+            continue
+        fk_col = str(r.get("left_column") or "")
+        parent_key = str(r.get("right_column") or "")
+        parent_entity = logical_entity_from_path(str(r.get("right_dataset") or ""))
+        if not fk_col or not parent_key or not parent_entity:
+            continue
+        try:
+            dim = read_bronze(layout, _bronze_for(parent_entity))
+        except Exception:
+            dim = None
+        if dim is None:
+            continue
+        name_col = next((c for c in dim.columns
+                         if c.lower() in _DIM_NAME_COLUMNS), None)
+        key_col = next((c for c in dim.columns if c == parent_key), None) \
+            or next((c for c in dim.columns if c.lower() == parent_key.lower()), None)
+        if not name_col or not key_col:
+            continue
+        try:
+            mapping = {
+                str(k): str(v)
+                for k, v in zip(dim.get_column(key_col).to_list(),
+                                dim.get_column(name_col).to_list())
+                if k is not None and v is not None
+            }
+        except Exception:
+            mapping = {}
+        if mapping:
+            out[fk_col] = mapping
+    return out
+
+
+def _resolve_fk_names(gold, fk_name_maps: dict[str, dict[str, str]]):
+    """Replace any FK-coded column in a gold frame with its dimension name (so a
+    payer UUID becomes 'Medicare'). Only columns that are an exact FK match and
+    whose values look coded (no overlap with names) are remapped. No-op when no
+    map applies."""
+    import polars as _pl
+
+    if not fk_name_maps:
+        return gold
+    for col in gold.columns:
+        mapping = fk_name_maps.get(col)
+        if not mapping:
+            continue
+        try:
+            gold = gold.with_columns(
+                _pl.col(col).cast(_pl.Utf8, strict=False)
+                .replace(mapping, default=_pl.col(col).cast(_pl.Utf8, strict=False))
+                .alias(col)
+            )
+        except Exception:
+            # Older polars: fall back to a map_elements lookup.
+            try:
+                gold = gold.with_columns(
+                    _pl.col(col).cast(_pl.Utf8, strict=False)
+                    .map_elements(lambda v: mapping.get(str(v), v),
+                                  return_dtype=_pl.Utf8).alias(col))
+            except Exception:
+                pass
+    return gold
+
+
 def _kpi_artifacts(model: ConformedModel, fact_table: str,
                    fact_measures: list[dict[str, Any]], data_through=None):
     """Return (tables, measures, page, exports) for every gold KPI.
@@ -255,11 +362,17 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
     charts: list[dict[str, Any]] = []    # one lead chart per KPI, beside the row
     exports: dict[str, pl.DataFrame] = {}
 
+    # FK -> name lookup maps, built once from proven relationships: a cut that is
+    # a foreign key (e.g. encounters.PAYER = a UUID) is replaced with the parent
+    # dimension's descriptive NAME so charts read "Medicare", not the UUID.
+    fk_name_maps = _build_fk_name_maps(layout)
+
     infos = []  # (kpi_id, km, gold)
     for kpi_id in list_gold_kpis(layout):
         gold = read_gold(layout, kpi_id)
         if gold is None or gold.height == 0:
             continue
+        gold = _resolve_fk_names(gold, fk_name_maps)
         infos.append((kpi_id, build_kpi_model(layout, kpi_id, gold), gold))
 
     # Distinct, business-meaningful card names: card_label, disambiguated with a
