@@ -547,6 +547,7 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
                                             model.frame, fact_measures, sql_scope)
             if rerooted is not None:
                 hero = rerooted
+            hero["_kpi_id"] = kpi_id      # used to keep only hero KPIs' charts
             charts.append(hero)
 
     if not cards:
@@ -576,10 +577,22 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
     # demote the rest to a compact strip -- so a stakeholder sees what matters
     # first instead of 10 equal tiles. Small scorecards (RCM's 3) stay uniform.
     cards = _apply_hero_hierarchy(cards)
+    has_heroes = any((c.get("options") or {}).get("emphasis") == "hero" for c in cards)
+    # Density control: when the scorecard is large (hero hierarchy active), the
+    # KPIs page keeps only the HERO KPIs' lead charts -- a few large, readable
+    # charts with whitespace instead of a cramped wall of one-per-KPI tiles. The
+    # full per-KPI detail lives on the Analysis page. Small scorecards keep all.
+    if has_heroes:
+        hero_kids = {c["id"].replace("k_", "", 1) for c in cards
+                     if (c.get("options") or {}).get("emphasis") == "hero"}
+        kept = [w for w in charts if w.get("_kpi_id") in hero_kids]
+        charts = kept or charts
+    for w in charts:
+        w.pop("_kpi_id", None)
     # Justify each widget GROUP to the 12-col grid so no row is ragged. A full-
     # width (12) item is left as-is. Verified by the screener's layout-balance
-    # check. (Hero hierarchy already set widths for its two groups.)
-    if not any(c.get("options", {}).get("emphasis") == "hero" for c in cards):
+    # check. (Hero hierarchy already set widths for the card groups.)
+    if not has_heroes:
         _justify_widget_widths(cards)
     _justify_widget_widths(charts)
     page = {
