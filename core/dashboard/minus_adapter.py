@@ -211,7 +211,11 @@ def _apply_hero_hierarchy(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
         c["options"] = opts
         c["height"] = 170
     for c in secondary:
-        c["height"] = 132
+        c["height"] = 120
+        # The compact strip is cramped with the full question repeated under an
+        # already-clear label -- keep the question only on the spacious hero cards;
+        # the compact cards read as a clean label + number (+ delta).
+        c.pop("subtitle", None)
     _justify_widget_widths(heroes)      # e.g. 3 heroes -> [4,4,4]
     _justify_widget_widths(secondary)   # e.g. 7 -> [3,3,3,3,3,2,...]
     for c in cards:
@@ -263,18 +267,40 @@ def _trend_column(gold) -> tuple[str | None, str]:
     column; falls back to a temporal BUCKET column (year/quarter/month) the KPI
     grouped by. Period follows the bucket. Generic -- no domain name list."""
     import polars as _pl
-    # 1. A genuine temporal column -> compare by quarter.
-    for c in gold.columns:
-        try:
-            if gold.schema.get(c) in (_pl.Date, _pl.Datetime):
-                return c, "quarter"
-        except Exception:
-            pass
-    # 2. A temporal bucket column (the KPI's own grain), compared at that grain.
+    # 1. A column whose NAME is a known grain (year/quarter/month) -> that grain
+    # is the period (so a year-bucketed gold says "vs prev year", not "quarter").
     for c in gold.columns:
         if c.lower() in _TEMPORAL_BUCKET_NAMES:
             return c, _TEMPORAL_BUCKET_NAMES[c.lower()]
+    # 2. A generic Date/Datetime column -> INFER the period from the typical gap
+    # between sorted distinct values, so the label matches the real grain.
+    for c in gold.columns:
+        try:
+            if gold.schema.get(c) in (_pl.Date, _pl.Datetime):
+                return c, _infer_period(gold.get_column(c))
+        except Exception:
+            pass
     return None, ""
+
+
+def _infer_period(col) -> str:
+    """Guess a period label (year/quarter/month) from the median gap between
+    distinct dates in a temporal column. Generic -- no name assumptions."""
+    try:
+        vals = sorted(set(col.drop_nulls().to_list()))
+        if len(vals) < 2:
+            return "month"
+        gaps = [(b - a).days for a, b in zip(vals, vals[1:]) if (b - a).days > 0]
+        if not gaps:
+            return "month"
+        g = sorted(gaps)[len(gaps) // 2]      # median gap in days
+        if g >= 300:
+            return "year"
+        if g >= 80:
+            return "quarter"
+        return "month"
+    except Exception:
+        return "month"
 
 
 def _human(name: str) -> str:
@@ -579,9 +605,23 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
             # SQL, carried as overridable base_filters.
             sql_scope = _kpi_sql_scope(layout, kpi_id, list(model.frame.columns))
             rerooted = _reroot_hero_to_fact(hero, km, gold, fact_table,
-                                            model.frame, fact_measures, sql_scope)
+                                            model.frame, fact_measures, sql_scope,
+                                            project_measures=measures)
             if rerooted is not None:
                 hero = rerooted
+                # A re-rooted temporal line is now on the conformed fact (which has
+                # the full year/quarter/month/day ladder) -- make it DRILLABLE like
+                # the Analysis trend: click a period to drill into it.
+                if hero.get("type") == "line":
+                    xcol = hero["dimension"].split(".")[-1]
+                    if xcol in _TEMPORAL_LADDER:
+                        start, dpath = _temporal_drill(model, fact_table)
+                        # Re-root the line to the chosen start grain + ladder.
+                        hero["dimension"] = f"{fact_table}.{start}"
+                        if len(dpath) > 1:
+                            hero["drill_path"] = dpath
+                        base = (hero.get("title") or "").split(" over ")[0].strip()
+                        hero["title"] = f"{base} over {_human(start)}"
             hero["_kpi_id"] = kpi_id      # used to keep only hero KPIs' charts
             charts.append(hero)
 
@@ -681,8 +721,27 @@ def _apply_scope_filter(frame: pl.DataFrame, scope: dict[str, Any]) -> pl.DataFr
     return frame
 
 
+def _count_measure_for_kpi(km, fcols: list[str]) -> tuple[str, bool] | None:
+    """For a count/count-distinct KPI, the (fact_column, is_distinct) to count so
+    it can be reproduced on the row-grain fact. None for non-count metrics or when
+    the column isn't on the fact. count(*) -> count any present id-ish column."""
+    metric = (km.metric or "").lower().strip()
+    m = re.match(r"\s*count\s*\(\s*(distinct\s+)?(.+?)\s*\)", metric)
+    if not m:
+        return None
+    distinct = bool(m.group(1))
+    arg = m.group(2).strip()
+    if arg in ("*", "1"):
+        # count rows -> count any non-null column present on the fact.
+        col = _ci_col("Id", fcols) or (fcols[0] if fcols else None)
+        return (col, False) if col else None
+    col = _ci_col(arg, fcols)
+    return (col, distinct) if col else None
+
+
 def _reroot_hero_to_fact(hero, km, gold, fact_table, fact_frame,
-                         fact_measures, sql_scope=None) -> dict[str, Any] | None:
+                         fact_measures, sql_scope=None,
+                         project_measures=None) -> dict[str, Any] | None:
     """Re-source a KPI's gold-bound hero chart onto the row-grain conformed table
     so EVERY page slicer (gender, line of business, ...) can filter it -- but only
     when doing so PROVABLY reproduces the validated gold result.
@@ -736,6 +795,47 @@ def _reroot_hero_to_fact(hero, km, gold, fact_table, fact_frame,
         return None
 
     sub = _apply_scope_filter(fact_frame, scope)
+
+    # A count / count-distinct KPI (not additive, so no SUM measure reproduces it)
+    # -- reproduce it directly on the fact by counting the underlying column. This
+    # lets a temporal count KPI (encounters per year) re-root onto conformed and
+    # become DRILLABLE. Registers a count measure on the fact and points at it.
+    cnt = _count_measure_for_kpi(km, fcols)
+    if cnt is not None and fact_measures is not None:
+        col, distinct = cnt
+        agg = (pl.col(col).n_unique() if distinct else pl.col(col).count())
+        rec = sub.group_by(xf).agg(agg.cast(pl.Float64).round(2).alias("__m"))
+        rmap = {r[xf]: round(float(r["__m"]), 2) for r in rec.iter_rows(named=True)
+                if r["__m"] is not None}
+        # Counts are re-derived from the conformed (cleaned, joined) layer, which
+        # is the dashboard's accepted CHART source -- it can differ from the gold
+        # count by a hair (a dropped/deduped row). Accept a small RELATIVE match
+        # per period (<=1% and <=2 absolute) so the drillable trend is allowed; the
+        # headline CARD still shows the exact gold number (it reads gold, not this).
+        def _close(a: float, b: float) -> bool:
+            return abs(a - b) <= max(2.0, 0.01 * abs(b))
+        if gmap and all(_close(rmap.get(k, float("inf")), v)
+                        for k, v in gmap.items()):
+            mname = f"{fact_table}_{_slug(km.kpi_id)}_cnt"
+            if not any(m.get("name") == mname for m in project_measures or []):
+                (project_measures if project_measures is not None else []).append({
+                    "name": mname, "label": km.card_label,
+                    "agg": "count_distinct" if distinct else "count",
+                    "field": f"{fact_table}.{col}",
+                    "fmt": measure_fmt(km.metric, km.measure, km.y_format),
+                })
+            new = dict(hero)
+            new["measure"] = mname
+            new.pop("measures", None)
+            new["dimension"] = f"{fact_table}.{xf}"
+            if scope:
+                new["base_filters"] = {f"{fact_table}.{k}": v for k, v in scope.items()}
+            if hero.get("breakdown"):
+                bc = _ci_col(hero["breakdown"].split(".")[-1], fcols)
+                new["breakdown"] = f"{fact_table}.{bc}" if bc else None
+                if not bc:
+                    new.pop("breakdown", None)
+            return new
 
     # Try each additive sum measure on the fact; the first that reproduces gold wins.
     for fm in fact_measures:
@@ -1052,12 +1152,15 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
             # Judge by cardinality, don't hardcode: a few series read best
             # OVERLAID on one line chart (direct comparison); many series would
             # overplot, so fall back to small multiples (trellis) only then.
+            # Use the COARSE trend grain (e.g. Year), not raw months -- a multi-
+            # series line over ~120 months is unreadable spaghetti; ~12 years per
+            # series reads cleanly.
             facet_n = dict(dims).get(facet_cat, 99)
             sm_type = "line" if facet_n <= 7 else "small_multiples"
             A.append({"id": "a_sm", "type": sm_type, "measure": primary,
-                      "dimension": f"{table}.{temporal}",
+                      "dimension": f"{table}.{trend_start}",
                       "breakdown": f"{table}.{facet_cat}",
-                      "title": f"{plabel} over Month, by {_human(facet_cat)}",
+                      "title": f"{plabel} over {_human(trend_start)}, by {_human(facet_cat)}",
                       "width": 12, "height": 320, "tab": "Trends"})
 
     # ---- Breakdowns: stacked (2 cuts) + grouped + one donut ----
