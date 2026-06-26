@@ -298,7 +298,7 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
         name = km.card_label
         if label_freq.get(km.card_label, 0) > 1 and kws.get(kpi_id):
             name = f"{km.card_label} - {kws[kpi_id]}"
-        question = km.title if len(km.title) <= 95 else km.title[:92] + "..."
+        question = _card_subtitle(km.title)
 
         # A summed share = 100% (meaningless headline) -> show the largest
         # segment's share instead (max), with a clear label.
@@ -607,6 +607,21 @@ _CHART_TYPE_MAP = {
     "ranked_bar": "hbar", "donut": "donut", "pie": "pie",
     "heatmap": "heatmap", "scatter": "scatter",
 }
+
+
+def _card_subtitle(title: str, *, max_len: int = 64) -> str:
+    """A concise one-line card subtitle from the full business question. Keeps the
+    first clause (up to a comma) when that already conveys the gist, else a clean
+    truncation. The vendor shows the FULL question on hover, so nothing is lost.
+    Generic -- no domain assumptions."""
+    t = (title or "").strip()
+    if len(t) <= max_len:
+        return t
+    # Prefer cutting at the first clause boundary if it lands in a readable range.
+    head = t.split(",", 1)[0].strip()
+    if 16 <= len(head) <= max_len:
+        return head
+    return t[: max_len - 1].rstrip() + "…"
 
 
 def _clean_panel_title(raw: str, measure_col: str, label: str, x: str) -> str:
