@@ -517,9 +517,13 @@ def _maybe_log_value_axis(fig, t: str) -> None:
         if len(vals) < 3:
             return
         vals.sort()
+        mn = vals[0]                          # smallest positive bar
         med = vals[len(vals) // 2]
         mx = vals[-1]
-        if med > 0 and mx / med >= 25:        # heavy skew -> log helps
+        # Heavy skew -> log so small bars stay visible. Trigger on max/MIN (a tiny
+        # bar like Essex $1,150 vs Suffolk $2.12M = 1843x vanishes on a linear
+        # axis even when the median is moderate), OR max/median for broad skew.
+        if (mn > 0 and mx / mn >= 50) or (med > 0 and mx / med >= 25):
             if t == "hbar":
                 fig.update_xaxes(type="log")
             else:
