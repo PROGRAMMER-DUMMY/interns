@@ -439,11 +439,22 @@ def _check_identifier_axes(root: Path) -> list[str]:
     data_dir = root / "data"
     if not dash_dir.exists():
         return []
+    # Map table name -> its data FILE from project.yaml (the conformed fact table
+    # is named after the entity, e.g. "encounters", but stored in conformed.parquet
+    # -- a naive "<table>.parquet" misses it and the check silently no-ops).
+    table_file: dict[str, str] = {}
+    try:
+        proj = yaml.safe_load((root / "project.yaml").read_text(encoding="utf-8")) or {}
+        for t in proj.get("tables") or []:
+            if t.get("name") and t.get("file"):
+                table_file[t["name"]] = t["file"]
+    except Exception:
+        pass
     cache: dict[str, "pl.DataFrame"] = {}
 
     def _col_values(table: str, col: str):
         if table not in cache:
-            fp = data_dir / f"{table}.parquet"
+            fp = data_dir / table_file.get(table, f"{table}.parquet")
             if not fp.exists():
                 return None
             try:

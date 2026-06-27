@@ -69,6 +69,24 @@ class IdentifierAxisTests(unittest.TestCase):
         root = self._ws(["Medicare", "Medicaid", "Anthem", "Humana"])
         self.assertEqual(_check_identifier_axes(root), [])
 
+    def test_resolves_table_to_file_via_project(self):
+        # The conformed fact table is named after the entity but stored in
+        # conformed.parquet -- the check must read project.yaml's table->file map,
+        # not assume "<table>.parquet", or it silently skips conformed charts.
+        import polars as pl
+        d = Path(tempfile.mkdtemp())
+        (d / "config" / "dashboards").mkdir(parents=True)
+        (d / "data").mkdir()
+        (d / "project.yaml").write_text(yaml.safe_dump(
+            {"tables": [{"name": "encounters", "file": "conformed.parquet"}]}))
+        (d / "config" / "dashboards" / "kpis.yaml").write_text(yaml.safe_dump(
+            {"widgets": [{"type": "hbar", "dimension": "encounters.Id"}]}))
+        pl.DataFrame({"Id": ["dae98068-065e-3b1a-6d1a-f4f61f04f688",
+                             "a11cd94b-0bad-9bd3-ae14-ca23c01e77a8",
+                             "b22de05c-1cbe-0ce4-bf25-db34d12f88c9"]}) \
+            .write_parquet(d / "data" / "conformed.parquet")
+        self.assertTrue(_check_identifier_axes(d))   # must find conformed.parquet
+
 
 if __name__ == "__main__":
     unittest.main()
