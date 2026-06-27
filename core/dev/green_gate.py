@@ -120,6 +120,7 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_export_decimal_safety",
     "tests.test_layout_planner",
     "tests.test_dashboard_card_density",
+    "tests.test_screener_selftest",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
