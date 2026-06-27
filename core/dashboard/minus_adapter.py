@@ -648,9 +648,16 @@ def _kpi_overview_charts(model: ConformedModel, fact_table: str,
     return charts, slicers
 
 
+_CODE_VAL_RE = re.compile(
+    r"^(?:\d[\d.\-]{2,}"            # bare numeric code: 702927004, 12.3-4
+    r"|[A-Za-z]{2,8}[\-_]?\d{2,}"   # prefix+digits code: PAYOR4707, ICD10, ORG_12
+    r")$")
+
+
 def _is_coded_dim(frame, col: str) -> bool:
-    """True when a column's values are mostly bare numeric CODES (SNOMED, ICD, ZIP)
-    -- meaningless as a chart axis to a stakeholder. Sampled; generic."""
+    """True when a column's values are mostly CODES (numeric like SNOMED/ICD/ZIP,
+    or prefix+number like PAYOR4707) -- meaningless as a chart axis to a
+    stakeholder. Sampled; generic, no column-name assumptions."""
     try:
         import polars as _pl
         vals = (frame.get_column(col).cast(_pl.Utf8, strict=False)
@@ -659,8 +666,8 @@ def _is_coded_dim(frame, col: str) -> bool:
         return False
     if len(vals) < 3:
         return False
-    numeric = sum(1 for v in vals if re.fullmatch(r"\d[\d.\-]{2,}", str(v).strip()))
-    return numeric >= max(3, int(0.6 * len(vals)))
+    coded = sum(1 for v in vals if _CODE_VAL_RE.match(str(v).strip()))
+    return coded >= max(3, int(0.6 * len(vals)))
 
 
 def _is_long_label_dim(frame, col: str) -> bool:
