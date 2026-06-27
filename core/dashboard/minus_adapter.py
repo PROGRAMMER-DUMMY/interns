@@ -631,10 +631,16 @@ def _kpi_overview_charts(model: ConformedModel, fact_table: str,
         charts.append({"id": "ko_donut", "type": "donut", "measure": "record_count",
                        "dimension": f"{fact_table}.{low[-1]}",
                        "title": f"Records by {_human(low[-1])}", "height": 340})
-    # Drop None-valued keys (clean YAML) and justify widths.
+    # Drop None-valued keys (clean YAML).
     for w in charts:
         for k in [k for k, v in list(w.items()) if v is None]:
             w.pop(k)
+    # Size for READABILITY: 2 charts per row (width 6) so each is large, not a
+    # cramped 4-across sliver; a trailing odd chart spans full width. Taller, too.
+    for i, w in enumerate(charts):
+        last_odd = (i == len(charts) - 1) and (len(charts) % 2 == 1)
+        w["width"] = 12 if last_odd else 6
+        w["height"] = 360
     # Slicers: dimensions the charts share, low-cardinality, most-decisive first.
     slicers = [{"id": f"kf_{_slug(c)}", "field": f"{fact_table}.{c}",
                 "label": _human(c), "type": "multi"}
@@ -889,12 +895,11 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
             w.pop("_kpi_id", None)
         hero_cards = _select_hero_cards(cards)   # reads + strips _hero_score
         _justify_widget_widths(hero_cards)
-        _justify_widget_widths(overview_charts)
+        # overview charts already carry 2-per-row widths (don't re-justify).
         cards, charts = hero_cards, overview_charts
         page_filters = overview_slicers
-        desc = ("The few headline KPIs lead; the charts below are live -- click "
-                "any bar/period to cross-filter every chart and drill in, then "
-                "'↑ up' to go back." + _through_note(data_through))
+        desc = ("Click any bar/period to cross-filter and drill every chart; "
+                "'↑ up' resets." + _through_note(data_through))
     else:
         cards, charts = _tier_kpis(cards, charts)   # justifies card groups
         _justify_widget_widths(charts)
