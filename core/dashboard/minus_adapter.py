@@ -198,45 +198,73 @@ def _justify_widget_widths(widgets: list[dict[str, Any]]) -> None:
         w["width"] = width
 
 
-# Promote heroes only when the scorecard is dense enough that hierarchy helps; a
-# small scorecard (e.g. 3 KPIs) reads fine as equal tiles and shouldn't change.
-_HERO_MIN_CARDS = 6
-_HERO_MAX = 3
+# Tiered scorecard: only the few most impactful single-number KPIs are text cards
+# (Miller's Law -- a dozen bare numbers overwhelm); the rest become charts. Keep
+# all-as-cards for a small scorecard, where a few tiles read fine.
+_TIER_MIN_KPIS = 6          # below this, show every KPI as a card (small dashboard)
+_TIER_TEXT_MAX = 5          # never more than 5 headline numbers
+_TIER_TEXT_MIN = 3
 
 
-def _apply_hero_hierarchy(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Split KPI cards into a prominent HERO row + a compact secondary strip and
-    return them reordered (heroes first). Heroes are the highest ``_hero_score``
-    cards (clean single-number stories, ideally with a trend), capped at
-    ``_HERO_MAX``; they get ``options.emphasis='hero'`` and a wider span. Each
-    group is justified independently so neither row is ragged. No-op (uniform)
-    for small scorecards. The transient ``_hero_score`` key is stripped."""
-    if len(cards) < _HERO_MIN_CARDS:
+def _tier_kpis(cards: list[dict[str, Any]],
+               charts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]],
+                                                       list[dict[str, Any]]]:
+    """Split KPIs into a Tier-1 headline row (3-5 most impactful single-number
+    KPIs as text cards) and a Tier-2 chart grid (every other KPI as its own
+    interactive chart). Returns (text_cards, chart_widgets). Each KPI shows in
+    exactly one tier, so nothing is dropped: a KPI chosen for text shows its card;
+    everyone else shows their chart (falling back to the card if it has none)."""
+    chart_by_kpi: dict[str, dict[str, Any]] = {}
+    for w in charts:
+        chart_by_kpi.setdefault(w.get("_kpi_id"), w)
+
+    def _kid(card) -> str:
+        return card["id"].replace("k_", "", 1)
+
+    # Small scorecard: keep every KPI as a card (+ all charts), uniform.
+    if len(cards) < _TIER_MIN_KPIS:
         for c in cards:
             c.pop("_hero_score", None)
-        return cards
-    ordered = sorted(
-        enumerate(cards), key=lambda it: (-it[1].get("_hero_score", 0), it[0])
-    )
-    hero_ids = {id(it[1]) for it in ordered[:_HERO_MAX]}
-    heroes = [c for c in cards if id(c) in hero_ids]
-    secondary = [c for c in cards if id(c) not in hero_ids]
-    for c in heroes:
-        opts = dict(c.get("options") or {})
-        opts["emphasis"] = "hero"
-        c["options"] = opts
-        c["height"] = 170
-    for c in secondary:
-        c["height"] = 120
-        # The compact strip is cramped with the full question repeated under an
-        # already-clear label -- keep the question only on the spacious hero cards;
-        # the compact cards read as a clean label + number (+ delta).
-        c.pop("subtitle", None)
-    _justify_widget_widths(heroes)      # e.g. 3 heroes -> [4,4,4]
-    _justify_widget_widths(secondary)   # e.g. 7 -> [3,3,3,3,3,2,...]
-    for c in cards:
+        for w in charts:
+            w.pop("_kpi_id", None)
+        _justify_widget_widths(cards)
+        return cards, charts
+
+    # Pick the headline text cards: highest impact score (clean number + trend;
+    # ranking/distribution KPIs score low and fall to the chart tier where they
+    # belong). Aim ~40% of KPIs, clamped to [3, 5].
+    text_n = min(_TIER_TEXT_MAX, max(_TIER_TEXT_MIN, round(len(cards) * 0.4)))
+    by_score = sorted(cards, key=lambda c: -c.get("_hero_score", 0))
+    text_kids = {_kid(c) for c in by_score[:text_n]}
+
+    hero_cards: list[dict[str, Any]] = []      # prominent headline numbers (<=5)
+    compact_cards: list[dict[str, Any]] = []   # irreducible scalars w/ no chart
+    chart_widgets: list[dict[str, Any]] = []
+    for c in cards:                       # preserve original (importance) order
+        kid = _kid(c)
         c.pop("_hero_score", None)
-    return heroes + secondary
+        ch = chart_by_kpi.get(kid)
+        if kid in text_kids:
+            opts = dict(c.get("options") or {})
+            opts["emphasis"] = "hero"
+            c["options"] = opts
+            c["height"] = 168
+            hero_cards.append(c)
+        elif ch is not None:              # chartable KPI -> chart tier
+            ch["height"] = 340
+            chart_widgets.append(ch)
+        else:                             # scalar with no chart -> small tile
+            c.pop("subtitle", None)
+            c["height"] = 118
+            compact_cards.append(c)
+    for w in chart_widgets:
+        w.pop("_kpi_id", None)
+    # Justify the hero row and (any) compact-scalar row independently, then stack:
+    # prominent headlines first, small leftover numbers next, charts handled by the
+    # caller. Keeps the headline tier to <=5 while never dropping a KPI.
+    _justify_widget_widths(hero_cards)
+    _justify_widget_widths(compact_cards)
+    return hero_cards + compact_cards, chart_widgets
 
 
 _TEMPORAL_BUCKET_NAMES = {"month": "month", "quarter": "quarter", "year": "year"}
@@ -640,6 +668,16 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
                         hero["title"] = f"{base} over {_human(start)}"
             hero["_kpi_id"] = kpi_id      # used to keep only hero KPIs' charts
             charts.append(hero)
+        else:
+            # Scalar KPI (no breakdown to chart): synthesize a drillable TREND on
+            # the conformed fact (the measure over time) so it can move to the
+            # chart tier instead of crowding the headline row. Only when a fact
+            # measure provably reproduces the KPI's total.
+            tr = _synth_scalar_trend(km, gold, fact_table, model,
+                                     fact_measures, measures)
+            if tr is not None:
+                tr["_kpi_id"] = kpi_id
+                charts.append(tr)
 
     if not cards:
         return tables, measures, None, exports
@@ -663,28 +701,12 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
         if max(g.get_column(col).n_unique() for g in golds) <= 40:
             kpi_filters.append({"id": f"kf_{_slug(col)}", "field": col,
                                 "label": _human(col), "type": "multi"})
-    # Visual hierarchy: with enough cards to feel dense, promote the top few
-    # (clean single-number stories with a trend) to a prominent HERO row and
-    # demote the rest to a compact strip -- so a stakeholder sees what matters
-    # first instead of 10 equal tiles. Small scorecards (RCM's 3) stay uniform.
-    cards = _apply_hero_hierarchy(cards)
-    has_heroes = any((c.get("options") or {}).get("emphasis") == "hero" for c in cards)
-    # Density control: when the scorecard is large (hero hierarchy active), the
-    # KPIs page keeps only the HERO KPIs' lead charts -- a few large, readable
-    # charts with whitespace instead of a cramped wall of one-per-KPI tiles. The
-    # full per-KPI detail lives on the Analysis page. Small scorecards keep all.
-    if has_heroes:
-        hero_kids = {c["id"].replace("k_", "", 1) for c in cards
-                     if (c.get("options") or {}).get("emphasis") == "hero"}
-        kept = [w for w in charts if w.get("_kpi_id") in hero_kids]
-        charts = kept or charts
-    for w in charts:
-        w.pop("_kpi_id", None)
-    # Justify each widget GROUP to the 12-col grid so no row is ragged. A full-
-    # width (12) item is left as-is. Verified by the screener's layout-balance
-    # check. (Hero hierarchy already set widths for the card groups.)
-    if not has_heroes:
-        _justify_widget_widths(cards)
+    # Tiered scorecard (executive-dashboard convention, Miller's Law): only the
+    # 3-5 MOST IMPACTFUL single-number KPIs sit up top as text cards; every other
+    # KPI is shown as its own interactive, drillable CHART below. So a stakeholder
+    # reads "are we on track?" from a few headlines, then explores the rest
+    # visually -- instead of scanning 10 bare numbers. Small scorecards keep all.
+    cards, charts = _tier_kpis(cards, charts)   # justifies card groups internally
     _justify_widget_widths(charts)
     page = {
         "id": "kpis", "title": "KPIs", "order": 5,
@@ -735,6 +757,73 @@ def _apply_scope_filter(frame: pl.DataFrame, scope: dict[str, Any]) -> pl.DataFr
         else:
             frame = frame.filter(pl.col(col) == val)
     return frame
+
+
+def _synth_scalar_trend(km, gold, fact_table, model, fact_measures,
+                        project_measures) -> dict[str, Any] | None:
+    """A drillable TREND line for a scalar KPI (no chartable breakdown), sourced
+    from the conformed fact: the KPI's measure over the temporal grain ladder.
+    Returns the widget, or None when no fact measure reproduces the KPI total (so
+    the KPI stays a headline card rather than showing a fabricated trend)."""
+    import polars as _pl
+    frame = getattr(model, "frame", None)
+    if frame is None:
+        return None
+    fcols = list(frame.columns)
+    start, dpath = _temporal_drill(model, fact_table)
+    if start not in fcols:
+        return None
+    try:
+        gtotal = round(float(gold.get_column(km.measure).sum()), 2)
+    except Exception:
+        return None
+    if not gtotal:
+        return None
+
+    def _rel_ok(a: float, b: float) -> bool:
+        return abs(a - b) <= max(2.0, 0.01 * abs(b))
+
+    measure_name = None
+    # 1. count / count-distinct KPI -> count the underlying column on the fact.
+    cnt = _count_measure_for_kpi(km, fcols)
+    if cnt is not None:
+        col, distinct = cnt
+        try:
+            tot = float(frame.get_column(col).n_unique() if distinct
+                        else frame.get_column(col).drop_nulls().len())
+        except Exception:
+            tot = None
+        if tot is not None and _rel_ok(tot, gtotal):
+            measure_name = f"{fact_table}_{_slug(km.kpi_id)}_cnt"
+            if not any(m.get("name") == measure_name for m in project_measures or []):
+                project_measures.append({
+                    "name": measure_name, "label": km.card_label,
+                    "agg": "count_distinct" if distinct else "count",
+                    "field": f"{fact_table}.{col}",
+                    "fmt": measure_fmt(km.metric, km.measure, km.y_format)})
+    # 2. additive sum KPI -> a matching sum measure already on the fact.
+    if measure_name is None:
+        for fm in fact_measures or []:
+            if fm.get("agg") != "sum" or not fm.get("field"):
+                continue
+            src = _ci_col(fm["field"].split(".")[-1], fcols)
+            if src is None:
+                continue
+            try:
+                tot = float(frame.get_column(src).sum())
+            except Exception:
+                continue
+            if _rel_ok(tot, gtotal):
+                measure_name = fm["name"]
+                break
+    if measure_name is None:
+        return None
+    w = {"id": f"t_{km.kpi_id}", "type": "line", "measure": measure_name,
+         "dimension": f"{fact_table}.{start}",
+         "title": f"{km.card_label} over {_human(start)}", "height": 340}
+    if len(dpath) > 1:
+        w["drill_path"] = dpath
+    return w
 
 
 def _count_measure_for_kpi(km, fcols: list[str]) -> tuple[str, bool] | None:

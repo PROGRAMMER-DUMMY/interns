@@ -256,6 +256,10 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
     # trailing gaps, no overflow). The CLI both DECIDES the layout (planner) and
     # VERIFIES it here, so a differently-shaped workspace can't ship a broken grid.
     semantic_findings += _check_layout_balance(minus_root(layout))
+    # Card-density: an executive scorecard must lead with a FEW headline numbers
+    # (Miller's Law) and show the rest as charts -- a wall of bare KPI cards
+    # overwhelms. Flag a page with too many prominent text cards / no charts.
+    semantic_findings += _check_kpi_card_density(minus_root(layout))
 
     ok = all(f.ok for f in findings) and not palette_findings and not semantic_findings
     report = {
@@ -372,6 +376,41 @@ def _check_layout_balance(root: Path) -> list[str]:
         for tab, widths in by_tab.items():
             for f in layout_findings(widths):
                 findings.append(f"{path.stem}/{tab}: {f}")
+    return findings
+
+
+def _check_kpi_card_density(root: Path) -> list[str]:
+    """An executive scorecard must lead with a FEW headline numbers and show the
+    rest as charts. Flag the KPIs page when it has too many prominent (hero) text
+    cards (> 5), or is all bare numbers with no chart while carrying many KPIs.
+    Reads the emitted dashboard YAML; generic across workspaces."""
+    import yaml
+
+    findings: list[str] = []
+    path = root / "config" / "dashboards" / "kpis.yaml"
+    if not path.exists():
+        return []
+    try:
+        dash = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+    widgets = dash.get("widgets") or []
+    kpi_cards = [w for w in widgets if w.get("type") == "kpi"]
+    charts = [w for w in widgets
+              if w.get("type") not in ("kpi", "table") and w.get("type")]
+    heroes = [w for w in kpi_cards
+              if (w.get("options") or {}).get("emphasis") == "hero"]
+    # Prominent headline numbers must stay <= 5 (Miller's Law).
+    prominent = heroes or kpi_cards          # if none flagged hero, all count
+    if len(prominent) > 5:
+        findings.append(
+            f"kpis: {len(prominent)} prominent KPI text cards (> 5) -- lead with "
+            "<=5 headline numbers and show the rest as charts")
+    # Many KPIs but no charts = a wall of numbers.
+    if len(kpi_cards) >= 6 and not charts:
+        findings.append(
+            f"kpis: {len(kpi_cards)} KPI cards and 0 charts -- supporting KPIs "
+            "should be shown as interactive charts, not all as bare numbers")
     return findings
 
 
