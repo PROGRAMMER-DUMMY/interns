@@ -1204,17 +1204,15 @@ def _analysis_page(model: ConformedModel, measures, dims) -> dict[str, Any]:
         A.append(w)
     if group_cat and facet_cat and group_cat != facet_cat:
         # A grouped bar across a SKEWED category (one race/payer holds most of the
-        # measure) squishes every other group to an invisible sliver. When that
-        # happens, render the two cuts as a HEATMAP instead -- every cell is
-        # visible by color regardless of magnitude, so the small categories read.
-        skew = _measure_concentration(model, group_cat, primary_col)
-        g_type = "heatmap" if skew > 0.45 else "bar"
-        A.append({"id": "a_group", "type": g_type, "measure": primary,
+        # measure) squishes every other group to an invisible sliver. Rather than
+        # change the chart type, the renderer auto-applies a LOG value axis when it
+        # detects this skew -- so the small bars stay visible AND comparable while
+        # the chart stays a familiar bar (data labels still show exact values).
+        A.append({"id": "a_group", "type": "bar", "measure": primary,
                   "dimension": f"{table}.{group_cat}", "breakdown": f"{table}.{facet_cat}",
                   "title": f"{plabel} by {_human(group_cat)} x {_human(facet_cat)}",
                   "width": 6, "height": 340, "tab": "Breakdowns",
-                  "drill_path": ([] if g_type == "heatmap"
-                                 else _drill(group_cat, {group_cat, facet_cat}))})
+                  "drill_path": _drill(group_cat, {group_cat, facet_cat})})
     if donut_cat:
         A.append({"id": "a_donut", "type": "donut", "measure": "record_count",
                   "dimension": f"{table}.{donut_cat}",

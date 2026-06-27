@@ -340,6 +340,14 @@ def build_chart_figure(widget, result, project, *, highlight=None, colors=None) 
 
     _style(fig, widget, colors)
 
+    # Skew rescue: when a bar chart's values span orders of magnitude (one
+    # category dominates), a linear axis squishes the small bars to invisible
+    # slivers. Switch the VALUE axis to LOG so every bar is visible and still
+    # ordered by size -- data labels keep the exact numbers honest. Not for
+    # stacked bars (stacking is additive -> log would misrepresent the totals).
+    if t in ("bar", "hbar"):
+        _maybe_log_value_axis(fig, t)
+
     # Combo: a right-hand secondary axis for the line measure + a legend.
     if t == "combo":
         fig.update_layout(
@@ -477,6 +485,41 @@ def _value_grade(vals: list, accent: str, *, lo: float = 0.45, hi: float = 1.0) 
         bb = round(b * t + 255 * (1 - t))
         out.append(f"rgb({rr},{gg},{bb})")
     return out
+
+
+def _maybe_log_value_axis(fig, t: str) -> None:
+    """Apply a LOG value axis to a bar chart whose values span orders of magnitude
+    (max >= ~25x the median positive value), so a dominant category doesn't squish
+    the rest into invisible slivers. Skips stacked bars (additive) and all-zero/
+    tiny ranges. y-axis for vertical bars, x-axis for hbar. Generic."""
+    try:
+        # Stacked bars: any trace explicitly stacked -> don't log.
+        if any(getattr(tr, "type", "") == "bar"
+               and getattr(getattr(fig, "layout", None), "barmode", None) == "stack"
+               for tr in fig.data):
+            return
+        vals = []
+        for tr in fig.data:
+            if getattr(tr, "type", "") != "bar":
+                continue
+            arr = tr.x if t == "hbar" else tr.y
+            if arr is None:
+                continue
+            for v in list(arr):
+                if v is not None and float(v) > 0:
+                    vals.append(float(v))
+        if len(vals) < 3:
+            return
+        vals.sort()
+        med = vals[len(vals) // 2]
+        mx = vals[-1]
+        if med > 0 and mx / med >= 25:        # heavy skew -> log helps
+            if t == "hbar":
+                fig.update_xaxes(type="log")
+            else:
+                fig.update_yaxes(type="log")
+    except Exception:
+        return
 
 
 def _format_temporal_axis(fig, dim: str, d) -> None:
