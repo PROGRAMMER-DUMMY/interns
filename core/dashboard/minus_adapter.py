@@ -248,6 +248,24 @@ _TIER_TEXT_MAX = 5          # never more than 5 headline numbers
 _TIER_TEXT_MIN = 3
 
 
+def _select_hero_cards(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The 3-5 most impactful KPIs as prominent headline cards (by impact score),
+    in original importance order. Used when the chart tier is conformed-overview
+    charts, so the headline stays a few key numbers."""
+    n = min(_TIER_TEXT_MAX, max(_TIER_TEXT_MIN, round(len(cards) * 0.4)))
+    top = {id(c) for c in sorted(cards, key=lambda c: -c.get("_hero_score", 0))[:n]}
+    out: list[dict[str, Any]] = []
+    for c in cards:
+        c.pop("_hero_score", None)
+        if id(c) in top:
+            opts = dict(c.get("options") or {})
+            opts["emphasis"] = "hero"
+            c["options"] = opts
+            c["height"] = 168
+            out.append(c)
+    return out
+
+
 def _tier_kpis(cards: list[dict[str, Any]],
                charts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]],
                                                        list[dict[str, Any]]]:
@@ -543,6 +561,112 @@ def _resolve_fk_names(gold, fk_name_maps: dict[str, dict[str, str]]):
     return gold
 
 
+def _kpi_overview_charts(model: ConformedModel, fact_table: str,
+                         fact_measures: list[dict[str, Any]]
+                         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build the KPIs page's CHART tier on the conformed fact (not per-KPI gold),
+    so every chart cross-filters the others + the slicers and drills in place --
+    real Power-BI-style interactivity, which isolated gold tables can't give.
+
+    Returns (charts, slicers). Charts: a drillable trend + the primary measure by
+    its most decisive dimensions + a composition donut. Slicers: the dimensions
+    those charts share. Generic; empty when the fact has no usable dims/measures.
+    """
+    dims = [(d, n) for d, n in _display_dimensions(model)
+            if d not in _measure_field_columns(fact_measures)]
+    cat_names = [d for d, _ in dims if d != "month"]
+    if not cat_names and not any(d == "month" for d, _ in dims):
+        return [], []
+
+    def _mcol(m):
+        f = m.get("field") or ""
+        return f.split(".", 1)[1] if "." in f else f
+
+    sums = [m for m in fact_measures if m.get("agg") == "sum"]
+    primary_m = None
+    if sums and cat_names:
+        primary_m = max(sums, key=lambda m: max(
+            [s for _, s in rank_dimensions(model.frame, cat_names, measure=_mcol(m),
+                                           is_share=(m.get("fmt") == "percent"))] or [0]))
+    primary_m = primary_m or (sums[0] if sums else (fact_measures[0] if fact_measures else None))
+    if primary_m is None:
+        return [], []
+    primary = primary_m["name"]
+    plabel = primary_m["label"]
+    pcol = _mcol(primary_m)
+    pshare = primary_m.get("fmt") == "percent"
+    # Only chart READABLE dimensions: drop identifier columns (UUIDs) and coded
+    # columns whose values are mostly bare numbers (e.g. SNOMED CODE 702927004) --
+    # a stakeholder can't read them and they make poor axes.
+    cat_names = [c for c in cat_names
+                 if not _is_identifier_dim(model.frame, c)
+                 and not _is_coded_dim(model.frame, c)]
+    ranked = ranked_names(model.frame, cat_names, measure=pcol, is_share=pshare)
+
+    charts: list[dict[str, Any]] = []
+    # 1. Drillable trend (year -> quarter -> month -> day).
+    start, ladder = _temporal_drill(model, fact_table)
+    if start in model.frame.columns:
+        w = {"id": "ko_trend", "type": "line", "measure": primary,
+             "dimension": f"{fact_table}.{start}",
+             "title": f"{plabel} over {_human(start)}", "height": 340}
+        if len(ladder) > 1:
+            w["drill_path"] = ladder
+        charts.append(w)
+    # 2-3. Primary by the two most decisive dimensions (drillable, cross-filtering).
+    for i, cut in enumerate(ranked[:2]):
+        n = dict(dims).get(cut, 0)
+        long_lbl = _is_long_label_dim(model.frame, cut)
+        wtype = "hbar" if (n > 8 or long_lbl) else "bar"
+        rest = [c for c in ranked if c != cut][:2]
+        charts.append({
+            "id": f"ko_by_{_slug(cut)}", "type": wtype, "measure": primary,
+            "dimension": f"{fact_table}.{cut}",
+            "title": f"{plabel} by {_human(cut)}", "height": 340,
+            "limit": 12 if wtype == "hbar" else None,
+            "drill_path": [cut] + rest if rest else None})
+    # 4. Composition donut on a low-cardinality dimension (record share).
+    low = [c for c in ranked if 2 <= dict(dims).get(c, 99) <= 6]
+    if low:
+        charts.append({"id": "ko_donut", "type": "donut", "measure": "record_count",
+                       "dimension": f"{fact_table}.{low[-1]}",
+                       "title": f"Records by {_human(low[-1])}", "height": 340})
+    # Drop None-valued keys (clean YAML) and justify widths.
+    for w in charts:
+        for k in [k for k, v in list(w.items()) if v is None]:
+            w.pop(k)
+    # Slicers: dimensions the charts share, low-cardinality, most-decisive first.
+    slicers = [{"id": f"kf_{_slug(c)}", "field": f"{fact_table}.{c}",
+                "label": _human(c), "type": "multi"}
+               for c in ranked if 2 <= dict(dims).get(c, 99) <= 40][:4]
+    return charts, slicers
+
+
+def _is_coded_dim(frame, col: str) -> bool:
+    """True when a column's values are mostly bare numeric CODES (SNOMED, ICD, ZIP)
+    -- meaningless as a chart axis to a stakeholder. Sampled; generic."""
+    try:
+        import polars as _pl
+        vals = (frame.get_column(col).cast(_pl.Utf8, strict=False)
+                .drop_nulls().to_list()[:50])
+    except Exception:
+        return False
+    if len(vals) < 3:
+        return False
+    numeric = sum(1 for v in vals if re.fullmatch(r"\d[\d.\-]{2,}", str(v).strip()))
+    return numeric >= max(3, int(0.6 * len(vals)))
+
+
+def _is_long_label_dim(frame, col: str) -> bool:
+    """True when a column's category labels are long (procedure/diagnosis names) --
+    better as a horizontal bar so labels read left-to-right."""
+    try:
+        vals = frame.get_column(col).cast(str, strict=False).drop_nulls().to_list()[:20]
+        return bool(vals) and (sum(len(v) for v in vals) / len(vals)) > 16
+    except Exception:
+        return False
+
+
 def _kpi_artifacts(model: ConformedModel, fact_table: str,
                    fact_measures: list[dict[str, Any]], data_through=None):
     """Return (tables, measures, page, exports) for every gold KPI.
@@ -752,20 +876,37 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
         if max(g.get_column(col).n_unique() for g in golds) <= 40:
             kpi_filters.append({"id": f"kf_{_slug(col)}", "field": col,
                                 "label": _human(col), "type": "multi"})
-    # Tiered scorecard (executive-dashboard convention, Miller's Law): only the
-    # 3-5 MOST IMPACTFUL single-number KPIs sit up top as text cards; every other
-    # KPI is shown as its own interactive, drillable CHART below. So a stakeholder
-    # reads "are we on track?" from a few headlines, then explores the rest
-    # visually -- instead of scanning 10 bare numbers. Small scorecards keep all.
-    cards, charts = _tier_kpis(cards, charts)   # justifies card groups internally
-    _justify_widget_widths(charts)
+    # Tiered scorecard (executive-dashboard convention, Miller's Law). For a large
+    # scorecard: lead with the 3-5 most impactful KPIs as headline numbers, then a
+    # tier of CONFORMED-fact charts that genuinely drill + cross-filter each other
+    # and the slicers (isolated per-KPI gold charts can't -- different tables/
+    # grains). For a small scorecard (RCM's 3): keep every KPI as a card + its
+    # chart, which already reads fine.
+    overview_charts, overview_slicers = _kpi_overview_charts(
+        model, fact_table, fact_measures)
+    if len(cards) >= _TIER_MIN_KPIS and overview_charts:
+        for w in charts:
+            w.pop("_kpi_id", None)
+        hero_cards = _select_hero_cards(cards)   # reads + strips _hero_score
+        _justify_widget_widths(hero_cards)
+        _justify_widget_widths(overview_charts)
+        cards, charts = hero_cards, overview_charts
+        page_filters = overview_slicers
+        desc = ("The few headline KPIs lead; the charts below are live -- click "
+                "any bar/period to cross-filter every chart and drill in, then "
+                "'↑ up' to go back." + _through_note(data_through))
+    else:
+        cards, charts = _tier_kpis(cards, charts)   # justifies card groups
+        _justify_widget_widths(charts)
+        page_filters = kpi_filters[:4]
+        desc = ("Each KPI shows its headline number with a chart beneath it. "
+                "Use the filters to slice every KPI at once; click any bar to "
+                "drill into it, then '↑ up' to go back." + _through_note(data_through))
     page = {
         "id": "kpis", "title": "KPIs", "order": 5,
-        "description": "Each KPI shows its headline number with a chart beneath it. "
-                       "Use the filters to slice every KPI at once; click any bar to "
-                       "drill into it, then '↑ up' to go back." + _through_note(data_through),
-        "filters": kpi_filters[:4],
-        "widgets": cards + charts,   # scorecard row, then per-KPI chart tabs
+        "description": desc,
+        "filters": page_filters,
+        "widgets": cards + charts,
     }
     return tables, measures, page, exports
 
