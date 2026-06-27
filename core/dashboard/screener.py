@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import shutil
 import socket
 import struct
@@ -260,6 +261,9 @@ def screen_dashboard(repo_root: Path, workspace_rel: str) -> dict[str, Any]:
     # (Miller's Law) and show the rest as charts -- a wall of bare KPI cards
     # overwhelms. Flag a page with too many prominent text cards / no charts.
     semantic_findings += _check_kpi_card_density(minus_root(layout))
+    # Identifier axes: a chart must not present raw UUIDs/codes as its categories
+    # (e.g. "top patients" by patient UUID) -- unreadable to a stakeholder.
+    semantic_findings += _check_identifier_axes(minus_root(layout))
 
     ok = all(f.ok for f in findings) and not palette_findings and not semantic_findings
     report = {
@@ -411,6 +415,75 @@ def _check_kpi_card_density(root: Path) -> list[str]:
         findings.append(
             f"kpis: {len(kpi_cards)} KPI cards and 0 charts -- supporting KPIs "
             "should be shown as interactive charts, not all as bare numbers")
+    return findings
+
+
+_UUID_RE = re.compile(r"^[0-9a-f]{6,}-[0-9a-f-]{6,}", re.IGNORECASE)
+_HEXID_RE = re.compile(r"^[0-9a-f]{12,}$", re.IGNORECASE)
+
+
+def _check_identifier_axes(root: Path) -> list[str]:
+    """Flag a chart whose CATEGORY axis is raw identifiers (UUIDs / long hex
+    codes) instead of human-readable names -- a stakeholder can't read
+    'Top patients: 1712d26d-822d-...'. Reads each chart widget's dimension column
+    from the emitted data and checks the sampled values. Generic across
+    workspaces (no column-name assumptions)."""
+    import yaml
+
+    try:
+        import polars as pl
+    except Exception:
+        return []
+    findings: list[str] = []
+    dash_dir = root / "config" / "dashboards"
+    data_dir = root / "data"
+    if not dash_dir.exists():
+        return []
+    cache: dict[str, "pl.DataFrame"] = {}
+
+    def _col_values(table: str, col: str):
+        if table not in cache:
+            fp = data_dir / f"{table}.parquet"
+            if not fp.exists():
+                return None
+            try:
+                cache[table] = pl.read_parquet(fp)
+            except Exception:
+                return None
+        df = cache[table]
+        c = col if col in df.columns else f"{table}.{col}"
+        if c not in df.columns:
+            return None
+        try:
+            return df.get_column(c).cast(pl.Utf8, strict=False).drop_nulls().to_list()
+        except Exception:
+            return None
+
+    seen: set[tuple[str, str]] = set()
+    for path in sorted(dash_dir.glob("*.yaml")):
+        try:
+            dash = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        for w in dash.get("widgets") or []:
+            dim = w.get("dimension")
+            if not dim or w.get("type") in ("kpi", "table"):
+                continue
+            table, _, col = dim.partition(".")
+            if not col or (table, col) in seen:
+                continue
+            seen.add((table, col))
+            vals = _col_values(table, col)
+            if not vals:
+                continue
+            sample = vals[:50]
+            idlike = sum(1 for v in sample
+                         if _UUID_RE.match(str(v)) or _HEXID_RE.match(str(v)))
+            if idlike >= max(3, int(0.6 * len(sample))):
+                findings.append(
+                    f"{path.stem}: chart axis '{col}' shows raw identifiers "
+                    f"(e.g. {sample[0][:18]}...) -- resolve to a human-readable "
+                    "name or don't chart it")
     return findings
 
 

@@ -365,12 +365,18 @@ def build_chart_figure(widget, result, project, *, highlight=None, colors=None) 
             font=dict(size=10, color=colors["muted"]), title_text=""))
         if t == "donut" and primary:
             fig.update_traces(domain=dict(x=[0, 1], y=[0.12, 1]))
-            total = float(df.get_column(primary).sum())
-            fig.add_annotation(
-                x=0.5, y=0.56, xref="paper", yref="paper", showarrow=False, align="center",
-                text=(f"<b>{format_value(total, _measure_fmt(primary, project))}</b>"
-                      f"<br><span style='font-size:9px'>{_measure_label(primary, project)}</span>"),
-                font=dict(size=15, color=colors["ink"], family="Fraunces, Georgia, serif"))
+            # The center total only makes sense for an ADDITIVE measure (count /
+            # money): summing those across slices gives a real grand total. For a
+            # SHARE/percent measure the slices already sum to 100%, so a "100.0%"
+            # center is meaningless -- omit it there.
+            pfmt = _measure_fmt(primary, project)
+            if pfmt != "percent":
+                total = float(df.get_column(primary).sum())
+                fig.add_annotation(
+                    x=0.5, y=0.56, xref="paper", yref="paper", showarrow=False, align="center",
+                    text=(f"<b>{format_value(total, pfmt)}</b>"
+                          f"<br><span style='font-size:9px'>{_measure_label(primary, project)}</span>"),
+                    font=dict(size=15, color=colors["ink"], family="Fraunces, Georgia, serif"))
 
     return fig
 

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from core.dashboard.screener import _check_kpi_card_density
+from core.dashboard.screener import _check_identifier_axes, _check_kpi_card_density
 
 
 def _write(widgets) -> Path:
@@ -44,6 +44,30 @@ class CardDensityTests(unittest.TestCase):
         # 3 KPIs, no charts -> fine (small dashboard, under the >=6 threshold).
         root = _write([{"type": "kpi"} for _ in range(3)])
         self.assertEqual(_check_kpi_card_density(root), [])
+
+
+class IdentifierAxisTests(unittest.TestCase):
+    def _ws(self, col_values) -> Path:
+        import polars as pl
+        d = Path(tempfile.mkdtemp())
+        (d / "config" / "dashboards").mkdir(parents=True)
+        (d / "data").mkdir()
+        (d / "config" / "dashboards" / "kpis.yaml").write_text(
+            yaml.safe_dump({"widgets": [
+                {"type": "hbar", "dimension": "kpi_x.entity"}]}))
+        pl.DataFrame({"entity": col_values, "v": list(range(len(col_values)))}) \
+            .write_parquet(d / "data" / "kpi_x.parquet")
+        return d
+
+    def test_flags_uuid_axis(self):
+        root = self._ws(["1712d26d-822d-1e3a-2267-0a9dba31d7c8",
+                         "5e055638-0dad-dfd5-005d-1e74b6fd29ac",
+                         "3de74169-7f67-9304-91d4-757e0f"])
+        self.assertTrue(_check_identifier_axes(root))
+
+    def test_readable_axis_passes(self):
+        root = self._ws(["Medicare", "Medicaid", "Anthem", "Humana"])
+        self.assertEqual(_check_identifier_axes(root), [])
 
 
 if __name__ == "__main__":

@@ -134,6 +134,48 @@ def _top_value_share(model: ConformedModel, column: str) -> float:
         return 0.0
 
 
+_UUID_VAL_RE = re.compile(r"^[0-9a-f]{6,}-[0-9a-f-]{6,}", re.IGNORECASE)
+_HEXID_VAL_RE = re.compile(r"^[0-9a-f]{12,}$", re.IGNORECASE)
+
+
+def _is_identifier_dim(gold, col: str) -> bool:
+    """True when a column's values are raw identifiers (UUIDs / long hex codes) --
+    not a human-readable category. Such a column makes a useless chart axis (a
+    stakeholder can't read a patient UUID). Generic; samples the values."""
+    try:
+        import polars as _pl
+        vals = (gold.get_column(col).cast(_pl.Utf8, strict=False)
+                .drop_nulls().to_list()[:50])
+    except Exception:
+        return False
+    if len(vals) < 3:
+        return False
+    idlike = sum(1 for v in vals
+                 if _UUID_VAL_RE.match(str(v)) or _HEXID_VAL_RE.match(str(v)))
+    return idlike >= max(3, int(0.6 * len(vals)))
+
+
+def _anonymize_identifier_column(gold, col: str, measure_col: str):
+    """Replace an identifier column's UUIDs with ranked, PII-safe labels
+    ("Patient 1", "Patient 2", ... by descending measure) so a "top entities"
+    chart is readable without exposing raw IDs. Generic: the label stem comes
+    from the column name."""
+    try:
+        import polars as _pl
+        stem = _human(col).rstrip("s") or "Item"
+        order = (gold.select([col, measure_col]).drop_nulls()
+                 .group_by(col).agg(_pl.col(measure_col).sum().alias("__r"))
+                 .sort("__r", descending=True))
+        ids = order.get_column(col).to_list()
+        mapping = {v: f"{stem} {i + 1}" for i, v in enumerate(ids)}
+        return gold.with_columns(
+            _pl.col(col).cast(_pl.Utf8, strict=False)
+            .replace(mapping, default=_pl.col(col).cast(_pl.Utf8, strict=False))
+            .alias(col))
+    except Exception:
+        return gold
+
+
 def _measure_concentration(model: ConformedModel, dim: str, measure_col: str) -> float:
     """Share of the measure total held by the single biggest category of ``dim``.
     High -> one category dominates, so a grouped/absolute bar squishes the rest
@@ -620,6 +662,15 @@ def _kpi_artifacts(model: ConformedModel, fact_table: str,
             panels = _kpi_breakdown_charts(tname, mslug, km.card_label, gold,
                                            km.cuts, km.measure, is_share)
         hero = _pick_hero(panels)
+        # An anonymous-identifier axis (e.g. "top patients" by patient UUID) is
+        # unreadable + PII. Relabel the categories to ranked, PII-safe labels
+        # ("Patient 1, 2, ...") so the chart stays useful (the heavy-utilizer
+        # distribution) without exposing raw IDs.
+        if hero and hero.get("dimension"):
+            _idcol = hero["dimension"].split(".")[-1]
+            if _is_identifier_dim(gold, _idcol):
+                gold = _anonymize_identifier_column(gold, _idcol, km.measure)
+                exports[tname] = gold
         if hero:
             hero["width"] = span          # aligns under its card (n-across)
             hero["height"] = 420
