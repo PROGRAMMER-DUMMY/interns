@@ -31,6 +31,55 @@ class ExecutionBackendTests(unittest.TestCase):
         )
         self.assertIsInstance(build_execution_backend(cfg), DuckDBBackend)
 
+    def test_health_check_redacts_secret_shaped_exception_message(self):
+        # databricks_client.py has no logger/print of its own -- it returns
+        # raw exception text to callers who print/log it. If the SDK ever
+        # echoes a token back in an error message, it must be redacted here
+        # at the source, not left to whatever the caller does with it.
+        client = DatabricksClient(DatabricksConfig(enabled=True, host="https://example", token="token"))
+
+        class _FakeUser:
+            def me(self):
+                raise RuntimeError(
+                    "connection failed using dapi1234567890abcdef1234 as credential"
+                )
+
+        class _FakeClient:
+            current_user = _FakeUser()
+
+        client.get_client = lambda: _FakeClient()
+        ok, msg = client.health_check()
+        self.assertFalse(ok)
+        self.assertNotIn("dapi1234567890abcdef1234", msg)
+        self.assertIn("[REDACTED:SECRET]", msg)
+
+    def test_discover_capabilities_redacts_secret_shaped_errors(self):
+        client = DatabricksClient(DatabricksConfig(enabled=True, host="https://example", token="token"))
+
+        class _FakeUser:
+            def me(self):
+                raise RuntimeError("auth failed with dapi1234567890abcdef1234")
+
+        class _FakeCatalogs:
+            def list(self):
+                raise RuntimeError("catalogs unavailable, token=abcdef123456")
+
+        class _FakeJobs:
+            def list(self, limit=1):
+                raise RuntimeError("jobs unavailable")
+
+        class _FakeClient:
+            current_user = _FakeUser()
+            catalogs = _FakeCatalogs()
+            jobs = _FakeJobs()
+
+        client.get_client = lambda: _FakeClient()
+        caps = client.discover_capabilities()
+        self.assertNotIn("dapi1234567890abcdef1234", caps["current_user_error"])
+        self.assertIn("[REDACTED:SECRET]", caps["current_user_error"])
+        self.assertNotIn("abcdef123456", caps["catalog_error"])
+        self.assertIn("[REDACTED:SECRET]", caps["catalog_error"])
+
     def test_databricks_jobs_reject_local_python_paths_before_submission(self):
         client = DatabricksClient(DatabricksConfig(enabled=True, host="https://example", token="token"))
         with self.assertRaises(ValueError):

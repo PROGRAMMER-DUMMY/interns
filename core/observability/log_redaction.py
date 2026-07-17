@@ -88,6 +88,14 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"(?i)\b(api[_\-]?key|token|password|secret)\s*[:=]\s*['\"]?[A-Za-z0-9\-._~+/!@#$%^&*]{6,}['\"]?"
         ),
     ),
+    # CLI-flag style secret arguments: --api-key VALUE / --token VALUE
+    # (space-separated, no '=' or ':' — as commands are typically logged)
+    (
+        "SECRET",
+        re.compile(
+            r"(?i)--(?:api[_\-]?key|token|password|secret)\s+['\"]?[A-Za-z0-9\-._~+/!@#$%^&*]{6,}['\"]?"
+        ),
+    ),
     # -- PII / PHI patterns --------------------------------------------
     # Email addresses (RFC 5321-ish, conservative)
     (
@@ -196,8 +204,28 @@ def install_log_redaction(logger: logging.Logger | None = None) -> None:
     target.addFilter(RedactionFilter())
 
 
+def assert_installed(logger: logging.Logger | None = None) -> None:
+    """Raise ``RuntimeError`` if no :class:`RedactionFilter` is attached to
+    ``logger`` (default: root logger).
+
+    Call this immediately after ``install_log_redaction()`` at startup. Its
+    only purpose is to fail loudly if a future refactor breaks the wiring —
+    this module was previously built and unit-tested but never actually
+    called from any startup path (core-audit P0.2), so redaction silently
+    did nothing in production. This assertion exists so that regression
+    cannot happen silently again.
+    """
+    target = logger if logger is not None else logging.getLogger()
+    if not any(isinstance(f, RedactionFilter) for f in target.filters):
+        raise RuntimeError(
+            "log redaction is not installed: call install_log_redaction() "
+            "before assert_installed()"
+        )
+
+
 __all__ = [
     "RedactionFilter",
+    "assert_installed",
     "install_log_redaction",
     "redact",
 ]

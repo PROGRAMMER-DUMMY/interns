@@ -65,10 +65,13 @@ class ExperimentLoop:
         self,
         cfg: Optional[Config] = None,
         task_id: str | None = None,
-        dry_run: bool = False,
+        dry_run: bool = True,
+        confirm_live_mutation: bool = False,
     ):
         self.cfg = cfg or load_config()
         self.dry_run = dry_run
+        if not self.dry_run:
+            _require_live_mutation_approval(confirm_live_mutation)
         self.tasks_path = ROOT / "config" / "tasks.json"
         self._load_task(task_id)
         self.workspace_layout = WorkspaceLayout.from_task(self.task, ROOT)
@@ -747,6 +750,46 @@ class ExperimentLoop:
         return self.workspace.get_results_tsv_string()
 
 
+def _require_live_mutation_approval(confirm_live_mutation: bool) -> None:
+    """Mirrors workspace_deployer._require_remote_approval: live mode writes
+    LLM-generated content to disk unattended, so it needs the same two-factor
+    shape (explicit flag + human-set env var) as the remote-execution gate."""
+    if not confirm_live_mutation:
+        raise PermissionError("--live requires --confirm-live-mutation")
+    if os.environ.get("AUTORESEARCH_ALLOW_LOCAL_MUTATION") != "1":
+        raise PermissionError(
+            "Set AUTORESEARCH_ALLOW_LOCAL_MUTATION=1 before live mutation"
+        )
+
+
+def _build_arg_parser(default_task: str | None = None) -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser()
+    p.add_argument(
+        "--mode",
+        choices=["auto", "semi", "sql", "polars", "sql_polars_hybrid", "pyspark", "global_exploration"],
+        default="auto",
+    )
+    p.add_argument("--task", default=default_task)
+    p.add_argument(
+        "--live",
+        action="store_true",
+        help="Allow the main agent to write directly to editable_file and run "
+             "the experiment. Without this flag the loop always runs in "
+             "dry-run mode (proposed edits saved to state/dry_run/, never "
+             "applied). Live mode additionally requires "
+             "--confirm-live-mutation and AUTORESEARCH_ALLOW_LOCAL_MUTATION=1 "
+             "in the environment.",
+    )
+    p.add_argument(
+        "--confirm-live-mutation",
+        action="store_true",
+        help="Required together with --live to acknowledge that live mode "
+             "writes LLM-generated content to disk unattended, with no "
+             "human review step before the write.",
+    )
+    return p
+
+
 def main() -> None:
     cfg = load_config()
     tasks_path = ROOT / "config" / "tasks.json"
@@ -759,22 +802,14 @@ def main() -> None:
         print("Error: active_task not configured in config/tasks.json")
         return
 
-    p = argparse.ArgumentParser()
-    p.add_argument(
-        "--mode",
-        choices=["auto", "semi", "sql", "polars", "sql_polars_hybrid", "pyspark", "global_exploration"],
-        default="auto",
-    )
-    p.add_argument("--task", default=task_id)
-    p.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Run interns + main agent, save proposed edits to state/dry_run/, "
-             "but do NOT modify the editable_file or run the experiment.",
-    )
-    args = p.parse_args()
+    args = _build_arg_parser(default_task=task_id).parse_args()
 
-    loop = ExperimentLoop(cfg, task_id=args.task, dry_run=args.dry_run)
+    loop = ExperimentLoop(
+        cfg,
+        task_id=args.task,
+        dry_run=not args.live,
+        confirm_live_mutation=args.confirm_live_mutation,
+    )
     try:
         loop.start(mode=args.mode)
     except KeyboardInterrupt:

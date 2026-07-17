@@ -11,7 +11,15 @@ from pathlib import Path
 
 import toml
 
+from core.observability.log_redaction import assert_installed, install_log_redaction
 from core.paths import PROJECT_ROOT
+
+# core.config is imported at the start of virtually every CLI entrypoint
+# (via load_config()), making it the natural single choke point to wire
+# secret/PII redaction into the root logger. Previously RedactionFilter was
+# built and unit-tested but never called from any real startup path.
+install_log_redaction()
+assert_installed()
 
 @dataclass
 class DatabricksConfig:

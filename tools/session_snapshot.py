@@ -12,20 +12,13 @@ _BOOTSTRAP_ROOT = Path(__file__).resolve().parents[1]
 if str(_BOOTSTRAP_ROOT) not in sys.path:
     sys.path.insert(0, str(_BOOTSTRAP_ROOT))
 
+from core.observability.log_redaction import redact as _shared_redact  # noqa: E402
 from core.paths import PROJECT_ROOT  # noqa: E402
 
 SESSION_ROOT = PROJECT_ROOT / ".agents" / "sessions"
 DEFAULT_SESSION_DIR = SESSION_ROOT / "current"
 ALIAS_DIR = SESSION_ROOT / "_aliases"
 CURRENT_SESSION_POINTER = SESSION_ROOT / "current_session.txt"
-SECRET_PATTERNS = [
-    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"),
-    re.compile(r"(?i)(api[_-]?key\s*[=:]\s*)[^\s`'\"<>]+"),
-    re.compile(r"(?i)(token\s*[=:]\s*)[^\s`'\"<>]+"),
-    re.compile(r"(?i)(password\s*[=:]\s*)[^\s`'\"<>]+"),
-    re.compile(r"(?i)(secret\s*[=:]\s*)[^\s`'\"<>]+"),
-    re.compile(r"(?i)(connection[_-]?string\s*[=:]\s*)[^\s`'\"<>]+"),
-]
 LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
     r"(?i)(?:[A-Z]:[\\/](?:Users|Documents and Settings)[\\/][^\s`'\"<>]+|"
     r"/(?:Users|home)/[^\s`'\"<>]+)"
@@ -972,12 +965,8 @@ def _read_content(args: argparse.Namespace) -> str:
 
 
 def _redact(value: str) -> tuple[str, bool]:
-    redacted = False
-    safe = value
-    for pattern in SECRET_PATTERNS:
-        safe, count = pattern.subn(lambda match: f"{match.group(1)}<redacted>", safe)
-        redacted = redacted or bool(count)
-    return safe, redacted
+    safe = _shared_redact(value)
+    return safe, safe != value
 
 
 def _clean_path_text(value: str) -> str:

@@ -50,7 +50,27 @@ class WorkspaceTrajectoryRecorderTests(unittest.TestCase):
             text = (workspace / "interns" / "state" / "trajectory.jsonl").read_text(encoding="utf-8")
             self.assertNotIn("super-secret-value", text)
             self.assertNotIn("sk-1234567890abcdef", text)
-            self.assertIn("<redacted>", text)
+            self.assertIn("[REDACTED:SECRET]", text)
+
+    def test_redacts_databricks_token_without_key_prefix(self):
+        # The shape-based token pattern must fire even when the token appears
+        # mid-sentence with no `token=`/`key=` prefix in front of it — the gap
+        # the hand-rolled assignment-only regex used to miss.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces" / "demo"
+            workspace.mkdir(parents=True)
+
+            WorkspaceTrajectoryRecorder(root, "workspaces/demo").record(
+                event_type="command",
+                status="failed",
+                summary="Subprocess failed while authenticating with dapi1234567890abcdef1234 to the workspace.",
+                command="uv run something",
+            )
+
+            text = (workspace / "interns" / "state" / "trajectory.jsonl").read_text(encoding="utf-8")
+            self.assertNotIn("dapi1234567890abcdef1234", text)
+            self.assertIn("[REDACTED:SECRET]", text)
 
     def test_workflow_guard_consumes_trajectory_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:

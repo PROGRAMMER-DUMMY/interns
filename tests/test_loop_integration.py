@@ -22,7 +22,12 @@ from types import SimpleNamespace
 
 from core.agents.intern_bus import InternBus, truncate_for_chain, _is_failure
 from core.config import Config
-from core.orchestration.loop import ExperimentLoop, _EXPENSIVE_INTERNS
+from core.orchestration.loop import (
+    ExperimentLoop,
+    _EXPENSIVE_INTERNS,
+    _build_arg_parser,
+    _require_live_mutation_approval,
+)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -278,6 +283,76 @@ class InternBusIntegrationTests(unittest.TestCase):
         out = bus.invoke("a", "req", {})
         self.assertTrue(out.startswith("INTERN_FAILED:"))
         self.assertIn("twice", out)
+
+
+# ── live-mutation safety gate (P0.1) ──────────────────────────────────────────
+
+class LiveMutationGateTests(unittest.TestCase):
+    """The loop must default to dry-run and refuse to write LLM output to
+    disk unattended unless a human explicitly opts in via --live
+    --confirm-live-mutation and AUTORESEARCH_ALLOW_LOCAL_MUTATION=1 — the
+    same shape as the existing remote-execution approval gate in
+    workspace_deployer.py."""
+
+    def setUp(self):
+        self._prior_env = os.environ.pop("AUTORESEARCH_ALLOW_LOCAL_MUTATION", None)
+
+    def tearDown(self):
+        if self._prior_env is not None:
+            os.environ["AUTORESEARCH_ALLOW_LOCAL_MUTATION"] = self._prior_env
+        else:
+            os.environ.pop("AUTORESEARCH_ALLOW_LOCAL_MUTATION", None)
+
+    def test_cli_defaults_to_not_live(self):
+        args = _build_arg_parser(default_task="t1").parse_args([])
+        self.assertFalse(args.live)
+        self.assertFalse(args.confirm_live_mutation)
+
+    def test_init_defaults_dry_run_to_true(self):
+        import inspect
+        sig = inspect.signature(ExperimentLoop.__init__)
+        self.assertIs(sig.parameters["dry_run"].default, True)
+
+    def test_gate_raises_without_confirm_flag(self):
+        with self.assertRaises(PermissionError) as cm:
+            _require_live_mutation_approval(False)
+        self.assertIn("--confirm-live-mutation", str(cm.exception))
+
+    def test_gate_raises_with_confirm_flag_but_no_env(self):
+        with self.assertRaises(PermissionError) as cm:
+            _require_live_mutation_approval(True)
+        self.assertIn("AUTORESEARCH_ALLOW_LOCAL_MUTATION", str(cm.exception))
+
+    def test_gate_passes_with_confirm_flag_and_env(self):
+        os.environ["AUTORESEARCH_ALLOW_LOCAL_MUTATION"] = "1"
+        _require_live_mutation_approval(True)  # must not raise
+
+    def test_init_live_without_confirm_raises_before_heavy_setup(self):
+        # dry_run=False with no confirm flag must raise PermissionError
+        # immediately (before task loading / workspace bootstrap), so a
+        # bogus task_id proves the gate fires first, not a later error.
+        cfg = Config()
+        with self.assertRaises(PermissionError) as cm:
+            ExperimentLoop(cfg, task_id="__no_such_task__", dry_run=False)
+        self.assertIn("--confirm-live-mutation", str(cm.exception))
+
+    def test_init_live_with_confirm_but_no_env_raises(self):
+        cfg = Config()
+        with self.assertRaises(PermissionError) as cm:
+            ExperimentLoop(
+                cfg, task_id="__no_such_task__", dry_run=False,
+                confirm_live_mutation=True,
+            )
+        self.assertIn("AUTORESEARCH_ALLOW_LOCAL_MUTATION", str(cm.exception))
+
+    def test_init_dry_run_true_never_invokes_gate(self):
+        # dry_run=True (the default) must not require any approval, even
+        # though task loading will still fail for a bogus id — the failure
+        # must be the task-lookup error, not PermissionError.
+        cfg = Config()
+        with self.assertRaises(ValueError) as cm:
+            ExperimentLoop(cfg, task_id="__no_such_task__", dry_run=True)
+        self.assertIn("__no_such_task__", str(cm.exception))
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import unittest
 
 from core.observability.log_redaction import (
     RedactionFilter,
+    assert_installed,
     install_log_redaction,
     redact,
 )
@@ -84,6 +85,15 @@ class TestRedactFunction(unittest.TestCase):
     def test_generic_api_key_assignment_is_redacted(self) -> None:
         result = redact("api_key='supersecretvalue123'")
         self.assertNotIn("supersecretvalue123", result)
+        self.assertIn("[REDACTED:SECRET]", result)
+
+    def test_cli_flag_style_secret_is_redacted(self) -> None:
+        # Shell/CLI invocations pass secrets as `--flag value` (space
+        # separated, no '=' or ':'), which the assignment-shaped pattern
+        # above does not cover on its own.
+        token = "sk-1234567890abcdef"
+        result = redact(f"tool --api-key {token}")
+        self.assertNotIn(token, result)
         self.assertIn("[REDACTED:SECRET]", result)
 
     # -- Low false-positive check on normal prose ----------------------------
@@ -278,6 +288,16 @@ class TestInstallLogRedaction(unittest.TestCase):
         self.assertNotIn("admin@internal.example.org", records[0].getMessage())
         self.assertIn("[REDACTED:EMAIL]", records[0].getMessage())
 
+    def test_assert_installed_raises_when_not_installed(self) -> None:
+        logger = self._fresh_logger("assert_missing")
+        with self.assertRaises(RuntimeError):
+            assert_installed(logger)
+
+    def test_assert_installed_passes_after_install(self) -> None:
+        logger = self._fresh_logger("assert_present")
+        install_log_redaction(logger)
+        assert_installed(logger)  # must not raise
+
     def test_install_on_root_logger_works(self) -> None:
         """install_log_redaction() with no args targets the root logger."""
         root = logging.getLogger()
@@ -287,6 +307,19 @@ class TestInstallLogRedaction(unittest.TestCase):
         # Must have added at most one (idempotent; may already be installed)
         self.assertGreaterEqual(after, 1)
         self.assertLessEqual(after - before, 1)
+
+
+class TestStartupWiring(unittest.TestCase):
+    """core.config is imported at the start of virtually every CLI entrypoint
+    (`load_config()`); importing it must install redaction on the root
+    logger, closing the P0.2 gap where the filter was built and tested but
+    never actually wired into any live logger."""
+
+    def test_importing_core_config_installs_root_redaction(self) -> None:
+        import core.config  # noqa: F401  (import side effect is what's tested)
+        root = logging.getLogger()
+        self.assertTrue(any(isinstance(f, RedactionFilter) for f in root.filters))
+        assert_installed(root)  # must not raise
 
 
 if __name__ == "__main__":

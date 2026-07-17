@@ -10,6 +10,8 @@ import json
 import shlex
 from typing import TYPE_CHECKING, Tuple
 
+from core.observability.log_redaction import redact
+
 if TYPE_CHECKING:
     from core.config import DatabricksConfig
 
@@ -47,7 +49,7 @@ class DatabricksClient:
             me = self.get_client().current_user.me()
             return True, f"Connected as {me.user_name}"
         except Exception as exc:
-            msg = str(exc)
+            msg = redact(str(exc))
             if "401" in msg or "Unauthorized" in msg:
                 return False, (
                     "Authentication failed (HTTP 401). "
@@ -109,34 +111,34 @@ class DatabricksClient:
             me = client.current_user.me()
             capabilities["current_user"] = me.user_name
         except Exception as exc:
-            capabilities["current_user_error"] = str(exc)
+            capabilities["current_user_error"] = redact(str(exc))
         try:
             catalogs = list(client.catalogs.list())
             capabilities["unity_catalog"] = "available"
             capabilities["catalogs"] = [getattr(item, "name", "") for item in catalogs if getattr(item, "name", "")]
         except Exception as exc:
             capabilities["unity_catalog"] = "unavailable"
-            capabilities["catalog_error"] = str(exc)
+            capabilities["catalog_error"] = redact(str(exc))
         try:
             list(client.jobs.list(limit=1))
             capabilities["jobs"] = "available"
         except Exception as exc:
             capabilities["jobs"] = "unavailable"
-            capabilities["jobs_error"] = str(exc)
+            capabilities["jobs_error"] = redact(str(exc))
         try:
             if hasattr(client, "warehouses"):
                 list(client.warehouses.list())
                 capabilities["sql_warehouses"] = "available"
         except Exception as exc:
             capabilities["sql_warehouses"] = "unavailable"
-            capabilities["sql_warehouses_error"] = str(exc)
+            capabilities["sql_warehouses_error"] = redact(str(exc))
         try:
             import mlflow
             mlflow.set_tracking_uri("databricks")
             capabilities["mlflow"] = "available"
         except Exception as exc:
             capabilities["mlflow"] = "unavailable"
-            capabilities["mlflow_error"] = str(exc)
+            capabilities["mlflow_error"] = redact(str(exc))
         return capabilities
 
     def write_delta(self, catalog: str, schema: str, table: str, records: list[dict]) -> None:

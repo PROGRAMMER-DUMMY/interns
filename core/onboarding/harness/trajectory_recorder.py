@@ -3,23 +3,19 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from core.governance.audit_chain import append_audit_record
+from core.observability.log_redaction import redact
 from core.paths import PROJECT_ROOT
 from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
 
 
 TRAJECTORY_VERSION = 1
-SECRET_PATTERNS = [
-    re.compile(r"(?i)(api[_-]?key|token|password|secret|bearer)\s*[:=]\s*['\"]?[^'\"\s]+"),
-    re.compile(r"(?i)sk-[A-Za-z0-9_\-]{12,}"),
-]
 
 
 @dataclass(frozen=True)
@@ -288,10 +284,7 @@ def _is_failure(item: dict[str, Any]) -> bool:
 
 def _redact(value: Any) -> Any:
     if isinstance(value, str):
-        redacted = value
-        for pattern in SECRET_PATTERNS:
-            redacted = pattern.sub(lambda match: match.group(0).split("=", 1)[0] + "=<redacted>" if "=" in match.group(0) else "<redacted>", redacted)
-        return redacted
+        return redact(value)
     if isinstance(value, list):
         return [_redact(item) for item in value]
     if isinstance(value, dict):

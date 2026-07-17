@@ -22,5 +22,11 @@ COPY dashboard.py ./
 # State and workspace dirs are mounted as volumes at runtime
 RUN mkdir -p state workspaces
 
-# Default: run the experiment loop
-CMD ["uv", "run", "loop"]
+# Default: read-only health/smoke check (green-gate cannot mutate anything).
+# Real invocations pass an explicit command, e.g.
+#   docker run <image> uv run workspace-dashboard --workspace <project> ...
+# The autonomous mutation loop (`uv run loop`) is intentionally not the
+# default — it requires --live --confirm-live-mutation and a human-set
+# AUTORESEARCH_ALLOW_LOCAL_MUTATION=1 to write anything, and is not part of
+# the platform's launch scope.
+CMD ["uv", "run", "green-gate", "--json"]

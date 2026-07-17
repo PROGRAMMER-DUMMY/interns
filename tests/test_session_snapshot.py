@@ -92,8 +92,7 @@ class SessionSnapshotTests(unittest.TestCase):
             append_turn(root, session_dir, role="user", content="api_key=abc123 password=hunter2")
 
             transcript = (session_dir / "transcript.md").read_text(encoding="utf-8")
-            self.assertIn("api_key=<redacted>", transcript)
-            self.assertIn("password=<redacted>", transcript)
+            self.assertIn("[REDACTED:SECRET]", transcript)
             self.assertNotIn("abc123", transcript)
             self.assertNotIn("hunter2", transcript)
 
@@ -101,6 +100,23 @@ class SessionSnapshotTests(unittest.TestCase):
             self.assertEqual(verification["overall_status"], "failed")
             secret_check = _check_by_id(verification, "no_secret_like_content")
             self.assertEqual(secret_check["status"], "failed")
+
+    def test_redacts_databricks_token_without_key_prefix(self):
+        # Shape-based token pattern must fire mid-sentence with no key=
+        # prefix — the gap the hand-rolled assignment-only regex missed.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            session_dir = root / ".agents" / "sessions" / "current"
+
+            start_session(root, session_dir, workspace="workspaces/demo", tool="codex")
+            append_turn(
+                root, session_dir, role="assistant",
+                content="Connected using dapi1234567890abcdef1234 successfully.",
+            )
+
+            transcript = (session_dir / "transcript.md").read_text(encoding="utf-8")
+            self.assertNotIn("dapi1234567890abcdef1234", transcript)
+            self.assertIn("[REDACTED:SECRET]", transcript)
 
     def test_cli_named_session_uses_alias_and_timestamped_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
