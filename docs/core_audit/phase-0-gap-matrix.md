@@ -310,27 +310,58 @@ Matrix A9 (all three sub-items).
 
 ## Systemic pattern flagged for owners
 
-Four related "the claim and the reality diverge" cases have now been found:
+Five related "the claim and the reality diverge" cases have now been found:
 1. `install_log_redaction()` — built + tested, never called (fixed in P0.2).
 2. `BudgetTracker` (`budget.py`) — built, never called (Phase 1b).
 3. Orchestration retries/backfill — claimed in docstring, absent in code (U4).
 4. **Token capture retarget (Phase 1a)** — a capability *audited as present in the
-   wrong subsystem*. The first three are "built but not wired"; this one is
-   "verified, but against the wrong target": `llm_engine.py` was the natural place
-   to look for agent-token cost, but it serves the out-of-scope loop, not the
-   launched platform.
+   wrong subsystem*. `llm_engine.py` was the natural place to look for agent-token
+   cost, but it serves the out-of-scope loop, not the launched platform.
+5. **The join key that doesn't join (Phase 1a.1)** — the cost ledger's anchor was
+   about to key on the platform's `session_snapshot` id, which is
+   `sha256(workspace|tool|now)[:10]` (`tools/session_snapshot.py:1025-1028`) and
+   never joins against anything the agent emits. Anchored on it, 1a.1 would have
+   shipped complete, tested, and green with rows that could never be matched to a
+   token count — found only in 1a.2 with the collector already up. The real join
+   key is the agent-native `CLAUDE_CODE_SESSION_ID` from the environment. A
+   mechanism that *looks* complete and is structurally inert — same family as
+   built-but-not-wired.
 
-"Module exists and passes tests" is being mistaken for "live" (cases 1–3); and
+6. **Coverage, not liveness — a distinct sub-family (Phase 1a.1).** The cost-ledger
+   anchor is wired correctly, tested, gated, and green — and observes ~**1%** of
+   the surface it exists to observe (seam-invoked runs are 1 of ~96 recorded
+   invocations; ~99% of spend goes through individually-invoked `uv run` commands
+   the seam never sees). Cases 1–5 are mechanisms *not wired*; this one *is* wired
+   and still fails its purpose. **Live and sufficient are independent properties.**
+   The liveness gate structurally cannot catch it — a run that never anchors has no
+   rows to fail on — so the gap is invisible from inside the mechanism.
+
+"Module exists and passes tests" is being mistaken for "live" (cases 1–3, 5);
 "the finding names a real mechanism" is being mistaken for "the mechanism is the
-one in scope" (case 4). Two structural defenses:
+one in scope" (case 4); and "the mechanism is live" is being mistaken for "the
+mechanism covers its surface" (case 6). Both target errors (4, 5) were caught by
+**empirical verification, not by reasoning from the report** (grep for callers;
+check the env for the actual identifier), and the coverage error (6) was caught by
+**measuring** the seam-vs-direct ratio — inference said "more common," measurement
+said 99%. The empirical rule paid for itself twice over. Four structural defenses:
 - **For built-but-not-wired:** a startup assertion that the mechanism is actually
   active (`assert_installed()` from P0.2 is the template). Phase 1b lands one for
-  budget caps; U4 audits the claim for orchestration.
+  budget caps; U4 audits the claim for orchestration; Phase 1a.1's
+  `assert_ledger_active` fails a run that produced zero anchors.
 - **For audited-against-the-wrong-target:** before building against an audit
   finding, confirm the finding refers to the subsystem actually in scope (grep for
   who calls it; check it against the launch-scope boundary, not just that the code
   exists).
+- **For the join key / identifier:** verify the join key **empirically** before
+  building against it — check the runtime/env for the actual value, don't assume
+  two identically-named-looking ids are the same one.
+- **For coverage:** measure a mechanism's **coverage**, not just its liveness — the
+  fraction of its intended surface it actually observes/guards. A green, live
+  mechanism at 1% coverage is a false comfort; a coverage test (below) is what
+  keeps it from decaying by attrition.
 
 Owners should treat any new safety/enforcement module as not-done until it has such
-an assertion, and any audit finding as unconfirmed until its subsystem is checked
-against launch scope.
+an assertion, any audit finding as unconfirmed until its subsystem is checked
+against launch scope, any join key as unconfirmed until it is matched against the
+real emitted value, and any observer/guard as unconfirmed until its coverage of the
+intended surface is measured — not just its liveness.
