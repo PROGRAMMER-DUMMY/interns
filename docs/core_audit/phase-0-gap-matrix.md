@@ -86,14 +86,16 @@ Per area: A1 cost `0H/2P/4M` · A2 medallion `2H/2P` · A3 dbt `2H/2P` · A4 orc
   types exist (`core/medallion/silver_contract.py:153-154`); a gate asserting
   every declared PK gets both is bounded.
 
-### Scoped-area N/A proposed — HUMAN SIGN-OFF REQUIRED (single checklist)
+### Scoped-area N/A — SIGNED OFF (conditional), 2026-07-18
 
-- [ ] **A7.3 — streaming event-time watermarks + windowed aggregation +
-  watermark-stall alerting → N/A.** Justification: the platform is batch/file-based
-  (CSV → Delta/DuckDB); there is no streaming ingestion or windowed streaming
-  aggregation, so the streaming-watermark/stall pattern does not apply. A *batch*
+- [x] **A7.3 — streaming event-time watermarks + windowed aggregation +
+  watermark-stall alerting → N/A, conditional on batch-only ingestion; revisit if
+  any streaming or event-time source is added.** Approved on batch-only grounds
+  (watermarks are meaningless without event-time streaming), but recorded as a
+  *conditional* N/A: "batch-only" is a current fact, not a permanent property, and
+  the report covers streaming CDC as a likely future ingestion mode. A *batch*
   high-water-mark exists and is verdicted separately (A7 table). This is the only
-  N/A proposed in a Phase 1–4 scoped area; it is proposed, not self-approved.
+  N/A in a Phase 1–4 scoped area.
 
 *(No other scoped-area N/As. All other absences are MISSING/PARTIAL, i.e. in scope
 and falsifiable.)*
@@ -170,7 +172,7 @@ and falsifiable.)*
 |---|---|---|---|---|
 | DLQ pattern for bad/poison records | PARTIAL | Batch **quarantine**: route null-key/dup records to quarantine instead of silver (`core/onboarding/data_model/data_understanding.py:600-603`; `data_quality.py:134,172`); `_is_quarantined` bronze metadata. | Quarantine is proposed in panels/design; verify it's emitted in every generated silver. No streaming DLQ (batch platform). | Phase 3 |
 | Idempotent / exactly-once sinks | HAVE | Silver Delta MERGE idempotent upsert (`delta_emitter.py:196-199`); duckdb merge (`build.py:538`); fingerprint skip (`incremental.py`). | Streaming Kafka idempotent-producer N/A (no streaming). | Phase 3 |
-| Watermarks on event-time + windowed agg + stall alert | **N/A** *(sign-off)* | Platform is batch/file-based; no streaming windowed aggregation. Batch analog only: high-water-mark column (`load_strategy: append_watermarked`, `manifest.py:42-43`; `detect_watermark` `design_naming.py:63`). | Streaming watermark/stall pattern does not apply. **Proposed N/A — Phase-3-scoped, needs human sign-off.** | Phase 3 |
+| Watermarks on event-time + windowed agg + stall alert | **N/A** *(conditional)* | Platform is batch/file-based; no streaming windowed aggregation. Batch analog only: high-water-mark column (`load_strategy: append_watermarked`, `manifest.py:42-43`; `detect_watermark` `design_naming.py:63`). | Streaming watermark/stall pattern does not apply **while ingestion is batch-only**. Signed off 2026-07-18 as N/A *conditional on batch-only ingestion; revisit if any streaming/event-time source is added.* | Phase 3 |
 | Schema-drift detection + evolution policy | PARTIAL | Detection: `schema_drift_columns`/`has_schema_drift` = union−common across source files (`source_family_contracts.py:82-84`); bronze `mergeSchema` additive (`delta_emitter.py:94`). | No explicit per-column evolution **policy** (fail/quarantine/accept) beyond bronze auto-append; no drift alerting. | Phase 2 |
 
 ### Area 8 — Data modeling → Unscoped
@@ -216,11 +218,91 @@ These PARTIAL/MISSING items sit in areas with **no Phase 1–5 owner** (areas 2,
 
 ---
 
-## Gate
+## Gate — CLEARED 2026-07-18
 
-No code changes were produced. Before Phase 1 starts, two human decisions:
+No code changes were produced. Both human decisions are now made and recorded
+below. Phase 1 work has **not** started; the 1a/1b spec is pending.
 
-1. **Sign off (or overturn) the single scoped-area N/A** — A7.3 (streaming
-   watermark/stall alerting → N/A on batch-only grounds). Checklist in §1.
-2. **Set real Phase 1–5 scope from this matrix** — including whether any Unscoped
-   finding (U1–U5) needs a phase of its own.
+1. **A7.3 N/A — signed off (conditional).** See §1 checklist and the A7 table row.
+2. **Phase 1–5 scope — set (companion doc `modern-data-engineering-report.md`
+   committed alongside as the grading standard).** See "Scope decisions" below.
+
+---
+
+## Scope decisions (accepted 2026-07-18)
+
+### Phase 1 splits in two (the halves are in different states)
+
+- **Phase 1a — token capture (near-greenfield).** Instrument `APIEngine.generate()`
+  (`core/agents/llm_engine.py:31-35`) and the CLI paths to capture usage at source;
+  normalize the Gemini Vertex-vs-API `candidatesTokenCount`/`thoughtsTokenCount`
+  split (**verify empirically per endpoint — do not trust the docs**); emit a
+  per-run ledger keyed by `run_id`/`workspace_id`/`pipeline_stage`. (Matrix
+  A1.1–A1.4, A1.6.)
+- **Phase 1b — budget enforcement (wiring job).** Wire `BudgetTracker`
+  (`core/medallion/budget.py`) into the build/loop and read
+  `manifest.max_usd_per_run`. **Land it with a startup assertion that caps are
+  actually active**, mirroring the `assert_installed()` pattern from P0.2. This is
+  the *second* fully-built-but-dead safety module found in this codebase
+  (redaction was the first) — "module exists and passes tests" being mistaken for
+  "live" is treated as a **systemic pattern**, defended structurally, not a
+  one-off. (Matrix A1.5.)
+
+**Pulled forward into Phase 1:**
+- Bronze `_batch_id` emission (the U1 emitter half) — already *declared*
+  (`generation_workflow.py:741`), just not emitted; it is the debugging lifeline
+  the report calls out. Add it to the emitters + reconcile the `_load_ts` vs
+  `_ingested_at` name.
+- `budget.py` wiring (Phase 1b above).
+
+The other two cheap wins (freshness-breach→alert, PK-assertion coverage gate) stay
+in **Phase 2**, where they naturally sit.
+
+### Phase 2 — data contracts / quality (unchanged scope)
+Matrix A5 (all four sub-items) + A3.1 (PK-assertion coverage gate) + A7.4
+(schema-drift evolution policy) + freshness-breach→alert (A10.1/A5.4).
+
+### Phase 2.5 — medallion/dbt maintenance + assertion scaffolding (NEW)
+Bundle of related unscoped findings — the layer is structurally sound but missing
+its maintenance/assertion scaffolding; individually small, done together:
+- **U1 (remainder)** — `_load_ts` vs `_ingested_at` naming reconciliation
+  (the `_batch_id` emission half moved to Phase 1).
+- **U2** — scheduled compaction/VACUUM/snapshot-expiry; ZORDER/clustering.
+- **U3** — row-level incremental (`unique_key`) + late-arrival lookback window
+  (today: fingerprint table-skip only).
+- **U5** — grain test-enforcement (today: grain declared, not asserted).
+
+### Phase 3 — lineage (SHRUNK)
+Column-level lineage already exists (`core/medallion/lineage.py`), so this is
+**"emit OpenLineage over working internals" — a serialization layer, not a
+build**. Rescoped: A6.1 (OpenLineage events) + A6.2 (backend, *if* required) only;
+A6.3/A6.4 are already HAVE. Also owns the DLQ/idempotency Phase-3 items (A7.1).
+
+### Phase 3.x (own scoped item) — U4: orchestration claims vs code (NEW, separate)
+Assets with no `retry_policy`/`partitions_def`/backfill **while the docstring
+claims them** (`dagster_defs.py:44`) is the same assumed-live pattern as
+`budget.py` and the redaction module — a documentation claim the code doesn't
+honor. Treated as a **correctness-of-claims** issue and given its own scoped item,
+**not** folded into the Phase 2.5 bundle.
+
+### Phase 4 — tunable objectives (CONFIRMED LAST)
+Near-empty (A10, all PARTIAL) and dependent on Phase 1a's cost data. Nothing to
+pull forward.
+
+### Phase 5 — query optimization (backlog, unchanged)
+Matrix A9 (all three sub-items).
+
+---
+
+## Systemic pattern flagged for owners
+
+Three fully-built-but-not-wired mechanisms have now been found in this codebase:
+1. `install_log_redaction()` — built + tested, never called (fixed in P0.2).
+2. `BudgetTracker` (`budget.py`) — built, never called (Phase 1b).
+3. Orchestration retries/backfill — claimed in docstring, absent in code (U4).
+
+"Module exists and passes tests" is being mistaken for "live." The structural
+defense is a **startup assertion that the mechanism is actually active**
+(`assert_installed()` from P0.2 is the template). Phase 1b lands one for budget
+caps; U4 is the audit of the claim for orchestration. Owners should treat any new
+safety/enforcement module as not-done until it has such an assertion.
