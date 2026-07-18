@@ -30,6 +30,7 @@ from core.orchestration.pipeline_stages import (
 )
 
 _DEFAULT_WORKSPACE_ENV = "AUTORESEARCH_PIPELINE_WORKSPACE"
+_MAIN_AGENT_ENV = "AUTORESEARCH_MAIN_AGENT"
 
 
 def _run_command(command: str, *, cwd: Optional[Path] = None) -> dict[str, Any]:
@@ -57,11 +58,48 @@ def run_pipeline(
 ) -> dict[str, Any]:
     """Plain sequential runner (no Dagster needed): execute every stage in
     dependency order, short-circuiting on the first failure by default. This is
-    the same DAG Dagster renders -- usable directly for a one-command run."""
-    results: dict[str, Any] = {}
+    the same DAG Dagster renders -- usable directly for a one-command run.
+
+    This seam is the cost-ledger ANCHOR point (Phase 1a.1): one honestly-empty
+    anchor row per stage, keyed by run_id/workspace_id/pipeline_stage and carrying
+    the agent-native session id from the environment, is written BEFORE each stage
+    runs (so a failing stage still leaves an anchor). Anchor-write failures are
+    surfaced in ``_anchor_errors`` -- never silently swallowed -- so a telemetry
+    fault cannot corrupt the run yet also cannot hide."""
+    from datetime import datetime, timezone
+
+    from core.observability.cost_ledger import (
+        CostLedger,
+        build_anchor,
+        ledger_dir_for,
+        liveness_check,
+        new_run_id,
+        resolve_agent_session,
+    )
+
+    env = os.environ
+    configured_agent = env.get(_MAIN_AGENT_ENV)
+    agent_session_id, _ = resolve_agent_session(env)
+    run_id = new_run_id(workspace_id=workspace, agent_session_id=agent_session_id)
+    ledger = CostLedger(ledger_dir_for(workspace, repo_root))
+
+    results: dict[str, Any] = {"_run_id": run_id}
     smap = {s.key: s for s in STAGES}
     for key in topological_order():
         stage = smap[key]
+        try:
+            ledger.append(
+                build_anchor(
+                    run_id=run_id,
+                    workspace_id=workspace,
+                    pipeline_stage=key,
+                    env=env,
+                    configured_agent=configured_agent,
+                    started_at=datetime.now(timezone.utc).isoformat(),
+                )
+            )
+        except Exception as exc:  # surfaced, not swallowed (no silent no-op)
+            results.setdefault("_anchor_errors", []).append(f"{key}: {exc}")
         res = _run_command(command_for(stage, workspace), cwd=repo_root)
         results[key] = res
         if on_stage:
@@ -72,6 +110,11 @@ def run_pipeline(
     results["_ok"] = all(
         v.get("ok") for k, v in results.items() if not k.startswith("_")
     )
+    try:
+        ledger.write_summary(run_id)
+        results["_cost_ledger"] = liveness_check(ledger.entries_for_run(run_id)).to_dict()
+    except Exception as exc:  # surfaced, not swallowed
+        results.setdefault("_anchor_errors", []).append(f"summary: {exc}")
     return results
 
 

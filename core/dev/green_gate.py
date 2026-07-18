@@ -121,6 +121,9 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_layout_planner",
     "tests.test_dashboard_card_density",
     "tests.test_screener_selftest",
+    # Phase 1a.1: agent-token cost-ledger ANCHOR half (env-native session join key,
+    # honest-empty schema, zero-anchor/over-threshold liveness gate).
+    "tests.test_cost_ledger",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
