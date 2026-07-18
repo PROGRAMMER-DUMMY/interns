@@ -233,12 +233,26 @@ below. Phase 1 work has **not** started; the 1a/1b spec is pending.
 
 ### Phase 1 splits in two (the halves are in different states)
 
-- **Phase 1a — token capture (near-greenfield).** Instrument `APIEngine.generate()`
-  (`core/agents/llm_engine.py:31-35`) and the CLI paths to capture usage at source;
-  normalize the Gemini Vertex-vs-API `candidatesTokenCount`/`thoughtsTokenCount`
-  split (**verify empirically per endpoint — do not trust the docs**); emit a
-  per-run ledger keyed by `run_id`/`workspace_id`/`pipeline_stage`. (Matrix
+- **Phase 1a — token capture, RETARGETED (near-greenfield).** Instrument the
+  **outer/driving CLI agent's native telemetry, not `llm_engine.py`.** Claude Code
+  and Codex via OTel/structured output; Gemini via `usageMetadata` on the API path
+  (**verify the Vertex-vs-API `candidatesTokenCount`/`thoughtsTokenCount` split
+  empirically per endpoint — do not trust the docs**). Persist a per-run ledger
+  keyed by `run_id`/`workspace_id`/`pipeline_stage`, schema designed so surfacing
+  it later is additive. Optionally capture `usageMetadata` in `APIEngine`
+  (`core/agents/llm_engine.py:31-35`) as a bonus — but record explicitly that this
+  meters the **out-of-scope loop/interns subsystem, not the platform.** (Matrix
   A1.1–A1.4, A1.6.)
+
+  *Why this retarget (recorded so it is not re-litigated):* `llm_engine.py` serves
+  `core/agents/` only (`registry.py:32-34`) — the loop/interns subsystem that P0.1
+  severed from launch scope; grep returned **zero platform callers**. The launched
+  platform is deterministic Python that delegates judgment to the outer CLI agent
+  via the `cli_agent_proposal_needed` pattern (`blocker_question_panel.py:668`), so
+  its real token spend **never touches `llm_engine.py`**. Instrumenting the shim
+  would meter the out-of-scope subsystem and miss the in-scope one entirely. This
+  also aligns with the companion report, which prescribes collection at the **agent
+  telemetry layer** rather than via a wrapper.
 - **Phase 1b — budget enforcement (wiring job).** Wire `BudgetTracker`
   (`core/medallion/budget.py`) into the build/loop and read
   `manifest.max_usd_per_run`. **Land it with a startup assertion that caps are
@@ -296,13 +310,27 @@ Matrix A9 (all three sub-items).
 
 ## Systemic pattern flagged for owners
 
-Three fully-built-but-not-wired mechanisms have now been found in this codebase:
+Four related "the claim and the reality diverge" cases have now been found:
 1. `install_log_redaction()` — built + tested, never called (fixed in P0.2).
 2. `BudgetTracker` (`budget.py`) — built, never called (Phase 1b).
 3. Orchestration retries/backfill — claimed in docstring, absent in code (U4).
+4. **Token capture retarget (Phase 1a)** — a capability *audited as present in the
+   wrong subsystem*. The first three are "built but not wired"; this one is
+   "verified, but against the wrong target": `llm_engine.py` was the natural place
+   to look for agent-token cost, but it serves the out-of-scope loop, not the
+   launched platform.
 
-"Module exists and passes tests" is being mistaken for "live." The structural
-defense is a **startup assertion that the mechanism is actually active**
-(`assert_installed()` from P0.2 is the template). Phase 1b lands one for budget
-caps; U4 is the audit of the claim for orchestration. Owners should treat any new
-safety/enforcement module as not-done until it has such an assertion.
+"Module exists and passes tests" is being mistaken for "live" (cases 1–3); and
+"the finding names a real mechanism" is being mistaken for "the mechanism is the
+one in scope" (case 4). Two structural defenses:
+- **For built-but-not-wired:** a startup assertion that the mechanism is actually
+  active (`assert_installed()` from P0.2 is the template). Phase 1b lands one for
+  budget caps; U4 audits the claim for orchestration.
+- **For audited-against-the-wrong-target:** before building against an audit
+  finding, confirm the finding refers to the subsystem actually in scope (grep for
+  who calls it; check it against the launch-scope boundary, not just that the code
+  exists).
+
+Owners should treat any new safety/enforcement module as not-done until it has such
+an assertion, and any audit finding as unconfirmed until its subsystem is checked
+against launch scope.
