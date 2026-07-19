@@ -63,8 +63,9 @@ def run_pipeline(
 
     This seam is the cost-ledger ANCHOR point (Phase 1a.1): one honestly-empty
     anchor row per stage, keyed by run_id/workspace_id/pipeline_stage and carrying
-    the agent-native session id from the environment, is written BEFORE each stage
-    runs (so a failing stage still leaves an anchor). Anchor-write failures are
+    the agent-native session id from the environment. The row is written AFTER each
+    stage runs so it carries started_at + finished_at (``_run_command`` never
+    raises, so a failing stage still leaves an anchor). Anchor-write failures are
     surfaced in ``_anchor_errors`` -- never silently swallowed -- so a telemetry
     fault cannot corrupt the run yet also cannot hide."""
     from datetime import datetime, timezone
@@ -88,6 +89,8 @@ def run_pipeline(
     smap = {s.key: s for s in STAGES}
     for key in topological_order():
         stage = smap[key]
+        stage_started = datetime.now(timezone.utc).isoformat()
+        res = _run_command(command_for(stage, workspace), cwd=repo_root)
         try:
             ledger.append(
                 build_anchor(
@@ -97,12 +100,12 @@ def run_pipeline(
                     env=env,
                     configured_agent=configured_agent,
                     run_id_source="pipeline_seam",
-                    started_at=datetime.now(timezone.utc).isoformat(),
+                    started_at=stage_started,
+                    finished_at=datetime.now(timezone.utc).isoformat(),
                 )
             )
         except Exception as exc:  # surfaced, not swallowed (no silent no-op)
             results.setdefault("_anchor_errors", []).append(f"{key}: {exc}")
-        res = _run_command(command_for(stage, workspace), cwd=repo_root)
         results[key] = res
         if on_stage:
             on_stage(key, res)

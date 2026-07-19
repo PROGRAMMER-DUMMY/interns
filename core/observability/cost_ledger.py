@@ -228,12 +228,18 @@ def build_anchor(
     configured_agent: Optional[str] = None,
     platform_session_id: str = "",
     started_at: str = "",
+    finished_at: str = "",
     run_id_source: str = "",
 ) -> AnchorEntry:
     """Build one honestly-empty anchor row from the environment.
 
     The driving agent and its session id are read from the environment (with a
     configured fallback for the agent only). Token/cost columns stay null.
+
+    ``finished_at`` is captured now (not conditionally) even though stage-level
+    temporal attribution is deferred: it is a data-collection decision, not a
+    feature -- an anchor written without it forecloses temporal attribution for
+    that row permanently, and it cannot be backfilled.
     """
     agent_session_id, agent_session_source = resolve_agent_session(env)
     detected, _detected_source = detect_agent(env)
@@ -251,6 +257,7 @@ def build_anchor(
         agent_configured=(str(configured_agent).strip() or None) if configured_agent else None,
         agent_detection_source=detection_source,
         started_at=started_at,
+        finished_at=finished_at,
     )
 
 
@@ -435,7 +442,13 @@ def _workspace_from_argv(argv: list[str]) -> str:
     return ""
 
 
-def _try_anchor(command_name: str, argv: Optional[list[str]] = None) -> None:
+def _try_anchor(
+    command_name: str,
+    argv: Optional[list[str]] = None,
+    *,
+    started_at: str = "",
+    finished_at: str = "",
+) -> None:
     """Write one anchor row for an individually-invoked command. Resolves the
     workspace from argv (``sys.argv`` when not given). Errors are SURFACED to
     stderr and never swallowed -- the CLI analogue of the seam's ``_anchor_errors``
@@ -457,7 +470,8 @@ def _try_anchor(command_name: str, argv: Optional[list[str]] = None) -> None:
                 env=env,
                 configured_agent=env.get("AUTORESEARCH_MAIN_AGENT"),
                 run_id_source=run_id_source,
-                started_at=datetime.now(timezone.utc).isoformat(),
+                started_at=started_at or datetime.now(timezone.utc).isoformat(),
+                finished_at=finished_at,
             )
         )
     except Exception as exc:  # surfaced, never swallowed
@@ -470,13 +484,26 @@ def _try_anchor(command_name: str, argv: Optional[list[str]] = None) -> None:
 
 def anchored(command_name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Mark a console-script entry point as cost-anchored and write an anchor on
-    each call. ``__anchored__`` is the marker the coverage test reads at import."""
+    each call. ``__anchored__`` is the marker the coverage test reads at import.
+
+    The anchor is written in a ``finally`` so it captures ``started_at`` +
+    ``finished_at`` around the command AND still records a row when the command
+    raises/exits (the "failing command still anchors" property, preserved from the
+    seam). A hard-killed/hung process leaves no row -- caught by the liveness gate,
+    not silently."""
 
     def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            _try_anchor(command_name)
-            return fn(*args, **kwargs)
+            started = datetime.now(timezone.utc).isoformat()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                _try_anchor(
+                    command_name,
+                    started_at=started,
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                )
 
         wrapper.__anchored__ = True  # type: ignore[attr-defined]
         wrapper.__anchored_command__ = command_name  # type: ignore[attr-defined]

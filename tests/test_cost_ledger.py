@@ -238,6 +238,7 @@ class RunPipelineAnchorTests(unittest.TestCase):
             )
             # Anchored on the agent-native session id, attributable, liveness ok.
             self.assertTrue(all(e["agent_session_id"] == "uuid-live" for e in entries))
+            self.assertTrue(all(e["finished_at"] >= e["started_at"] > "" for e in entries))
             self.assertTrue(results["_cost_ledger"]["ok"])
             self.assertTrue(ledger.summary_path.exists())
             self.assertNotIn("_anchor_errors", results)
@@ -280,6 +281,10 @@ class DecoratorTests(unittest.TestCase):
             self.assertEqual(rows[0]["pipeline_stage"], "my-command")
             self.assertEqual(rows[0]["agent_session_id"], "uuid-x")
             self.assertEqual(rows[0]["run_id_source"], "session_workspace")
+            # finished_at captured (can't be backfilled) and >= started_at.
+            self.assertTrue(rows[0]["started_at"])
+            self.assertTrue(rows[0]["finished_at"])
+            self.assertGreaterEqual(rows[0]["finished_at"], rows[0]["started_at"])
 
     def test_workspace_less_invocation_writes_no_row_but_runs(self):
         @anchored("no-ws-command")
