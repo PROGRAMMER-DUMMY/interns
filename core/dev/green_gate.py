@@ -124,6 +124,9 @@ CURATED_MODULES: tuple[str, ...] = (
     # Phase 1a.1: agent-token cost-ledger ANCHOR half (env-native session join key,
     # honest-empty schema, zero-anchor/over-threshold liveness gate).
     "tests.test_cost_ledger",
+    # Phase 1a.2b: transcript INGEST (privacy boundary, loud liveness, run-level
+    # attribution, logged dedupe).
+    "tests.test_cost_ingest",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
