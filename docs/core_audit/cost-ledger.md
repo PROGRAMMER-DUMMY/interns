@@ -188,6 +188,45 @@ path). These five are the *current output* of the rule above — a future mainta
 must not "improve" the list by re-deriving it structurally, which reintroduces the
 `medallion` bug.
 
+## Ingest (1a.2b): source, byte-match result, attribution ceiling
+
+The spike that gates 1a.2b (byte-match + co-occurrence + dimensionality) **passed**,
+against a better source than OTLP. Claude Code writes a per-session transcript to
+`~/.claude/projects/<cwd>/<session-uuid>.jsonl` as a byproduct of running:
+- **Byte-match:** the transcript filename and a per-record `sessionId` field both
+  byte-equal `CLAUDE_CODE_SESSION_ID` = the anchor's `agent_session_id`. The join
+  key binds.
+- **Co-occurrence:** token counts live on the `message.usage` object *on the same
+  record* as `sessionId` + `timestamp` — not split across a metric counter and a
+  span attribute (the failure mode the expanded gate was built to catch).
+- **Exclusive buckets already:** `input_tokens`, `cache_creation_input_tokens`,
+  `cache_read_input_tokens`, `output_tokens` — Anthropic reports these mutually
+  exclusive, so the report's inclusive/exclusive normalization is a no-op here.
+
+**Source decision: the transcript, not an OTLP sink.** It already exists (no new
+component to keep alive — an absent transcript is a far louder signal than an OTLP
+sink configured-but-quietly-not-exporting), and it sidesteps token normalization.
+
+**Trade-offs recorded:**
+- The transcript is a **Claude Code-specific artifact**. This is a *per-agent*
+  reader, not one unified OTLP pipeline: Codex and Gemini need their own readers.
+  Gemini stays honestly-degraded (§5); Codex gets a reader when someone drives with
+  it. Do not assume the transcript approach generalizes.
+- The **OTel span `session.id` was never verified** — the transcript made it
+  unnecessary. If anyone later wants an OTLP path, that byte-match is still
+  outstanding.
+
+**Attribution ceiling — higher than the deferral implied.** Stage-level attribution
+stays deferred (run-level first, as scoped) — but it was deferred partly on the
+assumption that agent telemetry would only give a *session total*. The spike's
+fourth sub-answer disproved that: usage is **per-turn, with timestamps**. So the
+ceiling on stage-level precision is higher than the deferral suggested; this is
+recorded, not re-opened. Run-level ships first.
+
+**Privacy boundary (hard).** The transcript is full of conversation content, but the
+reader emits ONLY numbers, timestamps, and the session id — message text / prompts /
+responses / tool results are never extracted, stored, or surfaced.
+
 ## Deferred verification — the 1a.2 byte-match gate (honest-limit discipline)
 
 Confirmed 2026-07-18: `CLAUDE_CODE_SESSION_ID` is exposed to subprocesses, stable,
