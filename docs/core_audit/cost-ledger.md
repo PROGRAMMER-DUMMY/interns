@@ -137,6 +137,57 @@ follow-on or 1a.2's main event depends on the measured seam-vs-direct ratio (see
 the phase-0 handoff) — if most real usage bypasses the seam, coverage is the phase,
 not a footnote to it.
 
+## Anchoring individually-invoked commands (1a.2a)
+
+Coverage (§Coverage boundary) is closed by an **A2 shared decorator**:
+`@anchored("<command>")` (`core/observability/cost_ledger.py`) on each console-script
+entry-point function. It sets `__anchored__` — a fact the coverage test reads **at
+import time**, not by AST-guessing a call or invoking the command — and writes one
+honest-empty anchor per call, resolving `--workspace` from argv. Anchor-write
+failures surface to stderr (`[cost-ledger] …`), never swallowed — the CLI analogue
+of the seam's `_anchor_errors`; a decorated-but-silently-failing command writes
+nothing and is then caught by the liveness gate (zero rows). A registry-driven
+coverage test enumerates `[project.scripts]`, imports each target, and asserts it is
+`__anchored__` **or** on the exemption list (with a required reason, no stale
+entries) — so coverage cannot decay back toward 1% by attrition.
+
+**Run grouping.** Individually-invoked commands are separate processes with no
+shared parent, so `run_id_for(session, workspace)` derives a **stable** id from
+`(agent_session_id, workspace_id)` (no time component) — every command in one
+session against one workspace collapses into a single run instead of fragmenting
+into one run per process. When the session id is absent (Finding A: weak for
+Gemini), it degrades to a unique time-based mint. `run_id_source`
+(`pipeline_seam` | `session_workspace` | `degraded_time`) records which derivation
+produced each id — the seam's time-based mint and the decorator's session-derived
+id are deliberately **not** unified, so they stay distinguishable instead of
+inferred from format.
+
+### Exemption list — how it is derived (the durable artifact, not the five entries)
+
+The exemption rule is **structural**: a command is exemptable when it takes no
+`--workspace` (nothing to key a ledger row to) or is out-of-launch-scope / dev-meta
+tooling. But the first attempt to *derive* the list mechanically — "does the entry
+point's module contain a literal `--workspace`" — **misclassified `medallion` and
+`harness`**, which dispatch `--workspace` to subcommands (`medallion build
+--workspace …`), so the literal never appears in the top-level module. That would
+have dropped `medallion` — the **#2 most-invoked command** (21× in the measurement)
+— into the exempt bucket, passing every test: coverage green, exemptions all
+reasoned, nothing to catch it.
+
+The list is therefore **curated, not grep-derived**, with two safeguards:
+1. The decorator reads `--workspace` from argv generically, so it captures the arg
+   regardless of where a subcommand defines it.
+2. **Decorate when uncertain.** Decorating a workspace-less command is harmless (it
+   writes no row); exempting a real pipeline command loses spend silently and
+   permanently. The asymmetry is not symmetric, so the default is to decorate.
+
+Current exemptions (5): `loop` (out-of-scope subsystem), `green-gate`,
+`validate-git-hygiene` (dev/CI), `generate-skill-adapters` (repo codegen),
+`retrieve-docs` (flat `--query` parser, verified no `--workspace` via any subcommand
+path). These five are the *current output* of the rule above — a future maintainer
+must not "improve" the list by re-deriving it structurally, which reintroduces the
+`medallion` bug.
+
 ## Deferred verification — the 1a.2 byte-match gate (honest-limit discipline)
 
 Confirmed 2026-07-18: `CLAUDE_CODE_SESSION_ID` is exposed to subprocesses, stable,

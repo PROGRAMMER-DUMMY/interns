@@ -336,14 +336,29 @@ Five related "the claim and the reality diverge" cases have now been found:
    The liveness gate structurally cannot catch it — a run that never anchors has no
    rows to fail on — so the gap is invisible from inside the mechanism.
 
+7. **The classifier that misclassifies the thing it most needed to catch (Phase
+   1a.2a).** The exemption rule for which commands need no cost anchor was sound
+   ("no `--workspace`, nothing to key"). But *deriving* the list mechanically —
+   grep the entry-point module for a literal `--workspace` — misclassified
+   `medallion` and `harness`, which dispatch `--workspace` to subcommands so the
+   literal never appears at module level. It would have dropped `medallion` (the
+   **#2 most-invoked command**) into the exempt bucket and passed everything:
+   coverage green, exemptions all reasoned, nothing to catch it. The rule was
+   right; the derivation of what satisfied it was wrong, and it failed on the
+   highest-value item. Fixed by reading `--workspace` from argv generically +
+   curating the list with a **decorate-when-uncertain** default.
+
 "Module exists and passes tests" is being mistaken for "live" (cases 1–3, 5);
 "the finding names a real mechanism" is being mistaken for "the mechanism is the
-one in scope" (case 4); and "the mechanism is live" is being mistaken for "the
-mechanism covers its surface" (case 6). Both target errors (4, 5) were caught by
-**empirical verification, not by reasoning from the report** (grep for callers;
-check the env for the actual identifier), and the coverage error (6) was caught by
-**measuring** the seam-vs-direct ratio — inference said "more common," measurement
-said 99%. The empirical rule paid for itself twice over. Four structural defenses:
+one in scope" (case 4); "the mechanism is live" is being mistaken for "the
+mechanism covers its surface" (case 6); and "the derivation is sound" is being
+mistaken for "the derivation classifies the high-value cases correctly" (case 7).
+The target errors (4, 5) were caught by **empirical verification, not by reasoning
+from the report** (grep for callers; check the env for the actual identifier); the
+coverage error (6) by **measuring** the seam-vs-direct ratio (inference said "more
+common," measurement said 99%); and the classifier error (7) by checking the
+derivation against its **highest-value excluded item**, not a random sample. The
+empirical rule paid for itself repeatedly. Five structural defenses:
 - **For built-but-not-wired:** a startup assertion that the mechanism is actually
   active (`assert_installed()` from P0.2 is the template). Phase 1b lands one for
   budget caps; U4 audits the claim for orchestration; Phase 1a.1's
@@ -359,9 +374,14 @@ said 99%. The empirical rule paid for itself twice over. Four structural defense
   fraction of its intended surface it actually observes/guards. A green, live
   mechanism at 1% coverage is a false comfort; a coverage test (below) is what
   keeps it from decaying by attrition.
+- **For derivations that exclude:** when a derivation produces an exemption or
+  exclusion list, verify it against the **highest-value items it excludes**, not a
+  random sample — a classifier fails most expensively exactly on the case the list
+  existed to protect.
 
 Owners should treat any new safety/enforcement module as not-done until it has such
 an assertion, any audit finding as unconfirmed until its subsystem is checked
 against launch scope, any join key as unconfirmed until it is matched against the
-real emitted value, and any observer/guard as unconfirmed until its coverage of the
-intended surface is measured — not just its liveness.
+real emitted value, any observer/guard as unconfirmed until its coverage of the
+intended surface is measured — not just its liveness — and any exclusion list as
+unconfirmed until its derivation is checked against the highest-value items it drops.
