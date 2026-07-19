@@ -18,6 +18,7 @@ Key guarantees
 - authoritative_usage_allowed is always False by default.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import hashlib
@@ -578,6 +579,8 @@ def _render_report(
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
+@anchored("scan-document")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="scan-document",

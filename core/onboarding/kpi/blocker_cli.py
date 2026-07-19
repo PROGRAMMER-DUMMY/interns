@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -19,6 +20,8 @@ def _resolve_workspace_path(repo_root: str, workspace: str) -> Path:
     return (Path(repo_root) / workspace).resolve()
 
 
+
+@anchored("prepare-kpi-blocker-panel")
 def prepare_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare a validated KPI blocker question panel.")
     parser.add_argument("--workspace", required=True)
@@ -84,6 +87,7 @@ def prepare_main(argv: list[str] | None = None) -> int:
     return 0
 
 
+@anchored("apply-kpi-panel-answer")
 def apply_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Apply an answer from the current KPI blocker panel.")
     parser.add_argument("--workspace", required=True)

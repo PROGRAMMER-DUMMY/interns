@@ -8,15 +8,18 @@ These tests lock the two things that make the anchor honest and joinable:
 """
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from core.observability import cost_ledger as cl
 from core.observability.cost_ledger import (
     UNATTRIBUTED_FAIL_FRACTION,
     AnchorEntry,
     CostLedger,
+    anchored,
     assert_ledger_active,
     build_anchor,
     detect_agent,
@@ -25,6 +28,7 @@ from core.observability.cost_ledger import (
     new_run_id,
     resolve_agent,
     resolve_agent_session,
+    run_id_for,
 )
 
 
@@ -237,6 +241,100 @@ class RunPipelineAnchorTests(unittest.TestCase):
             self.assertTrue(results["_cost_ledger"]["ok"])
             self.assertTrue(ledger.summary_path.exists())
             self.assertNotIn("_anchor_errors", results)
+
+
+class RunGroupingTests(unittest.TestCase):
+    def test_session_present_is_stable_and_time_free(self):
+        # All commands in one session+workspace collapse to ONE run id (no time
+        # component), so a multi-process onboard->build sequence groups.
+        a = run_id_for("uuid-live", "workspaces/x")
+        b = run_id_for("uuid-live", "workspaces/x")
+        self.assertEqual(a, b)
+        self.assertEqual(a[1], "session_workspace")
+        self.assertTrue(a[0].startswith("sess-"))
+        # Different workspace in the same session is a different run.
+        self.assertNotEqual(run_id_for("uuid-live", "workspaces/y")[0], a[0])
+
+    def test_absent_session_degrades_to_unique_time_mint(self):
+        rid, source = run_id_for("", "workspaces/x")
+        self.assertEqual(source, "degraded_time")
+        self.assertRegex(rid, r"^\d{8}T\d{6}Z-[0-9a-f]{8}$")
+
+
+class DecoratorTests(unittest.TestCase):
+    def test_marks_and_writes_one_anchor_keyed_by_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = tmp  # absolute path -> ledger stays in tmp, never a real workspace
+
+            @anchored("my-command")
+            def fake_main():
+                return 42
+
+            self.assertTrue(getattr(fake_main, "__anchored__", False))
+            env = {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "uuid-x"}
+            with mock.patch.object(sys, "argv", ["prog", "--workspace", ws]), \
+                    mock.patch.dict("os.environ", env, clear=True):
+                self.assertEqual(fake_main(), 42)  # command still runs
+            rows = CostLedger(ledger_dir_for(ws)).read_entries()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["pipeline_stage"], "my-command")
+            self.assertEqual(rows[0]["agent_session_id"], "uuid-x")
+            self.assertEqual(rows[0]["run_id_source"], "session_workspace")
+
+    def test_workspace_less_invocation_writes_no_row_but_runs(self):
+        @anchored("no-ws-command")
+        def fake_main():
+            return 7
+
+        with mock.patch.object(sys, "argv", ["prog", "--flag"]):
+            self.assertEqual(fake_main(), 7)  # no --workspace: nothing to key, no crash
+
+    def test_anchor_write_failure_is_surfaced_not_swallowed_and_command_still_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            @anchored("boom")
+            def fake_main():
+                return 1
+
+            with mock.patch.object(sys, "argv", ["prog", "--workspace", tmp]), \
+                    mock.patch.object(cl.CostLedger, "append", side_effect=OSError("disk full")), \
+                    mock.patch("sys.stderr") as err:
+                self.assertEqual(fake_main(), 1)  # telemetry fault never breaks the command
+            printed = "".join(str(c.args[0]) for c in err.write.call_args_list)
+            self.assertIn("cost-ledger", printed)  # surfaced, not silent
+
+
+class CoverageTests(unittest.TestCase):
+    """The anti-attrition guarantee: every console-script either anchors or is
+    explicitly exempted. Checked by reading __anchored__ at IMPORT time -- not an
+    AST guess, not a live run -- so a new command added un-anchored fails here."""
+
+    def test_every_script_anchors_or_is_exempt(self):
+        import importlib
+
+        from core.observability.cost_ledger import EXEMPTIONS, entry_point_scripts
+
+        offenders = []
+        for name, target in entry_point_scripts().items():
+            if name in EXEMPTIONS:
+                continue
+            mod, func = target.split(":")
+            fn = getattr(importlib.import_module(mod), func, None)
+            if not getattr(fn, "__anchored__", False):
+                offenders.append(name)
+        self.assertEqual(
+            offenders, [],
+            f"commands neither @anchored nor exempted: {offenders} "
+            f"(add @anchored(<name>) to the entry point, or exempt it with a reason)",
+        )
+
+    def test_exemptions_are_current_and_reasoned(self):
+        from core.observability.cost_ledger import EXEMPTIONS, entry_point_scripts
+
+        names = set(entry_point_scripts())
+        stale = sorted(n for n in EXEMPTIONS if n not in names)
+        self.assertEqual(stale, [], f"stale exemptions (no such script): {stale}")
+        reasonless = sorted(n for n, r in EXEMPTIONS.items() if not str(r).strip())
+        self.assertEqual(reasonless, [], f"exemptions missing a reason: {reasonless}")
 
 
 if __name__ == "__main__":

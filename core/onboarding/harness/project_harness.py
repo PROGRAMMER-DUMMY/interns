@@ -1,5 +1,6 @@
 """Run the governed project harness and write scoreable proof artifacts."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -684,6 +685,8 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+
+@anchored("validate-project-harness")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run all project harness checks and score the workspace.")
     parser.add_argument("--workspace", required=True)

@@ -1,5 +1,6 @@
 """Generate stakeholder-facing presentation exports for a workspace."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -489,6 +490,8 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+
+@anchored("export-data-model-diagram")
 def export_data_model_diagram_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Export a workspace data model diagram as SVG.")
     parser.add_argument("--workspace", required=True)
@@ -499,6 +502,7 @@ def export_data_model_diagram_main(argv: list[str] | None = None) -> int:
     return 0
 
 
+@anchored("export-kpi-registry-excel")
 def export_kpi_registry_excel_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Export a workspace KPI registry as XLSX.")
     parser.add_argument("--workspace", required=True)
@@ -509,6 +513,7 @@ def export_kpi_registry_excel_main(argv: list[str] | None = None) -> int:
     return 0
 
 
+@anchored("export-workspace-presentation")
 def export_workspace_presentation_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Export stakeholder presentation artifacts for a workspace.")
     parser.add_argument("--workspace", required=True)

@@ -14,6 +14,7 @@ prompts).  Each candidate gets a stable `candidate_id` derived deterministically
 from its type + source_document + page + content hash so the IDs survive re-runs.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import hashlib
@@ -371,6 +372,8 @@ def _rel(path: Path, root: Path) -> str:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
+@anchored("prepare-document-candidate-review")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="prepare-document-candidate-review",

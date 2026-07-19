@@ -1,5 +1,6 @@
 """Validate generated workspace artifacts before agents rely on them."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import hashlib
@@ -1215,6 +1216,8 @@ def _rel(path: Path, root: Path) -> str:
         return str(path)
 
 
+
+@anchored("validate-workspace-artifacts")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Validate generated workspace artifacts and question panel schema."

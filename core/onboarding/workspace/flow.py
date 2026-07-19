@@ -5,6 +5,7 @@ governed tools in-process, persists a small session record, and returns compact
 panels instead of streaming every lower-level command to the main chat.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import hashlib
@@ -2844,6 +2845,8 @@ def _args_before_subcommand(argv: list[str]) -> list[str]:
     return result
 
 
+
+@anchored("workspace-flow")
 def main(argv: list[str] | None = None) -> int:
     _utf8_safe_stdio()
     # BUG-019: --quiet must be accepted both at the top level
@@ -3294,6 +3297,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+@anchored("run-kpi-pipeline")
 def pipeline_main(argv: list[str] | None = None) -> int:
     """Entry point for ``run-kpi-pipeline``.
 

@@ -4,6 +4,7 @@ This module does not mutate Databricks. It turns the Databricks asset manifest
 into a deployment-ready specification, operator runbook, and evolution memory.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -430,6 +431,8 @@ def _rel(path: Path, root: Path) -> str:
         return str(path)
 
 
+
+@anchored("prepare-genie-workspace")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Create a local Genie workspace setup spec.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")

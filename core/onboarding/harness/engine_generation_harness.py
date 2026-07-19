@@ -24,6 +24,7 @@ No domain vocabulary or workspace name is hardcoded; all KPI ids are discovered
 from the generated filenames and the optional engine-generation report.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -394,6 +395,8 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+
+@anchored("validate-engine-generation")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Validate generated multi-engine KPI outputs for coherence (no Spark/Java execution)."

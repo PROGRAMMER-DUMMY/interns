@@ -14,6 +14,7 @@ to its final state once the user has reviewed it:
 """
 
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -184,6 +185,8 @@ def confirm_cli_agent_proposal(
     )
 
 
+
+@anchored("confirm-cli-agent-proposal")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(

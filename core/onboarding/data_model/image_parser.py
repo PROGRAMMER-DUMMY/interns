@@ -6,6 +6,7 @@ and multimodal providers can populate the same contract later, but the default
 path is local-safe and non-executable.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -1427,6 +1428,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+
+@anchored("parse-data-model-images")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Create review-gated data-model image sidecars.")
     parser.add_argument("--workspace", required=True)

@@ -19,6 +19,7 @@ VERIFIES the variable, never sets it). Without it the deployer runs in
 dry-run / plan-echo mode and says so.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import base64
@@ -1320,6 +1321,8 @@ def medallion_deploy_main(argv: list[str] | None = None) -> int:
     return 1 if outcome.failed_count else 0
 
 
+
+@anchored("deploy-databricks-workspace")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Dry-run or apply Databricks workspace deployment.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")

@@ -12,6 +12,7 @@ All signals are derived from the feature mapping, profiles, and `kpi_intent`;
 no domain vocabulary is hardcoded.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -224,6 +225,8 @@ def _render_md(recs: list[EngineRecommendation]) -> str:
     return "\n".join(lines) + "\n"
 
 
+
+@anchored("recommend-kpi-engine")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Recommend per-KPI execution engine (SQL default; Polars/hybrid/PySpark for scale)."

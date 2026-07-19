@@ -36,6 +36,7 @@ Usage::
     uv run token-report --workspace workspaces/<project> --label after --baseline before.json
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -308,6 +309,8 @@ def render_compare(baseline: dict[str, Any], current: Snapshot) -> str:
     return "\n".join(lines)
 
 
+
+@anchored("token-report")
 def main() -> None:
     parser = argparse.ArgumentParser(description="Report per-turn token cost (CLI fixed context + workspace run outputs).")
     parser.add_argument("--repo-root", default=str(PROJECT_ROOT), help="Repo root (default: detected PROJECT_ROOT).")

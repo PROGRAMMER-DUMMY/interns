@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -12,6 +13,8 @@ def _workflow(repo_root: str, workspace: str) -> DataModelGenerationWorkflow:
     return DataModelGenerationWorkflow(Path(repo_root).resolve(), workspace)
 
 
+
+@anchored("prepare-data-model-generation")
 def prepare_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare governed data model generation panel.")
     parser.add_argument("--workspace", required=True)
@@ -26,6 +29,7 @@ def prepare_main(argv: list[str] | None = None) -> int:
     )
 
 
+@anchored("apply-data-model-answer")
 def apply_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Apply a data model generation panel answer.")
     parser.add_argument("--workspace", required=True)
@@ -63,6 +67,7 @@ def apply_main(argv: list[str] | None = None) -> int:
     )
 
 
+@anchored("finalize-data-model-generation")
 def finalize_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Finalize approved data model docs and contracts.")
     parser.add_argument("--workspace", required=True)
@@ -90,6 +95,7 @@ def finalize_main(argv: list[str] | None = None) -> int:
     )
 
 
+@anchored("prepare-data-model-blocker-panel")
 def prepare_blocker_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare the next data model blocker panel.")
     parser.add_argument("--workspace", required=True)
@@ -104,6 +110,7 @@ def prepare_blocker_main(argv: list[str] | None = None) -> int:
     )
 
 
+@anchored("apply-data-model-blocker-answer")
 def apply_blocker_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Apply an answer to the current data model blocker panel.")
     parser.add_argument("--workspace", required=True)

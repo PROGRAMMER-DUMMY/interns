@@ -1,3 +1,4 @@
+from core.observability.cost_ledger import anchored
 import argparse
 import json
 import re
@@ -410,6 +411,8 @@ def run_cleanup(
     return cleaner.plan()
 
 
+
+@anchored("cleanup-workspace-references")
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Remove generated workspace artifacts and stale repo-level references."

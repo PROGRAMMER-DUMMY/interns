@@ -17,6 +17,7 @@ summary line (tier + schema type + scoped option count + artifact path) while
 still writing the full JSON + Markdown to disk.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -144,6 +145,8 @@ def run_understand_data(repo_root: str | Path, workspace: str | Path) -> dict[st
     }
 
 
+
+@anchored("understand-data")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(

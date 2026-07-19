@@ -1,5 +1,6 @@
 """Execute generated KPI SQL and prove that final result views exist."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import hashlib
@@ -594,6 +595,8 @@ def _metric_input_columns(metric: str) -> list[str]:
     return columns
 
 
+
+@anchored("run-kpi-execution-harness")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Execute generated KPI SQL and verify final result views."

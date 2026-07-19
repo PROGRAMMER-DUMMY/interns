@@ -86,6 +86,7 @@ Standalone module + CLI. NOT wired into flow.py or the blocker panel.
 That orchestration is a deferred follow-up for the integrator.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -1452,6 +1453,8 @@ def write_intent_contract(
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
+@anchored("build-intent-contract")
 def main(argv: list[str] | None = None) -> None:
     """Console entry point: build-intent-contract --workspace <ws>"""
     parser = argparse.ArgumentParser(

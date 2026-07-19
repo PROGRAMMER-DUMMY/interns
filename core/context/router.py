@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.observability.cost_ledger import anchored
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -663,6 +664,7 @@ def _rel(path: Path, root: Path) -> str:
         return str(path).replace("\\", "/")
 
 
+@anchored("context-router")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build a bounded context pack for a workspace task.")
     parser.add_argument("command", choices=["build"], help="Context router command.")

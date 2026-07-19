@@ -25,6 +25,7 @@ CLI agent (or workspace flow) using the worker assignments and delegation
 roster in the plan.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -519,6 +520,8 @@ def _rel(path: Path, root: Path) -> str:
         return str(path)
 
 
+
+@anchored("plan-kpi-completion")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Plan dependency-aware parallel KPI completion."

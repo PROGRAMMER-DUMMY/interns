@@ -17,6 +17,7 @@ Generic: no workspace/domain specifics. Requires `agent-browser` on PATH
 (`npm i -g agent-browser && agent-browser install`).
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -263,6 +264,8 @@ def verify(url: str, *, screenshot: str = "", settle_ms: int = 2500) -> VerifyRe
     return res
 
 
+
+@anchored("dashboard-verify")
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify a dashboard renders correctly in a real browser.")
     parser.add_argument("--url", required=True, help="file:///C:/.../index.html or http://127.0.0.1:8060")

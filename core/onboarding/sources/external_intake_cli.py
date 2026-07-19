@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -19,6 +20,8 @@ def _workflow_workspace_hint(args: argparse.Namespace) -> str:
     return args.workspace or args.proposed_workspace or "external-intake"
 
 
+
+@anchored("prepare-external-source-intake")
 def prepare_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare external source intake route panel.")
     parser.add_argument("--external-root", required=True)
@@ -51,6 +54,7 @@ def prepare_main(argv: list[str] | None = None) -> int:
     return 0
 
 
+@anchored("apply-external-source-intake")
 def apply_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Apply an answer to the external source intake panel.")
     parser.add_argument("--external-root", required=True)

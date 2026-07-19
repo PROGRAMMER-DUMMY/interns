@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -123,6 +124,8 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+
+@anchored("generate-pipeline-sql")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)

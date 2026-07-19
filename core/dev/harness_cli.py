@@ -11,6 +11,7 @@ of a name). This dispatcher keeps each suite's module intact and routes:
 most-documented gate); everything else routes through here.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import importlib
 import sys
@@ -56,6 +57,8 @@ SUITES: dict[str, tuple[str, str, str]] = {
 }
 
 
+
+@anchored("harness")
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in {"list", "--list", "-h", "--help"}:

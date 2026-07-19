@@ -17,6 +17,7 @@ Table naming:
   kpi_{id}_results   ← Gold view per KPI
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -280,6 +281,8 @@ def warehouse_table_name(
     return f"fact_{stem}" if source_path in fact_sources else f"dim_{stem}"
 
 
+
+@anchored("kpi-local-warehouse")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Set up local DuckDB warehouse.")
     sub = parser.add_subparsers(dest="command")

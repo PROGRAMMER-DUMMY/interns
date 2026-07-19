@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import csv
@@ -399,6 +400,8 @@ def run_main(argv: list[str] | None = None) -> int:
     return main(argv)
 
 
+
+@anchored("prepare-duplicate-review-panel")
 def panel_main(argv: list[str] | None = None) -> int:
     from core.onboarding.workspace.cli_runner import run_workspace_command
 
@@ -415,6 +418,7 @@ def panel_main(argv: list[str] | None = None) -> int:
     )
 
 
+@anchored("apply-duplicate-review-answer")
 def apply_main(argv: list[str] | None = None) -> int:
     from core.onboarding.workspace.cli_runner import run_workspace_command
 

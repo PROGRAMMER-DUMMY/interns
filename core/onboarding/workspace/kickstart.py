@@ -5,6 +5,7 @@ discovers likely enterprise inputs, runs local-safe onboarding, writes a hybrid
 task entry, and records missing or ambiguous decisions under the workspace.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -491,6 +492,8 @@ def _slug(value: str) -> str:
     return slug or "workspace"
 
 
+
+@anchored("kickstart-workspace")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Kickstart a governed enterprise workspace.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")

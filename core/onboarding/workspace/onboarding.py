@@ -4,6 +4,7 @@ The onboarder treats ``workspaces/<project>`` as user input and writes every
 generated artifact under ``workspaces/<project>/interns``.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -1407,6 +1408,7 @@ SQL_FILE = INTERNS_ROOT / "generated" / "solutions" / "kpi_metrics.sql"
 RESULT_PATH = INTERNS_ROOT / "runs" / "baseline_result.json"
 
 
+
 def main() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -2406,6 +2408,7 @@ def _sql_escape(value: str) -> str:
     return value.replace("'", "''")
 
 
+@anchored("onboard-workspace")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Onboard a workspace into interns/ artifacts.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")

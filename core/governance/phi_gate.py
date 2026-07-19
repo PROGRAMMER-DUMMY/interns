@@ -19,6 +19,7 @@ LOCAL execution (DuckDB) is always allowed -- PHI never leaves the box there.
 Only NON-COVERED REMOTE upload/exec is gated.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import json
 import re
@@ -622,6 +623,8 @@ def enforce_remote_sensitive_gate(
     )
 
 
+
+@anchored("assess-workspace-phi")
 def main(argv: list[str] | None = None) -> int:
     """CLI: assess-workspace-phi --workspace <ws>.
 

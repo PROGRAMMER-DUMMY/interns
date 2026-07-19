@@ -21,6 +21,7 @@ Detectors (each fires only on clear evidence):
   or range-scoped KPIs we can't reconstruct.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -249,6 +250,8 @@ def generate_kpi_suggestions(layout: WorkspaceLayout) -> dict[str, Any]:
     }
 
 
+
+@anchored("suggest-kpi-improvements")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="suggest-kpi-improvements")
     parser.add_argument("--workspace", required=True)

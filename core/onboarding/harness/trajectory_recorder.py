@@ -1,5 +1,6 @@
 """Workspace-scoped trajectory recording for governed agent workflows."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -311,6 +312,8 @@ def _metadata(value: str | None) -> dict[str, Any] | None:
     return parsed
 
 
+
+@anchored("record-workspace-trajectory")
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Record or render a workspace trajectory event.")
     parser.add_argument("--workspace", required=True)

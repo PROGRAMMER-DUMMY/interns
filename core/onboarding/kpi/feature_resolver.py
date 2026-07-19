@@ -6,6 +6,7 @@ else. A deeper pass can attach reusable derivation candidates, but candidates ar
 never executable proof.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -1755,6 +1756,8 @@ def _rel(path: Path, root: Path) -> str:
         return str(path)
 
 
+
+@anchored("resolve-kpi-features")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Resolve KPI features from generated workspace evidence.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")

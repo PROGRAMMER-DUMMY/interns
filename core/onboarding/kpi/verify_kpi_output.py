@@ -19,6 +19,7 @@ derived from the KPI text, the feature mapping, and the builder's parser, never
 from hardcoded domain vocabulary.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -678,6 +679,8 @@ def _rel(path: Path, root: Path) -> str:
         return str(path)
 
 
+
+@anchored("verify-kpi-output")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Self-grill gate: verify generated KPI SQL is executable and intent-aligned."

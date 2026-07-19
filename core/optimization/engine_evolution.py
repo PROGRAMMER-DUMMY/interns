@@ -1,5 +1,6 @@
 """Structured engine-routing memory for SQL/Polars/PySpark decisions."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -326,6 +327,8 @@ def _rel(path: Path, root: Path) -> str:
         return str(path)
 
 
+
+@anchored("record-engine-evolution")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Record SQL/Polars/PySpark engine evolution evidence.")
     parser.add_argument("--workspace", required=True)

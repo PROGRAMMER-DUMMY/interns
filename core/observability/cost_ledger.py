@@ -35,12 +35,16 @@ ingest is trusted, or the join key is revisited.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
+import os
+import sys
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from core.paths import PROJECT_ROOT
 from core.storage.workspace_layout import WorkspaceLayout
@@ -143,6 +147,35 @@ def new_run_id(
     return f"{ts}-{suffix}"
 
 
+def run_id_for(agent_session_id: str, workspace_id: str) -> tuple[str, str]:
+    """Derive ``(run_id, run_id_source)`` for an INDIVIDUALLY-invoked command.
+
+    Individually-invoked commands are separate processes with no shared parent to
+    hand down a run id. So:
+
+    * When an agent-native session id is present, derive a STABLE id from
+      ``(session, workspace)`` with NO time component -- every command in one agent
+      session against one workspace (onboard -> resolve -> build -> dashboard)
+      collapses into a single run rather than fragmenting into one run per process.
+      ``run_id_source = "session_workspace"``.
+    * When the session id is ABSENT (Finding A: not universally available -- weak
+      for Gemini), fall back to a unique time-based mint so unattributed
+      invocations do NOT collapse into one bogus shared run id or collide. The
+      degradation is recorded, never silent. ``run_id_source = "degraded_time"``.
+
+    The seam path (``run_pipeline``) keeps its own time-based mint tagged
+    ``"pipeline_seam"`` -- the derivations are deliberately NOT unified, and the
+    source marker is what lets them be told apart later instead of inferred from id
+    format.
+    """
+    session = str(agent_session_id or "").strip()
+    if session:
+        seed = f"{session}|{workspace_id}"
+        suffix = hashlib.sha1(seed.encode(), usedforsecurity=False).hexdigest()[:8]
+        return f"sess-{suffix}", "session_workspace"
+    return new_run_id(workspace_id=workspace_id), "degraded_time"
+
+
 # --------------------------------------------------------------------------- #
 # Schema -- every token/cost column is nullable and empty at anchor time. That   #
 # nullability is what makes surfacing the ledger later PURELY ADDITIVE.          #
@@ -153,6 +186,7 @@ class AnchorEntry:
     run_id: str
     workspace_id: str
     pipeline_stage: str
+    run_id_source: str = ""  # how run_id was derived: pipeline_seam | session_workspace | degraded_time
     # ---- agent-native join key (the finding that reshaped the schema) ----
     agent_session_id: str = ""
     agent_session_source: str = "none"
@@ -194,6 +228,7 @@ def build_anchor(
     configured_agent: Optional[str] = None,
     platform_session_id: str = "",
     started_at: str = "",
+    run_id_source: str = "",
 ) -> AnchorEntry:
     """Build one honestly-empty anchor row from the environment.
 
@@ -207,6 +242,7 @@ def build_anchor(
         run_id=run_id,
         workspace_id=workspace_id,
         pipeline_stage=pipeline_stage,
+        run_id_source=run_id_source,
         agent_session_id=agent_session_id,
         agent_session_source=agent_session_source,
         platform_session_id=platform_session_id,
@@ -383,18 +419,113 @@ def assert_ledger_active(
     return result
 
 
+# --------------------------------------------------------------------------- #
+# A2 -- shared decorator for individually-invoked console-scripts (Phase 1a.2a). #
+# Marks the entry point with __anchored__ (a fact the coverage test reads at      #
+# IMPORT time, never an AST guess or a live run) and writes one anchor per call.  #
+# --------------------------------------------------------------------------- #
+def _workspace_from_argv(argv: list[str]) -> str:
+    """Extract the ``--workspace <value>`` (or ``--workspace=<value>``) from argv.
+    Empty string when absent -- a workspace-less invocation has nothing to key."""
+    for i, tok in enumerate(argv):
+        if tok == "--workspace" and i + 1 < len(argv):
+            return argv[i + 1]
+        if tok.startswith("--workspace="):
+            return tok.split("=", 1)[1]
+    return ""
+
+
+def _try_anchor(command_name: str, argv: Optional[list[str]] = None) -> None:
+    """Write one anchor row for an individually-invoked command. Resolves the
+    workspace from argv (``sys.argv`` when not given). Errors are SURFACED to
+    stderr and never swallowed -- the CLI analogue of the seam's ``_anchor_errors``
+    -- so a decorated-but-silently-failing command cannot both pass coverage and
+    write nothing (that gap is then caught by the liveness gate: zero rows)."""
+    try:
+        args = list(sys.argv[1:] if argv is None else argv)
+        workspace = _workspace_from_argv(args)
+        if not workspace:
+            return  # workspace-less invocation: nothing to key a row to
+        env = os.environ
+        agent_session_id, _ = resolve_agent_session(env)
+        run_id, run_id_source = run_id_for(agent_session_id, workspace)
+        CostLedger(ledger_dir_for(workspace)).append(
+            build_anchor(
+                run_id=run_id,
+                workspace_id=workspace,
+                pipeline_stage=command_name,
+                env=env,
+                configured_agent=env.get("AUTORESEARCH_MAIN_AGENT"),
+                run_id_source=run_id_source,
+                started_at=datetime.now(timezone.utc).isoformat(),
+            )
+        )
+    except Exception as exc:  # surfaced, never swallowed
+        print(
+            f"[cost-ledger] anchor write failed for {command_name}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+def anchored(command_name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Mark a console-script entry point as cost-anchored and write an anchor on
+    each call. ``__anchored__`` is the marker the coverage test reads at import."""
+
+    def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            _try_anchor(command_name)
+            return fn(*args, **kwargs)
+
+        wrapper.__anchored__ = True  # type: ignore[attr-defined]
+        wrapper.__anchored_command__ = command_name  # type: ignore[attr-defined]
+        return wrapper
+
+    return deco
+
+
+# Console-scripts that legitimately emit no ledger row: no ``--workspace`` to key a
+# row to, or out-of-launch-scope / dev-meta tooling. Each carries a REQUIRED reason;
+# the coverage test forbids stale or reasonless entries, so exempting stays a
+# visible, reviewed decision -- never where an inconvenient command disappears.
+# NOTE: `medallion` and `harness` are deliberately NOT here -- they dispatch to
+# --workspace subcommands (`medallion build --workspace`, `harness ... --workspace`)
+# and ARE anchored; a naive "no --workspace literal in the module" grep would have
+# mis-exempted them (medallion is the #2 most-invoked command).
+EXEMPTIONS: dict[str, str] = {
+    "loop": "out-of-launch-scope loop/interns subsystem (Phase 1a retarget)",
+    "green-gate": "dev/CI test gate; not workspace pipeline work",
+    "retrieve-docs": "repo-level doc retrieval; no --workspace to key",
+    "generate-skill-adapters": "repo-level skill-adapter generation; no --workspace",
+    "validate-git-hygiene": "repo-level git-hygiene check; no --workspace",
+}
+
+
+def entry_point_scripts() -> dict[str, str]:
+    """Parse ``[project.scripts]`` -> ``{name: 'module:function'}`` from pyproject."""
+    import tomllib
+
+    data = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return dict((data.get("project") or {}).get("scripts") or {})
+
+
 __all__ = [
+    "EXEMPTIONS",
     "SCHEMA_VERSION",
     "UNATTRIBUTED_FAIL_FRACTION",
     "AnchorEntry",
     "CostLedger",
     "LivenessResult",
+    "anchored",
     "assert_ledger_active",
     "build_anchor",
     "detect_agent",
+    "entry_point_scripts",
     "ledger_dir_for",
     "liveness_check",
     "new_run_id",
     "resolve_agent",
     "resolve_agent_session",
+    "run_id_for",
 ]

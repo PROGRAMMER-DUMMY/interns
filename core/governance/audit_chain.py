@@ -35,6 +35,7 @@ HSM).  Both are additive and do not require changing this file's format.
 No external dependencies: stdlib only (hashlib, json, pathlib, datetime).
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import hashlib
@@ -198,6 +199,8 @@ def verify_chain(chain_path: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+
+@anchored("verify-audit-chain")
 def main(argv: list[str] | None = None) -> None:
     """``verify-audit-chain`` console script.
 

@@ -1,5 +1,6 @@
 """Detect workspace-level product bugs and write governed bug reports."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -509,6 +510,8 @@ def _rel(path: Path, repo_root: Path) -> str:
         return path.as_posix()
 
 
+
+@anchored("prepare-workspace-bug-report")
 def main() -> None:
     parser = argparse.ArgumentParser(description="Detect workspace product bugs and write bug reports.")
     parser.add_argument("--workspace", required=True, help="Workspace path under workspaces/<project>.")

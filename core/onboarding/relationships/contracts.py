@@ -1,5 +1,6 @@
 """Generate governed relationship/FK contracts for workspace datasets."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import csv
@@ -2011,6 +2012,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+
+@anchored("build-relationship-contracts")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build governed relationship/FK contracts.")
     parser.add_argument("--workspace", required=True)
@@ -2021,6 +2024,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+@anchored("apply-relationship-answer")
 def apply_main(argv: list[str] | None = None) -> int:
     from core.onboarding.workspace.cli_runner import run_workspace_command
     from core.onboarding.workspace.idempotency import fingerprint_paths

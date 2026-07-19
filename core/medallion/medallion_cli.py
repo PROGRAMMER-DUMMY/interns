@@ -4,6 +4,7 @@
     uv run medallion list
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import importlib
 import sys
@@ -19,6 +20,8 @@ SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
 }
 
 
+
+@anchored("medallion")
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in {"list", "--list", "-h", "--help"}:

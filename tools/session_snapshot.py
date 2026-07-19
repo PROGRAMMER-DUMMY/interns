@@ -1,3 +1,4 @@
+from core.observability.cost_ledger import anchored
 import argparse
 import hashlib
 import json
@@ -1071,6 +1072,8 @@ def _add_session_name(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--name", default="", help="Named session alias under .agents/sessions/.")
 
 
+
+@anchored("session-snapshot")
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Record exact agent/user session snapshots.")
     parser.add_argument("--session-dir", default="")

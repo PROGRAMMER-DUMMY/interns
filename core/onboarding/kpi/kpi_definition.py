@@ -19,6 +19,7 @@ by normalized business question (stable across re-onboards, which re-derive the
 ``kpi_001`` ids).
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import csv
@@ -468,6 +469,8 @@ def _rel(path: Path, root: Path) -> str:
         return str(path)
 
 
+
+@anchored("apply-kpi-definition")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Apply a human-confirmed KPI definition (metric/grain) into the registry."

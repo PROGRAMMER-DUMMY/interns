@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 
@@ -10,6 +11,8 @@ def _workflow(repo_root: str, workspace: str) -> KPIGenerationWorkflow:
     return KPIGenerationWorkflow(repo_root, workspace)
 
 
+
+@anchored("prepare-kpi-generation")
 def prepare_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare the KPI generation route/interview panel.")
     parser.add_argument("--workspace", required=True)
@@ -27,6 +30,7 @@ def prepare_main(argv: list[str] | None = None) -> int:
     )
 
 
+@anchored("apply-kpi-generation-answer")
 def apply_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Apply an answer to the current KPI generation panel.")
     parser.add_argument("--workspace", required=True)
@@ -58,6 +62,7 @@ def apply_main(argv: list[str] | None = None) -> int:
     )
 
 
+@anchored("finalize-kpi-generation")
 def finalize_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Finalize approved KPI generation draft.")
     parser.add_argument("--workspace", required=True)

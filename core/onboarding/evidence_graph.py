@@ -1,5 +1,6 @@
 """Build a workspace evidence graph from generated artifacts."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -684,6 +685,8 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+
+@anchored("build-workspace-evidence-graph")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build a workspace evidence graph from generated artifacts.")
     parser.add_argument("--workspace", required=True)
@@ -694,6 +697,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+@anchored("query-workspace-evidence-graph")
 def query_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Query a workspace evidence graph.")
     parser.add_argument("--workspace", required=True)

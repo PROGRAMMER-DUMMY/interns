@@ -1,5 +1,6 @@
 """Build data-model-backed source-to-target plans for KPI implementations."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -714,6 +715,8 @@ def _repo_path(value: str, root: Path) -> str:
     return normalized
 
 
+
+@anchored("plan-source-to-target")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build a KPI source-to-target implementation plan.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")

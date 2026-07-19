@@ -5,6 +5,7 @@ registry, mapping, SQL, execution, and validation evidence without applying
 answers or running queries.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import hashlib
@@ -808,6 +809,8 @@ def _rel(path: Path, root: Path) -> str:
         return str(path).replace("\\", "/")
 
 
+
+@anchored("kpi-proof-packet")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate a read-only all-KPI proof packet.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")

@@ -8,6 +8,7 @@ full-width with the data behind it + the analysis tables). Charts are the exact
 figures the live app draws.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -29,6 +30,8 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 
+
+@anchored("workspace-dashboard-pdf")
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="workspace-dashboard-pdf",

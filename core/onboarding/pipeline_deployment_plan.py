@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -117,6 +118,8 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+
+@anchored("prepare-pipeline-deployment-plan")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)

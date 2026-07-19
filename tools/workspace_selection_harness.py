@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -212,6 +213,8 @@ def render_text(result: WorkspaceSelectionResult) -> str:
     return "\n".join(lines)
 
 
+
+@anchored("prepare-workspace-selection")
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Prepare a guarded workspace-selection panel.")
     parser.add_argument("--workspace", required=True, nargs="+")

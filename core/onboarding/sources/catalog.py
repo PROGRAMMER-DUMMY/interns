@@ -5,6 +5,7 @@ chooses approved sources in ``docs/source_selection.json`` and this module
 turns that selection into either a dry-run plan or local workspace inputs.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import asyncio
@@ -2053,6 +2054,8 @@ def _rel(path: Path, root: Path) -> str:
         return str(path)
 
 
+
+@anchored("prepare-source-catalog")
 def plan_main(argv: list[str] | None = None) -> int:
     parser = _parser("Prepare a governed source catalog plan.")
     args = parser.parse_args(argv)
@@ -2061,6 +2064,7 @@ def plan_main(argv: list[str] | None = None) -> int:
     return 0
 
 
+@anchored("ingest-source-catalog")
 def ingest_main(argv: list[str] | None = None) -> int:
     parser = _parser("Apply an approved source catalog selection.")
     args = parser.parse_args(argv)
@@ -2069,6 +2073,7 @@ def ingest_main(argv: list[str] | None = None) -> int:
     return 0
 
 
+@anchored("source-catalog")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Governed source catalog control surface.")
     sub = parser.add_subparsers(dest="command", required=True)

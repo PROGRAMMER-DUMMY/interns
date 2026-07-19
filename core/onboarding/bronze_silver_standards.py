@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -137,6 +138,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+
+@anchored("prepare-bronze-silver-standards")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)

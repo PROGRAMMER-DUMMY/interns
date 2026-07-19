@@ -17,6 +17,7 @@ The machine_defaults spec refresh still runs each invocation (preserving
 user_overrides) because the MinusAnalyst panel selection reads that per-KPI spec.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import hmac
@@ -156,6 +157,8 @@ def _stop_server(layout: WorkspaceLayout, port: int) -> int:
     return 0
 
 
+
+@anchored("workspace-dashboard")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="workspace-dashboard")
     parser.add_argument("--workspace", required=True)

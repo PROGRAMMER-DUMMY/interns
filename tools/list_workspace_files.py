@@ -1,3 +1,4 @@
+from core.observability.cost_ledger import anchored
 import argparse
 import json
 import re
@@ -368,6 +369,8 @@ def _tokens(value: str) -> set[str]:
     return {token for token in re.split(r"[^a-z0-9]+", value.lower()) if token}
 
 
+
+@anchored("list-workspace-files")
 def main() -> None:
     parser = argparse.ArgumentParser(description="List workspace file paths without reading contents.")
     parser.add_argument(

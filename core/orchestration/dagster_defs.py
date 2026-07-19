@@ -16,6 +16,7 @@ serves the asset graph.
     AUTORESEARCH_PIPELINE_WORKSPACE=workspaces/<ws> dagster dev -m core.orchestration.dagster_defs
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import os
 import subprocess
@@ -95,6 +96,7 @@ def run_pipeline(
                     pipeline_stage=key,
                     env=env,
                     configured_agent=configured_agent,
+                    run_id_source="pipeline_seam",
                     started_at=datetime.now(timezone.utc).isoformat(),
                 )
             )
@@ -169,6 +171,8 @@ except Exception:  # ImportError or missing workspace at import time
     defs = None
 
 
+
+@anchored("pipeline-run")
 def main(argv: Optional[list[str]] = None) -> int:
     """One-command, dependency-ordered run of the whole pipeline (no Dagster
     needed). `uv run pipeline-run --workspace workspaces/<ws>`."""

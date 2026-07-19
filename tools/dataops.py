@@ -16,6 +16,7 @@ project, not a guess.
     dataops drill --scenario "clickstream analytics"
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import sys
 from pathlib import Path
@@ -34,6 +35,8 @@ def _default_review_out(workspace: Path) -> Path:
     return workspace / "interns" / "reports" / "dataops_review.md"
 
 
+
+@anchored("dataops")
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     add_vendor_to_path(PROJECT_ROOT)

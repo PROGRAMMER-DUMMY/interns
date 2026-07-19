@@ -1,5 +1,6 @@
 """Shared wiki memory and governed reuse cards for workspace decisions."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -558,6 +559,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+
+@anchored("prepare-wiki-memory")
 def prepare_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare governed wiki memory reuse cards.")
     parser.add_argument("--workspace", required=True)

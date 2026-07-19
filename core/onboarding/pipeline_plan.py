@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -300,6 +301,8 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+
+@anchored("prepare-data-engineering-route")
 def route_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)
@@ -317,10 +320,12 @@ def route_main(argv: list[str] | None = None) -> int:
     return 0
 
 
+@anchored("prepare-pipeline-plan")
 def pipeline_main(argv: list[str] | None = None) -> int:
     return main(argv)
 
 
+@anchored("prepare-pipeline-format-panel")
 def format_panel_main(argv: list[str] | None = None) -> int:
     from core.onboarding.workspace.cli_runner import run_workspace_command
 
@@ -337,6 +342,7 @@ def format_panel_main(argv: list[str] | None = None) -> int:
     )
 
 
+@anchored("apply-pipeline-format-answer")
 def format_answer_main(argv: list[str] | None = None) -> int:
     from core.onboarding.workspace.cli_runner import run_workspace_command
 
@@ -359,6 +365,7 @@ def format_answer_main(argv: list[str] | None = None) -> int:
     )
 
 
+@anchored("apply-pipeline-decision")
 def decision_main(argv: list[str] | None = None) -> int:
     from core.onboarding.workspace.cli_runner import run_workspace_command
 

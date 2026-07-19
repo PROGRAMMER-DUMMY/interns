@@ -1,5 +1,6 @@
 """CLI for local hardware/resource preflight."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -9,6 +10,8 @@ from core.paths import PROJECT_ROOT
 from core.resource.manager import ResourceManager
 
 
+
+@anchored("resource-preflight")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Write resource preflight evidence for a workspace.")
     parser.add_argument("--workspace", required=True, help="Workspace path, for example workspaces/demo")

@@ -24,6 +24,7 @@ data_model_candidate entries are flagged `executable: False` even after human
 acceptance -- they still require profile RI proof (BUG-004/023 discipline).
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -407,6 +408,8 @@ def _rel(path: Path, root: Path) -> str:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
+@anchored("apply-document-candidate")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="apply-document-candidate",

@@ -13,6 +13,7 @@ grain subset is also enforced inside the execution harness, so a red coverage
 result blocks review/completion through the existing proof boundary.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -248,6 +249,8 @@ def _rel(path: Path, root: Path) -> str:
         return str(path).replace("\\", "/")
 
 
+
+@anchored("validate-kpi-intent-coverage")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Verify generated KPI SQL realizes each KPI's declared intent (grain/metric/filters)."

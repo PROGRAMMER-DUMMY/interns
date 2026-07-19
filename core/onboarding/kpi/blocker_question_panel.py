@@ -1,5 +1,6 @@
 """Build a stakeholder-friendly blocker question panel from KPI feature mapping."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -2698,6 +2699,8 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+
+@anchored("blocker-question-panel")
 def main(argv: list[str] | None = None) -> int | None:
     parser = argparse.ArgumentParser(
         description="Generate a stakeholder-friendly blocker question panel."

@@ -1,5 +1,6 @@
 """Confidence-scored health report for workspace and team memory artifacts."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -555,6 +556,8 @@ def _is_expired(value: Any) -> bool:
     return parsed is not None and parsed < datetime.now(timezone.utc)
 
 
+
+@anchored("validate-memory-health")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate confidence-scored memory health.")
     parser.add_argument("--workspace", required=True)

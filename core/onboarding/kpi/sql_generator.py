@@ -1,5 +1,6 @@
 """Authoritative KPI SQL generation for fully resolved feature mappings."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -1048,6 +1049,8 @@ def _rel(path: Path, root: Path) -> str:
         return str(path)
 
 
+
+@anchored("generate-kpi-sql")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate SQL for one fully resolved KPI.")
     parser.add_argument("--workspace", required=True, help="Workspace path relative to repo root.")

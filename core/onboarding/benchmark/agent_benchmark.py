@@ -1,5 +1,6 @@
 """Project-native benchmark scorecard and release gates for AI data-agent workspaces."""
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -672,6 +673,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+
+@anchored("prepare-agent-benchmark")
 def prepare_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare a project-native AI data-agent benchmark scorecard.")
     parser.add_argument("--workspace", required=True)

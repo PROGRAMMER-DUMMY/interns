@@ -26,6 +26,7 @@ its reason, and any skips with reasons. No domain vocabulary is hardcoded; all
 KPI selection comes from the feature mapping.
 """
 from __future__ import annotations
+from core.observability.cost_ledger import anchored
 
 import argparse
 import json
@@ -284,6 +285,8 @@ def _render_md(engine: str, outcomes: list[KPIGenerationOutcome]) -> str:
     return "\n".join(lines) + "\n"
 
 
+
+@anchored("generate-kpi-engines")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
