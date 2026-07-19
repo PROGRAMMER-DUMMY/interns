@@ -2408,6 +2408,11 @@ def _sql_escape(value: str) -> str:
     return value.replace("'", "''")
 
 
+# THIS is the live `onboard-workspace` entry point. This module defines `def main`
+# three times (also ~L1413, ~L1462); Python binds the LAST, so this one wins and the
+# earlier two are dead. This file has trapped two audits on shadowed/duplicate mains
+# (a grep for `^def main` also once matched two mains inside string templates) — if
+# you touch the entry point, edit THIS main, and keep the @anchored decorator here.
 @anchored("onboard-workspace")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Onboard a workspace into interns/ artifacts.")

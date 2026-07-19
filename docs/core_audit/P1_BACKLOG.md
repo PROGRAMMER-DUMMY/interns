@@ -86,3 +86,46 @@ module list was never updated to match it.
 
 **Priority:** P1 — required before any enterprise team points this platform
 at their own Databricks.
+
+## P1.4 — green-gate Spark tests leak GBs to %TEMP%; disk exhaustion reads as a false regression
+
+**Tracked as:** this file.
+
+**Location:** green-gate's pyspark/delta-backed modules (medallion parity,
+`test_medallion_*`, `test_pipeline_orchestration`, etc.) via Spark's
+`java.io.tmpdir` under `%TEMP%`.
+
+**Symptom / risk:** repeated green-gate runs leave orphaned `%TEMP%/tmp*`
+directories (~800 MB each; observed ~5 GB across 7 dirs) plus a Spark warehouse,
+none cleaned up. When free disk drops below the resource preflight's 5 GB policy
+minimum (`core/resource/manager.py:143-168`, `min_free_after = min(total*0.15,
+5_000_000_000)`), the preflight raises `workspace_free_disk_below_minimum` and
+`resource_mode` flips `local_standard -> local_blocked_remote_recommended`. Two
+enterprise tests then fail:
+`test_source_to_target_planner_writes_data_model_backed_plan` and
+`test_hybrid_source_to_target_planner_uses_engine_evolution_memory` (both assert
+`resource_mode == "local_standard"`). **This is a test-infra defect masquerading as
+a code regression** — the gate fills the disk it runs on, then fails on the disk
+being full, at the worst possible time and with no signal that it is environmental.
+
+**Isolation procedure (record so it is not rediscovered):** to distinguish this
+environmental failure from a real regression without freeing disk, neutralize only
+the disk-policy blocker via the preflight's supported env knobs and re-run:
+
+```
+AUTORESEARCH_MIN_FREE_DISK_FRACTION=0 AUTORESEARCH_MAX_MIN_FREE_DISK_BYTES=0 \
+  .venv/Scripts/python.exe -m core.dev.green_gate --json
+```
+
+If the two failures clear under this and nothing else changes, they were disk, not
+code. (Verified 2026-07-19: gate went 831/2-fail -> 831/0-fail with only these knobs.)
+
+**Acceptance criteria:**
+- pyspark/delta test fixtures register cleanup of their Spark tmp/warehouse dirs
+  (e.g. `tempfile.TemporaryDirectory` + `spark.local.dir`/`java.io.tmpdir` scoped
+  per test, torn down on exit), so a green-gate run nets ~zero `%TEMP%` growth.
+- A documented note (or a preflight warning) points at this isolation procedure so
+  a disk-driven failure is not misread as a regression.
+
+**Priority:** P1 — a gate that fills its own disk produces false regression reports;
+low fix cost, high false-alarm cost.

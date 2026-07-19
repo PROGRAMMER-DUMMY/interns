@@ -310,7 +310,7 @@ Matrix A9 (all three sub-items).
 
 ## Systemic pattern flagged for owners
 
-Five related "the claim and the reality diverge" cases have now been found:
+Eight related "the claim and the reality diverge" cases have now been found:
 1. `install_log_redaction()` — built + tested, never called (fixed in P0.2).
 2. `BudgetTracker` (`budget.py`) — built, never called (Phase 1b).
 3. Orchestration retries/backfill — claimed in docstring, absent in code (U4).
@@ -348,6 +348,20 @@ Five related "the claim and the reality diverge" cases have now been found:
    highest-value item. Fixed by reading `--workspace` from argv generically +
    curating the list with a **decorate-when-uncertain** default.
 
+8. **Hidden by indirection — but caught by the mechanism (Phase 1a.2a).**
+   `context-router` (`core.context.cli:main`) is a *re-export*: `cli.py` does
+   `from core.context.router import main`, so the sweep's "find `def main(` in the
+   entry-point module" pass didn't see it, and a grep for its `--workspace` in
+   `cli.py` finds nothing — yet `router.py`'s `main` requires `--workspace`. Same
+   "hidden by indirection" family as `medallion` (case 7). **The difference that
+   matters: this one was caught by the coverage test at import time, not by anyone
+   remembering to look** — the test resolved `cli.py:main` to the real (undecorated)
+   `router.main` and failed. On the *same* first run it also caught
+   `onboarding.py`'s three shadowed `def main` (Python binds the last; the sweep had
+   decorated the first). Two "looks-fine-isn't" traps caught by mechanism on one
+   run — which is exactly why the import-time `__anchored__` marker was chosen over
+   an AST grep or judgment: it catches what greps and memory miss.
+
 "Module exists and passes tests" is being mistaken for "live" (cases 1–3, 5);
 "the finding names a real mechanism" is being mistaken for "the mechanism is the
 one in scope" (case 4); "the mechanism is live" is being mistaken for "the
@@ -357,8 +371,12 @@ The target errors (4, 5) were caught by **empirical verification, not by reasoni
 from the report** (grep for callers; check the env for the actual identifier); the
 coverage error (6) by **measuring** the seam-vs-direct ratio (inference said "more
 common," measurement said 99%); and the classifier error (7) by checking the
-derivation against its **highest-value excluded item**, not a random sample. The
-empirical rule paid for itself repeatedly. Five structural defenses:
+derivation against its **highest-value excluded item**, not a random sample. Case
+(8) is the encouraging one: it was caught by **the mechanism itself** — the
+import-time coverage test — not by verification-after-the-fact. Building the check
+as an import-time marker rather than a grep/AST/judgment is what turned a
+"remember to look" into a "the test fails." The empirical rule paid for itself
+repeatedly, and the mechanism has started paying too. Five structural defenses:
 - **For built-but-not-wired:** a startup assertion that the mechanism is actually
   active (`assert_installed()` from P0.2 is the template). Phase 1b lands one for
   budget caps; U4 audits the claim for orchestration; Phase 1a.1's
