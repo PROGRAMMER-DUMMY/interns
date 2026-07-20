@@ -310,7 +310,7 @@ Matrix A9 (all three sub-items).
 
 ## Systemic pattern flagged for owners
 
-Eight related "the claim and the reality diverge" cases have now been found:
+Nine related "the claim and the reality diverge" cases have now been found:
 1. `install_log_redaction()` — built + tested, never called (fixed in P0.2).
 2. `BudgetTracker` (`budget.py`) — built, never called (Phase 1b).
 3. Orchestration retries/backfill — claimed in docstring, absent in code (U4).
@@ -362,6 +362,32 @@ Eight related "the claim and the reality diverge" cases have now been found:
    run — which is exactly why the import-time `__anchored__` marker was chosen over
    an AST grep or judgment: it catches what greps and memory miss.
 
+9. **Correctly built, correctly joined, correctly labeled — and still meaningless
+   (Phase 1a.2b→c).** The purest instance, and the one no mechanism in the family so
+   far could have caught. The transcript ingest anchors on the verified join key,
+   groups the pipeline into one run (7/7 anchors, one `run_id`), fills 100% with
+   zero unattributable rows, dedupes the double-fire, and honors the privacy
+   boundary — every structural property correct, every test green. Run end-to-end
+   (2026-07-19, Healthcare-RCM), it attributed **88.2M tokens / 373 turns / a
+   33.9-hour window** to a single `onboard→resolve→build→dashboard` run that
+   **actually executed in 4.3 minutes** — a **474×** over-attribution. Cause: run
+   grouping is *stable per `(session, workspace)`* — the very property that makes
+   the pipeline collapse into one run also means the whole session's transcript
+   attributes to that run, and session-level ingest hands it the lot. `attribution:
+   "run"` is *technically accurate* (it is one run_id) and reads as "the pipeline's
+   cost" while being "the session's cost that happens to contain the pipeline."
+   Cases 1–3,5 were *not wired*; 6 was wired but *did not cover*; 7 *misderived*; 8
+   was *hidden by indirection*. This is none of those: built, wired, covered,
+   joined, labeled — and off by ~2 orders of magnitude. **No test catches
+   magnitude**, and a truthful-sounding label is half of why 474× read as plausible.
+   Worse, the defect was one downstream step from being *concealed*: cache-read is
+   84.7M of the 88.2M tokens and prices at ~10% of input, so 1a.2c would have turned
+   an 88M-token session into a modest, unremarkable USD figure — nobody reviewing a
+   plausible dollar number hunts for a 474× scope error behind it. Fixed by the
+   temporal-attribution slice (`temporal_approximate` label + anchor-window
+   intersection; see `cost-ledger.md`), whose acceptance is a *human magnitude read*,
+   not an assertion — because the entire lesson is that no assertion catches this.
+
 "Module exists and passes tests" is being mistaken for "live" (cases 1–3, 5);
 "the finding names a real mechanism" is being mistaken for "the mechanism is the
 one in scope" (case 4); "the mechanism is live" is being mistaken for "the
@@ -375,8 +401,13 @@ derivation against its **highest-value excluded item**, not a random sample. Cas
 (8) is the encouraging one: it was caught by **the mechanism itself** — the
 import-time coverage test — not by verification-after-the-fact. Building the check
 as an import-time marker rather than a grep/AST/judgment is what turned a
-"remember to look" into a "the test fails." The empirical rule paid for itself
-repeatedly, and the mechanism has started paying too. Five structural defenses:
+"remember to look" into a "the test fails." Case (9) is the counterweight: no
+mechanism caught it and none could — it took *reading the output number and
+disbelieving it*. "The number is structurally correct" is being mistaken for "the
+number is meaningful"; a correct join at the wrong grain (session, not run)
+produces a precise, well-labeled, wrong-by-474× figure. The empirical rule paid for
+itself repeatedly, and the mechanism has started paying too — but magnitude is the
+one class that stays a human read. Six structural defenses:
 - **For built-but-not-wired:** a startup assertion that the mechanism is actually
   active (`assert_installed()` from P0.2 is the template). Phase 1b lands one for
   budget caps; U4 audits the claim for orchestration; Phase 1a.1's
@@ -396,10 +427,20 @@ repeatedly, and the mechanism has started paying too. Five structural defenses:
   exclusion list, verify it against the **highest-value items it excludes**, not a
   random sample — a classifier fails most expensively exactly on the case the list
   existed to protect.
+- **For magnitude / scope:** verify a produced quantity's **magnitude** against an
+  independent estimate at the stage where it is still legible — *before* any
+  downstream transformation compresses it. A scope error (attributing a 34-hour
+  session to a 4-minute run) survives every structural test; and a later
+  cheap-pricing step (cache-read at ~10% of input dominated 84.7M of 88.2M tokens)
+  turns it into a modest dollar figure that *conceals* the error rather than delaying
+  it. No automated assertion catches magnitude — a human must read the number, and
+  the acceptance gate must say so explicitly.
 
 Owners should treat any new safety/enforcement module as not-done until it has such
 an assertion, any audit finding as unconfirmed until its subsystem is checked
 against launch scope, any join key as unconfirmed until it is matched against the
 real emitted value, any observer/guard as unconfirmed until its coverage of the
-intended surface is measured — not just its liveness — and any exclusion list as
-unconfirmed until its derivation is checked against the highest-value items it drops.
+intended surface is measured — not just its liveness — any exclusion list as
+unconfirmed until its derivation is checked against the highest-value items it drops,
+and any produced cost/quantity as unconfirmed until its magnitude is read against an
+independent estimate at the stage where it is still legible.

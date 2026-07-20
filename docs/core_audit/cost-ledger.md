@@ -243,6 +243,160 @@ quietly become an assumption:
 This gate is also written into every run's `current.md` summary, so it travels
 with the artifact.
 
+## The 474× finding — run-level attribution conflates session with pipeline (1a.2b live read)
+
+The ledger passed every test, so it was run end-to-end (2026-07-19, Healthcare-RCM)
+and its output was *read*, not asserted. Pipeline: `onboard-workspace` →
+`resolve-kpi-features` → `medallion design`/`build` →
+`workspace-dashboard --screen --no-refresh`, then `cost-ledger-ingest`. Every
+structural property came out correct:
+
+| Check | Result |
+|---|---|
+| Run grouping | 7/7 anchors under one `run_id` (`sess-4f4694c5`, `session_workspace`); the nested `prepare-kpi-blocker-panel` collapsed into the same run |
+| Join coverage | 7/7 carry the session id; `unattributable_anchors: 0`; liveness passes the <10% bar at 0% |
+| Dedupe | fired — 2 `same_stage_double_fire` (info) on `(run, medallion)` from the three `medallion`-CLI calls; logged, not collapsed |
+| Failing-command anchor | the failed `medallion build` still wrote its row (`finally`-anchor) |
+| Privacy | usage record carries only numbers/timestamps/session id |
+
+And the number was **meaningless.** Ingest attributed to that one run, labeled
+`attribution: "run"`:
+
+```
+input 52,034  output 748,879  cached 87,399,880  TOTAL 88,200,793 tokens
+turns 373     window 2026-07-18T06:55Z → 2026-07-19T16:47Z  (33.9 hours)
+```
+
+The pipeline actually executed **16:43:31 → 16:47:48 — 4.3 minutes.** The attributed
+window is **33.9 hours**: a **474× over-attribution.** 88.2M tokens / 373 turns is a
+plausible *whole-session* total (≈227K cache-read/turn against a big-repo context,
+≈2K output/turn — internally consistent, so the number is real), but as one
+pipeline's cost it is off by ~2 orders of magnitude.
+
+**Cause — a correct join at the wrong grain.** `run_id = sess-hash(session |
+workspace)` is stable per `(session, workspace)`. That is the property that makes the
+pipeline collapse into one run (good) — and it is *also* why every turn of the entire
+conversation shares that run_id, so session-level ingest
+(`cost_ingest.py` `extract_session_usage` sums the whole transcript) attributes the
+lot to it. `attribution: "run"` is technically accurate — it *is* one run_id — and
+reads as "the pipeline's cost" while being "the session's cost that contains the
+pipeline." Nothing is unwired, miscovered, misjoined, or mislabeled in the usual
+sense; it is the ninth systemic instance in `phase-0-gap-matrix.md`, and the purest.
+
+### The generalized lesson — a compressing transform can *conceal* a scope error
+
+Record this at least as carefully as the number. Cache-read is **84.7M of the 88.2M
+tokens**, and cache-read prices at roughly **10% of input.** So the mis-scope had a
+second trap waiting one step downstream: 1a.2c would have priced this session and
+produced a **modest, unremarkable dollar figure** — the dominant token class is the
+cheap one — and *nobody reviewing a plausible USD number goes hunting for a 474×
+scope error behind it.* The cheap pricing of the dominant token class would not have
+*delayed* the defect; it would have **hidden** it.
+
+> **Rule:** a downstream transformation that compresses magnitude (cheap-pricing a
+> dominant-but-cheap component, averaging, normalizing) can mask an upstream scope
+> error. Verify magnitude at the stage where it is still legible — here, the raw
+> token count — *before* the compressing step, not after.
+
+**Standing rule (the stronger, durable form — confirmed by the acceptance read, not
+just the session-scale defect).** The *pipeline-scoped* number is **also** ~99.9%
+cache-read (784,312 of 785,216 tokens in the 96-second window). The cheap-token
+domination is not a session-scale artifact; it holds at every granularity this system
+will ever produce. Therefore:
+
+> **The magnitude check in this system is permanently on token counts, never on
+> dollars.** A USD figure — at session scope, pipeline scope, or any future
+> stage scope — is *uninformative about whether the number is scoped correctly*,
+> because cheap-pricing the dominant class flattens a 474× (or an ∞×; see the
+> zero-window case) into an unremarkable cost either way. Dollars answer "how much did
+> this cost"; they will **never** be the signal that a scope error exists. Read the
+> tokens.
+
+This is why the phase ordering is: **confirm the estimate's magnitude is sane, then
+reconcile it against provider billing (1a.2c).** Reconciling first prices the wrong
+denominator precisely.
+
+## Temporal-attribution slice — scope (fixes the 474×; 1a.2c stays parked)
+
+Run-level attribution over a long-lived agent session is the defect. The fix is the
+stage/temporal attribution deferred in 1a.2b — and the 2026-07-19 run proved the data
+for it is already on disk.
+
+**Enabler — `finished_at` being written unconditionally in 1a.2b is what makes this
+possible now.** It was added as a *data-collection* decision, not a feature: "an
+anchor written without it forecloses temporal attribution for that row permanently,
+and it cannot be backfilled" (`cost_ledger.py` `build_anchor` docstring). That call
+paid off — every anchor already carries `started_at`+`finished_at`, and the
+transcript carries per-turn timestamps, so temporal intersection is a pure read over
+existing data. Deferring `finished_at` would have foreclosed it for every row written
+since 1a.2b. Recorded as a case where the data-collection-vs-feature distinction paid.
+
+**Mechanism.** For each run, compute its window `[min(started_at), max(finished_at)]`
+across the run's anchors, then attribute only the transcript turns whose timestamp
+falls inside that window. For `sess-4f4694c5` that window is ~4.3 minutes, not 33.9
+hours, so only the handful of turns that actually drove the pipeline attribute.
+
+**Requirement 1 — the approximation is self-describing in the schema, not just here.**
+The windowed record is **not** labeled `"run"`. It carries
+`attribution: "temporal_approximate"`, its window bounds (`window_lo`/`window_hi`/
+`window_seconds`), `turns_in_window`, and an `attribution_note` stating the direction
+of error. The error is **systematic and uneven**: the agent turn that *launches* a
+stage is timestamped just before the subprocess's `started_at`, and the turn that
+*reacts* to it just after `finished_at`, so boundary driving-turns fall outside the
+window — the intersection **undercounts**, and undercounts more for runs with few
+stages (multi-stage runs catch the inter-stage turns; a single-stage run can catch
+near-zero). The whole-session total is still emitted alongside, relabeled
+`attribution: "session_total"` (not `"run"`) so no reader can mistake the session
+figure for a pipeline figure either. Mislabeling was half of why 474× read as
+plausible; a future reader must not be able to mistake the approximate number for an
+exact one.
+
+**Requirement 2 — acceptance is a magnitude read, not a passing test.** No automated
+assertion catches magnitude (that is the entire lesson). After the slice lands, the
+required acceptance step is to **re-run this exact pipeline, run ingest, and read the
+output**: is the attributed window ~4.3 minutes rather than 33.9 hours, and is the
+token count believable for that work? That is a human judgment on the number. Unit
+tests lock the *mechanics* (windowing math, the `temporal_approximate` label, the
+undercount note, the relabeled session total) — they do not, and cannot, certify the
+magnitude is sane.
+
+### Acceptance result (2026-07-20) — both extremes in one read
+
+Re-ran the exact pipeline against a fresh ledger, two driving patterns:
+
+| Driving pattern | window | `turns_in_window` | temporal tokens |
+|---|---|---|---|
+| whole pipeline in one agent turn | 66s | **0** (`zero_window_runs` + `[~]`) | 0 |
+| stages across four turns | 96s | 4 | **785,216** (~0.8% of the 98.6M `session_total`) |
+
+Both scope correctly to ~1 minute (vs 33.9h), so the 474× is fixed. The believable
+figure (785K, dominated by four turns' cache-reads) is a per-pipeline number, not a
+per-session one.
+
+**The zero-window run is the more valuable measurement.** Zero turns in a 66-second
+window is the approximation's failure mode caught at its extreme — and *surfaced*
+(`zero_window_runs` + the `[~] undercount extreme` marker) rather than reported as a
+small number. Without that flag a batched run would report **genuine work as free**,
+which is arguably worse than 474×: **zero reads as an *answer*, not an anomaly**, so no
+one questions it. Catching both extremes in one acceptance read is what makes "honest,
+labeled undercount" a *demonstrated* claim rather than an aspirational one. The
+magnitude is driving-pattern-sensitive by construction (one turn → 0, four turns →
+785K, same stages); that caveat is written into `usage.md` next to the human-read note,
+because anyone comparing two runs' costs reads the output, not this doc.
+
+### 1a.2c precondition — write it now, while the reasoning is fresh
+
+> **Gate.** When 1a.2c comes off the parking brake, a **passed token-level magnitude
+> read is a required precondition of reconciliation, not a preamble to it.** Because
+> dollars cannot reveal a scope error in this system (see the standing rule above),
+> reconciling a run whose `temporal_approximate` magnitude has not been human-confirmed
+> as pipeline-scoped means pricing a number nobody has verified — and the resulting USD
+> figure will look fine whether the scope is right or wrong. Reconciliation runs **only
+> after** the magnitude read passes for that run's granularity.
+
+**1a.2c (provider $ reconciliation) stays parked** until asked. The exact
+cache-write-vs-read split is already preserved in `usage.jsonl` for it.
+
 ## Systemic pattern — a fifth instance
 
 Added to `phase-0-gap-matrix.md` §"Systemic pattern": **the join key that doesn't
