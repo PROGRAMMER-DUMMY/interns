@@ -34,6 +34,7 @@ import json
 import sys
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
@@ -96,10 +97,35 @@ class SessionUsage:
         )
 
 
-def extract_session_usage(path: Path, session_id: str) -> SessionUsage:
+def _parse_ts(s: str) -> Optional[datetime]:
+    """Parse an ISO-8601 timestamp (``Z`` or ``+00:00``) to an aware UTC datetime.
+    None on failure. A naive result is assumed UTC so window comparisons never mix
+    aware/naive datetimes (which would raise)."""
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def extract_session_usage(
+    path: Path,
+    session_id: str,
+    window: Optional[tuple[datetime, datetime]] = None,
+) -> SessionUsage:
     """Sum the exclusive token buckets over a transcript. Reads numbers +
-    timestamps only; never message content."""
+    timestamps only; never message content.
+
+    When ``window`` is given, only turns whose timestamp falls inside ``[lo, hi]``
+    are summed -- the temporal-attribution path. A turn with a missing/unparseable
+    timestamp is EXCLUDED under a window (it cannot be placed in time) but included
+    when ``window is None`` -- the unchanged default (session total)."""
     su = SessionUsage(session_id=session_id)
+    lo = hi = None
+    if window is not None:
+        lo, hi = window
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         if not line.strip():
             continue
@@ -110,16 +136,36 @@ def extract_session_usage(path: Path, session_id: str) -> SessionUsage:
         usage = _usage_from_record(obj)
         if usage is None:
             continue
+        ts = str(obj.get("timestamp") or "")
+        if window is not None:
+            dt = _parse_ts(ts)
+            if dt is None or dt < lo or dt > hi:
+                continue
         su.input_tokens += usage["input_tokens"]
         su.output_tokens += usage["output_tokens"]
         su.cache_creation_input_tokens += usage["cache_creation_input_tokens"]
         su.cache_read_input_tokens += usage["cache_read_input_tokens"]
         su.turns += 1
-        ts = str(obj.get("timestamp") or "")
         if ts:
             su.first_ts = ts if not su.first_ts else min(su.first_ts, ts)
             su.last_ts = ts if not su.last_ts else max(su.last_ts, ts)
     return su
+
+
+def run_window(
+    anchors: Iterable[Mapping[str, Any]]
+) -> Optional[tuple[datetime, datetime]]:
+    """A run's temporal window ``[min(started_at), max(finished_at)]`` over its
+    anchors. ``None`` when no anchor carries usable timestamps -- temporal
+    attribution is then unavailable for that run. This should not happen since
+    1a.2b writes ``finished_at`` unconditionally (that data-collection decision is
+    exactly what makes temporal attribution possible now), but it is handled
+    honestly rather than assumed away."""
+    starts = [t for t in (_parse_ts(str(a.get("started_at") or "")) for a in anchors) if t]
+    finishes = [t for t in (_parse_ts(str(a.get("finished_at") or "")) for a in anchors) if t]
+    if not starts or not finishes:
+        return None
+    return (min(starts), max(finishes))
 
 
 def detect_anchor_dupes(anchors: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -151,6 +197,8 @@ class IngestResult:
     ok: bool
     sessions_total: int = 0
     sessions_filled: int = 0
+    temporal_runs: int = 0  # per-run temporal_approximate records written
+    zero_window_runs: list[str] = field(default_factory=list)  # runs whose window caught 0 turns (undercount extreme)
     missing_transcript: list[dict[str, Any]] = field(default_factory=list)
     empty_transcript: list[dict[str, Any]] = field(default_factory=list)
     unattributable_anchors: int = 0  # anchors with no agent_session_id (anchor gate owns these)
@@ -162,15 +210,33 @@ class IngestResult:
         return asdict(self)
 
 
-def _usage_record(su: SessionUsage, run_ids: list[str], workspaces: list[str]) -> dict[str, Any]:
+# The direction-of-error, in the record itself (Requirement 1: the approximation is
+# self-describing in the schema, not just the docs). Mislabeling was half of why the
+# 474x over-attribution read as plausible; a reader must not mistake this for exact.
+_TEMPORAL_UNDERCOUNT_NOTE = (
+    "transcript turns intersected with the run's anchor window "
+    "[min started_at, max finished_at]. SYSTEMATICALLY UNDERCOUNTS: the agent turn "
+    "that launches a stage is timestamped just before the subprocess's started_at "
+    "and the turn that reacts to it just after finished_at, so boundary driving-turns "
+    "fall outside the window; the undercount grows for runs with few stages (a "
+    "multi-stage run catches its inter-stage turns; a single-stage run can catch "
+    "near-zero). Approximate -- never an exact per-pipeline cost."
+)
+
+
+def _session_total_record(
+    su: SessionUsage, run_ids: list[str], workspaces: list[str]
+) -> dict[str, Any]:
+    """The whole-session token total. Deliberately labeled ``session_total``, NOT
+    ``run`` -- attributing a session total to a single ``run_id`` (the old label) is
+    exactly the 474x conflation. This row is context/liveness, never a pipeline cost."""
     return {
         "artifact_type": "cost_ledger.usage",
         "schema_version": USAGE_SCHEMA_VERSION,
         "agent_session_id": su.session_id,
+        "attribution": "session_total",
         "run_ids": run_ids,
         "workspaces": workspaces,
-        "attribution": "run" if len(run_ids) == 1 else "session_spans_multiple_runs",
-        # generic exclusive buckets (schema-aligned) ...
         "input_tokens": su.input_tokens,
         "output_tokens": su.output_tokens,
         "cached_tokens": su.cache_read_input_tokens + su.cache_creation_input_tokens,
@@ -184,6 +250,68 @@ def _usage_record(su: SessionUsage, run_ids: list[str], workspaces: list[str]) -
         "cost_usd": None,
         "cost_source": "unreconciled",  # local $ estimate needs real prices (1a.2c)
         "capture_method": "transcript_ingest",
+        "note": (
+            "whole-session token total across all runs in this agent session; NOT a "
+            "single pipeline's cost -- see the temporal_approximate rows for per-run "
+            "approximate shares"
+        ),
+    }
+
+
+def _temporal_record(
+    su: SessionUsage,
+    run_id: str,
+    workspaces: list[str],
+    window: tuple[datetime, datetime],
+) -> dict[str, Any]:
+    """A run's temporally-scoped token spend: the transcript turns inside the run's
+    anchor window. Labeled ``temporal_approximate`` with its window bounds and a
+    direction-of-error note, so it can never be mistaken for an exact figure."""
+    lo, hi = window
+    return {
+        "artifact_type": "cost_ledger.usage",
+        "schema_version": USAGE_SCHEMA_VERSION,
+        "agent_session_id": su.session_id,
+        "attribution": "temporal_approximate",
+        "run_id": run_id,
+        "workspaces": workspaces,
+        "window_lo": lo.isoformat(),
+        "window_hi": hi.isoformat(),
+        "window_seconds": round((hi - lo).total_seconds(), 1),
+        "input_tokens": su.input_tokens,
+        "output_tokens": su.output_tokens,
+        "cached_tokens": su.cache_read_input_tokens + su.cache_creation_input_tokens,
+        "thinking_tokens": None,
+        "cache_creation_input_tokens": su.cache_creation_input_tokens,
+        "cache_read_input_tokens": su.cache_read_input_tokens,
+        "turns_in_window": su.turns,
+        "cost_usd": None,
+        "cost_source": "unreconciled",
+        "capture_method": "transcript_ingest_temporal",
+        "attribution_note": _TEMPORAL_UNDERCOUNT_NOTE,
+    }
+
+
+def _temporal_unavailable_record(
+    session_id: str, run_id: str, workspaces: list[str]
+) -> dict[str, Any]:
+    """Emitted when a run's anchors carry no usable timestamps, so no temporal
+    window can be built. Honest gap, not a silent zero -- token columns are null."""
+    return {
+        "artifact_type": "cost_ledger.usage",
+        "schema_version": USAGE_SCHEMA_VERSION,
+        "agent_session_id": session_id,
+        "attribution": "temporal_unavailable",
+        "run_id": run_id,
+        "workspaces": workspaces,
+        "reason": "no usable started_at/finished_at on the run's anchors",
+        "input_tokens": None,
+        "output_tokens": None,
+        "cached_tokens": None,
+        "turns_in_window": 0,
+        "cost_usd": None,
+        "cost_source": "unreconciled",
+        "capture_method": "transcript_ingest_temporal",
     }
 
 
@@ -216,9 +344,11 @@ class CostIngest:
                 continue
             by_session[sid].append(a)
 
-        records: list[dict[str, Any]] = []
+        session_records: list[dict[str, Any]] = []
+        temporal_records: list[dict[str, Any]] = []
         missing: list[dict[str, Any]] = []
         empty: list[dict[str, Any]] = []
+        zero_window_runs: list[str] = []
         for sid, rows in sorted(by_session.items()):
             run_ids = sorted({str(r.get("run_id") or "") for r in rows})
             workspaces = sorted({str(r.get("workspace_id") or "") for r in rows})
@@ -226,19 +356,39 @@ class CostIngest:
             if tpath is None:
                 missing.append({"agent_session_id": sid, "run_ids": run_ids, "reason": "transcript_not_found"})
                 continue
-            su = extract_session_usage(tpath, sid)
-            if su.turns == 0 or su.total_tokens == 0:
+            su_full = extract_session_usage(tpath, sid)
+            if su_full.turns == 0 or su_full.total_tokens == 0:
                 empty.append({"agent_session_id": sid, "reason": "transcript_has_no_usage"})
                 continue
-            records.append(_usage_record(su, run_ids, workspaces))
+            # (1) whole-session total -- context, honestly labeled (NOT a run cost).
+            session_records.append(_session_total_record(su_full, run_ids, workspaces))
+            # (2) per-run temporal_approximate -- the scoped, approximate number.
+            for rid in run_ids:
+                run_rows = [r for r in rows if str(r.get("run_id") or "") == rid]
+                run_ws = sorted({str(r.get("workspace_id") or "") for r in run_rows})
+                win = run_window(run_rows)
+                if win is None:
+                    temporal_records.append(_temporal_unavailable_record(sid, rid, run_ws))
+                    continue
+                su_win = extract_session_usage(tpath, sid, window=win)
+                temporal_records.append(_temporal_record(su_win, rid, run_ws, win))
+                if su_win.turns == 0:
+                    zero_window_runs.append(rid)
 
+        records = session_records + temporal_records
         # LIVENESS: a session that has anchors but no usable transcript is loud.
+        # (A zero-turn temporal window is the undercount extreme, flagged but not a
+        # liveness failure -- the transcript IS present; it is a magnitude signal for
+        # the human acceptance read, not a capture failure.)
         ok = not missing and not empty
-        self._write(records, missing, empty, dedupe_events, ok)
+        self._write(session_records, temporal_records, missing, empty,
+                    dedupe_events, ok, zero_window_runs)
         return IngestResult(
             ok=ok,
             sessions_total=len(by_session),
-            sessions_filled=len(records),
+            sessions_filled=len(session_records),
+            temporal_runs=len(temporal_records),
+            zero_window_runs=zero_window_runs,
             missing_transcript=missing,
             empty_transcript=empty,
             unattributable_anchors=unattributable,
@@ -249,22 +399,24 @@ class CostIngest:
 
     def _write(
         self,
-        records: list[dict[str, Any]],
+        session_records: list[dict[str, Any]],
+        temporal_records: list[dict[str, Any]],
         missing: list[dict[str, Any]],
         empty: list[dict[str, Any]],
         dedupe_events: list[dict[str, Any]],
         ok: bool,
+        zero_window_runs: list[str],
     ) -> None:
         self.ledger.ledger_dir.mkdir(parents=True, exist_ok=True)
         with self.usage_path.open("w", encoding="utf-8") as fh:
-            for rec in records:
+            for rec in session_records + temporal_records:
                 fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
         lines = [
-            "# Cost Ledger -- token usage (Phase 1a.2b, transcript ingest)",
+            "# Cost Ledger -- token usage (Phase 1a.2b ingest + temporal attribution)",
             "",
             f"- liveness: `{'ok' if ok else 'FAIL'}`",
-            f"- sessions filled: `{len(records)}`  missing transcript: `{len(missing)}`  "
-            f"empty transcript: `{len(empty)}`",
+            f"- sessions filled: `{len(session_records)}`  missing transcript: "
+            f"`{len(missing)}`  empty transcript: `{len(empty)}`",
             "",
         ]
         if missing or empty:
@@ -276,23 +428,50 @@ class CostIngest:
             for e in empty:
                 lines.append(f"- [x] transcript has no usage for session `{e['agent_session_id']}`")
             lines.append("")
-        lines.append("## Usage by session")
+        lines.append("## Session totals (whole agent session -- NOT a pipeline cost)")
         lines.append("")
-        for rec in records:
+        for rec in session_records:
             lines.append(
-                f"- `{rec['agent_session_id']}` ({rec['attribution']}): "
+                f"- `{rec['agent_session_id']}` (session_total, {len(rec['run_ids'])} run(s)): "
                 f"in={rec['input_tokens']} out={rec['output_tokens']} "
-                f"cached={rec['cached_tokens']} turns={rec['turns']}  "
-                f"cost=`{rec['cost_source']}`"
+                f"cached={rec['cached_tokens']} turns={rec['turns']}  cost=`{rec['cost_source']}`"
+            )
+        lines.append("")
+        lines.append("## Per-run temporal attribution (approximate -- undercounts; read the magnitude)")
+        lines.append("")
+        for rec in temporal_records:
+            if rec["attribution"] == "temporal_unavailable":
+                lines.append(f"- [x] run `{rec['run_id']}`: temporal_unavailable -- {rec['reason']}")
+                continue
+            flag = "  [~] 0 turns in window (undercount extreme)" if rec["turns_in_window"] == 0 else ""
+            lines.append(
+                f"- run `{rec['run_id']}` (temporal_approximate): window={rec['window_seconds']}s "
+                f"in={rec['input_tokens']} out={rec['output_tokens']} cached={rec['cached_tokens']} "
+                f"turns_in_window={rec['turns_in_window']}{flag}"
             )
         if dedupe_events:
             lines.extend(["", "## Dedupe events (logged, not silent)"])
             for d in dedupe_events:
                 lines.append(f"- `{d['level']}` {d['kind']}: run `{d['run_id']}` stage `{d['pipeline_stage']}`")
         lines.append("")
-        lines.append("All values are token counts + timestamps only; no conversation "
-                     "content is read or stored. `cost_source: unreconciled` -- USD "
-                     "requires real prices (1a.2c), never rendered as reconciled here.")
+        lines.append(
+            "`temporal_approximate` intersects transcript turns with each run's anchor "
+            "window and SYSTEMATICALLY UNDERCOUNTS (see `attribution_note`); it is never "
+            "exact. `session_total` is the whole agent session, not one pipeline. "
+            "**Acceptance for the temporal slice is a HUMAN magnitude read of these "
+            "numbers, not a passing test** -- no automated assertion catches magnitude, "
+            "and the check is on TOKEN COUNTS, never dollars (the number is ~99.9% "
+            "cache-read, so a USD figure is uninformative about scope at any granularity). "
+            "**Driving-pattern sensitive:** the SAME pipeline yields different numbers by "
+            "how the agent drove it -- run entirely within one agent turn, the window "
+            "catches ZERO turns (`turns_in_window: 0`, flagged above, an undercount and "
+            "NOT a cheap run); driven across several turns it catches the inter-stage "
+            "turns. Before comparing two runs' costs, read `turns_in_window` and "
+            "`window_seconds` first -- a low or zero count is an undercount, not a bargain. "
+            "All values are token counts + timestamps only; no conversation content is "
+            "read or stored. `cost_source: unreconciled` -- USD requires real prices "
+            "(1a.2c), never rendered as reconciled here."
+        )
         lines.append("")
         self.summary_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -322,5 +501,6 @@ __all__ = [
     "extract_session_usage",
     "find_transcript",
     "main",
+    "run_window",
     "transcript_root",
 ]

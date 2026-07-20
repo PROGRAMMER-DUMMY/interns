@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from core.observability.cost_ingest import (
@@ -18,6 +19,7 @@ from core.observability.cost_ingest import (
     detect_anchor_dupes,
     extract_session_usage,
     find_transcript,
+    run_window,
 )
 from core.observability.cost_ledger import AnchorEntry, CostLedger
 
@@ -80,6 +82,38 @@ class ExtractionTests(unittest.TestCase):
             self.assertNotIn("LEAKED_SECRET_XYZ", blob)
             self.assertNotIn("content", blob)
 
+    def test_window_filters_turns_by_timestamp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = _write_transcript(
+                Path(tmp), "proj", "sid",
+                [
+                    _usage_msg(10, 5, 0, 0, "2026-07-19T10:00:00Z"),   # inside
+                    _usage_msg(99, 99, 0, 0, "2026-07-19T23:00:00Z"),  # outside
+                ],
+            )
+            lo = datetime(2026, 7, 19, 9, 59, tzinfo=timezone.utc)
+            hi = datetime(2026, 7, 19, 10, 1, tzinfo=timezone.utc)
+            su = extract_session_usage(p, "sid", window=(lo, hi))
+            self.assertEqual(su.input_tokens, 10)
+            self.assertEqual(su.turns, 1)
+            # window=None is unchanged: both turns summed
+            self.assertEqual(extract_session_usage(p, "sid").turns, 2)
+
+
+class RunWindowTests(unittest.TestCase):
+    def test_spans_min_start_to_max_finish(self):
+        win = run_window([
+            {"started_at": "2026-07-19T10:00:00Z", "finished_at": "2026-07-19T10:00:30Z"},
+            {"started_at": "2026-07-19T10:05:00Z", "finished_at": "2026-07-19T10:05:10+00:00"},
+        ])
+        self.assertIsNotNone(win)
+        lo, hi = win
+        self.assertEqual(lo.isoformat(), "2026-07-19T10:00:00+00:00")
+        self.assertEqual(hi.isoformat(), "2026-07-19T10:05:10+00:00")
+
+    def test_none_when_no_usable_timestamps(self):
+        self.assertIsNone(run_window([{"started_at": "", "finished_at": ""}]))
+
 
 class FindTranscriptTests(unittest.TestCase):
     def test_locates_by_session_id_across_project_dirs(self):
@@ -96,30 +130,79 @@ class IngestTests(unittest.TestCase):
     def _ledger(self, tmp: str) -> CostLedger:
         return CostLedger(Path(tmp) / "cost_ledger")
 
-    def test_fills_run_level_usage_from_transcript(self):
+    def _usage(self, ledger: CostLedger) -> list[dict]:
+        return [json.loads(l) for l in ledger.ledger_dir.joinpath("usage.jsonl").read_text().splitlines()]
+
+    def _by_attr(self, recs: list[dict], attr: str) -> list[dict]:
+        return [r for r in recs if r["attribution"] == attr]
+
+    def _anchor(self, **kw) -> AnchorEntry:
+        base = dict(workspace_id="ws", pipeline_stage="onboard", agent="claude-code")
+        base.update(kw)
+        return AnchorEntry(**base)
+
+    def test_emits_session_total_and_temporal_records(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             _write_transcript(home, "proj", "sess-abc",
                               [_usage_msg(100, 40, 500, 300, "2026-07-19T10:00:00Z")])
             ledger = self._ledger(tmp)
-            ledger.append(AnchorEntry(run_id="r1", workspace_id="ws", pipeline_stage="onboard",
-                                      agent_session_id="sess-abc", agent="claude-code"))
+            ledger.append(self._anchor(run_id="r1", agent_session_id="sess-abc",
+                                       started_at="2026-07-19T09:59:00Z",
+                                       finished_at="2026-07-19T10:01:00Z"))
             result = CostIngest(ledger, home=home).run()
             self.assertTrue(result.ok)
             self.assertEqual(result.sessions_filled, 1)
-            usage = [json.loads(l) for l in ledger.ledger_dir.joinpath("usage.jsonl").read_text().splitlines()]
-            self.assertEqual(usage[0]["input_tokens"], 100)
-            self.assertEqual(usage[0]["output_tokens"], 40)
-            self.assertEqual(usage[0]["cached_tokens"], 800)  # cache_creation + cache_read
-            self.assertEqual(usage[0]["attribution"], "run")
-            self.assertEqual(usage[0]["cost_source"], "unreconciled")
-            self.assertEqual(usage[0]["capture_method"], "transcript_ingest")
+            self.assertEqual(result.temporal_runs, 1)
+            recs = self._usage(ledger)
+            st = self._by_attr(recs, "session_total")
+            tp = self._by_attr(recs, "temporal_approximate")
+            self.assertEqual(len(st), 1)
+            self.assertEqual(len(tp), 1)
+            # session_total = full transcript sum, honestly labeled (not "run")
+            self.assertEqual(st[0]["input_tokens"], 100)
+            self.assertEqual(st[0]["cached_tokens"], 800)  # cache_creation + cache_read
+            self.assertEqual(st[0]["run_ids"], ["r1"])
+            self.assertEqual(st[0]["capture_method"], "transcript_ingest")
+            # temporal = windowed (the 10:00 turn is inside 09:59-10:01)
+            self.assertEqual(tp[0]["input_tokens"], 100)
+            self.assertEqual(tp[0]["turns_in_window"], 1)
+            self.assertEqual(tp[0]["run_id"], "r1")
+            self.assertEqual(tp[0]["cost_source"], "unreconciled")
+            self.assertEqual(tp[0]["capture_method"], "transcript_ingest_temporal")
+            self.assertIn("window_seconds", tp[0])
+
+    def test_no_record_is_labeled_plain_run(self):
+        # Regression guard: the mislabel that made 474x read as plausible must not
+        # recur -- nothing is a bare "run"; the scoped figure is temporal_approximate.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            _write_transcript(home, "proj", "s", [_usage_msg(10, 5, 0, 0, "2026-07-19T10:00:00Z")])
+            ledger = self._ledger(tmp)
+            ledger.append(self._anchor(run_id="r1", agent_session_id="s",
+                                       started_at="2026-07-19T09:59:00Z",
+                                       finished_at="2026-07-19T10:01:00Z"))
+            CostIngest(ledger, home=home).run()
+            recs = self._usage(ledger)
+            self.assertTrue(all(r["attribution"] != "run" for r in recs))
+            self.assertIn("temporal_approximate", {r["attribution"] for r in recs})
+
+    def test_temporal_record_self_describes_undercount(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            _write_transcript(home, "proj", "s", [_usage_msg(10, 5, 0, 0, "2026-07-19T10:00:00Z")])
+            ledger = self._ledger(tmp)
+            ledger.append(self._anchor(run_id="r1", agent_session_id="s",
+                                       started_at="2026-07-19T09:59:00Z",
+                                       finished_at="2026-07-19T10:01:00Z"))
+            CostIngest(ledger, home=home).run()
+            tp = self._by_attr(self._usage(ledger), "temporal_approximate")[0]
+            self.assertIn("UNDERCOUNT", tp["attribution_note"].upper())
 
     def test_missing_transcript_is_loud_not_quiet_zero_fill(self):
         with tempfile.TemporaryDirectory() as tmp:
             ledger = self._ledger(tmp)
-            ledger.append(AnchorEntry(run_id="r1", workspace_id="ws", pipeline_stage="onboard",
-                                      agent_session_id="no-such-session", agent="claude-code"))
+            ledger.append(self._anchor(run_id="r1", agent_session_id="no-such-session"))
             result = CostIngest(ledger, home=Path(tmp)).run()
             self.assertFalse(result.ok)  # LOUD
             self.assertEqual(len(result.missing_transcript), 1)
@@ -131,24 +214,84 @@ class IngestTests(unittest.TestCase):
             _write_transcript(home, "proj", "sess-empty",
                               [{"type": "user", "message": {"content": "hi"}}])  # no usage
             ledger = self._ledger(tmp)
-            ledger.append(AnchorEntry(run_id="r1", workspace_id="ws", pipeline_stage="onboard",
-                                      agent_session_id="sess-empty", agent="claude-code"))
+            ledger.append(self._anchor(run_id="r1", agent_session_id="sess-empty"))
             result = CostIngest(ledger, home=home).run()
             self.assertFalse(result.ok)
             self.assertEqual(len(result.empty_transcript), 1)
 
-    def test_multi_run_session_marked_not_split(self):
+    def test_multi_run_session_splits_into_per_run_temporal(self):
+        # A session spanning two runs is now SPLIT (approximately) by anchor window,
+        # not left as one un-split blob. Each run gets only its window's turns.
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
-            _write_transcript(home, "proj", "sess-multi", [_usage_msg(10, 10, 0, 0, "t")])
+            _write_transcript(home, "proj", "sess-multi", [
+                _usage_msg(10, 10, 0, 0, "2026-07-19T10:00:00Z"),
+                _usage_msg(20, 20, 0, 0, "2026-07-19T11:00:00Z"),
+            ])
             ledger = self._ledger(tmp)
-            for rid in ("r1", "r2"):
-                ledger.append(AnchorEntry(run_id=rid, workspace_id="ws", pipeline_stage="onboard",
-                                          agent_session_id="sess-multi", agent="claude-code"))
+            ledger.append(self._anchor(run_id="r1", agent_session_id="sess-multi",
+                                       started_at="2026-07-19T09:59:00Z",
+                                       finished_at="2026-07-19T10:01:00Z"))
+            ledger.append(self._anchor(run_id="r2", agent_session_id="sess-multi",
+                                       started_at="2026-07-19T10:59:00Z",
+                                       finished_at="2026-07-19T11:01:00Z"))
             result = CostIngest(ledger, home=home).run()
             self.assertTrue(result.ok)
-            usage = [json.loads(l) for l in ledger.ledger_dir.joinpath("usage.jsonl").read_text().splitlines()]
-            self.assertEqual(usage[0]["attribution"], "session_spans_multiple_runs")
+            recs = self._usage(ledger)
+            st = self._by_attr(recs, "session_total")
+            self.assertEqual(len(st), 1)
+            self.assertEqual(st[0]["run_ids"], ["r1", "r2"])
+            self.assertEqual(st[0]["input_tokens"], 30)  # full session
+            tp = {r["run_id"]: r for r in self._by_attr(recs, "temporal_approximate")}
+            self.assertEqual(set(tp), {"r1", "r2"})
+            self.assertEqual(tp["r1"]["input_tokens"], 10)  # only the 10:00 turn
+            self.assertEqual(tp["r2"]["input_tokens"], 20)  # only the 11:00 turn
+
+    def test_turn_outside_window_is_flagged_zero_not_liveness_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            _write_transcript(home, "proj", "s",
+                              [_usage_msg(10, 5, 0, 0, "2026-07-19T20:00:00Z")])  # far outside
+            ledger = self._ledger(tmp)
+            ledger.append(self._anchor(run_id="r1", agent_session_id="s",
+                                       started_at="2026-07-19T09:59:00Z",
+                                       finished_at="2026-07-19T10:01:00Z"))
+            result = CostIngest(ledger, home=home).run()
+            self.assertTrue(result.ok)  # transcript present -> not a capture failure
+            self.assertEqual(result.zero_window_runs, ["r1"])
+            recs = self._usage(ledger)
+            tp = self._by_attr(recs, "temporal_approximate")[0]
+            self.assertEqual(tp["turns_in_window"], 0)
+            self.assertEqual(tp["input_tokens"], 0)
+            # ... but the session total still counted the turn
+            self.assertEqual(self._by_attr(recs, "session_total")[0]["input_tokens"], 10)
+
+    def test_usage_md_carries_driving_pattern_and_human_read_notes(self):
+        # The output artifact -- not just the design doc -- must warn a reader that
+        # the number is driving-pattern sensitive and the check is a human token read.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            _write_transcript(home, "proj", "s", [_usage_msg(10, 5, 0, 0, "2026-07-19T10:00:00Z")])
+            ledger = self._ledger(tmp)
+            ledger.append(self._anchor(run_id="r1", agent_session_id="s",
+                                       started_at="2026-07-19T09:59:00Z",
+                                       finished_at="2026-07-19T10:01:00Z"))
+            CostIngest(ledger, home=home).run()
+            md = ledger.ledger_dir.joinpath("usage.md").read_text()
+            self.assertIn("HUMAN magnitude read", md)
+            self.assertIn("Driving-pattern sensitive", md)
+            self.assertIn("turns_in_window", md)
+
+    def test_temporal_unavailable_when_anchor_lacks_timestamps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            _write_transcript(home, "proj", "s", [_usage_msg(10, 5, 0, 0, "2026-07-19T10:00:00Z")])
+            ledger = self._ledger(tmp)
+            ledger.append(self._anchor(run_id="r1", agent_session_id="s"))  # no started/finished
+            CostIngest(ledger, home=home).run()
+            tu = self._by_attr(self._usage(ledger), "temporal_unavailable")
+            self.assertEqual(len(tu), 1)
+            self.assertEqual(tu[0]["run_id"], "r1")
 
 
 class DedupeTests(unittest.TestCase):
