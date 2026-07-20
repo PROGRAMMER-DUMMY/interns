@@ -129,3 +129,66 @@ code. (Verified 2026-07-19: gate went 831/2-fail -> 831/0-fail with only these k
 
 **Priority:** P1 — a gate that fills its own disk produces false regression reports;
 low fix cost, high false-alarm cost.
+
+## P1.5 — containment story for any future `loop` revival (not work to do now)
+
+**Tracked as:** this file. Informational — a pointer for whenever loop-live comes
+up again, not a task with acceptance criteria to execute today.
+
+**Current state:** `uv run loop` (the autonomous mutation loop) is gated by
+`--live --confirm-live-mutation` plus a human-set
+`AUTORESEARCH_ALLOW_LOCAL_MUTATION=1`, and the shipped `Dockerfile:25-32` defaults
+to a non-mutating `green-gate --json` CMD specifically so the mutation loop is not
+the default entrypoint (`208590e harden: gate autonomous mutation loop`).
+
+**Why this is not enough if `loop` is ever revived live:** a flag, an env var, and a
+non-mutating default CMD are a **policy boundary** — checked at the call site, not
+enforced by the runtime underneath it. This project has now watched policy
+boundaries erode repeatedly under exactly this shape (a mechanism that is correct
+and checked, but whose absence-of-check on some path or some future caller isn't
+caught by anything structural) — see the nine systemic-pattern instances in
+`phase-0-gap-matrix.md`, most directly case 6 (coverage vs. liveness: a live,
+correctly-gated mechanism that doesn't cover its whole surface) and case 9 (a
+mechanism that is correct everywhere it was checked and still produces the wrong
+outcome one layer up). A flag someone forgets to check, or a new call path that
+bypasses the CLI entirely, silently removes the boundary; nothing fails loudly.
+
+**The structural alternative, when that conversation happens:** Docker Sandboxes
+(`sbx`) — microVM isolation, not another gate layered on the same call site:
+- **workspace-only mount** — the container cannot see or write outside the target
+  workspace directory, so a mutation bug is contained by the filesystem, not by the
+  loop remembering to check a flag.
+- **network allow-list** — outbound access limited to what the workspace's own
+  pipeline actually needs, so a compromised or runaway loop can't exfiltrate or
+  reach arbitrary hosts.
+- **host-side credential proxy** — the agent process never holds a raw key/token;
+  secrets are proxied from the host, so a leaked container never leaks a credential
+  that works outside it (this is a structural version of the secret-display hard
+  stop already enforced at the CLI layer — see `CLAUDE.md` — moved into the runtime
+  boundary itself).
+
+**When to act on this:** only if/when `loop` (or any future autonomous mutation
+capability) is proposed for live use outside a single supervised session. Until
+then this is a pointer, not a queued task.
+
+## P1.6 — Dockerfile base image: hardened non-root + SBOM (cheap supply-chain win)
+
+**Tracked as:** this file.
+
+**Location:** `Dockerfile:1` — `FROM python:3.11-slim`.
+
+**Risk:** `python:3.11-slim` runs as root by default and carries no published SBOM,
+which is exactly what an enterprise security review flags first on a Dockerfile —
+low actual exploitation risk today (the image runs a non-mutating `green-gate`
+CMD by default, P1.5), but a routine finding that costs nothing to preempt.
+
+**Acceptance criteria:**
+- Swap to a hardened, non-root base (e.g. a distroless or `python:3.11-slim` variant
+  with a `USER` directive added, or an equivalent hardened image) so the container
+  does not run as root by default.
+- Generate and publish an SBOM for the image (e.g. `docker sbom`, `syft`, or
+  equivalent) as part of the build, so dependency provenance is answerable without
+  re-deriving it from `pyproject.toml`/`uv.lock` by hand.
+
+**Priority:** low/minor — cheap to fix, not urgent, but worth doing before an
+enterprise security review asks for it.
