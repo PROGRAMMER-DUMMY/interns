@@ -215,17 +215,16 @@ def step_test_query(cfg) -> bool:
 
     try:
         from core.execution.databricks_client import DatabricksClient
-        client = DatabricksClient(db).get_client()
+        client = DatabricksClient(db)
         warehouse_id = db.http_path.rstrip("/").split("/")[-1]
-        resp = client.statement_execution.execute_statement(
-            warehouse_id=warehouse_id,
-            statement="SELECT 1 AS autoresearch_test",
-            wait_timeout="30s",
-        )
-        state = str(resp.status.state)
-        ok = "SUCCEEDED" in state
-        print(f"  SQL Warehouse {warehouse_id[:8]}...: {'OK' if ok else 'FAILED'} (state={state})")
-        return ok
+        # execute_query() polls past PENDING/RUNNING to a terminal state --
+        # a bare execute_statement() call (the previous version of this
+        # step) reads resp.status.state once and reports FAILED on a cold
+        # warehouse that hadn't finished starting yet, which isn't a real
+        # failure.
+        client.execute_query("SELECT 1 AS autoresearch_test")
+        print(f"  SQL Warehouse {warehouse_id[:8]}...: OK")
+        return True
     except Exception as exc:
         print(f"  Test query failed: {exc}")
         print(f"  -> if this is a permission error, add token scope: {STEP_SCOPE['query']}")
