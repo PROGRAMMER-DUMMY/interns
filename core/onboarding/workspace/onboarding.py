@@ -73,6 +73,12 @@ class WorkspaceInputs:
     data_files: list[str] = field(default_factory=list)
     kpi_registries: list[str] = field(default_factory=list)
     data_models: list[str] = field(default_factory=list)
+    # Fully-qualified "catalog.schema.table" strings -- populated generically
+    # from workspace_settings.json's "databricks_source" declaration (see
+    # _databricks_source_tables()), never hardcoded to any specific workspace.
+    # Empty for every workspace that doesn't declare one; local-file discovery
+    # above is completely unaffected either way.
+    databricks_tables: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -665,6 +671,15 @@ class WorkspaceOnboarder:
                 profiled_count += 1
                 profiles.extend(file_profiles)
                 profile_map[data_file] = str(file_profiles[0].get("profile_path") or "")
+        # Databricks-sourced tables (workspace_settings.json "databricks_source"),
+        # generic and additive -- empty for every workspace that hasn't declared
+        # one, so this changes nothing for workspaces profiling local files.
+        if inputs.databricks_tables:
+            db_profiles, db_warnings = self.profile_databricks_tables(inputs.databricks_tables)
+            profile_warnings.extend(db_warnings)
+            if db_profiles:
+                profiled_count += len(db_profiles)
+                profiles.extend(db_profiles)
         reused_count = len(reusable_profiles)
         # Extract dictionary text from PDF/DOCX data-model files. The text is
         # downstream evidence for the CLI-agent proposal panel; failures
@@ -848,7 +863,43 @@ class WorkspaceOnboarder:
             data_files=[_rel(path, self.repo_root) for path in sorted(set(data_files))],
             kpi_registries=[_rel(path, self.repo_root) for path in sorted(set(kpi_registries))],
             data_models=[_rel(path, self.repo_root) for path in sorted(set(data_models))],
+            databricks_tables=self._databricks_source_tables(),
         )
+
+    def _databricks_source_tables(self) -> list[str]:
+        """Fully-qualified tables to profile via the SQL warehouse instead of
+        local files, per workspace_settings.json's "databricks_source":
+        ``{"catalog": "...", "schema": "..."}``.
+
+        Fully generic: no workspace name, catalog name, or table name is ever
+        hardcoded here. A workspace that doesn't declare this key gets an
+        empty list and local-file discovery above is entirely unaffected --
+        this is additive, not a replacement for any existing workspace.
+        """
+        source = (self.layout.load_settings() or {}).get("databricks_source")
+        if not isinstance(source, dict):
+            return []
+        catalog = str(source.get("catalog") or "").strip()
+        schema = str(source.get("schema") or "").strip()
+        if not catalog or not schema:
+            return []
+        try:
+            from core.config import load as load_config
+            from core.execution.databricks_client import DatabricksClient
+
+            cfg = load_config()
+            client = DatabricksClient(cfg.databricks)
+            if not client.is_configured():
+                return []
+            _, rows = client.execute_query(f"SHOW TABLES IN `{catalog}`.`{schema}`")
+            # SHOW TABLES columns: database, tableName, isTemporary (order/
+            # names are stable Spark SQL output, not Databricks-specific).
+            return sorted(f"{catalog}.{schema}.{row[1]}" for row in rows)
+        except Exception:
+            # Table discovery must never break onboarding for a workspace
+            # that declared a source but has no reachable warehouse right
+            # now -- surfaces as an empty list, same as not declaring one.
+            return []
 
     def _is_platform_governance_note(self, path: Path) -> bool:
         """Whether a file is a platform-generated governance note, not input.
@@ -1160,6 +1211,48 @@ class WorkspaceOnboarder:
                 )
             except Exception as exc:
                 warnings.append(f"profile_failed:{_rel(path, self.repo_root)}:{type(exc).__name__}:{exc}")
+        return profiles, warnings
+
+    def profile_databricks_tables(
+        self, table_fqns: list[str]
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Profile fully-qualified "catalog.schema.table" strings via the SQL
+        warehouse (core.profiling.databricks_table_profiler.profile_uc_table),
+        the same DatasetProfile shape profile_inputs() produces for local
+        files -- so downstream consumers of profile_index.json don't need to
+        know or care which profiler produced a given entry. No incremental
+        fingerprint/reuse caching here yet (unlike the local-file loop) --
+        a reasonable future optimization, not required for correctness now.
+        """
+        profiles: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        if not table_fqns:
+            return profiles, warnings
+        from core.config import load as load_config
+        from core.execution.databricks_client import DatabricksClient
+        from core.profiling.databricks_table_profiler import profile_uc_table
+
+        cfg = load_config()
+        client = DatabricksClient(cfg.databricks)
+        for fqn in table_fqns:
+            try:
+                catalog, schema, table = fqn.split(".", 2)
+            except ValueError:
+                warnings.append(f"malformed_databricks_table_fqn:{fqn}")
+                continue
+            try:
+                profile = profile_uc_table(client, catalog, schema, table)
+                stem = f"{catalog}__{schema}__{table}"
+                self.layout.profiles_dir.mkdir(parents=True, exist_ok=True)
+                profile_path = self.layout.profiles_dir / f"{stem}.profile.json"
+                profile_path.write_text(profile.to_json(), encoding="utf-8")
+                summary = profile.summary()
+                summary["profile_path"] = _rel(profile_path, self.repo_root)
+                summary["resource_mode"] = "databricks_sql_warehouse"
+                profiles.append(summary)
+                self._store_metadata("profiles", stem, summary)
+            except Exception as exc:
+                warnings.append(f"databricks_profile_failed:{fqn}:{type(exc).__name__}:{exc}")
         return profiles, warnings
 
     def _build_domain_model(

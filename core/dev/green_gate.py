@@ -134,6 +134,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # Priority 3 substrate work: profiling a Unity Catalog table via the SQL
     # warehouse (DatabricksClient.execute_query), not local DuckDB/direct-S3.
     "tests.test_databricks_table_profiler",
+    # Generic, additive "databricks_source" discovery in onboarding.py --
+    # workspace_settings.json-driven, zero hardcoded workspace/catalog/table
+    # names in core/ (locked in by an explicit genericity-guard test).
+    "tests.test_onboarding_databricks_source",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

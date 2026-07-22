@@ -1,5 +1,6 @@
 {
-  "dataset_allowlist": [
-    "datasets/EMR/trendytech-hospital-a"
-  ]
+  "databricks_source": {
+    "catalog": "healthcare_rcm",
+    "schema": "bronze"
+  }
 }
