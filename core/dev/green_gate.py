@@ -127,6 +127,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # Phase 1a.2b: transcript INGEST (privacy boundary, loud liveness, run-level
     # attribution, logged dedupe).
     "tests.test_cost_ingest",
+    # Priority 1.1: PHI/PII review-and-consent panel (disposition capture,
+    # not_sensitive_columns override with confirmed_by provenance, refuses
+    # agent-asserted confirmers outright).
+    "tests.test_phi_review_panel",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

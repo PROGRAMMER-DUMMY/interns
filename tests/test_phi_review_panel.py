@@ -1,0 +1,151 @@
+"""Priority 1.1: PHI/PII review-and-consent panel.
+
+Contract under test:
+- The panel lists every semantic_contract.json column flagged is_sensitive.
+- Answering `not_sensitive` writes to the user-authored data_policy.json's
+  `not_sensitive_columns` allowlist, with confirmed_by provenance -- and that
+  allowlist entry actually suppresses the sensitivity flag (is_allowlisted).
+- Answering a real disposition (hash_to_key / pass_through_and_tag /
+  bronze_only) writes to the new phi_disposition.json contract, not
+  data_policy.json.
+- Agent-asserted confirmed_by is refused outright -- nothing is written.
+- A column already answered drops out of the next panel's pending list.
+"""
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from core.governance.data_policy import is_allowlisted, load_workspace_data_policy
+from core.onboarding.kpi.phi_review_panel import (
+    NOT_SENSITIVE_ANSWER,
+    PHIReviewPanelBuilder,
+    apply_phi_review_answer,
+)
+from core.storage.workspace_layout import WorkspaceLayout
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _fixture_workspace(tmp: str) -> tuple[Path, Path]:
+    repo = Path(tmp)
+    ws = repo / "workspaces" / "demo"
+    layout = WorkspaceLayout(project_root=ws)
+    _write_json(
+        layout.contracts_dir / "semantic_contract.json",
+        {
+            "columns": {
+                "SSN": {"is_sensitive": True, "category": "ssn"},
+                "PatientName": {"is_sensitive": True, "category": "name"},
+                "InternalRiskScore": {"is_sensitive": True, "category": "policy:trade_secret"},
+                "OrderID": {"is_sensitive": False},
+            }
+        },
+    )
+    return repo, ws
+
+
+class PHIReviewPanelTests(unittest.TestCase):
+    def test_panel_lists_only_sensitive_unanswered_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(tmp)
+            result = PHIReviewPanelBuilder(repo, ws).run()
+
+            self.assertEqual(result.column_count, 3)
+            current = json.loads((repo / result.current_json).read_text(encoding="utf-8"))
+            names = {c["column"] for c in current["columns"]}
+            self.assertEqual(names, {"SSN", "PatientName", "InternalRiskScore"})
+            self.assertEqual(current["status"], "needs_user_answer")
+
+    def test_accept_two_override_one_writes_correctly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(tmp)
+
+            apply_phi_review_answer(
+                repo, ws, column="SSN", answer="hash_to_key", confirmed_by="Dr. Smith"
+            )
+            apply_phi_review_answer(
+                repo, ws, column="InternalRiskScore", answer="pass_through_and_tag",
+                confirmed_by="Dr. Smith",
+            )
+            apply_phi_review_answer(
+                repo, ws, column="PatientName", answer=NOT_SENSITIVE_ANSWER,
+                confirmed_by="Dr. Smith",
+            )
+
+            # -- The 2 accepted-as-sensitive columns: recorded in phi_disposition.json,
+            # not in data_policy.json.
+            layout = WorkspaceLayout(project_root=ws)
+            disposition = json.loads(
+                (layout.contracts_dir / "phi_disposition.json").read_text(encoding="utf-8")
+            )
+            by_column = {r["column"]: r for r in disposition["columns"]}
+            self.assertEqual(set(by_column), {"SSN", "InternalRiskScore"})
+            self.assertEqual(by_column["SSN"]["disposition"], "hash_to_key")
+            self.assertEqual(by_column["SSN"]["confirmed_by"], "Dr. Smith")
+            self.assertEqual(by_column["SSN"]["source"], "human")
+            self.assertEqual(by_column["InternalRiskScore"]["disposition"], "pass_through_and_tag")
+
+            # -- The 1 override: exactly one entry in data_policy.json's allowlist,
+            # with confirmed_by recorded.
+            policy_path = ws / "data_policy.json"
+            policy_data = json.loads(policy_path.read_text(encoding="utf-8"))
+            self.assertEqual(policy_data["not_sensitive_columns"], ["PatientName"])
+            self.assertEqual(
+                policy_data["not_sensitive_columns_confirmed_by"]["PatientName"]["confirmed_by"],
+                "Dr. Smith",
+            )
+
+            # -- The override actually suppresses the sensitivity flag (this is what
+            # "the SQL generator masks the other 2, not this one" cashes out to --
+            # is_allowlisted is exactly what _sensitive_columns_section() consults).
+            policy = load_workspace_data_policy(ws)
+            self.assertTrue(is_allowlisted(policy, "PatientName"))
+            self.assertFalse(is_allowlisted(policy, "SSN"))
+            self.assertFalse(is_allowlisted(policy, "InternalRiskScore"))
+
+    def test_agent_asserted_confirmer_is_refused_and_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(tmp)
+
+            with self.assertRaises(ValueError):
+                apply_phi_review_answer(
+                    repo, ws, column="SSN", answer="hash_to_key", confirmed_by="claude"
+                )
+            with self.assertRaises(ValueError):
+                apply_phi_review_answer(
+                    repo, ws, column="SSN", answer="hash_to_key", confirmed_by=""
+                )
+
+            layout = WorkspaceLayout(project_root=ws)
+            self.assertFalse((layout.contracts_dir / "phi_disposition.json").exists())
+            self.assertFalse((ws / "data_policy.json").exists())
+
+    def test_invalid_answer_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(tmp)
+            with self.assertRaises(ValueError):
+                apply_phi_review_answer(
+                    repo, ws, column="SSN", answer="delete_it", confirmed_by="Dr. Smith"
+                )
+
+    def test_answered_column_drops_out_of_next_panel(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(tmp)
+            apply_phi_review_answer(
+                repo, ws, column="SSN", answer="hash_to_key", confirmed_by="Dr. Smith"
+            )
+            result = PHIReviewPanelBuilder(repo, ws).run()
+            self.assertEqual(result.column_count, 2)
+            current = json.loads((repo / result.current_json).read_text(encoding="utf-8"))
+            names = {c["column"] for c in current["columns"]}
+            self.assertEqual(names, {"PatientName", "InternalRiskScore"})
+
+
+if __name__ == "__main__":
+    unittest.main()
