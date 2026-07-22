@@ -21,5 +21,14 @@ host_env       = "DATABRICKS_HOST"
 token_env      = "DATABRICKS_TOKEN"
 http_path_env  = "DATABRICKS_HTTP_PATH"   # required for execution = "warehouse"
 
+# Alternative to the above for local dev: if host_env/token_env resolve empty,
+# the platform falls back to this ~/.databrickscfg profile (the same auth
+# `databricks auth login` / `databricks configure` already manage) -- no need
+# to duplicate a token into .env on a workstation already authenticated via
+# the CLI. CI/Airflow-worker contexts without a ~/.databrickscfg should keep
+# using host_env/token_env instead.
+profile        = "DEFAULT"
+http_path      = ""           # non-secret; can be set directly here instead of via http_path_env
+
 trace_redact   = true         # redact secrets from traces
 http_timeout_sec = 60

@@ -29,13 +29,21 @@ class DatabricksClient:
         return self.cfg.is_active()
 
     def get_client(self):
-        """Return (and lazily initialise) the WorkspaceClient."""
+        """Return (and lazily initialise) the WorkspaceClient.
+
+        Prefers explicit host/token (env-var-sourced -- the right path for CI,
+        Airflow workers, and other contexts with no ~/.databrickscfg). Falls
+        back to the Databricks CLI's own profile-based auth when those aren't
+        set, so a workstation already authenticated via `databricks auth
+        login` / `databricks configure` doesn't need the token duplicated
+        into .env as well.
+        """
         if self._client is None:
             from databricks.sdk import WorkspaceClient
-            self._client = WorkspaceClient(
-                host=self.cfg.host,
-                token=self.cfg.token,
-            )
+            if self.cfg.host and self.cfg.token:
+                self._client = WorkspaceClient(host=self.cfg.host, token=self.cfg.token)
+            else:
+                self._client = WorkspaceClient(profile=self.cfg.profile or "DEFAULT")
         return self._client
 
     def health_check(self) -> Tuple[bool, str]:
@@ -44,7 +52,10 @@ class DatabricksClient:
         Returns (True, "OK") or (False, error_message).
         """
         if not self.is_configured():
-            return False, "Databricks not configured (DATABRICKS_HOST / DATABRICKS_TOKEN missing)"
+            return False, (
+                "Databricks not configured: neither DATABRICKS_HOST/DATABRICKS_TOKEN "
+                f"nor a working ~/.databrickscfg profile ({self.cfg.profile!r}) were found"
+            )
         try:
             me = self.get_client().current_user.me()
             return True, f"Connected as {me.user_name}"

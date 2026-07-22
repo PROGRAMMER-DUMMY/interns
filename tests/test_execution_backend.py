@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from core.config import Config, DatabricksConfig
 from core.execution.backend import DuckDBBackend, StrictWarehouseBackend, build_execution_backend, normalize_command
@@ -79,6 +80,43 @@ class ExecutionBackendTests(unittest.TestCase):
         self.assertIn("[REDACTED:SECRET]", caps["current_user_error"])
         self.assertNotIn("abcdef123456", caps["catalog_error"])
         self.assertIn("[REDACTED:SECRET]", caps["catalog_error"])
+
+    def test_get_client_uses_explicit_host_token_when_both_set(self):
+        client = DatabricksClient(
+            DatabricksConfig(enabled=True, host="https://example", token="tok", profile="unused")
+        )
+        with mock.patch("databricks.sdk.WorkspaceClient") as fake_ws:
+            client.get_client()
+        fake_ws.assert_called_once_with(host="https://example", token="tok")
+
+    def test_get_client_falls_back_to_databrickscfg_profile_when_host_or_token_unset(self):
+        # Neither host nor token set (e.g. a workstation authenticated purely
+        # via `databricks auth login` / `databricks configure`, no .env
+        # duplication) -- must fall back to profile-based resolution instead
+        # of constructing WorkspaceClient with empty host/token.
+        client = DatabricksClient(DatabricksConfig(enabled=True, profile="my-profile"))
+        with mock.patch("databricks.sdk.WorkspaceClient") as fake_ws:
+            client.get_client()
+        fake_ws.assert_called_once_with(profile="my-profile")
+
+    def test_is_active_true_via_databrickscfg_profile_when_no_env_token(self):
+        cfg = DatabricksConfig(enabled=True, profile="DEFAULT")  # host/token both empty
+        with mock.patch("databricks.sdk.core.Config") as fake_cfg_cls:
+            fake_cfg_cls.return_value.authenticate.return_value = None
+            self.assertTrue(cfg.is_active())
+        fake_cfg_cls.assert_called_once_with(profile="DEFAULT")
+
+    def test_is_active_false_when_neither_env_token_nor_profile_work(self):
+        cfg = DatabricksConfig(enabled=True, profile="DEFAULT")  # host/token both empty
+        with mock.patch("databricks.sdk.core.Config") as fake_cfg_cls:
+            fake_cfg_cls.return_value.authenticate.side_effect = RuntimeError("no auth found")
+            self.assertFalse(cfg.is_active())
+
+    def test_is_active_disabled_short_circuits_before_any_profile_check(self):
+        cfg = DatabricksConfig(enabled=False, profile="DEFAULT")
+        with mock.patch("databricks.sdk.core.Config") as fake_cfg_cls:
+            self.assertFalse(cfg.is_active())
+        fake_cfg_cls.assert_not_called()
 
     def test_databricks_jobs_reject_local_python_paths_before_submission(self):
         client = DatabricksClient(DatabricksConfig(enabled=True, host="https://example", token="token"))

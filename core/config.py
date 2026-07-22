@@ -31,6 +31,12 @@ class DatabricksConfig:
     host: str = ""
     token: str = ""
     http_path: str = ""                # required for warehouse mode
+    # ~/.databrickscfg profile to fall back to when host/token env vars are
+    # unset -- lets a workstation that already ran `databricks auth login` /
+    # `databricks configure` work without duplicating the token into .env.
+    # Never read/stored as a plain string here; resolution happens inside the
+    # SDK at call time (see DatabricksClient.get_client / is_active below).
+    profile: str = "DEFAULT"
     catalog: str = "autoresearch"
     schema: str = "experiments"
     trace_redact: bool = True
@@ -45,7 +51,23 @@ class DatabricksConfig:
     pci_covered: bool = False
 
     def is_active(self) -> bool:
-        return self.enabled and bool(self.host) and bool(self.token)
+        if not self.enabled:
+            return False
+        if bool(self.host) and bool(self.token):
+            return True
+        # Fall back to the Databricks CLI's own profile-based auth
+        # (~/.databrickscfg), the same store `databricks auth login` /
+        # `databricks configure` already manage -- so a workstation that's
+        # already authenticated via the CLI doesn't need its token duplicated
+        # into .env as well. Resolution + validation happens inside the SDK;
+        # this process never reads or holds the token value itself.
+        try:
+            from databricks.sdk.core import Config as _SdkConfig
+
+            _SdkConfig(profile=self.profile or "DEFAULT").authenticate()
+            return True
+        except Exception:
+            return False
 
     @classmethod
     def from_lock(cls, lock: dict) -> "DatabricksConfig":
@@ -62,7 +84,8 @@ class DatabricksConfig:
             fallback=block.get("fallback", "duckdb"),
             host=host,
             token=token,
-            http_path=http_path,
+            http_path=http_path or block.get("http_path", ""),
+            profile=block.get("profile", "DEFAULT"),
             catalog=block.get("catalog", "autoresearch"),
             schema=block.get("schema", "experiments"),
             trace_redact=block.get("trace_redact", True),
