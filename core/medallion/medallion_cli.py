@@ -16,6 +16,7 @@ SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
     "init-salt": ("core.medallion.salt_store", "_init_salt_cli", "initialise the hashing salt store"),
     "plan-deploy": ("core.medallion.deploy_plan", "main", "emit a validated Databricks deployment plan (plan only)"),
     "apply-deploy": ("core.medallion.apply_deploy", "main", "evaluate the 5 deployment gates; record approval when all pass (no remote calls)"),
+    "ratify-design": ("core.medallion.design_ratify", "apply_main", "ratify one fact/dimension/relationship in the design panel (requires --reasoning)"),
     "deploy": ("core.onboarding.databricks.workspace_deployer", "medallion_deploy_main", "execute the approved UC deployment (dry-run unless --apply --confirm-remote-mutation + human-set env)"),
 }
 

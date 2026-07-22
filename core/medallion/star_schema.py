@@ -25,6 +25,9 @@ class FactTable:
     reasoning: str = ""                         # why this grain, why these measures
     evidence_sources: list[str] = field(default_factory=list)
     needs_user_confirmation: bool = True
+    confirmed_by: str = ""                      # human name; set only by design-panel ratification
+    confirmed_at: str = ""
+    confirmation_reasoning: str = ""             # the human's stated why, not the generator's
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -40,6 +43,9 @@ class FactTable:
             reasoning=d.get("reasoning", ""),
             evidence_sources=list(d.get("evidence_sources", [])),
             needs_user_confirmation=bool(d.get("needs_user_confirmation", True)),
+            confirmed_by=d.get("confirmed_by", ""),
+            confirmed_at=d.get("confirmed_at", ""),
+            confirmation_reasoning=d.get("confirmation_reasoning", ""),
         )
 
 
@@ -55,6 +61,9 @@ class DimensionTable:
     reasoning: str = ""
     evidence_sources: list[str] = field(default_factory=list)
     needs_user_confirmation: bool = True
+    confirmed_by: str = ""                      # human name; set only by design-panel ratification
+    confirmed_at: str = ""
+    confirmation_reasoning: str = ""             # the human's stated why, not the generator's
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -72,6 +81,9 @@ class DimensionTable:
             reasoning=d.get("reasoning", ""),
             evidence_sources=list(d.get("evidence_sources", [])),
             needs_user_confirmation=bool(d.get("needs_user_confirmation", True)),
+            confirmed_by=d.get("confirmed_by", ""),
+            confirmed_at=d.get("confirmed_at", ""),
+            confirmation_reasoning=d.get("confirmation_reasoning", ""),
         )
 
 
@@ -86,6 +98,9 @@ class Relationship:
     confidence: float = 0.0
     evidence: list[str] = field(default_factory=list)   # ["value_overlap_rate=0.987", "kpi_002 joins these"]
     needs_user_confirmation: bool = True
+    confirmed_by: str = ""                      # human name; set only by design-panel ratification
+    confirmed_at: str = ""
+    confirmation_reasoning: str = ""             # the human's stated why, not the generator's
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -101,6 +116,9 @@ class Relationship:
             confidence=float(d.get("confidence", 0.0)),
             evidence=list(d.get("evidence", [])),
             needs_user_confirmation=bool(d.get("needs_user_confirmation", True)),
+            confirmed_by=d.get("confirmed_by", ""),
+            confirmed_at=d.get("confirmed_at", ""),
+            confirmation_reasoning=d.get("confirmation_reasoning", ""),
         )
 
 

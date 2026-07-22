@@ -138,6 +138,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # workspace_settings.json-driven, zero hardcoded workspace/catalog/table
     # names in core/ (locked in by an explicit genericity-guard test).
     "tests.test_onboarding_databricks_source",
+    # Priority 2.1/3.6 minimal slice: medallion design-panel ratification.
+    # Requires a real, non-blank --reasoning per item so a ratification
+    # record can't collapse into a name-only rubber stamp.
+    "tests.test_design_ratify",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
