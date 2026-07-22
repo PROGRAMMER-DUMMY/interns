@@ -188,6 +188,45 @@ class DatabricksClient:
             wait_timeout="30s",
         )
 
+    def execute_query(self, sql: str, *, wait_timeout: str = "50s") -> Tuple[list, list]:
+        """
+        Execute SQL against the configured SQL warehouse and return
+        (column_names, rows) -- rows as lists of string values (the SQL
+        Statement Execution API's default JSON_ARRAY result format).
+
+        This is the missing read path this platform didn't have: write_delta()
+        above executes SQL but never reads results back, and every other
+        execute_statement call site (core/execution/backend.py) only reads
+        status/row-count, never resp.result.data_array. Building this properly
+        here (not duplicated per caller) so profiling, cost-tag verification,
+        and anything else that needs to read the warehouse can reuse it.
+        """
+        import time as _time
+        from databricks.sdk.service.sql import StatementState
+
+        client = self.get_client()
+        resp = client.statement_execution.execute_statement(
+            warehouse_id=self._extract_warehouse_id(),
+            statement=sql,
+            wait_timeout=wait_timeout,
+        )
+        # execute_statement blocks synchronously up to wait_timeout; if the
+        # warehouse is still cold-starting or the query is still running past
+        # that, it returns PENDING/RUNNING instead of raising -- poll until a
+        # terminal state.
+        while resp.status.state in (StatementState.PENDING, StatementState.RUNNING):
+            _time.sleep(2)
+            resp = client.statement_execution.get_statement(resp.statement_id)
+
+        if resp.status.state != StatementState.SUCCEEDED:
+            error = resp.status.error
+            message = redact(error.message) if error and error.message else str(resp.status.state)
+            raise RuntimeError(f"Databricks SQL statement failed ({resp.status.state}): {message}")
+
+        columns = [col.name for col in (resp.manifest.schema.columns or [])]
+        rows = resp.result.data_array or [] if resp.result else []
+        return columns, rows
+
     def submit_job_run(self, task: dict, time_budget: int) -> int:
         """Submit experiment_cmd as a one-time Databricks job run. Returns run_id."""
         from databricks.sdk.service.jobs import RunTask, SparkPythonTask

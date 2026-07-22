@@ -131,6 +131,9 @@ CURATED_MODULES: tuple[str, ...] = (
     # not_sensitive_columns override with confirmed_by provenance, refuses
     # agent-asserted confirmers outright).
     "tests.test_phi_review_panel",
+    # Priority 3 substrate work: profiling a Unity Catalog table via the SQL
+    # warehouse (DatabricksClient.execute_query), not local DuckDB/direct-S3.
+    "tests.test_databricks_table_profiler",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
