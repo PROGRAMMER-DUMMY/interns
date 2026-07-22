@@ -10,9 +10,12 @@ The salt never appears in artifacts, logs, manifests, or run state.
 """
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class SaltMissing(RuntimeError):
@@ -31,8 +34,12 @@ def get_workspace_salt(workspace: str) -> str:
         )
         if secret and secret.value:
             return secret.value
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "medallion salt lookup failed for workspace `%s` via Databricks secret scope "
+            "(autoresearch/medallion_salt__%s); falling through to next source: %s",
+            workspace, workspace, exc,
+        )
 
     # 2. OS env
     env_name = f"AUTORESEARCH_WORKSPACE_SALT__{workspace.upper().replace('-', '_')}"
@@ -49,8 +56,12 @@ def get_workspace_salt(workspace: str) -> str:
             salt = (data.get("workspaces", {}).get(workspace) or {}).get("medallion_salt")
             if salt:
                 return salt
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "medallion salt lookup failed for workspace `%s` via %s; "
+                "falling through to next source: %s",
+                workspace, cfg, exc,
+            )
 
     raise SaltMissing(
         f"No medallion salt configured for workspace `{workspace}`. "

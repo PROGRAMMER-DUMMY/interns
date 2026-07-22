@@ -474,7 +474,9 @@ class DatabricksWorkspaceDeployer:
         applied = []
         failed = []
         skipped = []
-        for operation in plan.get("operations", []):
+        not_attempted = []
+        operations = plan.get("operations", [])
+        for index, operation in enumerate(operations):
             if not operation.get("apply_supported"):
                 skipped.append({**operation, "result": "spec_only"})
                 continue
@@ -498,13 +500,24 @@ class DatabricksWorkspaceDeployer:
                 applied.append({**operation, "result": "applied"})
             except Exception as exc:
                 failed.append({**operation, "result": "failed", "error": str(exc)})
+                # Stop on first failure rather than silently continuing past it.
+                # Every operation above is idempotent (mkdirs/upload-overwrite/
+                # get-then-create/CREATE TABLE IF NOT EXISTS), so retrying the
+                # whole plan after a fix is always safe -- there is no partial
+                # state a retry can't recover from.
+                not_attempted = [
+                    {**op, "result": "not_attempted"} for op in operations[index + 1 :]
+                ]
+                break
         plan["apply_result"] = {
             "applied": applied,
             "skipped": skipped,
             "failed": failed,
+            "not_attempted": not_attempted,
             "applied_count": len(applied),
             "skipped_count": len(skipped),
             "failed_count": len(failed),
+            "not_attempted_count": len(not_attempted),
         }
         return plan
 

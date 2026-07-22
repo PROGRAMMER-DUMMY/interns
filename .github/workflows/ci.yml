@@ -10,64 +10,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"   # Spark 3.5 supports Java 8/11/17 only -- green-gate's
+                                # curated suite includes Spark-backed medallion tests.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install
+      - name: Install (Spark 3.5 / Scala 2.12 + Delta 3.2, pinned to match pyspark-parity job)
         run: |
           python -m pip install --upgrade pip
           pip install -e .
+          pip install "pyspark==3.5.3" "delta-spark==3.2.0"
           pip install ruff
       - name: Lint (touched modules)
         run: ruff check core/onboarding/kpi core/onboarding/harness core/onboarding/workspace/delegation.py
         continue-on-error: true
-      - name: Unit tests (curated, deterministic suite)
-        run: |
-          python -m unittest -v \
-            tests.test_parser_parity \
-            tests.test_engine_parity \
-            tests.test_engine_parity_aggregate \
-            tests.test_cli_deprecation_redirect \
-            tests.test_base_source_selector \
-            tests.test_kpi_engine_generators \
-            tests.test_verify_kpi_output \
-            tests.test_engine_recommender \
-            tests.test_generate_kpi_engines \
-            tests.test_engine_generation_harness \
-            tests.test_kpi_generation_quality \
-            tests.test_data_model_generation \
-            tests.test_agent_skill_routing \
-            tests.test_delegation_handoff \
-            tests.test_handoff_cli \
-            tests.test_workflow_guard_reliability \
-            tests.test_workflow_guard_roster \
-            tests.test_workflow_guard_monitoring \
-            tests.test_project_harness_gates \
-            tests.test_result_view_builder \
-            tests.test_kpi_execution_harness \
-            tests.test_kpi_format_detector \
-            tests.test_workbook_structure \
-            tests.test_kpi_confirmation_panel \
-            tests.test_document_candidate_consumption \
-            tests.test_document_type_classification \
-            tests.test_intent_contract_routing \
-            tests.test_phi_gate \
-            tests.test_workflow_guard_specialist_firing \
-            tests.test_prose_kpi_ingestion \
-            tests.test_blocked_kpi_invariant \
-            tests.test_documented_join_evidence \
-            tests.test_collision_blocking \
-            tests.test_onboarding_incremental \
-            tests.test_profile_pushdown \
-            tests.test_medallion_incremental \
-            tests.test_workspace_data_policy \
-            tests.test_chart_knowledge \
-            tests.test_deploy_gates \
-            tests.test_workspace_lock_reentrancy \
-            tests.test_workspace_deployer \
-            tests.test_no_supporting_evidence \
-            tests.test_dictionary_reconciliation \
-            tests.test_derived_option_synthesis
+      - name: Green gate (curated + enterprise suite -- the platform's own test gate)
+        run: python -m core.dev.green_gate --json
 
   pyspark-parity:
     runs-on: ubuntu-latest

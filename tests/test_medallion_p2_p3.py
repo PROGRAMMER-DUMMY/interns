@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -23,7 +24,7 @@ from core.medallion.design import (
 from core.medallion.manifest import BronzeTable, Manifest, SilverTable, manifest_to_yaml
 from core.medallion.model_classifier import ModelCapability
 from core.medallion.run_state import RunState
-from core.medallion.salt_store import _init_salt_cli
+from core.medallion.salt_store import _init_salt_cli, get_workspace_salt
 from core.medallion.silver_contract import SilverContract, TableContract
 from core.medallion.tier_router import assign_tiers, pick_model, rank_models, should_deescalate
 
@@ -95,6 +96,26 @@ class MedallionP2P3Tests(unittest.TestCase):
         self.assertIn("Salt ready for workspace `demo`", output)
         self.assertNotIn(secret, output)
         self.assertNotIn(secret[:8], output)
+
+    def test_salt_lookup_failure_is_logged_not_swallowed(self):
+        # One source (Databricks secret scope) fails; another source (OS env)
+        # holds a *different* salt value. The failure must be logged, and the
+        # fallback value must still be returned -- not silently swallowed.
+        env_name = "AUTORESEARCH_WORKSPACE_SALT__DEMO"
+        with mock.patch(
+            "databricks.sdk.WorkspaceClient",
+            side_effect=RuntimeError("no databricks auth configured"),
+        ):
+            with mock.patch.dict(os.environ, {env_name: "env-fallback-salt"}, clear=False):
+                with self.assertLogs("core.medallion.salt_store", level="WARNING") as cm:
+                    salt = get_workspace_salt("demo")
+
+        self.assertEqual(salt, "env-fallback-salt")
+        self.assertTrue(
+            any("medallion salt lookup failed" in msg for msg in cm.output),
+            f"expected a logged salt-lookup failure, got: {cm.output}",
+        )
+        self.assertTrue(any("demo" in msg for msg in cm.output))
 
     def test_run_state_records_target_override_and_compromise_fields(self):
         state = RunState(

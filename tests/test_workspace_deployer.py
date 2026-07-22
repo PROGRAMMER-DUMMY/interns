@@ -22,6 +22,7 @@ from unittest import mock
 
 from core.onboarding.databricks.deploy_gates import GATE_NAMES, REMOTE_ENV
 from core.onboarding.databricks.workspace_deployer import (
+    DatabricksWorkspaceDeployer,
     build_unity_catalog_actions,
     deploy_medallion_from_approval,
     medallion_deploy_main,
@@ -377,6 +378,52 @@ class ActionSequenceTest(unittest.TestCase):
                 .read_text(encoding="utf-8")
             )
             self.assertNotIn("consumed_at", approval)
+
+
+class ApplyStopsOnFirstFailureTest(unittest.TestCase):
+    def test_apply_stops_after_second_of_four_operations_fails(self) -> None:
+        class FlakyMkdirsApi:
+            """Implements WorkspaceApi; op 2 (mkdirs) always fails."""
+
+            def __init__(self) -> None:
+                self.mkdirs_calls: list[str] = []
+
+            def mkdirs(self, path: str) -> None:
+                self.mkdirs_calls.append(path)
+                if path == "fails-here":
+                    raise RuntimeError("boom")
+
+            def upload_file(self, path: str, source: Path) -> None:
+                self.mkdirs_calls.append(f"upload:{path}")
+
+            def ensure_schema(self, catalog: str, schema: str) -> None:
+                self.mkdirs_calls.append(f"schema:{catalog}.{schema}")
+
+            def execute_sql(self, statement: str) -> None:
+                self.mkdirs_calls.append(f"sql:{statement}")
+
+        api = FlakyMkdirsApi()
+        plan = {
+            "operations": [
+                {"apply_supported": True, "action": "create_workspace_folder", "target": "op1"},
+                {"apply_supported": True, "action": "create_workspace_folder", "target": "fails-here"},
+                {"apply_supported": True, "action": "create_workspace_folder", "target": "op3"},
+                {"apply_supported": True, "action": "create_workspace_folder", "target": "op4"},
+            ]
+        }
+
+        result = DatabricksWorkspaceDeployer(api).apply(plan)["apply_result"]
+
+        # Only operations 1 and 2 were ever attempted -- 3 and 4 never ran.
+        self.assertEqual(api.mkdirs_calls, ["op1", "fails-here"])
+        self.assertEqual(result["applied_count"], 1)
+        self.assertEqual(result["failed_count"], 1)
+        self.assertEqual(result["not_attempted_count"], 2)
+        self.assertEqual(
+            [op["target"] for op in result["not_attempted"]], ["op3", "op4"]
+        )
+        self.assertEqual(result["failed"][0]["target"], "fails-here")
+        self.assertIn("boom", result["failed"][0]["error"])
 
 
 class VerifyApprovalUnitTest(unittest.TestCase):
