@@ -481,21 +481,11 @@ class DuckDBKPISQLGenerator:
         for feature in kpi.get("features", []):
             if feature.get("resolution_type") != "derived_formula":
                 continue
-            # Explicit source_columns win over _source_for_column's bare-
-            # name matching -- same fix as _derived_formula_refs, needed
-            # here too since this is a separate, duplicated inline copy of
-            # the same logic (found live: skipping this one still resolved
-            # `invoices.acct` to addr.csv here even after fixing the other
-            # copy).
-            declared = {
-                str(sc.get("column") or ""): str(sc.get("dataset") or "")
-                for sc in (feature.get("source_columns") or [])
-                if isinstance(sc, dict) and sc.get("column") and sc.get("dataset")
-            }
-            for column in _formula_inputs(feature):
-                source = declared.get(column) or _source_for_column(column, base_source, profile_map)
-                if source:
-                    required_refs.append({"dataset": source, "column": column})
+            # Every declared (dataset, column) pair, inclusive -- see
+            # _declared_formula_refs. This copy drives the catalog
+            # bootstrap, so it must stay inclusive of every declared
+            # column regardless of bare-vs-qualified use in the formula.
+            required_refs.extend(_declared_formula_refs(feature, base_source, profile_map))
 
         required_sources = _unique_preserve_order(
             [base_source]
@@ -548,14 +538,6 @@ class DuckDBKPISQLGenerator:
         for feature in kpi.get("features", []):
             if feature.get("resolution_type") != "derived_formula":
                 continue
-            # Same fix as _derived_formula_refs / _required_source_columns:
-            # a third duplicated copy of this loop, same bare-name-matching
-            # bug.
-            declared = {
-                str(sc.get("column") or ""): str(sc.get("dataset") or "")
-                for sc in (feature.get("source_columns") or [])
-                if isinstance(sc, dict) and sc.get("column") and sc.get("dataset")
-            }
             # This loop builds the OUTER JOIN chain specifically (unlike
             # _required_source_columns's identical-looking loop, which
             # drives the catalog bootstrap and must stay inclusive). Only a
@@ -566,12 +548,10 @@ class DuckDBKPISQLGenerator:
             # an outer join, which would fan the base grain out to one row
             # per joined-table row.
             bare = _bare_formula_columns(feature)
-            for column in _formula_inputs(feature):
-                if column not in bare:
+            for ref in _declared_formula_refs(feature, base_source, profile_map):
+                if ref["column"] not in bare:
                     continue
-                source = declared.get(column) or _source_for_column(column, base_source, profile_map)
-                if source:
-                    required_refs.append({"dataset": source, "column": column})
+                required_refs.append(ref)
         required_sources = _unique_preserve_order(
             [base_source]
             + [
@@ -628,24 +608,7 @@ class DuckDBKPISQLGenerator:
         for feature in kpi.get("features", []):
             if feature.get("resolution_type") != "derived_formula":
                 continue
-            # Explicit source_columns (dataset, column) pairs are the
-            # authoritative, already-confirmed binding -- consult them
-            # before falling back to _source_for_column's bare-name
-            # matching, which picks whichever profiled dataset happens to
-            # sort first alphabetically whenever more than one table has a
-            # column with that name (found live: a formula explicitly
-            # declaring `invoices.acct` still resolved to `addr.csv`
-            # instead, purely because addr.csv also has an "acct" column
-            # and sorts before "invoices" alphabetically).
-            declared = {
-                str(sc.get("column") or ""): str(sc.get("dataset") or "")
-                for sc in (feature.get("source_columns") or [])
-                if isinstance(sc, dict) and sc.get("column") and sc.get("dataset")
-            }
-            for column in _formula_inputs(feature):
-                source = declared.get(column) or _source_for_column(column, base_source, profile_map)
-                if source:
-                    refs.append({"dataset": source, "column": column})
+            refs.extend(_declared_formula_refs(feature, base_source, profile_map))
         return refs
 
     def _choose_feature_ref(
@@ -923,6 +886,45 @@ def _formula_inputs(feature: dict[str, Any]) -> list[str]:
     return _unique_preserve_order(inputs)
 
 
+def _declared_formula_refs(
+    feature: dict[str, Any],
+    base_source: str,
+    profile_map: dict[str, dict[str, Any]],
+) -> list[dict[str, str]]:
+    """(dataset, column) refs for a derived formula's inputs.
+
+    Explicit source_columns are the authoritative, human-confirmed binding --
+    every declared (dataset, column) PAIR is trusted directly, not routed
+    through a column-name-keyed dict. A name-keyed dict can only remember one
+    dataset per column NAME, which breaks the moment the SAME bare name is
+    declared against two DIFFERENT datasets -- a normal shape for a join key
+    shared by both sides (e.g. `inv_no` on both invoices.csv and disputes.csv
+    for a formula that dot-qualifies each occurrence, `iv.inv_no`/
+    `d.inv_no`): whichever pair happened to be declared last silently
+    overwrote the other, dropping that dataset's column from the required-
+    columns/catalog-bootstrap set entirely.
+    Found live: kpi_010's `perfect_shipment` formula declared both
+    `invoices.inv_no` and `disputes.inv_no`; the bootstrap view for
+    invoices.csv ended up selecting only `ship_no`, and the formula's own
+    `iv.inv_no = d.inv_no` join failed to bind at execution.
+    Falls back to `_source_for_column`'s bare-name matching only when a
+    formula token has no explicit declaration at all (empty source_columns).
+    """
+    declared_pairs = [
+        {"dataset": str(sc.get("dataset")), "column": str(sc.get("column"))}
+        for sc in (feature.get("source_columns") or [])
+        if isinstance(sc, dict) and sc.get("column") and sc.get("dataset")
+    ]
+    if declared_pairs:
+        return declared_pairs
+    refs = []
+    for column in _formula_inputs(feature):
+        source = _source_for_column(column, base_source, profile_map)
+        if source:
+            refs.append({"dataset": source, "column": column})
+    return refs
+
+
 def _bare_formula_columns(feature: dict[str, Any]) -> set[str]:
     """The subset of a derived formula's declared source_columns that need
     the OUTER row's join, as opposed to only existing inside the formula's
@@ -1073,36 +1075,25 @@ def plan_required_sources(
     for feature in kpi.get("features", []):
         if feature.get("resolution_type") != "derived_formula":
             continue
-        # Same fix as the other three copies of this loop in this module:
-        # explicit source_columns win over _source_for_column's bare-name
-        # matching, which otherwise picks whichever profiled dataset
-        # happens to sort first alphabetically when more than one table
-        # shares a column name. This copy matters most -- plan_required_sources
-        # is the canonical, explicitly cross-engine-shared source plan (SQL,
-        # Polars, PySpark all consume it), so the bug reached every engine
-        # from here, not just the SQL-specific copies.
+        # Uses _declared_formula_refs (see its docstring) -- this copy
+        # matters most since plan_required_sources is the canonical,
+        # explicitly cross-engine-shared source plan (SQL, Polars, PySpark
+        # all consume it).
         #
-        # Also: only a BARE (unqualified) reference genuinely needs this
-        # dataset outer-joined into the base grain. A column the formula
-        # only ever references dot-qualified (e.g. `i.acct` inside its own
-        # correlated subquery) doesn't need an outer join at all -- adding
-        # one fans the base grain out to one row per joined-table row,
-        # silently inflating every downstream count. Found live: a per-
-        # account boolean (240 accounts) summed to over 4,500 once the plan
-        # joined in every one of an account's invoices for a formula that
-        # never referenced the outer join in the first place.
-        declared = {
-            str(sc.get("column") or ""): str(sc.get("dataset") or "")
-            for sc in (feature.get("source_columns") or [])
-            if isinstance(sc, dict) and sc.get("column") and sc.get("dataset")
-        }
+        # Only a BARE (unqualified) reference genuinely needs this dataset
+        # outer-joined into the base grain. A column the formula only ever
+        # references dot-qualified (e.g. `i.acct` inside its own correlated
+        # subquery) doesn't need an outer join at all -- adding one fans the
+        # base grain out to one row per joined-table row, silently inflating
+        # every downstream count. Found live: a per-account boolean (240
+        # accounts) summed to over 4,500 once the plan joined in every one
+        # of an account's invoices for a formula that never referenced the
+        # outer join in the first place.
         bare = _bare_formula_columns(feature)
-        for column in _formula_inputs(feature):
-            if column not in bare:
+        for ref in _declared_formula_refs(feature, base_source, profile_map):
+            if ref["column"] not in bare:
                 continue
-            source = declared.get(column) or _source_for_column(column, base_source, profile_map)
-            if source:
-                required_refs.append({"dataset": source, "column": column})
+            required_refs.append(ref)
     chosen = [ref for ref in required_refs if ref and ref.get("dataset")]
     required_sources = _unique_preserve_order(
         [base_source]

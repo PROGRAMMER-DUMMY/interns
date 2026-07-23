@@ -9,6 +9,7 @@ from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
 from core.onboarding.kpi.sql_generator import (
     DuckDBKPISQLGenerator,
     _bare_formula_columns,
+    _declared_formula_refs,
     _derived_formula,
     _formula_inputs,
     choose_feature_ref,
@@ -365,6 +366,31 @@ class DerivedFormulaRefsTests(unittest.TestCase):
         )
         self.assertEqual(base_source, "workspaces/demo/datasets/party.csv")
         self.assertNotIn("workspaces/demo/datasets/invoices.csv", required_sources)
+
+    def test_declared_refs_keeps_both_datasets_for_a_shared_column_name(self) -> None:
+        # Found live (kpi_010, Hostile_Synthetic): a formula declared BOTH
+        # `invoices.inv_no` and `disputes.inv_no` (a join key shared by
+        # name on both sides, referenced dot-qualified as iv.inv_no /
+        # d.inv_no inside the formula's own subquery). A column-name-keyed
+        # dict can only remember one dataset per name, so whichever pair
+        # was declared last silently overwrote the other -- the catalog
+        # bootstrap view for invoices.csv ended up missing inv_no entirely,
+        # and the formula's own join failed to bind at execution.
+        feature = {
+            "resolution_type": "derived_formula",
+            "source_columns": [
+                {"dataset": "workspaces/demo/datasets/invoices.csv", "column": "inv_no"},
+                {"dataset": "workspaces/demo/datasets/disputes.csv", "column": "inv_no"},
+            ],
+        }
+        refs = _declared_formula_refs(feature, "workspaces/demo/datasets/shipments.csv", {})
+        self.assertEqual(
+            {(r["dataset"], r["column"]) for r in refs},
+            {
+                ("workspaces/demo/datasets/invoices.csv", "inv_no"),
+                ("workspaces/demo/datasets/disputes.csv", "inv_no"),
+            },
+        )
 
     def test_plan_required_sources_trusts_declared_dataset_too(self) -> None:
         # plan_required_sources is the explicitly cross-engine-shared source
