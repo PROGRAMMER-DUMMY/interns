@@ -690,15 +690,20 @@ class DatabricksUcSourcedGenerationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             gen = self._make_generator(Path(tmp))
             profile_map = {self.UC_FQN: self._uc_profile()}
-            staging_sql, stage_views = gen._staging_views(profile_map, [self.UC_FQN], {})
+            cte_fragments, stage_views = gen._staging_ctes(profile_map, [self.UC_FQN], {})
+            staging_sql = "\n".join(cte_fragments)
 
             # The real source table -- not Path(fqn).stem's mangled "healthcare_rcm.bronze"
-            self.assertIn(f"FROM {self.UC_FQN};", staging_sql)
+            self.assertIn(f"FROM {self.UC_FQN}", staging_sql)
             # Never reconstructed under the generator's OWN catalog/schema
             self.assertNotIn("`main`.`autoresearch`.`cptcodes`", staging_sql)
             # The view name uses the real table name as its stem, not the mangled one
             self.assertIn("cptcodes", stage_views[self.UC_FQN])
             self.assertNotIn("healthcare_rcm", stage_views[self.UC_FQN])
+            # Phase C: a CTE fragment, not a terminated TEMP VIEW statement --
+            # no TEMP VIEW chain, single-statement rewrite.
+            self.assertNotIn("CREATE OR REPLACE TEMP VIEW", staging_sql)
+            self.assertIn(" AS (", staging_sql)
 
     def test_derived_formula_source_rewrite_uses_real_uc_table(self):
         with tempfile.TemporaryDirectory() as tmp:

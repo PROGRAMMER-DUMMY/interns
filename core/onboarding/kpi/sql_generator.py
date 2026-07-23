@@ -122,7 +122,10 @@ class DuckDBKPISQLGenerator:
             profile_map,
             relationships,
         )
-        staging_sql, stage_views = self._staging_views(profile_map, required_sources, required_columns)
+        if self.dialect == "databricks":
+            staging_ctes, stage_views = self._staging_ctes(profile_map, required_sources, required_columns)
+        else:
+            staging_sql, stage_views = self._staging_views(profile_map, required_sources, required_columns)
         source_from_sql, source_aliases = self._kpi_source_from(
             kpi,
             profile_map,
@@ -188,32 +191,70 @@ class DuckDBKPISQLGenerator:
                 "before generating SQL."
             )
 
-        # Build staging SQL — use Delta tables if they exist, fall back to CSV
-        staging_sql_final = self._staging_with_delta(
-            staging_sql, profile_map, required_sources
-        )
-
-        sql = "\n".join(
-            [
-                "-- Authoritative KPI SQL generated only from ready feature mappings.",
-                f"-- Dialect: {self.dialect}",
-                f"-- KPI: {kpi.get('name', kpi_id)}",
-                f"-- Resource mode: {resource_settings.get('mode', 'unknown') if resource_settings else 'unknown'}",
-                f"-- SQL strategy: {resource_settings.get('sql_strategy', 'standard_local') if resource_settings else 'standard_local'}",
-                "",
-                staging_sql_final.rstrip(),
-                "",
-                f"CREATE OR REPLACE VIEW {self.quote_ident(kpi_id + '_features')} AS",
-                "SELECT",
-                ",\n".join(select_items),
-                source_from_sql.rstrip(),
-                ";",
-                "",
-                self._result_view_sql(kpi, kpi_id).rstrip(),
-                "",
-                self._delta_write_sql(kpi_id),
-            ]
-        )
+        header_comment = [
+            "-- Authoritative KPI SQL generated only from ready feature mappings.",
+            f"-- Dialect: {self.dialect}",
+            f"-- KPI: {kpi.get('name', kpi_id)}",
+            f"-- Resource mode: {resource_settings.get('mode', 'unknown') if resource_settings else 'unknown'}",
+            f"-- SQL strategy: {resource_settings.get('sql_strategy', 'standard_local') if resource_settings else 'standard_local'}",
+        ]
+        if self.dialect == "databricks":
+            # Single-statement rewrite (Phase C): staging + features + result
+            # nest as CTEs feeding ONE final query, materialized as a
+            # persisted view. Exactly one execute_query() call proves the
+            # whole KPI -- no TEMP VIEW chain, no session-continuity needed.
+            features_ident = self.quote_ident(kpi_id + "_features")
+            features_cte = (
+                f"{features_ident} AS (\n"
+                "SELECT\n"
+                + ",\n".join(select_items) + "\n"
+                + source_from_sql.rstrip() + "\n"
+                + ")"
+            )
+            all_ctes = staging_ctes + [features_cte]
+            result_ident = self.quote_ident(kpi_id + "_results")
+            result_select_body = self._extract_result_select_body(
+                self._result_view_sql(kpi, kpi_id), result_ident
+            )
+            result_target = self.table_ident(kpi_id + "_results")
+            sql = "\n".join(
+                header_comment
+                + [
+                    "-- Single-statement rewrite: staging + features + result nest as",
+                    "-- CTEs feeding ONE final query. Exactly one execute_query() call",
+                    "-- proves the whole KPI.",
+                    "",
+                    f"CREATE OR REPLACE VIEW {result_target} AS",
+                    "WITH " + ",\n".join(all_ctes),
+                    "SELECT * FROM (",
+                    result_select_body,
+                    f") AS {self.quote_ident('final_result')};",
+                    "",
+                    self._delta_write_sql(kpi_id),
+                ]
+            )
+        else:
+            # Build staging SQL — use Delta tables if they exist, fall back to CSV
+            staging_sql_final = self._staging_with_delta(
+                staging_sql, profile_map, required_sources
+            )
+            sql = "\n".join(
+                header_comment
+                + [
+                    "",
+                    staging_sql_final.rstrip(),
+                    "",
+                    f"CREATE OR REPLACE VIEW {self.quote_ident(kpi_id + '_features')} AS",
+                    "SELECT",
+                    ",\n".join(select_items),
+                    source_from_sql.rstrip(),
+                    ";",
+                    "",
+                    self._result_view_sql(kpi, kpi_id).rstrip(),
+                    "",
+                    self._delta_write_sql(kpi_id),
+                ]
+            )
         suffix = "" if self.dialect == "duckdb" else f"_{self.dialect}"
         output = self.layout.solutions_dir / f"{kpi_id}{suffix}.sql"
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -392,74 +433,125 @@ class DuckDBKPISQLGenerator:
         required_sources: list[str] | None = None,
         required_columns: dict[str, set[str]] | None = None,
     ) -> tuple[str, dict[str, str]]:
+        """DuckDB-dialect staging: a chain of CREATE VIEW statements bootstrapped
+        from local CSV files. Databricks-dialect staging uses _staging_ctes()
+        instead (a single-statement CTE rewrite -- see Phase C), so this method
+        is duckdb-only; it is never called with self.dialect == "databricks".
+        """
         view_lines = []
         stage_views = {}
         union_parts = []
         required_source_set = set(required_sources or [])
-        # "csv" is a local file profile (core.profiling.data_model_profiler).
-        # "delta" is a Unity-Catalog-sourced profile
-        # (core.profiling.databricks_table_profiler) -- its `path` is already
-        # a live, fully-qualified `catalog`.`schema`.`table` reference, not a
-        # local file to bootstrap from. Previously only "csv" profiles were
-        # staged at all, so a UC-sourced dataset silently produced no staging
-        # view whatsoever for databricks-dialect generation. A "delta" profile
-        # is only stageable for the databricks dialect -- the duckdb dialect
-        # has no local proxy for a remote UC table, and read_csv_auto() on a
-        # fqn string would be nonsense.
         stageable_profiles = [
             (path, profile)
             for path, profile in sorted(profile_map.items())
-            if (
-                profile.get("format") == "csv"
-                or (profile.get("format") == "delta" and self.dialect == "databricks")
-            )
+            if profile.get("format") == "csv"
             and (not required_source_set or path in required_source_set)
         ]
-        for idx, (rel_path, _profile) in enumerate(stageable_profiles, start=1):
+        for rel_path, _profile in stageable_profiles:
             stem = _safe_name(dataset_display_stem(rel_path))
-            view_name = f"catalog_raw_{stem}" if self.dialect == "duckdb" else f"stage_{idx:03d}_{stem}"
+            view_name = f"catalog_raw_{stem}"
             stage_views[rel_path] = view_name
             select_list = self._stage_select_list(rel_path, _profile, required_columns or {})
-            if self.dialect == "databricks":
-                # A UC-sourced profile's path IS the real source table --
-                # reference it directly. table_ident(stem) would instead
-                # reconstruct `self.catalog`.`self.schema`.`stem`, which is
-                # only correct for a local-file profile whose CSV stem is
-                # assumed to match a same-named table already registered
-                # under the generator's OWN target catalog/schema -- wrong
-                # when the UC source lives in a different catalog/schema
-                # than the KPI's output target.
-                table_name = rel_path if _profile.get("format") == "delta" else self.table_ident(stem)
-                view_lines.append(
-                    f"CREATE OR REPLACE TEMP VIEW {self.quote_ident(view_name)} AS "
-                    f"SELECT {select_list} FROM {table_name};"
-                )
-            else:
-                view_lines.append(
-                    f"CREATE OR REPLACE VIEW {self.quote_ident(view_name)} AS "
-                    f"SELECT {select_list} FROM read_csv_auto('{rel_path}', union_by_name=true);"
-                )
+            view_lines.append(
+                f"CREATE OR REPLACE VIEW {self.quote_ident(view_name)} AS "
+                f"SELECT {select_list} FROM read_csv_auto('{rel_path}', union_by_name=true);"
+            )
             union_parts.append(f"SELECT * FROM {self.quote_ident(view_name)}")
         if not union_parts and not required_source_set:
             return "CREATE OR REPLACE VIEW all_workspace_rows AS SELECT 1 AS ready_marker;", stage_views
         if not union_parts:
             return "", stage_views
-        union_operator = "UNION ALL" if self.dialect == "databricks" else "UNION ALL BY NAME"
-        lines = []
-        if self.dialect == "duckdb":
-            lines.append("-- BEGIN CATALOG BOOTSTRAP")
+        lines = ["-- BEGIN CATALOG BOOTSTRAP"]
         lines.extend(view_lines)
-        if self.dialect == "duckdb":
-            lines.append("-- END CATALOG BOOTSTRAP")
+        lines.append("-- END CATALOG BOOTSTRAP")
         lines.extend(
             [
-                "CREATE OR REPLACE TEMP VIEW all_workspace_rows AS"
-                if self.dialect == "databricks"
-                else "CREATE OR REPLACE VIEW all_workspace_rows AS",
-                f"\n{union_operator}\n".join(union_parts) + ";",
+                "CREATE OR REPLACE VIEW all_workspace_rows AS",
+                "\nUNION ALL BY NAME\n".join(union_parts) + ";",
             ]
         )
         return ("\n".join(lines), stage_views)
+
+    def _staging_ctes(
+        self,
+        profile_map: dict[str, dict[str, Any]],
+        required_sources: list[str] | None = None,
+        required_columns: dict[str, set[str]] | None = None,
+    ) -> tuple[list[str], dict[str, str]]:
+        """Databricks-dialect staging as CTE fragments for a single-statement
+        rewrite (Phase C): staging + features + result all nest as CTEs
+        feeding ONE final query -- no TEMP VIEW chain, no session-continuity
+        needed, exactly one execute_query() call proves the whole KPI. Each
+        fragment is ``name AS (\\n  SELECT ...\\n)``, ready to join with
+        commas inside one outer WITH clause. Mirrors _staging_views' source
+        selection/naming exactly but is a separate method (not a dialect
+        branch inside it) so the duckdb path stays provably untouched.
+
+        "csv" (a local file profiled for schema discovery, whose data is
+        assumed already materialized under this generator's own target
+        catalog/schema -- table_ident(stem)) and "delta" (a Unity-Catalog-
+        sourced profile whose path IS the real source table already --
+        referenced directly, never reconstructed under the generator's own
+        catalog/schema) are both stageable here.
+        """
+        stage_views: dict[str, str] = {}
+        cte_fragments: list[str] = []
+        union_parts: list[str] = []
+        required_source_set = set(required_sources or [])
+        stageable_profiles = [
+            (path, profile)
+            for path, profile in sorted(profile_map.items())
+            if profile.get("format") in {"csv", "delta"}
+            and (not required_source_set or path in required_source_set)
+        ]
+        for idx, (rel_path, _profile) in enumerate(stageable_profiles, start=1):
+            stem = _safe_name(dataset_display_stem(rel_path))
+            view_name = f"stage_{idx:03d}_{stem}"
+            stage_views[rel_path] = view_name
+            select_list = self._stage_select_list(rel_path, _profile, required_columns or {})
+            table_name = rel_path if _profile.get("format") == "delta" else self.table_ident(stem)
+            cte_fragments.append(
+                f"{self.quote_ident(view_name)} AS (\n"
+                f"  SELECT {select_list} FROM {table_name}\n"
+                ")"
+            )
+            union_parts.append(f"SELECT * FROM {self.quote_ident(view_name)}")
+        if not union_parts:
+            if not required_source_set:
+                cte_fragments.append(
+                    f"{self.quote_ident('all_workspace_rows')} AS (SELECT 1 AS ready_marker)"
+                )
+            return cte_fragments, stage_views
+        cte_fragments.append(
+            f"{self.quote_ident('all_workspace_rows')} AS (\n"
+            + "\n  UNION ALL\n".join(union_parts)
+            + "\n)"
+        )
+        return cte_fragments, stage_views
+
+    def _extract_result_select_body(self, result_view_sql: str, result_view_ident: str) -> str:
+        """Strip build_result_view_sql()'s ``CREATE OR REPLACE VIEW <ident> AS``
+        header and trailing ``;`` so the remaining SELECT (which may itself
+        start with its own nested WITH, e.g. the single-attribution-share
+        case) can be embedded as a derived-table subquery inside the Phase C
+        single-statement rewrite. build_result_view_sql() always emits this
+        exact header on every path (grain-bucketing-blocked, generic
+        fallback, and the normal composed cases alike) -- a missing header is
+        an internal contract violation, not a recoverable/generic-fallback
+        case, so this fails loud rather than silently emitting broken SQL.
+        """
+        header = f"CREATE OR REPLACE VIEW {result_view_ident} AS"
+        idx = result_view_sql.find(header)
+        if idx == -1:
+            raise ValueError(
+                "Internal error: result-view SQL did not contain the expected "
+                f"`{header}` header; cannot safely rewrite as a single-statement CTE."
+            )
+        body = result_view_sql[idx + len(header):].strip()
+        if body.endswith(";"):
+            body = body[:-1].rstrip()
+        return body
 
     def _stage_select_list(
         self,

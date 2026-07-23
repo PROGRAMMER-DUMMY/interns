@@ -557,7 +557,9 @@ def _detect_secondary_measure(
     return None
 
 
-def _parse_aggregation(text: str, lookup: dict[str, str]) -> Aggregation | None:
+def _parse_aggregation(
+    text: str, lookup: dict[str, str], dialect: str = "duckdb"
+) -> Aggregation | None:
     text = text.strip()
     if not text:
         return None
@@ -578,7 +580,12 @@ def _parse_aggregation(text: str, lookup: dict[str, str]) -> Aggregation | None:
             fn="count",
             column=col,
             alias=_norm_alias(f"{col}_{literal}_count"),
-            predicate=f"{_quote(col)} = '{literal}'",
+            # Baked in at parse time (dialect-aware) -- _agg_expr_no_alias
+            # inlines agg.predicate verbatim, so an un-dialected quote here
+            # would silently compare a STRING LITERAL to a string literal in
+            # Spark SQL (double-quoted = string literal, not identifier),
+            # producing a constant (always-true/false) predicate.
+            predicate=f"{_quote(col, dialect)} = '{literal}'",
         )
     column = _resolve_column(inner_raw, lookup)
     alias_base = f"{('distinct_' if distinct else '')}{column}" if column else fn
@@ -740,6 +747,7 @@ def _detect_date_arithmetic(
     lookup: dict[str, str],
     as_of_expr: str = "CURRENT_DATE",
     band_width: int | None = None,
+    dialect: str = "duckdb",
 ) -> list[tuple[str, str, str | None]]:
     """Detect age/date-arithmetic expressions in cuts text. Returns
     [(group_expression, alias, display_expression), ...] to add to SELECT.
@@ -766,7 +774,7 @@ def _detect_date_arithmetic(
         if not source:
             continue
         col = _resolve_column(source, lookup)
-        base = f"date_diff('year', CAST({_quote(col)} AS DATE), {as_of_expr})"
+        base = f"date_diff('year', CAST({_quote(col, dialect)} AS DATE), {as_of_expr})"
         if band_width:
             out.append((_band_expr(base, band_width), "age_band",
                         _band_label_expr(base, band_width)))
@@ -775,7 +783,7 @@ def _detect_date_arithmetic(
     for match in _DAYS_SINCE_PATTERN.finditer(cuts_text):
         source = match.group(1)
         col = _resolve_column(source, lookup)
-        base = f"date_diff('day', CAST({_quote(col)} AS DATE), {as_of_expr})"
+        base = f"date_diff('day', CAST({_quote(col, dialect)} AS DATE), {as_of_expr})"
         alias = f"days_since_{_norm_alias(col)}"
         if band_width:
             out.append((_band_expr(base, band_width), f"{alias}_band",
@@ -921,6 +929,7 @@ def parse_kpi(
     kpi: dict[str, Any],
     denominator_scope: str | None = None,
     grain_bucketing: str | None = None,
+    dialect: str = "duckdb",
 ) -> ParsedKPI:
     """Parse a KPI registry entry into structured aggregations/dimensions/filters.
 
@@ -945,6 +954,16 @@ def parse_kpi(
         ``"band_continuous_cuts"`` or ``"exact_value_grain"``) records that the
         grain was confirmed, so the generator proceeds. Mirrors the
         denominator_scope facet pattern.
+    dialect:
+        Identifier-quoting dialect for every column reference baked into a
+        Dimension/Aggregation/filter expression here (age/date-arithmetic
+        grain, GROUP BY dimensions, COUNT(...) predicates, window PARTITION
+        BY columns). Defaults to "duckdb" (double-quoted identifiers,
+        unchanged pre-existing behavior). "databricks" uses backtick
+        identifiers -- required because Spark SQL treats a double-quoted
+        string as a STRING LITERAL, not an identifier, by default: an
+        un-dialected quote here would silently bake a constant/always-equal
+        predicate or GROUP BY a literal string instead of the real column.
     """
     parsed = ParsedKPI()
     metric_text = str(kpi.get("metric") or "").strip()
@@ -979,7 +998,7 @@ def parse_kpi(
     # exists we fall back to CURRENT_DATE.
     event_date_col = _detect_event_date_column(cuts_text, lookup)
     as_of_expr = (
-        f"CAST({_quote(event_date_col)} AS DATE)" if event_date_col else "CURRENT_DATE"
+        f"CAST({_quote(event_date_col, dialect)} AS DATE)" if event_date_col else "CURRENT_DATE"
     )
     if not event_date_col:
         # Record the fallback so it is auditable in the contract AND visible in
@@ -1044,12 +1063,12 @@ def parse_kpi(
                 if bucket:
                     unit, source, alias = bucket
                     source_col = _resolve_column(source or alias, lookup) or alias
-                    expr = f"date_trunc('{unit}', CAST({_quote(source_col)} AS DATE))"
+                    expr = f"date_trunc('{unit}', CAST({_quote(source_col, dialect)} AS DATE))"
                     _add_grain(expr, _norm_alias(alias))
                     continue
                 if _AGE_PATTERN.search(token) or _DAYS_SINCE_PATTERN.search(token):
                     for expr, alias, display in _detect_date_arithmetic(
-                        token, lookup, as_of_expr, band_width
+                        token, lookup, as_of_expr, band_width, dialect=dialect
                     ):
                         _add_grain(expr, alias, display)
                     continue
@@ -1059,7 +1078,7 @@ def parse_kpi(
                 col = _resolve_column(clean, lookup)
                 if col in emitted:
                     cut_columns.append(col)
-                    _add_grain(_quote(col), _dimension_alias(col, clean))
+                    _add_grain(_quote(col, dialect), _dimension_alias(col, clean))
 
             # Resolve the "for <group>" token to a REAL emitted column (graceful
             # fallback to the cut columns) and make sure it is part of the grain.
@@ -1084,7 +1103,7 @@ def parse_kpi(
                     partition, lookup, kpi, tuple(cut_columns)
                 )
             if partition_col and partition_col in emitted:
-                _add_grain(_quote(partition_col), _norm_alias(partition_col))
+                _add_grain(_quote(partition_col, dialect), _norm_alias(partition_col))
 
             # An empty grain is fine: the numerator then partitions by nothing
             # (OVER ()), matching the denominator — degenerate but executable. We
@@ -1107,7 +1126,7 @@ def parse_kpi(
             if distinct and column and column != "*" and grain_terms:
                 order_terms: list[str] = []
                 if event_date_col:
-                    order_terms.append(f"CAST({_quote(event_date_col)} AS DATE) DESC")
+                    order_terms.append(f"CAST({_quote(event_date_col, dialect)} AS DATE) DESC")
                     attribution_mode = "most_recent_event"
                 else:
                     attribution_mode = "deterministic_cell_order"
@@ -1125,7 +1144,7 @@ def parse_kpi(
                     ) if partition else ""
                     if _within_col and _within_col in emitted:
                         denom_expr = (
-                            f"SUM(COUNT(*)) OVER (PARTITION BY {_quote(_within_col)})"
+                            f"SUM(COUNT(*)) OVER (PARTITION BY {_quote(_within_col, dialect)})"
                         )
                         parsed.denominator_scope = denominator_scope
                         parsed.denominator_scope_alternative = "grand_total"
@@ -1179,7 +1198,7 @@ def parse_kpi(
                 _denom_window = WindowSpec(partition_by=(partition_time_expr,))
                 _scope_label = f"within_{partition_low}"
             elif _denom_is_within and partition_col and partition_col in emitted:
-                _denom_window = WindowSpec(partition_by=(_quote(partition_col),))
+                _denom_window = WindowSpec(partition_by=(_quote(partition_col, dialect),))
                 _scope_label = denominator_scope
             else:
                 _denom_window = WindowSpec()
@@ -1206,8 +1225,8 @@ def parse_kpi(
             # sum_*_per_group / sum_*_total scaffolding columns).
             parsed.extra_select_exprs.append(
                 (
-                    f"CAST({_agg_expr_no_alias(group_agg)} AS DOUBLE) "
-                    f"/ NULLIF({_agg_expr_no_alias(total_agg)}, 0) * 100",
+                    f"CAST({_agg_expr_no_alias(group_agg, dialect)} AS DOUBLE) "
+                    f"/ NULLIF({_agg_expr_no_alias(total_agg, dialect)}, 0) * 100",
                     "percentage_share",
                 )
             )
@@ -1220,8 +1239,8 @@ def parse_kpi(
         fn in metric_text.lower() for fn in ("sum(", "count(", "avg(", "count (")
     ):
         halves = [h.strip() for h in metric_text.split("/", 1)]
-        numerator = _parse_aggregation(halves[0], lookup)
-        denominator = _parse_aggregation(halves[1], lookup) if len(halves) > 1 else None
+        numerator = _parse_aggregation(halves[0], lookup, dialect)
+        denominator = _parse_aggregation(halves[1], lookup, dialect) if len(halves) > 1 else None
         if numerator and denominator:
             parsed.ratio = (numerator, denominator)
             parsed.aggregations.extend([numerator, denominator])
@@ -1232,7 +1251,7 @@ def parse_kpi(
         else:
             parsed.fallback_reason = "ratio metric could not be parsed"
     else:
-        agg = _parse_aggregation(metric_text, lookup)
+        agg = _parse_aggregation(metric_text, lookup, dialect)
         if agg:
             # Apply window-function intent (other than mismatched-grain percentage,
             # which short-circuits earlier).
@@ -1248,8 +1267,8 @@ def parse_kpi(
                 parsed.aggregations.append(base_agg)
                 parsed.extra_select_exprs.append(
                     (
-                        f"CAST({_agg_expr_no_alias(base_agg)} AS DOUBLE) "
-                        f"/ NULLIF(SUM({_agg_expr_no_alias(base_agg)}) OVER (), 0) * 100",
+                        f"CAST({_agg_expr_no_alias(base_agg, dialect)} AS DOUBLE) "
+                        f"/ NULLIF(SUM({_agg_expr_no_alias(base_agg, dialect)}) OVER (), 0) * 100",
                         "percent_of_total",
                     )
                 )
@@ -1261,8 +1280,8 @@ def parse_kpi(
                     parsed.aggregations.append(base_agg)
                     parsed.extra_select_exprs.append(
                         (
-                            f"CAST({_agg_expr_no_alias(base_agg)} AS DOUBLE) "
-                            f"/ NULLIF(SUM({_agg_expr_no_alias(base_agg)}) OVER (), 0) * 100",
+                            f"CAST({_agg_expr_no_alias(base_agg, dialect)} AS DOUBLE) "
+                            f"/ NULLIF(SUM({_agg_expr_no_alias(base_agg, dialect)}) OVER (), 0) * 100",
                             "percent_of_total",
                         )
                     )
@@ -1273,8 +1292,8 @@ def parse_kpi(
                     parsed.aggregations.append(base_agg)
                     parsed.extra_select_exprs.append(
                         (
-                            f"CAST({_agg_expr_no_alias(base_agg)} AS DOUBLE) "
-                            f"/ NULLIF(SUM({_agg_expr_no_alias(base_agg)}) OVER (PARTITION BY {_quote(group_col)}), 0) * 100",
+                            f"CAST({_agg_expr_no_alias(base_agg, dialect)} AS DOUBLE) "
+                            f"/ NULLIF(SUM({_agg_expr_no_alias(base_agg, dialect)}) OVER (PARTITION BY {_quote(group_col, dialect)}), 0) * 100",
                             f"percent_of_{_norm_alias(group_col)}",
                         )
                     )
@@ -1303,7 +1322,7 @@ def parse_kpi(
                     fn="row_number", column="",
                     alias=_norm_alias(f"rank_within_{partition_col}"),
                     window=WindowSpec(
-                        partition_by=(_quote(partition_col),),
+                        partition_by=(_quote(partition_col, dialect),),
                         order_by=(f"{agg.alias} DESC",),
                     ),
                 )
@@ -1331,7 +1350,7 @@ def parse_kpi(
         if bucket:
             unit, source, alias = bucket
             source_col = _resolve_column(source or alias, lookup) or alias
-            expr = f"date_trunc('{unit}', CAST({_quote(source_col)} AS DATE))"
+            expr = f"date_trunc('{unit}', CAST({_quote(source_col, dialect)} AS DATE))"
             parsed.dimensions.append(Dimension(expression=expr, alias=_norm_alias(alias)))
             continue
         # Skip tokens that will be handled by _detect_date_arithmetic (age/days-since)
@@ -1342,7 +1361,7 @@ def parse_kpi(
             continue
         column = _resolve_column(clean_token, lookup)
         parsed.dimensions.append(
-            Dimension(expression=_quote(column), alias=_norm_alias(column))
+            Dimension(expression=_quote(column, dialect), alias=_norm_alias(column))
         )
 
     # Prose temporal grain: the question asks for a per-period breakdown ("each
@@ -1355,7 +1374,7 @@ def parse_kpi(
         if unit:
             date_col = _date_column_from_lookup(lookup)
             if date_col:
-                expr = f"date_trunc('{unit}', CAST({_quote(date_col)} AS DATE))"
+                expr = f"date_trunc('{unit}', CAST({_quote(date_col, dialect)} AS DATE))"
                 parsed.dimensions.insert(
                     0, Dimension(expression=expr, alias=_norm_alias(unit)))
 
@@ -1436,7 +1455,7 @@ def parse_kpi(
     # Date arithmetic (age, days-since) — must run BEFORE prose filter detection
     # so the date_diff dimension exists when we look for it.
     for expr, alias, display in _detect_date_arithmetic(
-        cuts_text + " " + name_text, lookup, as_of_expr, band_width
+        cuts_text + " " + name_text, lookup, as_of_expr, band_width, dialect=dialect
     ):
         parsed.extra_select_exprs.append((expr, alias))
         parsed.dimensions.append(
@@ -1511,9 +1530,9 @@ def parse_kpi(
             None,
         )
         if pct_idx is not None and windowed_total is not None and base is not None:
-            filters_sql = " AND ".join(_filter_sql(f) for f in parsed.filters)
-            filtered_expr = f"{_agg_expr_no_alias(base)} FILTER (WHERE {filters_sql})"
-            total_expr = _agg_expr_no_alias(base)
+            filters_sql = " AND ".join(_filter_sql(f, dialect) for f in parsed.filters)
+            filtered_expr = f"{_agg_expr_no_alias(base, dialect)} FILTER (WHERE {filters_sql})"
+            total_expr = _agg_expr_no_alias(base, dialect)
             parsed.aggregations = [a for a in parsed.aggregations if a is not windowed_total]
             parsed.extra_select_exprs[pct_idx] = (
                 f"CAST({filtered_expr} AS DOUBLE) / NULLIF({total_expr}, 0) * 100",
@@ -1611,6 +1630,7 @@ def build_result_view_sql(
         kpi,
         denominator_scope=denominator_scope,
         grain_bucketing=grain_bucketing,
+        dialect=dialect,
     )
     if parsed.grain_bucketing_block is not None:
         block = parsed.grain_bucketing_block
@@ -1726,7 +1746,7 @@ def build_result_view_sql(
             f"-- share_attribution: single ({attribution['mode']}); "
             "each entity counted in exactly one grain cell"
         )
-        entity_q = _quote(attribution["entity_column"])
+        entity_q = _quote(attribution["entity_column"], dialect)
         order_sql = ", ".join(attribution["order_terms"])
         lines += [
             f"CREATE OR REPLACE VIEW {result_view} AS",

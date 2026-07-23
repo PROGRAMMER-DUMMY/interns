@@ -567,6 +567,12 @@ class WindowedOnlyDedupRegressionTests(unittest.TestCase):
         )
         self.assertIn("SELECT DISTINCT", sql)
         self.assertIn("percentage_share", sql)
+        # parse_kpi() bakes the PARTITION BY column in at PARSE time, before
+        # dialect-aware rendering -- a missing dialect thread here silently
+        # kept the duckdb-style double-quoted identifier, which Spark SQL
+        # reads as a STRING LITERAL, not a column reference.
+        self.assertIn("PARTITION BY `departement`", sql)
+        self.assertNotIn('PARTITION BY "departement"', sql)
 
     def test_distinct_share_takes_attribution_group_by_not_distinct(self):
         # Distinct-entity share: attribution CTE + plain GROUP BY, no
@@ -1241,6 +1247,65 @@ class PreviewRowCapTests(unittest.TestCase):
         # It must reference PREVIEW_ROW_CAP, not the literal 20
         self.assertIn("PREVIEW_ROW_CAP", src)
         self.assertNotIn("preview_rows=20", src)
+
+
+class DatabricksDialectIdentifierQuotingTests(unittest.TestCase):
+    """parse_kpi() bakes column references into Dimension/Aggregation.predicate/
+    WindowSpec expressions at PARSE time, before dialect-aware rendering runs.
+    Every one of those call sites must thread the real dialect through --
+    Spark SQL treats a double-quoted string as a STRING LITERAL (not an
+    identifier) by default, so a duckdb-defaulted quote here doesn't just
+    look wrong, it silently changes what the SQL computes (a predicate
+    becomes an always-same-truth-value literal comparison; a GROUP BY groups
+    a constant instead of the real column).
+    """
+
+    def test_predicate_in_count_uses_backtick_for_databricks(self):
+        parsed = parse_kpi(
+            _kpi(metric="count(status = 'Refunded') / count(*)", cuts="channel"),
+            dialect="databricks",
+        )
+        numerator = parsed.ratio[0]
+        self.assertIn("`status`", numerator.predicate)
+        self.assertNotIn('"status"', numerator.predicate)
+
+    def test_predicate_in_count_uses_doublequote_for_duckdb_unchanged(self):
+        parsed = parse_kpi(
+            _kpi(metric="count(status = 'Refunded') / count(*)", cuts="channel")
+        )
+        numerator = parsed.ratio[0]
+        self.assertIn('"status"', numerator.predicate)
+
+    def test_plain_dimension_uses_backtick_for_databricks(self):
+        parsed = parse_kpi(
+            _kpi(metric="sum(total_amount)", cuts="channel"), dialect="databricks"
+        )
+        self.assertIn("`channel`", parsed.dimensions[0].expression)
+        self.assertNotIn('"channel"', parsed.dimensions[0].expression)
+
+    def test_date_arithmetic_age_uses_backtick_for_databricks(self):
+        parsed = parse_kpi(
+            _kpi(metric="count(*)", cuts="age"),
+            dialect="databricks",
+        )
+        age_dim = next((d for d in parsed.dimensions if d.alias == "age"), None)
+        self.assertIsNotNone(age_dim)
+        self.assertNotIn('"', age_dim.expression)
+
+    def test_generated_sql_has_no_double_quoted_identifiers_for_databricks(self):
+        kpi = _kpi(
+            name="percentage share of paid amount by channel",
+            metric="percentage of sum(amount) / sum(amount) for channel",
+            cuts="channel, region",
+        )
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_x",
+            feature_view="`kpi_x_features`", result_view="`kpi_x_results`",
+            dialect="databricks",
+        )
+        # A double-quoted string in Spark SQL is a STRING LITERAL, never a
+        # column reference -- none may leak into databricks-dialect output.
+        self.assertNotIn('"', sql)
 
 
 if __name__ == "__main__":

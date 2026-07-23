@@ -2685,9 +2685,18 @@ diff --git a/model.sql b/model.sql
             self.assertEqual(result.dialect, "databricks")
             sql = (root / result.path).read_text(encoding="utf-8")
             self.assertIn("-- Dialect: databricks", sql)
-            self.assertIn("CREATE OR REPLACE TEMP VIEW", sql)
             self.assertIn("`main`.`rcm`.`transactions`", sql)
             self.assertNotIn("read_csv_auto", sql)
+            # Phase C: single-statement rewrite -- one persisted view, CTEs
+            # feeding one final query, no TEMP VIEW chain to run separately.
+            self.assertNotIn("CREATE OR REPLACE TEMP VIEW", sql)
+            self.assertIn("CREATE OR REPLACE VIEW `main`.`rcm`.`kpi_001_results` AS", sql)
+            self.assertIn("WITH ", sql)
+            self.assertEqual(
+                sql.count("CREATE OR REPLACE VIEW"),
+                1,
+                "expected exactly one persisted view (single-statement rewrite, no separate features view)",
+            )
 
     def test_databricks_asset_manifest_maps_profiles_to_uc_tables(self):
         try:

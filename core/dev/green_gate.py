@@ -150,6 +150,21 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_local_only_workspace_regression",
     "tests.test_databricks_source_mode",
     "tests.test_data_source_panel",
+    # Phase C (single-statement rewrite): parse_kpi() bakes column references
+    # into Dimension/Aggregation.predicate/WindowSpec expressions at PARSE
+    # time, before dialect-aware rendering -- most of those call sites never
+    # threaded the real dialect through, silently keeping a duckdb-style
+    # double-quoted identifier for databricks-dialect SQL. Spark SQL treats a
+    # double-quoted string as a STRING LITERAL, not an identifier, by
+    # default -- this doesn't just look wrong, it silently changes what a
+    # predicate/GROUP BY/PARTITION BY computes. Promoted from SWEEP_MODULES:
+    # a correctness bug in the exact capability this work builds (real,
+    # executable Databricks KPI SQL) must always be enforced, not swept.
+    "tests.test_result_view_builder",
+    # Phase A/C: UC-sourced (format="delta") staging correctness and the
+    # single-statement CTE rewrite that depends on it -- also promoted from
+    # SWEEP_MODULES for the same reason.
+    "tests.test_pipeline_sql_generator",
     # Priority 2.1/3.6 minimal slice: medallion design-panel ratification.
     # Requires a real, non-blank --reasoning per item so a ratification
     # record can't collapse into a name-only rubber stamp.
@@ -191,7 +206,6 @@ SWEEP_MODULES: tuple[str, ...] = (
     "tests.test_kpi_proof_packet",
     "tests.test_workspace_definitions",
     "tests.test_workspace_flow",
-    "tests.test_result_view_builder",
     "tests.test_kpi_execution_harness",
     "tests.test_kpi_format_detector",
     "tests.test_workbook_structure",
@@ -204,7 +218,6 @@ SWEEP_MODULES: tuple[str, ...] = (
     "tests.test_layered_pipeline_harness",
     "tests.test_pipeline_execution_harness",
     "tests.test_pipeline_plan",
-    "tests.test_pipeline_sql_generator",
     "tests.test_relationship_contracts",
     "tests.test_dashboard_spec_fidelity",
     "tests.test_kpi_intent_contract",
