@@ -805,11 +805,25 @@ def _formula_inputs(feature: dict[str, Any]) -> list[str]:
         for column in feature.get("source_columns") or []
         if column.get("column")
     ]
+    if inputs:
+        # Explicit source_columns are the authoritative, human-confirmed
+        # binding -- trust them and skip re-parsing the raw formula/
+        # definition text entirely. Doing both unconditionally (as this
+        # used to) re-tokenized the definition's free-text prose (e.g. a
+        # WHERE/EXISTS custom definition written in natural English) with
+        # a bare regex that had no stopword filtering at all, so ordinary
+        # words like "period"/"account" got treated as extra candidate
+        # columns and resolved against ANY dataset with a matching column
+        # name -- pulling in a completely unrelated table. Found live:
+        # "period" from "... for that account in the period" resolved to
+        # settlements.csv, which the KPI never referenced.
+        return _unique_preserve_order(inputs)
     formula = _derived_formula(feature)
     if formula:
+        from core.onboarding.features.expression import extract_expression
+
         inputs.extend(
-            token
-            for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", formula)
+            token for token in extract_expression(formula).identifiers
             if token.lower() not in {"date_diff", "year", "month", "day"}
         )
     return _unique_preserve_order(inputs)

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
-from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator
+from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator, _formula_inputs
 from core.onboarding.pipeline_plan import (
     DataEngineeringRoutePlanner,
     PipelineDecisionRecorder,
@@ -142,6 +142,56 @@ class PipelineSQLGeneratorTests(unittest.TestCase):
             result = PipelineSQLGenerator(root, "workspaces/demo").generate()
 
             self.assertEqual(result.status, "generated")
+
+
+class FormulaInputsTests(unittest.TestCase):
+    """_formula_inputs must never resolve ordinary English words in a
+    free-text formula/definition as candidate columns when explicit
+    source_columns are already recorded.
+
+    Found live: a "WHERE EXISTS ... for that account in the period" custom
+    definition, with source_columns correctly bound to party.party_key and
+    invoices.Status, still re-tokenized the raw formula text with an
+    unfiltered regex and treated "period" as an extra candidate column --
+    which then resolved against an unrelated table (settlements.csv) purely
+    because it happened to have a column with that name.
+    """
+
+    def test_explicit_source_columns_are_trusted_without_reparsing_formula_text(self) -> None:
+        feature = {
+            "source_columns": [{"column": "party_key"}, {"column": "Status"}],
+            "evidence": [
+                {
+                    "type": "workspace_feature_definition",
+                    "detail": (
+                        "party.party_key WHERE EXISTS a non-void invoice "
+                        "(invoices.Status != 'VOID') for that account in the period"
+                    ),
+                }
+            ],
+        }
+        inputs = _formula_inputs(feature)
+        self.assertEqual(inputs, ["party_key", "Status"])
+        self.assertNotIn("period", inputs)
+        self.assertNotIn("account", inputs)
+
+    def test_falls_back_to_filtered_formula_parse_when_source_columns_empty(self) -> None:
+        feature = {
+            "source_columns": [],
+            "evidence": [
+                {
+                    "type": "workspace_feature_definition",
+                    "detail": "SUM(invoices.Date) for that account in the period",
+                }
+            ],
+        }
+        inputs = _formula_inputs(feature)
+        self.assertIn("invoices", inputs)
+        self.assertIn("Date", inputs)
+        self.assertNotIn("for", inputs)
+        self.assertNotIn("that", inputs)
+        self.assertNotIn("in", inputs)
+        self.assertNotIn("the", inputs)
 
 
 class BUG022NoMixSourceLayerTests(unittest.TestCase):
