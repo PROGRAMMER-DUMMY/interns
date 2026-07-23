@@ -6,6 +6,7 @@ from pathlib import Path
 from core.onboarding.kpi.kpi_intent import parse_intent
 from core.onboarding.kpi.polars_generator import PolarsKPIGenerator
 from core.onboarding.kpi.pyspark_generator import PySparkKPIGenerator
+from core.onboarding.kpi.result_view_builder import build_result_view_sql
 
 
 class KPIIntentTests(unittest.TestCase):
@@ -63,6 +64,55 @@ class KPIIntentTests(unittest.TestCase):
     def test_unsupported_window_flagged(self):
         intent = parse_intent({"name": "running total of revenue by month", "metric": "sum(revenue)", "cuts": "month"})
         self.assertEqual(intent.unsupported_window, "running_total")
+
+
+class FeatureLabelVsPhysicalColumnContractTests(unittest.TestCase):
+    """When a feature's label differs from its bound physical column, the SQL
+    path and the Polars/PySpark path must each resolve to a DIFFERENT thing,
+    on purpose, and both must keep working:
+
+    - SQL result-view SQL queries FROM the intermediate features view, which
+      sql_generator.py always aliases to the feature LABEL -- so the result
+      view SQL must reference the label.
+    - Polars/PySpark (kpi_intent.py -> parse_intent) read raw dataframes
+      directly, with no intermediate aliased view -- so they must resolve to
+      the PHYSICAL column.
+
+    A single shared lookup answering both questions the same way broke one
+    side or the other (found live: fixing the SQL path by making
+    _column_lookup always return the label broke this exact Polars/PySpark
+    contract, caught by test_mismatched_grain_percentage_share above).
+    result_view_builder.py now has two separate functions for this --
+    _column_lookup (physical, shared with kpi_intent.py) and
+    _features_view_column_lookup (label, SQL-result-view only). This test
+    pins both behaviors together so they can't drift apart again.
+    """
+
+    def test_sql_result_view_uses_feature_label_not_physical_column(self):
+        kpi = {
+            "kpi_id": "kpi_test",
+            "name": "count of cargo claims",
+            "metric": "count(cargo_claims)",
+            "cuts": "",
+            "features": [{"feature": "cargo_claims", "source_columns": [{"column": "Id"}]}],
+        }
+        sql = build_result_view_sql(
+            kpi, kpi_id="kpi_test", feature_view='"kpi_test_features"', result_view='"kpi_test_results"',
+        )
+        self.assertIn('"cargo_claims"', sql)
+        self.assertNotRegex(sql, r'COUNT\(\s*"Id"\s*\)')
+
+    def test_polars_pyspark_intent_uses_physical_column_not_label(self):
+        kpi = {
+            "kpi_id": "kpi_test",
+            "name": "count of cargo claims",
+            "metric": "count(cargo_claims)",
+            "cuts": "",
+            "features": [{"feature": "cargo_claims", "source_columns": [{"column": "Id"}]}],
+        }
+        intent = parse_intent(kpi)
+        self.assertIsNotNone(intent.metric)
+        self.assertEqual(intent.metric.column, "Id")
 
 
 class EngineGeneratorTests(unittest.TestCase):

@@ -869,6 +869,19 @@ def choose_feature_ref(
     """
     refs = _feature_source_refs(feature, repo_root)
     feature_name = str(feature.get("feature") or "")
+    # A single recorded ref is not a choice to make -- it's the one thing a
+    # human (or an earlier proven-direct/proven-alias resolution) already
+    # said this feature means. The base-source-preference logic below
+    # matches candidates by column NAME ALONE against the base table's own
+    # schema, which silently substitutes a same-named column from a
+    # DIFFERENT table whenever the base source happens to also have a
+    # column with that name (found live: a feature confirmed as
+    # `cargo_claims.Id` silently resolved to `shipments.Id` instead, purely
+    # because the base source -- shipments -- also has an "Id" column).
+    # Only fall through to that disambiguation logic when there are
+    # genuinely multiple candidates to choose among.
+    if len(refs) == 1:
+        return refs[0]
     if refs:
         for ref in refs:
             if ref["dataset"] == base_source:

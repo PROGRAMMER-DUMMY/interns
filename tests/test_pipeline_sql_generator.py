@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
-from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator, _formula_inputs
+from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator, _formula_inputs, choose_feature_ref
 from core.onboarding.pipeline_plan import (
     DataEngineeringRoutePlanner,
     PipelineDecisionRecorder,
@@ -192,6 +192,65 @@ class FormulaInputsTests(unittest.TestCase):
         self.assertNotIn("that", inputs)
         self.assertNotIn("in", inputs)
         self.assertNotIn("the", inputs)
+
+
+class ChooseFeatureRefTests(unittest.TestCase):
+    """choose_feature_ref is the single source of truth every engine (SQL,
+    Polars, PySpark) shares for per-feature column resolution -- a fix here
+    is engine-agnostic by construction, not something to special-case per
+    engine.
+
+    A feature with exactly ONE recorded source ref (a human already
+    confirmed which column it means, or an earlier resolution proved it
+    unambiguously) must return that ref untouched. Found live: the
+    base-source-preference fallback matched candidates by column NAME ALONE
+    against the base table's own schema, so a feature confirmed as
+    `cargo_claims.Id` silently resolved to `shipments.Id` instead whenever
+    shipments (the query's base source) happened to also have a column
+    named "Id" -- a human-confirmed answer silently overridden downstream.
+    """
+
+    def test_single_confirmed_ref_is_returned_even_when_base_source_has_a_same_named_column(self):
+        feature = {
+            "feature": "cargo_claims",
+            "state": "user_confirmed",
+            "source_columns": [{"dataset": "workspaces/demo/datasets/cargo_claims.csv", "column": "Id"}],
+        }
+        ref = choose_feature_ref(
+            feature,
+            base_source="workspaces/demo/datasets/shipments.csv",
+            all_refs=[],
+            profile_map={
+                "workspaces/demo/datasets/shipments.csv": {"schema": {"Id": "string"}},
+                "workspaces/demo/datasets/cargo_claims.csv": {"schema": {"Id": "string"}},
+            },
+            repo_root=Path("."),
+        )
+        self.assertEqual(ref["dataset"], "workspaces/demo/datasets/cargo_claims.csv")
+
+    def test_multiple_candidate_refs_still_prefer_the_base_source(self):
+        # The disambiguation logic this fix leaves untouched: with genuine
+        # ambiguity (more than one recorded ref), preferring the base source
+        # is still correct.
+        feature = {
+            "feature": "carrier_cd",
+            "state": "proven_alias",
+            "source_columns": [
+                {"dataset": "workspaces/demo/datasets/settlements.csv", "column": "carrier_cd"},
+                {"dataset": "workspaces/demo/datasets/shipments.csv", "column": "carrier_cd"},
+            ],
+        }
+        ref = choose_feature_ref(
+            feature,
+            base_source="workspaces/demo/datasets/shipments.csv",
+            all_refs=[],
+            profile_map={
+                "workspaces/demo/datasets/shipments.csv": {"schema": {"carrier_cd": "string"}},
+                "workspaces/demo/datasets/settlements.csv": {"schema": {"carrier_cd": "string"}},
+            },
+            repo_root=Path("."),
+        )
+        self.assertEqual(ref["dataset"], "workspaces/demo/datasets/shipments.csv")
 
 
 class BUG022NoMixSourceLayerTests(unittest.TestCase):

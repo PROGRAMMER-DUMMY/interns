@@ -301,6 +301,38 @@ def _column_lookup(kpi: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def _features_view_column_lookup(kpi: dict[str, Any]) -> dict[str, str]:
+    """Map feature label -> the column name the SQL FEATURES VIEW exposes it
+    under, i.e. the feature label itself, always.
+
+    `_column_lookup` above answers a different question -- the feature's
+    PHYSICAL source column -- needed by Polars/PySpark (which read raw
+    dataframes directly, no intermediate view) and by raw-table analysis
+    inside this module. This function is for the one case that's genuinely
+    different: SQL result-view generation (`parse_kpi`/build_result_view_sql)
+    queries FROM the features view exclusively, never the raw catalog views,
+    and that view's SELECT list aliases every column to its feature label
+    unconditionally (sql_generator.py's `<expr> AS "<feature_label>"`, run
+    for every resolution_type, not just derived_formula). Resolving to the
+    physical column name there referenced a column the features view never
+    exposes under that name, producing a binder error whenever a feature's
+    label differs from its bound column (e.g. a feature named `cargo_claims`
+    bound to physical column `Id`). Deliberately a separate function, not a
+    change to `_column_lookup` itself: that function's physical-column
+    answer is correct for its other callers and must not change to fix a
+    problem specific to the SQL result-view context.
+    """
+    out: dict[str, str] = {}
+    for feature in kpi.get("features") or []:
+        if not isinstance(feature, dict):
+            continue
+        label = str(feature.get("feature") or feature.get("name") or "")
+        if not label:
+            continue
+        out[label.lower()] = label
+    return out
+
+
 def _resolve_column(name: str, lookup: dict[str, str]) -> str:
     """Resolve a KPI cut/term to an underlying column.
 
@@ -918,7 +950,7 @@ def parse_kpi(
     metric_text = str(kpi.get("metric") or "").strip()
     cuts_text = str(kpi.get("cuts") or "").strip()
     name_text = str(kpi.get("name") or kpi.get("business_question") or "").strip()
-    lookup = _column_lookup(kpi)
+    lookup = _features_view_column_lookup(kpi)
     window_intent = _detect_window_intent(metric_text, name_text)
 
     # Grain-bucketing hard block: a share/percentage metric cut by a RAW
