@@ -8,6 +8,7 @@ from pathlib import Path
 from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
 from core.onboarding.kpi.sql_generator import (
     DuckDBKPISQLGenerator,
+    _derived_formula,
     _formula_inputs,
     choose_feature_ref,
     plan_required_sources,
@@ -325,6 +326,36 @@ class DerivedFormulaRefsTests(unittest.TestCase):
         )
         self.assertNotIn("workspaces/demo/datasets/addr.csv", required_sources)
         self.assertIn("workspaces/demo/datasets/invoices.csv", required_sources)
+
+
+class DerivedFormulaLatestEvidenceWinsTests(unittest.TestCase):
+    """_derived_formula must use the MOST RECENTLY applied definition, not
+    the first one ever recorded.
+
+    Found live: evidence entries are append-only (re-applying a workspace
+    definition -- e.g. a human correcting an earlier formula that had an
+    unqualified column reference -- appends a new entry rather than
+    replacing the old one). Picking the first match silently kept using an
+    already-superseded, broken formula across multiple resolver runs even
+    though the corrected one was right there in the same list.
+    """
+
+    def test_last_workspace_feature_definition_evidence_wins(self) -> None:
+        feature = {
+            "evidence": [
+                {"type": "workspace_feature_definition", "detail": "OLD_FORMULA(x)"},
+                {"type": "schema_alias", "detail": "irrelevant"},
+                {"type": "workspace_feature_definition", "detail": "CORRECTED_FORMULA(x)"},
+            ]
+        }
+        self.assertEqual(_derived_formula(feature), "CORRECTED_FORMULA(x)")
+
+    def test_falls_back_to_source_column_detail_when_no_evidence_match(self) -> None:
+        feature = {
+            "evidence": [],
+            "source_columns": [{"detail": "FALLBACK_FORMULA(y)"}],
+        }
+        self.assertEqual(_derived_formula(feature), "FALLBACK_FORMULA(y)")
 
 
 class BUG022NoMixSourceLayerTests(unittest.TestCase):

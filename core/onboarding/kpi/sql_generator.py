@@ -821,7 +821,16 @@ def _split_dataset_column(value: str, repo_root: Path) -> tuple[str, str]:
 
 
 def _derived_formula(feature: dict[str, Any]) -> str:
-    for ev in feature.get("evidence") or []:
+    # Evidence entries are append-only: re-applying a workspace definition
+    # (e.g. a human correcting an earlier formula) appends a NEW entry
+    # rather than replacing the old one, so the list can carry several
+    # "workspace_feature_definition" entries for the same feature over
+    # successive resolver runs. The most recently appended one is the
+    # human's latest word on this formula -- search in reverse so it wins,
+    # not whichever happened to be recorded first. Found live: a corrected
+    # formula (fixing an unqualified column reference) was silently ignored
+    # in favor of the original, already-superseded one.
+    for ev in reversed(feature.get("evidence") or []):
         detail = str(ev.get("detail") or "")
         if ev.get("type") == "workspace_feature_definition" and "(" in detail:
             return detail
