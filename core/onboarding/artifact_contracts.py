@@ -48,6 +48,14 @@ BLOCKER_QUESTION_PANEL_CONTRACT = ArtifactContract(
     required_generated_by="blocker-question-panel",
 )
 
+DATA_SOURCE_PANEL_CONTRACT = ArtifactContract(
+    artifact_type="data_source_panel/current.json",
+    version_field="version",
+    supported_version=1,
+    regenerate_command="prepare-data-source-panel",
+    required_generated_by="prepare-data-source-panel",
+)
+
 WORKSPACE_FEATURE_DEFINITIONS_CONTRACT = ArtifactContract(
     artifact_type="workspace_feature_definitions.json",
     version_field="version",

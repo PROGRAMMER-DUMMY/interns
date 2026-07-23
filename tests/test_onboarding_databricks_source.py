@@ -124,6 +124,99 @@ class ProfileDatabricksTablesTests(unittest.TestCase):
             self.assertEqual((profiles, warnings), ([], []))
 
 
+class ExclusiveModeOnboardingTests(unittest.TestCase):
+    """Phase B: databricks_source.mode="exclusive" skips local dataset
+    discovery entirely and hard-warns instead of silently proceeding on an
+    empty profile index when zero UC tables are actually discovered.
+    """
+
+    def _fixture_with_local_csv(self, tmp: str, mode: str) -> tuple[Path, Path]:
+        repo, ws = _fixture_workspace(
+            tmp,
+            settings={
+                "databricks_source": {"catalog": "main", "schema": "bronze", "mode": mode}
+            },
+        )
+        (ws / "datasets").mkdir(parents=True, exist_ok=True)
+        (ws / "datasets" / "orders.csv").write_text(
+            "OrderID,Amount\n1,10.0\n2,20.0\n", encoding="utf-8"
+        )
+        (ws / "docs").mkdir(parents=True, exist_ok=True)
+        (ws / "docs" / "kpi_registry.csv").write_text(
+            "Key business question,Description,Cuts / grain hints,Metric,Data model refinement required\n"
+            "What is total amount?,Baseline KPI,,sum(Amount),\n",
+            encoding="utf-8",
+        )
+        return repo, ws
+
+    def test_exclusive_mode_skips_local_data_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = self._fixture_with_local_csv(tmp, "exclusive")
+            onboarder = WorkspaceOnboarder(repo, ws, sample_rows=10)
+            with mock.patch.object(
+                WorkspaceOnboarder, "_databricks_source_tables", return_value=["main.bronze.orders"]
+            ), mock.patch.object(
+                WorkspaceOnboarder, "profile_databricks_tables",
+                return_value=([{"format": "delta", "path": "`main`.`bronze`.`orders`",
+                                 "schema": {"OrderID": "int", "Amount": "double"},
+                                 "profile_path": "x", "row_count": 2}], []),
+            ):
+                result = onboarder.run()
+            self.assertEqual(result.inputs.data_files, [])
+            self.assertEqual(result.inputs.databricks_source_mode, "exclusive")
+            self.assertEqual(result.inputs.databricks_tables, ["main.bronze.orders"])
+            self.assertEqual(result.profile_count, 1)
+            # Stale local file present but not scanned -- non-blocking warning.
+            self.assertTrue(
+                any("exclusive_databricks_mode_stale_local_files_present" in w for w in result.warnings)
+            )
+            # Not the hard zero-tables warning -- tables WERE discovered.
+            self.assertFalse(
+                any("exclusive_databricks_mode_zero_tables_discovered" in w for w in result.warnings)
+            )
+
+    def test_exclusive_mode_zero_tables_hard_warns_and_redirects_next_step(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(
+                tmp,
+                settings={
+                    "databricks_source": {"catalog": "main", "schema": "bronze", "mode": "exclusive"}
+                },
+            )
+            (ws / "docs").mkdir(parents=True, exist_ok=True)
+            (ws / "docs" / "kpi_registry.csv").write_text(
+                "Key business question,Description,Cuts / grain hints,Metric,Data model refinement required\n"
+                "What is total amount?,Baseline KPI,,sum(Amount),\n",
+                encoding="utf-8",
+            )
+            onboarder = WorkspaceOnboarder(repo, ws, sample_rows=10)
+            with mock.patch.object(WorkspaceOnboarder, "_databricks_source_tables", return_value=[]):
+                result = onboarder.run()
+            self.assertEqual(result.inputs.data_files, [])
+            self.assertEqual(result.profile_count, 0)
+            self.assertTrue(
+                any("exclusive_databricks_mode_zero_tables_discovered" in w for w in result.warnings)
+            )
+            self.assertIn("apply-data-source-answer", result.next_command)
+            self.assertIn("databricks_exclusive", result.next_command)
+
+    def test_additive_mode_still_scans_local_files(self):
+        """Sanity check: only "exclusive" changes local discovery -- "additive"
+        (today's original silent-merge behavior) is untouched."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = self._fixture_with_local_csv(tmp, "additive")
+            onboarder = WorkspaceOnboarder(repo, ws, sample_rows=10)
+            with mock.patch.object(WorkspaceOnboarder, "_databricks_source_tables", return_value=[]):
+                result = onboarder.run()
+            # additive mode must still discover local files -- unlike exclusive
+            # mode's test above, which asserts data_files == [] outright.
+            self.assertIn("workspaces/demo/datasets/orders.csv", result.inputs.data_files)
+            self.assertEqual(result.inputs.databricks_source_mode, "additive")
+            self.assertFalse(
+                any("exclusive_databricks_mode" in w for w in result.warnings)
+            )
+
+
 class GenericityGuardTest(unittest.TestCase):
     def test_new_databricks_source_code_has_no_hardcoded_workspace_vocabulary(self):
         """Regression guard: the databricks_source discovery/profiling code in

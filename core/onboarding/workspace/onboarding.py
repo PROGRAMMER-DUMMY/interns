@@ -79,6 +79,10 @@ class WorkspaceInputs:
     # Empty for every workspace that doesn't declare one; local-file discovery
     # above is completely unaffected either way.
     databricks_tables: list[str] = field(default_factory=list)
+    # WorkspaceLayout.databricks_source_mode(): "local_files" (default),
+    # "additive" (today's original silent merge), or "exclusive" (local
+    # data_files discovery is skipped -- see discover_inputs()).
+    databricks_source_mode: str = "local_files"
 
 
 @dataclass(frozen=True)
@@ -150,6 +154,9 @@ class WorkspaceOnboarder:
         self.layout = WorkspaceLayout(project_root=self.workspace)
         self.profiler = DataModelProfiler()
         self.metadata_store = metadata_store or build_metadata_store(self.layout, repo_root=self.repo_root)
+        # Set by discover_inputs() when databricks_source_mode()=="exclusive"
+        # and local dataset files are physically present despite that mode.
+        self._exclusive_mode_stale_local_files: list[str] = []
 
     def run(self) -> OnboardingResult:
         self._validate_workspace()
@@ -797,6 +804,51 @@ class WorkspaceOnboarder:
         }
         artifacts["generated_file_readability"] = self._write_generated_file_readability()
 
+        # Exclusive-mode guards: the single most important check in this
+        # phase. A workspace declaring databricks_exclusive with zero UC
+        # tables actually discovered must NOT proceed as if profiling
+        # succeeded -- an empty profile_index.json would otherwise silently
+        # point KPI resolution at a workspace with no data at all. This is a
+        # hard warning (not an exception) so onboarding still completes and
+        # writes artifacts a human/agent can inspect to diagnose the
+        # connection, matching every other degrade-with-a-warning path here.
+        exclusive_mode_warnings: list[str] = []
+        exclusive_mode_zero_tables = (
+            inputs.databricks_source_mode == "exclusive" and not inputs.databricks_tables
+        )
+        if exclusive_mode_zero_tables:
+            exclusive_mode_warnings.append(
+                "[x] exclusive_databricks_mode_zero_tables_discovered: "
+                "databricks_source.mode is 'exclusive' but zero Unity Catalog "
+                "tables were discovered -- profile_index.json is empty. Fix the "
+                "Databricks connection (catalog/schema/credentials) before "
+                "resolving KPI features; local datasets/ is intentionally not "
+                "scanned in this mode."
+            )
+        if self._exclusive_mode_stale_local_files:
+            exclusive_mode_warnings.append(
+                "[~] exclusive_databricks_mode_stale_local_files_present: "
+                f"{len(self._exclusive_mode_stale_local_files)} local dataset file(s) "
+                "exist on disk but are not scanned in databricks_exclusive mode "
+                "(e.g. " + self._exclusive_mode_stale_local_files[0] + "). Remove them "
+                "or switch mode via apply-data-source-answer if this is unintended."
+            )
+
+        if exclusive_mode_zero_tables:
+            next_step = (
+                "Fix the Databricks connection for this exclusive-mode workspace "
+                "(catalog/schema/credentials) -- zero UC tables were discovered, "
+                "so KPI feature resolution has no data to work against."
+            )
+            next_command = (
+                f"uv run apply-data-source-answer --workspace {inputs.workspace} "
+                "--answer databricks_exclusive --catalog <catalog> --schema <schema> "
+                '--confirmed-by "<name>"'
+            )
+        else:
+            next_step = _onboarding_next_step(inputs, kpis, profiles)
+            next_command = _onboarding_next_command(inputs, kpis, profiles)
+
         result = OnboardingResult(
             workspace=str(self.workspace),
             interns_dir=str(self.layout.interns_dir),
@@ -804,13 +856,14 @@ class WorkspaceOnboarder:
             kpi_count=len(kpis),
             profile_count=len(profiles),
             artifacts=artifacts,
-            next_step=_onboarding_next_step(inputs, kpis, profiles),
-            next_command=_onboarding_next_command(inputs, kpis, profiles),
+            next_step=next_step,
+            next_command=next_command,
             warnings=kpi_warnings
             + profile_warnings
             + dictionary_warnings
             + diagram_warnings
-            + document_warnings,
+            + document_warnings
+            + exclusive_mode_warnings,
             incremental={
                 "mode": run_mode,
                 "datasets_total": len(inputs.data_files),
@@ -831,8 +884,9 @@ class WorkspaceOnboarder:
         return result
 
     def discover_inputs(self) -> WorkspaceInputs:
+        source_mode = self.layout.databricks_source_mode()
         classified = self._classified_workspace_inputs()
-        data_files: list[Path] = [
+        local_data_files: list[Path] = [
             path
             for path, roles in classified
             if "dataset_evidence" in roles
@@ -841,7 +895,24 @@ class WorkspaceOnboarder:
             and path.suffix.lower() in DATA_SUFFIXES
             and self.layout.is_dataset_allowed(path)
         ]
-        data_files.extend(self._external_data_files())
+        local_data_files.extend(self._external_data_files())
+        # "exclusive" mode: the workspace's data lives on Databricks only --
+        # local datasets/ is not "your data" for this workspace, so it is
+        # never scanned. kpi_registries/data_models are business-definition
+        # inputs (what the KPIs mean), not data itself, so they are always
+        # discovered regardless of source mode. A local file physically
+        # present despite exclusive mode is surfaced as a non-blocking
+        # warning by _run_locked() (self._exclusive_mode_stale_local_files),
+        # not silently dropped -- a stale/misconfigured workspace should be
+        # visible, not invisible.
+        if source_mode == "exclusive":
+            self._exclusive_mode_stale_local_files = sorted(
+                {_rel(path, self.repo_root) for path in local_data_files}
+            )
+            data_files: list[Path] = []
+        else:
+            self._exclusive_mode_stale_local_files = []
+            data_files = local_data_files
 
         kpi_registries = [
             path
@@ -864,6 +935,7 @@ class WorkspaceOnboarder:
             kpi_registries=[_rel(path, self.repo_root) for path in sorted(set(kpi_registries))],
             data_models=[_rel(path, self.repo_root) for path in sorted(set(data_models))],
             databricks_tables=self._databricks_source_tables(),
+            databricks_source_mode=source_mode,
         )
 
     def _databricks_source_tables(self) -> list[str]:

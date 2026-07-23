@@ -184,6 +184,33 @@ class WorkspaceLayout:
                 pass
         return {}
 
+    def databricks_source_mode(self) -> str:
+        """The workspace's data-source mode for onboarding.
+
+        Read from `workspace_settings.json`'s `databricks_source.mode`:
+          "local_files" -- scan local `datasets/` only (the default).
+          "additive"    -- scan local files AND profile the declared UC
+                            catalog/schema, merging both into
+                            profile_index.json.
+          "exclusive"   -- UC catalog/schema only; local dataset discovery
+                            is skipped entirely.
+
+        No `databricks_source` key at all -> "local_files": every existing
+        local-only workspace is unaffected. A `databricks_source` declared
+        with a catalog/schema but no `mode` -> "additive": this is today's
+        original silent-merge behavior, preserved as the default for a
+        workspace whose owner has not yet been asked to make the choice
+        explicit via the data_source_panel (see core.onboarding.data_source_panel).
+        """
+        settings = self.load_settings()
+        source = settings.get("databricks_source")
+        if not isinstance(source, dict):
+            return "local_files"
+        mode = str(source.get("mode") or "").strip().lower()
+        if mode in {"local_files", "additive", "exclusive"}:
+            return mode
+        return "additive"
+
     def is_dataset_allowed(self, path: Path) -> bool:
         settings = self.load_settings()
         return path_allowed_by_entries(path, project_root=self.project_root, settings=settings)

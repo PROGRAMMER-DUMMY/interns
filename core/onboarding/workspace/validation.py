@@ -15,6 +15,7 @@ from core.onboarding.artifact_contracts import (
     CATALOG_CONTRACT_CONTRACT,
     DATA_ENGINEERING_ROUTE_CONTRACT,
     DATA_QUALITY_CONTRACT,
+    DATA_SOURCE_PANEL_CONTRACT,
     DUPLICATE_DECISIONS_CONTRACT,
     DOMAIN_MODEL_CONTRACT,
     KPI_FEATURE_MAPPING_CONTRACT,
@@ -92,6 +93,7 @@ class WorkspaceArtifactValidator:
         self._validate_workspace()
         self._validate_input_inventory()
         self._validate_profile_index()
+        self._validate_data_source_panel()
         self._validate_domain_model()
         self._validate_kpi_registry()
         mapping = self._validate_feature_mapping()
@@ -175,6 +177,26 @@ class WorkspaceArtifactValidator:
                 self._error(path, f"profile #{idx} `schema` must be an object")
             if "columns" in profile and not isinstance(profile["columns"], list):
                 self._error(path, f"profile #{idx} `columns` must be a list")
+
+    def _validate_data_source_panel(self) -> None:
+        # Unlike profile_index.json, this panel is only ever generated once a
+        # workspace has declared (or been asked about) a databricks_source --
+        # most local-only workspaces never produce it, so its absence is not
+        # a warning, only its malformation if it does exist.
+        path = self.layout.reports_dir / "data_source_panel" / "current.json"
+        data = self._load_json(path, required=False)
+        if not data:
+            return
+        self._validate_artifact_contract(path, data, DATA_SOURCE_PANEL_CONTRACT)
+        for key in ("status", "current_mode", "options", "recommended_option_id"):
+            if key not in data:
+                self._error(path, f"data_source_panel/current.json missing `{key}`")
+        valid_option_ids = {opt.get("option_id") for opt in data.get("options") or [] if isinstance(opt, dict)}
+        if data.get("recommended_option_id") not in valid_option_ids:
+            self._error(
+                path,
+                "data_source_panel/current.json recommended_option_id is not one of its own options",
+            )
 
     def _validate_domain_model(self) -> None:
         path = self.layout.contracts_dir / "domain_model.json"

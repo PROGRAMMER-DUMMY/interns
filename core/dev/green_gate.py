@@ -138,6 +138,18 @@ CURATED_MODULES: tuple[str, ...] = (
     # workspace_settings.json-driven, zero hardcoded workspace/catalog/table
     # names in core/ (locked in by an explicit genericity-guard test).
     "tests.test_onboarding_databricks_source",
+    # Generic Databricks-first-class onboarding (dynamic-cooking-firefly plan):
+    # Path(uc_fqn).stem/.name silently mangled a `catalog`.`schema`.`table`
+    # identifier -- corrupting dedup keys, staging-view table refs, and
+    # dataset-file resolution for any UC-sourced profile. Plus the explicit,
+    # human-confirmed data-source-mode panel (local_files/additive/exclusive)
+    # and the golden-fixture proof that a local-only workspace (the
+    # overwhelming majority, no databricks_source declared at all) is
+    # completely unaffected by any of it.
+    "tests.test_dataset_identity",
+    "tests.test_local_only_workspace_regression",
+    "tests.test_databricks_source_mode",
+    "tests.test_data_source_panel",
     # Priority 2.1/3.6 minimal slice: medallion design-panel ratification.
     # Requires a real, non-blank --reasoning per item so a ratification
     # record can't collapse into a name-only rubber stamp.
