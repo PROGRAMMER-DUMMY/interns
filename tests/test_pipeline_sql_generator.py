@@ -253,6 +253,45 @@ class ChooseFeatureRefTests(unittest.TestCase):
         self.assertEqual(ref["dataset"], "workspaces/demo/datasets/shipments.csv")
 
 
+class DerivedFormulaRefsTests(unittest.TestCase):
+    """_derived_formula_refs must trust an explicitly-declared source_columns
+    dataset over bare-name matching against the whole profile map.
+
+    Found live: a derived formula explicitly declared `invoices.acct` as a
+    source column, but _source_for_column's fallback (search every profiled
+    dataset for a matching column name, return the alphabetically-first
+    match) resolved "acct" to addr.csv instead, purely because addr.csv also
+    happens to have a column named "acct" and sorts before "invoices".
+    """
+
+    def _generator(self, root: Path) -> DuckDBKPISQLGenerator:
+        (root / "workspaces" / "demo").mkdir(parents=True, exist_ok=True)
+        return DuckDBKPISQLGenerator(root, "workspaces/demo")
+
+    def test_declared_dataset_wins_over_alphabetically_first_bare_name_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gen = self._generator(root)
+            kpi = {
+                "kpi_id": "kpi_test",
+                "features": [
+                    {
+                        "feature": "churned",
+                        "resolution_type": "derived_formula",
+                        "source_columns": [
+                            {"dataset": "workspaces/demo/datasets/invoices.csv", "column": "acct"},
+                        ],
+                    }
+                ],
+            }
+            profile_map = {
+                "workspaces/demo/datasets/addr.csv": {"schema": {"acct": "string"}},
+                "workspaces/demo/datasets/invoices.csv": {"schema": {"acct": "string"}},
+            }
+            refs = gen._derived_formula_refs(kpi, "workspaces/demo/datasets/party.csv", profile_map)
+            self.assertEqual(refs, [{"dataset": "workspaces/demo/datasets/invoices.csv", "column": "acct"}])
+
+
 class BUG022NoMixSourceLayerTests(unittest.TestCase):
     """BUG-022: a single SQL generation run must never mix read_csv_auto and delta_scan."""
 

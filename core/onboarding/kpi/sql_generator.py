@@ -577,8 +577,22 @@ class DuckDBKPISQLGenerator:
         for feature in kpi.get("features", []):
             if feature.get("resolution_type") != "derived_formula":
                 continue
+            # Explicit source_columns (dataset, column) pairs are the
+            # authoritative, already-confirmed binding -- consult them
+            # before falling back to _source_for_column's bare-name
+            # matching, which picks whichever profiled dataset happens to
+            # sort first alphabetically whenever more than one table has a
+            # column with that name (found live: a formula explicitly
+            # declaring `invoices.acct` still resolved to `addr.csv`
+            # instead, purely because addr.csv also has an "acct" column
+            # and sorts before "invoices" alphabetically).
+            declared = {
+                str(sc.get("column") or ""): str(sc.get("dataset") or "")
+                for sc in (feature.get("source_columns") or [])
+                if isinstance(sc, dict) and sc.get("column") and sc.get("dataset")
+            }
             for column in _formula_inputs(feature):
-                source = _source_for_column(column, base_source, profile_map)
+                source = declared.get(column) or _source_for_column(column, base_source, profile_map)
                 if source:
                     refs.append({"dataset": source, "column": column})
         return refs
