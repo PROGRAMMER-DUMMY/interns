@@ -52,6 +52,7 @@ from core.medallion.design_naming import (
     source_system_from_silver_source,
 )
 from core.storage.workspace_layout import WorkspaceLayout
+from core.sql_safety import quote_ident_sql
 
 
 # ── Exit codes (Section 19 of the PRD) ────────────────────────────────────────
@@ -501,6 +502,90 @@ def _prepare_model_routing(
     return metadata
 
 
+_ENTITY_METADATA_COLS = frozenset({"_source_system", "_source_file", "_load_ts"})
+
+
+def _dataset_column_set(ds: dict[str, Any]) -> set[str]:
+    schema = ds.get("schema")
+    cols: set[str] = set()
+    if isinstance(schema, dict):
+        cols = {str(k).lower() for k in schema.keys()}
+    elif isinstance(schema, list):
+        cols = {str(c.get("name")).lower() for c in schema if isinstance(c, dict) and c.get("name")}
+    return cols - _ENTITY_METADATA_COLS
+
+
+def _schema_compatible(a: set[str], b: set[str], *, min_overlap: float = 0.75) -> bool:
+    """Two dataset schemas are compatible enough to union as one logical
+    entity if they share at least `min_overlap` of the smaller schema's
+    columns. Filename similarity alone (the grouping key) doesn't imply
+    this -- a dimension/master table and an unrelated event/reference table
+    can share a filename prefix while having almost no columns in common.
+    The threshold is high (0.75, not a bare majority) because genuine
+    same-entity-multiple-sources data shares nearly its whole schema
+    (ratio close to 1.0); a lower bar lets a single shared foreign/lookup
+    key (e.g. a reference table's code column) alone cross it, which is
+    exactly the false-positive this function exists to reject.
+    """
+    if not a or not b:
+        return False
+    return (len(a & b) / min(len(a), len(b))) >= min_overlap
+
+
+def _resolve_dataset_logical_names(datasets: list[dict[str, Any]]) -> dict[int, str]:
+    """Final logical-entity name per dataset (keyed by `id(dataset)`), after
+    `_split_schema_incompatible_groups` has separated any naive filename-
+    prefix group whose members aren't actually the same entity.
+
+    Both bronze table naming (`_build_bronze_tables`) and silver contract
+    building (`_seed_proposal`) must resolve entity names through this same
+    function -- computing the split independently in each (as before) let
+    them disagree, silently dropping the bronze-source mapping for any
+    entity `_seed_proposal` split out. Relies on the same dataset dicts
+    (from one `inputs["domain_model"]["datasets"]` list, loaded once per
+    `design_medallion` call) flowing into both callers.
+    """
+    by_logical: dict[str, list[dict[str, Any]]] = {}
+    for ds in datasets:
+        logical = _logical_entity_from_path(ds.get("path", ""))
+        by_logical.setdefault(logical, []).append(ds)
+    by_logical = _split_schema_incompatible_groups(by_logical)
+    resolved: dict[int, str] = {}
+    for logical, dss in by_logical.items():
+        for ds in dss:
+            resolved[id(ds)] = logical
+    return resolved
+
+
+def _split_schema_incompatible_groups(
+    by_logical: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    """`_logical_entity_from_path` groups datasets purely by filename prefix
+    (e.g. driver_masters.csv + driver_people.csv -> both "driver"), blind to
+    whether the schemas are actually the same entity from multiple sources
+    vs. two unrelated tables sharing a word. Unioning incompatible schemas
+    crashes DuckDB ("Set operations can only apply to expressions with the
+    same number of result columns") or, worse, silently merges garbage when
+    column counts coincidentally match. Re-split any group whose members
+    aren't schema-compatible with the group's first dataset, keyed by full
+    filename stem so each split-out dataset gets its own logical entity.
+    """
+    result: dict[str, list[dict[str, Any]]] = {}
+    for logical, dss in by_logical.items():
+        if len(dss) <= 1:
+            result[logical] = dss
+            continue
+        anchor_cols = _dataset_column_set(dss[0])
+        result[logical] = [dss[0]]
+        for ds in dss[1:]:
+            if _schema_compatible(anchor_cols, _dataset_column_set(ds)):
+                result[logical].append(ds)
+            else:
+                stem = Path(ds.get("path", "")).stem.lower() or logical
+                result.setdefault(stem, []).append(ds)
+    return result
+
+
 def _seed_proposal(inputs: dict[str, Any]) -> dict[str, Any]:
     """
     Deterministic minimal proposal built from profiles + KPI mapping + confirmed
@@ -513,10 +598,10 @@ def _seed_proposal(inputs: dict[str, Any]) -> dict[str, Any]:
     pii_lookup = _pii_lookup_from_semantic(semantic)
 
     silver_tables: dict[str, Any] = {}
+    resolved_names = _resolve_dataset_logical_names(datasets)
     by_logical: dict[str, list[dict[str, Any]]] = {}
     for ds in datasets:
-        logical = _logical_entity_from_path(ds.get("path", ""))
-        by_logical.setdefault(logical, []).append(ds)
+        by_logical.setdefault(resolved_names[id(ds)], []).append(ds)
 
     for logical, dss in by_logical.items():
         pii_cols = sorted({
@@ -1152,13 +1237,14 @@ def _build_bronze_tables(inputs: dict[str, Any], *, semantic_contract: Any, repo
     domain_model = inputs.get("domain_model") or {}
     datasets = domain_model.get("datasets", []) if isinstance(domain_model, dict) else []
     pii_by_ds = _pii_lookup_from_semantic(semantic_contract)
+    resolved_names = _resolve_dataset_logical_names(datasets)
     out: list[BronzeTable] = []
     for ds in datasets:
         path = ds.get("path", "")
         if not path:
             continue
         source_system = _source_system_from_path(path)
-        logical = _logical_entity_from_path(path)
+        logical = resolved_names[id(ds)]
         name = f"{logical}__{source_system}" if source_system else logical
         schema = ds.get("schema", {}) or {}
         natural_key = _detect_natural_key(schema, logical)
@@ -1410,25 +1496,29 @@ def _emit_silver_sql_duckdb(manifest: Manifest, contract: SilverContract, out_di
             select_lines.append(f"    SELECT *, '{_source_system_from_silver_src(src)}' AS source_system FROM {src}")
         union_sql = "\n    UNION ALL\n".join(select_lines)
         pii_replacements = [
-            f"sha256(coalesce(cast({col} AS VARCHAR), '') || $salt) AS {col}"
+            f"sha256(coalesce(cast({quote_ident_sql(col)} AS VARCHAR), '') || $salt) AS {quote_ident_sql(col)}"
             for col in tc.pii_hash_columns
         ]
         # Canonical PK rename (raw `Id` -> `<entity>_id`): project it explicitly and
         # EXCLUDE the raw column from the star so the PK the dedup/MERGE/assertions
         # key on actually exists.
-        rename_items = [f"    {raw} AS {canon}," for raw, canon in tc.key_rename.items()]
+        rename_items = [f"    {quote_ident_sql(raw)} AS {canon}," for raw, canon in tc.key_rename.items()]
         exclude_cols = [raw for raw in tc.key_rename]
         # Contract type casts (e.g. temporal -> TIMESTAMP), applied via REPLACE.
         # TRY_CAST (not CAST): a single malformed value nulls that cell instead of
         # aborting the whole silver load -- a stray non-date in a temporal column
-        # should not fail the pipeline.
+        # should not fail the pipeline. Source/alias are quoted (quote_ident_sql):
+        # an unquoted reserved-word column (e.g. a real "START"/"END" column) is
+        # otherwise a SQL parser error, not a hypothetical.
         cast_replacements = [
-            f"TRY_CAST({col} AS {cast.to_type}) AS {col}"
+            f"TRY_CAST({quote_ident_sql(col)} AS {cast.to_type}) AS {quote_ident_sql(col)}"
             for col, cast in tc.type_casts.items()
             if col not in tc.pii_hash_columns and col not in exclude_cols
         ]
         replacements = cast_replacements + pii_replacements
-        exclude_clause = f" EXCLUDE ({', '.join(exclude_cols)})" if exclude_cols else ""
+        exclude_clause = (
+            f" EXCLUDE ({', '.join(quote_ident_sql(c) for c in exclude_cols)})" if exclude_cols else ""
+        )
         replace_clause = (
             "\n    REPLACE (\n        " + ",\n        ".join(replacements) + "\n    )"
             if replacements else ""
@@ -1469,13 +1559,13 @@ def _render_assertions_sql(table: str, tc: TableContract) -> str:
     lines = [f"-- Assertions for silver.{table}\n"]
     for a in tc.assertions:
         if a.type == "not_null" and a.columns:
-            cols = " OR ".join(f"{c} IS NULL" for c in a.columns)
+            cols = " OR ".join(f"{quote_ident_sql(c)} IS NULL" for c in a.columns)
             lines.append(
                 f"SELECT '{a.id}' AS assertion_id, COUNT(*) AS violations\n"
                 f"FROM silver.{table} WHERE {cols};\n"
             )
         elif a.type == "unique" and a.columns:
-            group = ", ".join(a.columns)
+            group = ", ".join(quote_ident_sql(c) for c in a.columns)
             lines.append(
                 f"SELECT '{a.id}' AS assertion_id, COUNT(*) AS violations FROM (\n"
                 f"    SELECT {group} FROM silver.{table} GROUP BY {group} HAVING COUNT(*) > 1\n"
@@ -1484,15 +1574,17 @@ def _render_assertions_sql(table: str, tc: TableContract) -> str:
         elif a.type == "referential_integrity" and a.child and a.parent:
             parent_table, parent_col = a.parent.rsplit(".", 1)
             child_table, child_col = a.child.rsplit(".", 1)
+            parent_col_q = quote_ident_sql(parent_col)
+            child_col_q = quote_ident_sql(child_col)
             lines.append(
                 f"SELECT '{a.id}' AS assertion_id, COUNT(*) AS violations\n"
                 f"FROM {child_table} c\n"
-                f"LEFT JOIN {parent_table} p ON p.{parent_col} = c.{child_col}\n"
-                f"WHERE c.{child_col} IS NOT NULL AND p.{parent_col} IS NULL;\n"
+                f"LEFT JOIN {parent_table} p ON p.{parent_col_q} = c.{child_col_q}\n"
+                f"WHERE c.{child_col_q} IS NOT NULL AND p.{parent_col_q} IS NULL;\n"
             )
         elif a.type == "range" and a.columns:
             # Accuracy: each value must fall within [min_value, max_value].
-            col = a.columns[0]
+            col = quote_ident_sql(a.columns[0])
             conds = []
             if a.min_value is not None:
                 conds.append(f"{col} < {a.min_value}")

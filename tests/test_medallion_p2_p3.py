@@ -81,7 +81,7 @@ class MedallionP2P3Tests(unittest.TestCase):
             # so `*` and `REPLACE` are no longer adjacent -- assert the REPLACE
             # clause exists rather than the exact `* REPLACE` adjacency.
             self.assertIn("REPLACE (", generated)
-            self.assertIn("sha256(coalesce(cast(PatientName AS VARCHAR), '') || $salt) AS PatientName", generated)
+            self.assertIn('sha256(coalesce(cast("PatientName" AS VARCHAR), \'\') || $salt) AS "PatientName"', generated)
             self.assertNotIn("{salt}", generated)
 
     def test_init_salt_cli_does_not_print_salt_material(self):

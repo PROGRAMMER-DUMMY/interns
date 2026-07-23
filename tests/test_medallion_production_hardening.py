@@ -14,6 +14,7 @@ from core.medallion.design import (
     _seed_accuracy_assertions,
     _seed_type_casts,
     _build_sla_contract,
+    _split_schema_incompatible_groups,
 )
 
 
@@ -33,6 +34,58 @@ class ContractRoundTripTests(unittest.TestCase):
         ids = {a["id"] for a in accuracy}
         self.assertIn("nonneg_base_cost", ids)
         self.assertTrue(all(a["min_value"] == 0 for a in accuracy))
+
+
+class SchemaIncompatibleGroupSplitTests(unittest.TestCase):
+    def test_unrelated_datasets_sharing_a_filename_prefix_are_split(self):
+        by_logical = {
+            "exception": [
+                {"path": "workspaces/x/datasets/ops/exception_operations.csv",
+                 "schema": {"Id": "string", "ship_ref": "string", "Date": "string", "exc_cd": "string", "note": "string"}},
+                {"path": "workspaces/x/datasets/ops/exception_reference.csv",
+                 "schema": {"exc_cd": "string", "Name": "string", "severity": "string"}},
+            ]
+        }
+        result = _split_schema_incompatible_groups(by_logical)
+        self.assertEqual(len(result["exception"]), 1)
+        self.assertIn("exception_reference", result)
+        self.assertEqual(len(result["exception_reference"]), 1)
+
+    def test_genuinely_multi_source_same_schema_stays_grouped(self):
+        by_logical = {
+            "patient": [
+                {"path": "workspaces/x/datasets/hospital-a/patients.csv",
+                 "schema": {"Id": "string", "Name": "string", "DOB": "string"}},
+                {"path": "workspaces/x/datasets/hospital-b/patients.csv",
+                 "schema": {"Id": "string", "Name": "string", "DOB": "string"}},
+            ]
+        }
+        result = _split_schema_incompatible_groups(by_logical)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(len(result["patient"]), 2)
+
+    def test_single_dataset_group_is_unchanged(self):
+        by_logical = {"vendor": [{"path": "workspaces/x/datasets/vendor.csv", "schema": {"Id": "string"}}]}
+        result = _split_schema_incompatible_groups(by_logical)
+        self.assertEqual(result, by_logical)
+
+    def test_a_single_shared_lookup_key_alone_does_not_imply_sameness(self):
+        # A small reference table sharing only its join/lookup key (not most
+        # of its schema) with a fact table hits a bare 50% overlap ratio
+        # (1 shared column / 2 total on the smaller side) -- that must still
+        # split, since sharing a foreign key means "related", not "the same
+        # entity from another source".
+        by_logical = {
+            "fuel": [
+                {"path": "workspaces/x/datasets/fleet/fuel_logs.csv",
+                 "schema": {"Id": "string", "vin": "string", "Date": "string", "litres": "double", "Amount": "double"}},
+                {"path": "workspaces/x/datasets/pricing/fuel_prices.csv",
+                 "schema": {"Date": "string", "pence_per_litre": "double"}},
+            ]
+        }
+        result = _split_schema_incompatible_groups(by_logical)
+        self.assertEqual(len(result["fuel"]), 1)
+        self.assertIn("fuel_prices", result)
 
 
 class IdempotentMergeTests(unittest.TestCase):

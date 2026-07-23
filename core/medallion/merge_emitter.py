@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from core.sql_safety import assert_safe_identifier
+from core.sql_safety import assert_safe_identifier, quote_ident_sql
 
 
 def emit_scd2_merge(
@@ -38,8 +38,8 @@ def emit_scd2_merge(
     already has an identical open row. All identifiers are injection-validated.
     """
     safe_table = assert_safe_identifier(table_name, context="scd2 table")
-    bk = [assert_safe_identifier(c, context="scd2 business key") for c in business_key]
-    attrs = [assert_safe_identifier(c, context="scd2 attribute") for c in attribute_columns]
+    bk = [quote_ident_sql(assert_safe_identifier(c, context="scd2 business key")) for c in business_key]
+    attrs = [quote_ident_sql(assert_safe_identifier(c, context="scd2 attribute")) for c in attribute_columns]
     all_cols = bk + attrs
     col_list = ", ".join(all_cols)
     src_list = ", ".join(f"src.{c}" for c in all_cols)
@@ -94,7 +94,7 @@ def emit_silver_merge(
     # Valid names pass through unchanged; bad names fail the build.
     safe_table = assert_safe_identifier(table_name, context="silver merge table")
     pk_cols = [
-        assert_safe_identifier(col, context="silver merge PK column")
+        quote_ident_sql(assert_safe_identifier(col, context="silver merge PK column"))
         for col in primary_key
     ]
     pk_tuple = ", ".join(pk_cols)
