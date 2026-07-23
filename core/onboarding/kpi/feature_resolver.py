@@ -21,6 +21,7 @@ from core.onboarding.features.blockers import (
     normalize as normalize_blocker,
     prioritize_blockers as prioritize_feature_blockers,
 )
+from core.profiling.dataset_identity import dataset_display_name, dataset_display_stem
 from core.onboarding.features.derived_evidence import (
     derived_feature_options,
 )
@@ -308,7 +309,7 @@ class KPIFeatureResolver:
             if norm in schema_index:
                 evidences = schema_index[norm]
                 datasets = {
-                    normalize_blocker(Path(str(evidence.get("dataset") or "")).stem)
+                    normalize_blocker(dataset_display_stem(str(evidence.get("dataset") or "")))
                     for evidence in evidences
                 }
                 if len(datasets) > 1:
@@ -541,7 +542,7 @@ class KPIFeatureResolver:
             return _contextual_feature(token, [dictionary_choice], proven=True)
         endpoints = [
             (
-                normalize_blocker(Path(str(evidence.get("dataset") or "")).stem),
+                normalize_blocker(dataset_display_stem(str(evidence.get("dataset") or ""))),
                 normalize_blocker(str(evidence.get("column") or "")),
             )
             for evidence in evidences
@@ -580,7 +581,7 @@ class KPIFeatureResolver:
                 "question": None,
             }
         descriptions = [
-            f"{Path(str(evidence.get('dataset') or '')).stem}.{evidence.get('column')}"
+            f"{dataset_display_stem(str(evidence.get('dataset') or ''))}.{evidence.get('column')}"
             + (
                 f": {evidence.get('dictionary_description')}"
                 if evidence.get("dictionary_description")
@@ -744,7 +745,7 @@ def _dictionary_context_choice(
             str(evidence.get("dictionary_description") or "")
         ) - {norm}
         dataset_tokens = _semantic_tokens(
-            _split_identifier(Path(str(evidence.get("dataset") or "")).stem)
+            _split_identifier(dataset_display_stem(str(evidence.get("dataset") or "")))
         )
         overlap = context_tokens & (description_tokens | dataset_tokens)
         scored.append((len(overlap), overlap, evidence))
@@ -814,11 +815,11 @@ def _column_identity_groups(
         if not _relationship_join_worthy(relationship):
             continue
         left = (
-            normalize_blocker(Path(str(relationship.get("left_dataset") or "")).stem),
+            normalize_blocker(dataset_display_stem(str(relationship.get("left_dataset") or ""))),
             normalize_blocker(str(relationship.get("left_column") or "")),
         )
         right = (
-            normalize_blocker(Path(str(relationship.get("right_dataset") or "")).stem),
+            normalize_blocker(dataset_display_stem(str(relationship.get("right_dataset") or ""))),
             normalize_blocker(str(relationship.get("right_column") or "")),
         )
         if not left[1] or not right[1]:
@@ -839,7 +840,7 @@ def _column_pair(source: dict[str, Any]) -> tuple[str, str] | None:
     if not column:
         return None
     raw_dataset = str(source.get("dataset") or source.get("source") or "")
-    dataset = normalize_blocker(Path(raw_dataset).name or raw_dataset)
+    dataset = normalize_blocker(dataset_display_name(raw_dataset) or raw_dataset)
     return (dataset, column)
 
 
@@ -1115,7 +1116,7 @@ def enrich_schema_index_with_dictionaries(
     for entries in schema_index.values():
         for entry in entries:
             column_norm = normalize_blocker(str(entry.get("column") or ""))
-            dataset_table = normalize_blocker(Path(str(entry.get("dataset") or "")).stem)
+            dataset_table = normalize_blocker(dataset_display_stem(str(entry.get("dataset") or "")))
             row = by_table_field.get((dataset_table, column_norm))
             if row is None:
                 matches = by_field.get(column_norm) or []
@@ -1291,7 +1292,7 @@ def _contextual_score(
     pick) must use ``name_matched``, not score/rank alone.
     """
     column = str(entry.get("column") or "")
-    dataset = Path(str(entry.get("dataset") or "")).stem
+    dataset = dataset_display_stem(str(entry.get("dataset") or ""))
     dictionary_description = str(entry.get("dictionary_description") or "")
     dictionary_field = str(entry.get("dictionary_field") or column)
     column_norm = normalize_blocker(column)
@@ -1499,11 +1500,11 @@ def _prose_anchor_evidence(
         for entry in entries:
             dataset = str(entry.get("dataset") or "")
             column = str(entry.get("column") or "")
-            key = (Path(dataset).name.lower(), column.lower())
+            key = (dataset_display_name(dataset).lower(), column.lower())
             if not column or key in seen:
                 continue
             column_hits = tokens & _semantic_tokens(_split_identifier(column))
-            dataset_hits = tokens & _semantic_tokens(_split_identifier(Path(dataset).stem))
+            dataset_hits = tokens & _semantic_tokens(_split_identifier(dataset_display_stem(dataset)))
             description_hits = tokens & _semantic_tokens(
                 str(entry.get("dictionary_description") or "")
             )

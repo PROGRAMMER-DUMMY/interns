@@ -10,6 +10,7 @@ from core.onboarding.relationships.contracts import (
     apply_relationship_answer,
 )
 from core.onboarding.relationships.contracts import _norm as _norm_col
+from core.onboarding.relationships.contracts import _profile_relationship_candidates
 from core.onboarding.relationships.source_to_target_planner import _source_group
 from core.onboarding.workspace.validation import WorkspaceArtifactValidator
 from core.storage.workspace_layout import WorkspaceLayout
@@ -1436,6 +1437,48 @@ class ExecutableDefaultAlignmentTests(unittest.TestCase):
             "executable_usage_policy": {"allowed_in_sql_generation": True},
         }
         self.assertFalse(_executable_allowed(rel))
+
+
+class UcSourcedSkipReasonTests(unittest.TestCase):
+    """Phase A: a UC-sourced profile pair's RI/uniqueness checks can't read a
+    CSV -- the skip must be a visible reason in the evidence, not a silent
+    None indistinguishable from a genuinely unreadable local file.
+    """
+
+    def _uc_profile(self, fqn: str, schema: dict[str, str]) -> dict:
+        return {"format": "delta", "path": fqn, "schema": schema}
+
+    def test_uc_sourced_pair_records_visible_skip_reasons(self):
+        left_fqn = "`healthcare_rcm`.`bronze`.`encounters`"
+        right_fqn = "`healthcare_rcm`.`bronze`.`patients`"
+        profiles = {
+            left_fqn: self._uc_profile(left_fqn, {"PatientID": "string", "EncounterID": "string"}),
+            right_fqn: self._uc_profile(right_fqn, {"PatientID": "string", "Name": "string"}),
+        }
+        relationships = _profile_relationship_candidates(profiles, repo_root=None)
+        self.assertTrue(relationships, "expected at least one candidate relationship")
+        evidence = relationships[0]["evidence_sources"][0]
+        self.assertIn("skip_reasons", evidence)
+        self.assertIn("ri_check_skipped:non_csv_source", evidence["skip_reasons"])
+        self.assertIn("uniqueness_check_skipped:non_csv_source", evidence["skip_reasons"])
+        # Both ratios are still explicitly None -- the reason is additive, not a replacement.
+        self.assertIsNone(evidence["left_key_resolution_ratio"])
+
+    def test_local_csv_pair_never_gets_skip_reasons(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            left_path = root / "a.csv"
+            right_path = root / "b.csv"
+            left_path.write_text("PatientID,EncounterID\n1,e1\n2,e2\n", encoding="utf-8")
+            right_path.write_text("PatientID,Name\n1,Alice\n2,Bob\n", encoding="utf-8")
+            profiles = {
+                "a.csv": {"format": "csv", "path": "a.csv", "schema": {"PatientID": "string", "EncounterID": "string"}},
+                "b.csv": {"format": "csv", "path": "b.csv", "schema": {"PatientID": "string", "Name": "string"}},
+            }
+            relationships = _profile_relationship_candidates(profiles, repo_root=root)
+            self.assertTrue(relationships)
+            evidence = relationships[0]["evidence_sources"][0]
+            self.assertNotIn("skip_reasons", evidence)
 
 
 if __name__ == "__main__":

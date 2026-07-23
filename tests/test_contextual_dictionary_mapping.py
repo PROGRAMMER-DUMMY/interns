@@ -6,6 +6,7 @@ from pathlib import Path
 from core.onboarding.kpi.blocker_question_panel import BlockerQuestionPanelBuilder
 from core.onboarding.kpi.feature_resolver import (
     KPIFeatureResolver,
+    _column_pair,
     _dedupe_features_by_physical_column,
     _redupe_all_kpis_after_definitions,
 )
@@ -273,6 +274,23 @@ class PhysicalColumnDedupTests(unittest.TestCase):
     """BUG-001: multiple features for one KPI that resolve to the SAME physical
     column must collapse to one, and a candidate duplicate must not raise a
     phantom blocker when a sibling already proves the column."""
+
+    def test_column_pair_distinguishes_uc_tables_by_true_table_name(self):
+        # _column_pair's own docstring: "the dataset basename is used ... so
+        # the same physical column matches whether one feature recorded an
+        # absolute path and another a repo-relative one." Path(fqn).name
+        # doesn't actually mangle a UC fqn (no "/" to strip on), but it also
+        # doesn't extract just the table name the way it does for local
+        # paths -- dataset_display_name now makes the two source kinds
+        # consistent. Two DISTINCT UC tables sharing a column name must never
+        # collide into the same physical-column identity.
+        p1 = _column_pair({"dataset": "`healthcare_rcm`.`bronze`.`cptcodes`", "column": "Code"})
+        p2 = _column_pair({"dataset": "`healthcare_rcm`.`bronze`.`claims_hospital1`", "column": "Code"})
+        self.assertNotEqual(p1, p2)
+        # The SAME UC table referenced twice must still unify (this is the
+        # actual point of using a "basename" identity at all).
+        p3 = _column_pair({"dataset": "`healthcare_rcm`.`bronze`.`cptcodes`", "column": "Code"})
+        self.assertEqual(p1, p3)
 
     def _feature(self, name, state, dataset, column):
         return {

@@ -663,5 +663,67 @@ class BUG022NoMixSourceLayerTests(unittest.TestCase):
             self.assertEqual(mode, "delta")
 
 
+class DatabricksUcSourcedGenerationTests(unittest.TestCase):
+    """Phase A proof: a UC-sourced (format='delta') profile now produces
+    databricks-dialect SQL that references the real source table -- not a
+    mis-mangled stem (Path(fqn).stem bug) and not the generator's OWN target
+    catalog/schema (table_ident(stem) bug), which is what unblocks Phase C's
+    single-statement rewrite.
+    """
+
+    UC_FQN = "`healthcare_rcm`.`bronze`.`cptcodes`"
+
+    def _make_generator(self, root: Path) -> DuckDBKPISQLGenerator:
+        workspace = root / "workspaces" / "demo"
+        workspace.mkdir(parents=True, exist_ok=True)
+        return DuckDBKPISQLGenerator(
+            root, "workspaces/demo", dialect="databricks", catalog="main", schema="autoresearch"
+        )
+
+    def _uc_profile(self) -> dict:
+        return {
+            "format": "delta",
+            "schema": {"Code": "string", "Description": "string"},
+        }
+
+    def test_staging_view_references_real_uc_table_not_generator_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gen = self._make_generator(Path(tmp))
+            profile_map = {self.UC_FQN: self._uc_profile()}
+            staging_sql, stage_views = gen._staging_views(profile_map, [self.UC_FQN], {})
+
+            # The real source table -- not Path(fqn).stem's mangled "healthcare_rcm.bronze"
+            self.assertIn(f"FROM {self.UC_FQN};", staging_sql)
+            # Never reconstructed under the generator's OWN catalog/schema
+            self.assertNotIn("`main`.`autoresearch`.`cptcodes`", staging_sql)
+            # The view name uses the real table name as its stem, not the mangled one
+            self.assertIn("cptcodes", stage_views[self.UC_FQN])
+            self.assertNotIn("healthcare_rcm", stage_views[self.UC_FQN])
+
+    def test_derived_formula_source_rewrite_uses_real_uc_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gen = self._make_generator(Path(tmp))
+            profile_map = {self.UC_FQN: self._uc_profile()}
+            feature = {
+                "resolution_type": "derived_formula",
+                "feature": "code_upper",
+                "source_columns": [],
+                "evidence": [
+                    {
+                        "type": "workspace_feature_definition",
+                        "detail": (
+                            "CASE WHEN EXISTS (SELECT 1 FROM \"cptcodes\" c "
+                            "WHERE c.Code = Code) THEN 1 ELSE 0 END"
+                        ),
+                    }
+                ],
+            }
+            expr = gen._feature_expression(feature, {}, profile_map)
+            self.assertIsNotNone(expr)
+            self.assertIn(f"FROM {self.UC_FQN}", expr)
+            self.assertNotIn('"cptcodes"', expr)
+            self.assertNotIn("`main`.`autoresearch`.`cptcodes`", expr)
+
+
 if __name__ == "__main__":
     unittest.main()

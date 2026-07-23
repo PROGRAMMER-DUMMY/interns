@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from core.onboarding.kpi.feature_resolver import READY_STATES
+from core.profiling.dataset_identity import dataset_display_stem
 from core.onboarding.kpi.sensitive_masking import (
     is_feature_sensitive,
     load_sensitive_columns,
@@ -395,19 +396,40 @@ class DuckDBKPISQLGenerator:
         stage_views = {}
         union_parts = []
         required_source_set = set(required_sources or [])
-        csv_profiles = [
+        # "csv" is a local file profile (core.profiling.data_model_profiler).
+        # "delta" is a Unity-Catalog-sourced profile
+        # (core.profiling.databricks_table_profiler) -- its `path` is already
+        # a live, fully-qualified `catalog`.`schema`.`table` reference, not a
+        # local file to bootstrap from. Previously only "csv" profiles were
+        # staged at all, so a UC-sourced dataset silently produced no staging
+        # view whatsoever for databricks-dialect generation. A "delta" profile
+        # is only stageable for the databricks dialect -- the duckdb dialect
+        # has no local proxy for a remote UC table, and read_csv_auto() on a
+        # fqn string would be nonsense.
+        stageable_profiles = [
             (path, profile)
             for path, profile in sorted(profile_map.items())
-            if profile.get("format") == "csv"
+            if (
+                profile.get("format") == "csv"
+                or (profile.get("format") == "delta" and self.dialect == "databricks")
+            )
             and (not required_source_set or path in required_source_set)
         ]
-        for idx, (rel_path, _profile) in enumerate(csv_profiles, start=1):
-            stem = _safe_name(Path(rel_path).stem)
+        for idx, (rel_path, _profile) in enumerate(stageable_profiles, start=1):
+            stem = _safe_name(dataset_display_stem(rel_path))
             view_name = f"catalog_raw_{stem}" if self.dialect == "duckdb" else f"stage_{idx:03d}_{stem}"
             stage_views[rel_path] = view_name
             select_list = self._stage_select_list(rel_path, _profile, required_columns or {})
             if self.dialect == "databricks":
-                table_name = self.table_ident(_safe_name(Path(rel_path).stem))
+                # A UC-sourced profile's path IS the real source table --
+                # reference it directly. table_ident(stem) would instead
+                # reconstruct `self.catalog`.`self.schema`.`stem`, which is
+                # only correct for a local-file profile whose CSV stem is
+                # assumed to match a same-named table already registered
+                # under the generator's OWN target catalog/schema -- wrong
+                # when the UC source lives in a different catalog/schema
+                # than the KPI's output target.
+                table_name = rel_path if _profile.get("format") == "delta" else self.table_ident(stem)
                 view_lines.append(
                     f"CREATE OR REPLACE TEMP VIEW {self.quote_ident(view_name)} AS "
                     f"SELECT {select_list} FROM {table_name};"
@@ -644,13 +666,18 @@ class DuckDBKPISQLGenerator:
             # (`FROM "encounters" p` in a self-join). The script only creates
             # catalog views, so map known dataset stems to their view names —
             # the author of a custom rule cannot know generator-internal names.
-            for source in profile_map:
-                stem = _safe_name(Path(source).stem)
-                view = (
-                    self.quote_ident(f"catalog_raw_{stem}")
-                    if self.dialect == "duckdb"
-                    else self.table_ident(stem)
-                )
+            for source, source_profile in profile_map.items():
+                stem = _safe_name(dataset_display_stem(source))
+                if self.dialect == "duckdb":
+                    view = self.quote_ident(f"catalog_raw_{stem}")
+                elif source_profile.get("format") == "delta":
+                    # UC-sourced: `source` IS the real table reference already
+                    # (see _staging_views' identical reasoning) -- table_ident
+                    # would wrongly reconstruct it under the generator's own
+                    # target catalog/schema instead.
+                    view = source
+                else:
+                    view = self.table_ident(stem)
                 formula = re.sub(
                     rf'(?i)(\b(?:FROM|JOIN)\s+)"{re.escape(stem)}"',
                     lambda m, v=view: m.group(1) + v,

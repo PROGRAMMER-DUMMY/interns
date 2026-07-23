@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from core.governance.provenance import decision_source as decision_source_for
+from core.profiling.dataset_identity import is_uc_fqn
 from core.storage.workspace_layout import WorkspaceLayout
 from core.contracts.versioning import register_contract
 
@@ -749,6 +750,14 @@ def _promote_documented_relationships(
                 "(left FK -> right key overlap)."
             ),
         }
+        skip_reasons = _uc_skip_reasons(
+            ri_ratio=ri_ratio,
+            uniqueness_ratio=right_uniqueness,
+            left_profile=profiles.get(left),
+            right_profile=profiles.get(right),
+        )
+        if skip_reasons:
+            overlap_evidence["skip_reasons"] = skip_reasons
         proven = (
             ri_ratio is not None
             and ri_ratio >= _REFERENTIAL_INTEGRITY_THRESHOLD
@@ -922,6 +931,24 @@ def _profile_relationship_from_candidate(
     ri_ratio = _left_key_resolution_ratio(
         profiles.get(left, {}), left_col, profiles.get(right, {}), right_col, repo_root
     )
+    skip_reasons = _uc_skip_reasons(
+        ri_ratio=ri_ratio,
+        uniqueness_ratio=right_u,
+        left_profile=profiles.get(left),
+        right_profile=profiles.get(right),
+    )
+    shared_key_evidence = {
+        "type": "profile_shared_key",
+        "left_profile": profiles[left].get("profile_path", ""),
+        "right_profile": profiles[right].get("profile_path", ""),
+        "normalized_key": _norm(right_col),
+        "left_uniqueness_ratio": left_u,
+        "right_uniqueness_ratio": right_u,
+        "dimension_side_key_unique": dimension_key_unique,
+        "left_key_resolution_ratio": ri_ratio,
+    }
+    if skip_reasons:
+        shared_key_evidence["skip_reasons"] = skip_reasons
 
     return _relationship(
         left_dataset=left,
@@ -930,18 +957,7 @@ def _profile_relationship_from_candidate(
         right_column=right_col,
         state="profile_validated",
         confidence=confidence,
-        evidence_sources=[
-            {
-                "type": "profile_shared_key",
-                "left_profile": profiles[left].get("profile_path", ""),
-                "right_profile": profiles[right].get("profile_path", ""),
-                "normalized_key": _norm(right_col),
-                "left_uniqueness_ratio": left_u,
-                "right_uniqueness_ratio": right_u,
-                "dimension_side_key_unique": dimension_key_unique,
-                "left_key_resolution_ratio": ri_ratio,
-            }
-        ],
+        evidence_sources=[shared_key_evidence],
         dimension_key_unique=dimension_key_unique,
         referential_integrity_ratio=ri_ratio,
     )
@@ -1444,6 +1460,28 @@ def _relationships_from_diagram_sidecars(
             diagram_confidence = float(edge.get("confidence") or 0.8)
             if low_cardinality_dimension:
                 diagram_confidence = min(diagram_confidence, LOW_CARDINALITY_CONFIDENCE_CAP)
+            diagram_evidence = {
+                "type": "data_model_image_diagram",
+                "path": record.get("source_image", _rel(path, repo_root)),
+                "sidecar_path": _rel(path, repo_root),
+                "relationship_id": edge.get("relationship_id", ""),
+                "from_table": edge["from"].get("table_name", ""),
+                "to_table": edge["to"].get("table_name", ""),
+                "left_uniqueness_ratio": left_u,
+                "right_uniqueness_ratio": right_u,
+                "dimension_side_key_unique": dimension_key_unique,
+                "left_key_resolution_ratio": ri_ratio,
+                "low_cardinality_dimension": low_cardinality_dimension,
+                "dimension_row_count": right_rows,
+            }
+            skip_reasons = _uc_skip_reasons(
+                ri_ratio=ri_ratio,
+                uniqueness_ratio=right_u,
+                left_profile=profiles.get(left_dataset),
+                right_profile=profiles.get(right_dataset),
+            )
+            if skip_reasons:
+                diagram_evidence["skip_reasons"] = skip_reasons
             relationships.append(
                 _relationship(
                     left_dataset=left_dataset,
@@ -1452,22 +1490,7 @@ def _relationships_from_diagram_sidecars(
                     right_column=right_column,
                     state="proven_data_model",
                     confidence=diagram_confidence,
-                    evidence_sources=[
-                        {
-                            "type": "data_model_image_diagram",
-                            "path": record.get("source_image", _rel(path, repo_root)),
-                            "sidecar_path": _rel(path, repo_root),
-                            "relationship_id": edge.get("relationship_id", ""),
-                            "from_table": edge["from"].get("table_name", ""),
-                            "to_table": edge["to"].get("table_name", ""),
-                            "left_uniqueness_ratio": left_u,
-                            "right_uniqueness_ratio": right_u,
-                            "dimension_side_key_unique": dimension_key_unique,
-                            "left_key_resolution_ratio": ri_ratio,
-                            "low_cardinality_dimension": low_cardinality_dimension,
-                            "dimension_row_count": right_rows,
-                        }
-                    ],
+                    evidence_sources=[diagram_evidence],
                     dimension_key_unique=dimension_key_unique,
                     referential_integrity_ratio=ri_ratio,
                 )
@@ -1764,7 +1787,7 @@ def _ratio_from_dataset(
 
 def _resolve_dataset_file(profile: dict[str, Any], repo_root: Path | None) -> Path | None:
     raw = str(profile.get("path") or "")
-    if not raw:
+    if not raw or is_uc_fqn(raw):
         return None
     path = Path(raw)
     if path.is_absolute() and path.exists():
@@ -1774,6 +1797,39 @@ def _resolve_dataset_file(profile: dict[str, Any], repo_root: Path | None) -> Pa
         if candidate.exists():
             return candidate
     return path if path.exists() else None
+
+
+def _is_non_csv_source(profile: dict[str, Any]) -> bool:
+    """True when a profile's uniqueness/RI checks structurally cannot read a
+    CSV -- a Databricks/Unity-Catalog-sourced profile (format='delta', path is
+    a `` `catalog`.`schema`.`table` `` fqn) -- as opposed to a local CSV that
+    is merely missing/unreadable. Workspace-agnostic: format/path shape only.
+    """
+    return profile.get("format") == "delta" or is_uc_fqn(str(profile.get("path") or ""))
+
+
+def _uc_skip_reasons(
+    *,
+    ri_ratio: float | None,
+    uniqueness_ratio: float | None,
+    left_profile: dict[str, Any] | None = None,
+    right_profile: dict[str, Any] | None = None,
+) -> list[str]:
+    """Visible reason codes for RI/uniqueness checks left as None because a
+    profile is UC-sourced, not because the data was genuinely unreadable --
+    so a reviewer can see quality is degraded for that pair instead of the
+    reason silently vanishing into a bare `None`. Empty when no check was
+    skipped for this reason, so local-only (CSV) contracts are unaffected.
+    """
+    non_csv = any(_is_non_csv_source(p) for p in (left_profile, right_profile) if p)
+    if not non_csv:
+        return []
+    reasons = []
+    if ri_ratio is None:
+        reasons.append("ri_check_skipped:non_csv_source")
+    if uniqueness_ratio is None:
+        reasons.append("uniqueness_check_skipped:non_csv_source")
+    return reasons
 
 
 def _first_number(payload: dict[str, Any], keys: tuple[str, ...]) -> float | None:
