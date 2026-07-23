@@ -873,19 +873,42 @@ def _resolved_physical_columns(feature: dict[str, Any]) -> set[tuple[str, str]]:
 
 
 def _candidate_physical_column(feature: dict[str, Any]) -> tuple[str, str] | None:
-    """Top-ranked CANDIDATE physical column for an UNRESOLVED feature.
+    """Top-ranked, NAME-MATCHED candidate physical column for an UNRESOLVED
+    feature, for phantom-duplicate detection against a proven sibling only.
 
     An unresolved contextual/alias feature does not have a single resolved
-    column; instead it carries one or more ranked candidate columns. The
-    target it would resolve to is the highest-ranked candidate — index 0 of
-    ``candidates`` (preferred) or, failing that, ``source_columns``, both of
-    which preserve descending-score order. Returns ``None`` when no candidate
-    column is present.
+    column; instead it carries one or more ranked candidate columns. Only a
+    candidate whose ``name_matched`` flag is set (see ``_contextual_score``)
+    is genuine evidence the feature token itself means that column, e.g. a
+    misspelling ("departement" containing "department") or a table named
+    after the feature. A candidate that scored purely from generic KPI-text
+    overlap is not — a sparse-context KPI can push several unrelated tokens
+    (e.g. "on_time") to the SAME weak, generic top candidate belonging to an
+    already-proven, semantically unrelated sibling feature (e.g.
+    "carrier_cd"), and that must never be treated as "this feature already
+    resolved to the proven column" (found live: "on_time" was silently
+    dropped as a phantom duplicate of "carrier_cd" this way). Returns
+    ``None`` when no name-matched candidate is present -- the feature then
+    correctly falls through to its own blocker/question instead of being
+    silently collapsed.
     """
-    for entry in feature.get("candidates") or []:
-        pair = _column_pair(entry)
-        if pair:
-            return pair
+    candidates = feature.get("candidates") or []
+    if candidates:
+        # `candidates` carries the scored, name_matched-tagged ranking (see
+        # `_contextual_score`) for contextual-match features. Only a
+        # genuinely name-matched entry counts as a phantom-duplicate target;
+        # a purely generic top score is not evidence of anything, so we do
+        # NOT fall back to a lower-ranked or unmarked entry here.
+        for entry in candidates:
+            if not entry.get("name_matched"):
+                continue
+            pair = _column_pair(entry)
+            if pair:
+                return pair
+        return None
+    # No `candidates` list at all (e.g. a structural alias_column feature,
+    # which doesn't run through contextual scoring) -- fall back to the
+    # ranked source_columns, preserving prior behavior for that path.
     for entry in feature.get("source_columns") or []:
         pair = _column_pair(entry)
         if pair:
@@ -916,10 +939,17 @@ def _dedupe_features_by_physical_column(
 
     A second pass handles unresolved features (e.g. ``candidate_unconfirmed``)
     that carry a *ranked candidate* column rather than a resolved one: if such a
-    feature's top-ranked candidate column equals a proven sibling's resolved
-    column, the candidate is a phantom blocker for an already-proven column and
-    is dropped. Its remaining lower-ranked candidates are ignored — the proven
-    sibling already covers the column it would have resolved to.
+    feature's top-ranked, NAME-MATCHED candidate column (see
+    ``_candidate_physical_column``) equals a proven sibling's resolved column,
+    the candidate is a phantom blocker for an already-proven column and is
+    dropped. Its remaining lower-ranked candidates are ignored — the proven
+    sibling already covers the column it would have resolved to. A candidate
+    that only scored from generic KPI-text overlap (no genuine relationship to
+    the feature's own name) is never treated as a phantom duplicate this way,
+    even if it happens to be the top of an unimpressive candidate list —
+    found live: "on_time" and "carrier_cd" shared the same weak generic top
+    candidate with zero real relationship between them, and "on_time" was
+    silently dropped as if it had already resolved to "carrier_cd".
     """
     groups: dict[frozenset[tuple[str, str]], list[int]] = {}
     for position, feature in enumerate(features):
@@ -1115,7 +1145,9 @@ def contextual_column_candidates(
     scored: list[dict[str, Any]] = []
     for entries in schema_index.values():
         for entry in entries:
-            score, reasons = _contextual_score(feature_norm, context_tokens, context_norm, entry)
+            score, reasons, name_matched = _contextual_score(
+                feature_norm, context_tokens, context_norm, entry
+            )
             if score < 8:
                 continue
             scored.append(
@@ -1123,6 +1155,7 @@ def contextual_column_candidates(
                     **entry,
                     "score": score,
                     "reason": "; ".join(reasons),
+                    "name_matched": name_matched,
                 }
             )
     scored.sort(
@@ -1180,6 +1213,7 @@ def _contextual_feature(
                 "column": candidate["column"],
                 "score": candidate.get("score"),
                 "reason": candidate.get("reason"),
+                "name_matched": candidate.get("name_matched", False),
             }
             for candidate in contextual_candidates
         ],
@@ -1190,6 +1224,7 @@ def _contextual_feature(
                 "column": candidate["column"],
                 "source": candidate["dataset"],
                 "reason": candidate.get("reason", ""),
+                "name_matched": candidate.get("name_matched", False),
             }
             for candidate in contextual_candidates
         ],
@@ -1207,7 +1242,23 @@ def _contextual_score(
     context_tokens: set[str],
     context_norm: str,
     entry: dict[str, Any],
-) -> tuple[float, list[str]]:
+) -> tuple[float, list[str], bool]:
+    """Score a candidate column against a feature token.
+
+    Returns ``(score, reasons, name_matched)``. ``name_matched`` is True only
+    when the FEATURE'S OWN NAME (not the surrounding KPI text) is directly
+    reflected in the candidate -- the token appears in the column name, the
+    table is named after the feature, or the data dictionary description
+    names the feature. Those are genuine "this column IS the feature"
+    signals. The other bonuses (context text mentions the column/table,
+    dictionary description overlaps the KPI's OTHER words, numeric dtype)
+    only say "this column relates to the KPI's general vocabulary" -- a
+    sparse-context KPI can push several unrelated tokens to the same
+    generic candidate purely on those, which is not evidence the candidate
+    means what the token names. Callers that need to know whether a
+    candidate is genuinely THIS feature (not just an unimpressive top-of-list
+    pick) must use ``name_matched``, not score/rank alone.
+    """
     column = str(entry.get("column") or "")
     dataset = Path(str(entry.get("dataset") or "")).stem
     dictionary_description = str(entry.get("dictionary_description") or "")
@@ -1222,22 +1273,25 @@ def _contextual_score(
             ]
             if entry.get("dictionary_description"):
                 reasons.append("data dictionary corroborates the primary key choice")
-            return score, reasons
+            return score, reasons, True
     description_tokens = _semantic_tokens(dictionary_description)
     column_tokens = _semantic_tokens(_split_identifier(column))
     field_tokens = _semantic_tokens(_split_identifier(dictionary_field))
     dataset_tokens = _semantic_tokens(dataset)
     reasons: list[str] = []
     score = 0.0
+    name_matched = False
     # Direct table-feature alignment: a table named after the feature is the
     # strongest non-lexical signal — apply before KPI-text bonuses so it
     # isn't drowned out by unrelated context matches.
     if feature_norm and dataset_norm and feature_norm == dataset_norm.rstrip("s"):
         score += 30.0
         reasons.append(f"table `{dataset}` directly aligns with feature `{feature_norm}`")
+        name_matched = True
     if feature_norm in column_norm:
         score += 6.0
         reasons.append(f"`{feature_norm}` appears in column `{column}`")
+        name_matched = True
     if column_norm and column_norm in context_norm:
         score += 8.0
         reasons.append(f"KPI context explicitly contains column phrase `{column}`")
@@ -1256,6 +1310,7 @@ def _contextual_score(
     if feature_norm and any(feature_norm in normalize_blocker(token) for token in description_tokens):
         score += 3.0
         reasons.append("data dictionary description mentions the feature")
+        name_matched = True
     column_overlap = context_tokens.intersection(column_tokens.union(field_tokens))
     if column_overlap:
         score += 2.0 * len(column_overlap)
@@ -1275,7 +1330,7 @@ def _contextual_score(
     ):
         score += 2.0
         reasons.append("profile dtype is numeric")
-    return score, reasons
+    return score, reasons, name_matched
 
 
 def _semantic_tokens(value: str) -> set[str]:

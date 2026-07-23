@@ -247,18 +247,34 @@ class PhysicalColumnDedupTests(unittest.TestCase):
 
         Mirrors the real resolver shape: ``source_columns`` and ``candidates``
         hold every scored candidate in descending-score order, so index 0 is
-        the top-ranked target the feature would resolve to.
+        the top-ranked target the feature would resolve to. Each pair is
+        either ``(dataset, column)`` (generic-context match, the common case)
+        or ``(dataset, column, name_matched)`` to mark a candidate as
+        genuinely reflecting the feature's OWN name (see
+        ``_contextual_score``'s ``name_matched``), e.g. a misspelling.
         """
+        def _unpack(pair):
+            if len(pair) == 3:
+                return pair
+            dataset, column = pair
+            return dataset, column, False
+
         return {
             "feature": name,
             "state": "candidate_unconfirmed",
             "resolution_type": "contextual_column_candidate",
             "source_columns": [
-                {"dataset": dataset, "column": column} for dataset, column in ranked_pairs
+                {"dataset": dataset, "column": column}
+                for dataset, column, _name_matched in (_unpack(pair) for pair in ranked_pairs)
             ],
             "candidates": [
-                {"state": "candidate_unconfirmed", "source": dataset, "column": column}
-                for dataset, column in ranked_pairs
+                {
+                    "state": "candidate_unconfirmed",
+                    "source": dataset,
+                    "column": column,
+                    "name_matched": name_matched,
+                }
+                for dataset, column, name_matched in (_unpack(pair) for pair in ranked_pairs)
             ],
             "question": f"Should `{name}` use context/dictionary candidate(s)?",
         }
@@ -275,7 +291,7 @@ class PhysicalColumnDedupTests(unittest.TestCase):
             self._contextual_candidate_feature(
                 "departement",
                 [
-                    ("datasets/departments.csv", "Name"),  # top-ranked target
+                    ("datasets/departments.csv", "Name", True),  # top-ranked, genuine name match
                     ("datasets/patients.csv", "DOB"),
                     ("datasets/patients.csv", "Gender"),
                     ("datasets/transactions.csv", "VisitType"),
@@ -358,6 +374,37 @@ class PhysicalColumnDedupTests(unittest.TestCase):
             sorted(f["feature"] for f in deduped),
             ["active_last_q", "churned"],
         )
+
+    def test_generic_top_candidate_matching_a_proven_sibling_is_not_a_phantom_duplicate(self):
+        # Found live (kpi_001, Hostile_Synthetic): "on_time" has zero real
+        # lexical relationship to "carrier_cd", but in a sparse-context KPI
+        # both scored the SAME weak, generic top candidate
+        # (shipments.carrier_cd) purely from KPI-text overlap -- not from
+        # "on_time" itself matching that column. Because "carrier_cd" was
+        # already proven to shipments.carrier_cd, the old second pass treated
+        # "on_time"'s generic top candidate as a phantom duplicate of the
+        # proven column and silently dropped it, permanently losing the
+        # blocker question for a feature that had never actually resolved to
+        # anything. A candidate with no genuine name-based relationship to
+        # the feature (name_matched=False, the default) must never trigger
+        # this drop, even when it happens to be the top of the list.
+        features = [
+            self._feature("carrier_cd", "proven_direct", "datasets/shipments.csv", "carrier_cd"),
+            self._contextual_candidate_feature(
+                "on_time",
+                [
+                    ("datasets/shipments.csv", "carrier_cd"),  # generic top match, no name relation
+                    ("datasets/shipments.csv", "note"),
+                    ("datasets/shipments.csv", "ts"),
+                ],
+            ),
+        ]
+
+        deduped = _dedupe_features_by_physical_column(features)
+
+        self.assertIn("on_time", [f["feature"] for f in deduped])
+        self.assertIn("candidate_unconfirmed", [f["state"] for f in deduped])
+        self.assertEqual(len(deduped), 2)
 
     def test_distinct_columns_are_never_merged(self):
         features = [
