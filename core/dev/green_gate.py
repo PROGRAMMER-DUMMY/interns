@@ -170,6 +170,12 @@ CURATED_MODULES: tuple[str, ...] = (
     # handling for _execute_records_databricks(). No live warehouse
     # dependency (DatabricksClient mocked), so always safe to enforce.
     "tests.test_kpi_execution_harness",
+    # Found live via a real end-to-end walkthrough against the healthcare_rcm
+    # Unity Catalog: blocker_question_panel.py's human-facing candidate
+    # labels used Path(uc_fqn).stem in 16 places, rendering THREE DISTINCT
+    # candidate tables as the identical, useless `catalog`.`schema`.column
+    # label -- a human reading the panel could not tell them apart.
+    "tests.test_blocker_panel_uc_sourced_labels",
     # Priority 2.1/3.6 minimal slice: medallion design-panel ratification.
     # Requires a real, non-blank --reasoning per item so a ratification
     # record can't collapse into a name-only rubber stamp.

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from core.paths import PROJECT_ROOT
+from core.profiling.dataset_identity import dataset_display_stem
 from core.storage.workspace_layout import WorkspaceLayout
 from core.wiki import WikiLayout, read_feature_note
 from core.contracts.versioning import register_contract
@@ -736,7 +737,7 @@ def _dictionary_conflict_question(
     lead = errors[0] if errors else (conflicts[0] if conflicts else {})
     dataset_name = str(lead.get("dataset_name") or "")
     column = str(lead.get("column") or feature)
-    column_label = f"{Path(dataset_name).stem or 'dataset'}.{column}"
+    column_label = f"{dataset_display_stem(dataset_name) or 'dataset'}.{column}"
     feature_question = next(
         (
             str(item["feature"].get("question") or "")
@@ -979,7 +980,7 @@ def _strict_proven_sql(kpi: dict[str, Any]) -> str:
     table = "proven_source"
     for feature in ready_features[:8]:
         source = (feature.get("source_columns") or [{}])[0]
-        table = Path(str(source.get("dataset") or "")).stem or table
+        table = dataset_display_stem(str(source.get("dataset") or "")) or table
         column = str(source.get("column") or "")
         if column:
             select_items.append(f'  "{column}" AS "{_slug(str(feature.get("feature") or column))}"')
@@ -1024,7 +1025,7 @@ def _first_kpi_table(kpi: dict[str, Any]) -> str:
         for source in feature.get("source_columns") or []:
             dataset = str(source.get("dataset") or "")
             if dataset:
-                return '"' + (Path(dataset).stem or "source_table") + '"'
+                return '"' + (dataset_display_stem(dataset) or "source_table") + '"'
     return ""
 
 
@@ -1069,7 +1070,7 @@ def _source_label(path: str, repo_root: Path) -> str:
 
 
 def _sql_table_label(path: str) -> str:
-    return Path(str(path or "")).stem or "source_table"
+    return dataset_display_stem(str(path or "")) or "source_table"
 
 
 def _sql_column_label(path: str, column: str) -> str:
@@ -1237,7 +1238,7 @@ def _profile_candidate_options(
                     "mapping_proof": {
                         "sample_query": (
                             f'SELECT "{column_name}" AS "{_slug(column_name)}" '
-                            f'FROM "{Path(dataset).stem}" LIMIT 5;'
+                            f'FROM "{dataset_display_stem(dataset)}" LIMIT 5;'
                         ),
                         "sample_output": [
                             {_slug(column_name): value}
@@ -1267,7 +1268,7 @@ def _profile_candidate_score(
 ) -> tuple[float, str]:
     feature_norm = _norm(feature)
     column_norm = _norm(column)
-    dataset_norm = _norm(Path(dataset).stem)
+    dataset_norm = _norm(dataset_display_stem(dataset))
     kpi_text = _norm(
         " ".join(
             str(value or "")
@@ -1375,7 +1376,7 @@ def _physical_option_proof(option: dict[str, Any], source_truth: list[dict[str, 
     samples = list(option.get("observed_values") or option.get("value_profile", {}).get("sample_values") or [])[:8]
     query = option.get("answer_demo", {}).get("query") or (
         f'SELECT "{column}", COUNT(*) AS row_count\n'
-        f'FROM "{Path(dataset).stem or "source_table"}"\n'
+        f'FROM "{dataset_display_stem(dataset) or "source_table"}"\n'
         f'GROUP BY "{column}"\n'
         "ORDER BY row_count DESC\n"
         "LIMIT 10;"
@@ -1416,7 +1417,7 @@ def _answer_demo(
     selected_column: dict[str, Any],
 ) -> dict[str, Any]:
     dataset = str(selected_column.get("dataset") or "")
-    table = Path(dataset).stem or "source_table"
+    table = dataset_display_stem(dataset) or "source_table"
     column = str(selected_column.get("column") or "")
     feature_label = _slug(str(feature.get("feature") or column))
     metric_text = " ".join(
@@ -1611,7 +1612,7 @@ def _derived_sql_query(option: dict[str, Any]) -> str:
     select_columns = [column for column in select_columns if column]
     table = "joined_source"
     if inputs:
-        table = Path(str(inputs[-1].get("dataset") or "")).stem or table
+        table = dataset_display_stem(str(inputs[-1].get("dataset") or "")) or table
     select_exprs = [f'"{column}"' for column in select_columns]
     select_exprs.append(f"{formula} AS \"{derived_column}\"" if formula else f'NULL AS "{derived_column}"')
     return "SELECT\n  " + ",\n  ".join(select_exprs) + f'\nFROM "{table}"\nLIMIT 10;'
@@ -2790,7 +2791,7 @@ def _where_it_lands(feature: dict[str, Any]) -> str:
     sources = feature.get("source_columns") or []
     if state == "proven_join" and sources:
         first = sources[0]
-        dataset_stem = Path(str(first.get("dataset") or "")).stem
+        dataset_stem = dataset_display_stem(str(first.get("dataset") or ""))
         column = str(first.get("column") or "?")
         # Detect a join key by scanning source_columns for an *_id-shaped column
         # that also appears on the parent table. Heuristic but useful.
@@ -2802,13 +2803,13 @@ def _where_it_lands(feature: dict[str, Any]) -> str:
     if state.startswith("proven_") or state == "user_confirmed":
         if sources:
             first = sources[0]
-            return f"{Path(str(first.get('dataset') or '')).stem}.{first.get('column') or '?'}"
+            return f"{dataset_display_stem(str(first.get('dataset') or ''))}.{first.get('column') or '?'}"
         formula = feature.get("derived_formula") or feature.get("resolution_type") or ""
         return f"derived ({formula})" if formula else "(resolved)"
     if state == "cli_agent_proposed":
         if sources:
             first = sources[0]
-            return f"proposed: {Path(str(first.get('dataset') or '')).stem}.{first.get('column') or '?'} (awaiting confirmation)"
+            return f"proposed: {dataset_display_stem(str(first.get('dataset') or ''))}.{first.get('column') or '?'} (awaiting confirmation)"
         return "proposed (awaiting confirmation)"
     # Blocked states: try to surface the most promising direction.
     derived = feature.get("derived_feature_options") or []
@@ -2816,11 +2817,11 @@ def _where_it_lands(feature: dict[str, Any]) -> str:
         first = derived[0]
         inputs = first.get("input_columns") or []
         if inputs and isinstance(inputs[0], dict):
-            return f"derived from {Path(str(inputs[0].get('dataset') or '')).stem}.{inputs[0].get('column') or '?'}"
+            return f"derived from {dataset_display_stem(str(inputs[0].get('dataset') or ''))}.{inputs[0].get('column') or '?'}"
         return "derived (no proven inputs)"
     if sources:
         first = sources[0]
-        return f"candidate: {Path(str(first.get('dataset') or '')).stem}.{first.get('column') or '?'}"
+        return f"candidate: {dataset_display_stem(str(first.get('dataset') or ''))}.{first.get('column') or '?'}"
     return "(no candidate)"
 
 
@@ -2899,7 +2900,7 @@ def _build_sample_evidence(
                 rows.append(
                     {
                         "feature": name,
-                        "column": f"{Path(str(source.get('dataset') or '')).stem}.{column}",
+                        "column": f"{dataset_display_stem(str(source.get('dataset') or ''))}.{column}",
                         "first_samples": [str(value) for value in display_samples],
                         "redacted": is_pii_column(column, patterns=policy_patterns),
                     }
@@ -2950,7 +2951,7 @@ def _executable_sql_for_option(option: dict[str, Any], repo_root: Path) -> tuple
         # CSV as a single unqualified table when read via read_csv_auto).
         sql_formula = formula
         for col in inputs:
-            qualified = f"{Path(str(col.get('dataset') or '')).stem}.{col.get('column') or ''}"
+            qualified = f"{dataset_display_stem(str(col.get('dataset') or ''))}.{col.get('column') or ''}"
             bare = str(col.get("column") or "")
             if qualified and bare:
                 sql_formula = sql_formula.replace(qualified, f'"{bare}"')

@@ -34,6 +34,7 @@ from core.onboarding.kpi.execution_harness import (
     sql_is_intent_blocked,
 )
 from core.onboarding.workspace.bugs import WorkspaceBugDetector
+from core.profiling.dataset_identity import is_uc_fqn
 from core.storage.workspace_layout import WorkspaceLayout
 
 
@@ -604,6 +605,11 @@ class WorkspaceArtifactValidator:
             self._error(path, f"workspace definition #{idx} physical_column must include source_columns")
         for col_idx, source_column in enumerate(source_columns, start=1):
             dataset = str((source_column or {}).get("dataset") or "")
+            # A Unity-Catalog-sourced dataset is a `catalog`.`schema`.`table`
+            # fqn, never a repo-relative path -- see
+            # core.profiling.databricks_table_profiler._qualified_name.
+            if is_uc_fqn(dataset):
+                continue
             if _looks_like_local_absolute_path(dataset):
                 self._error(
                     path,
