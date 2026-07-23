@@ -23,7 +23,13 @@ from core.storage.workspace_layout import WorkspaceLayout
 
 
 RESULT_VIEW_PATTERN = re.compile(
-    r"create\s+or\s+replace\s+(?:temp\s+|temporary\s+)?view\s+[`\"]?{view}[`\"]?\s+as",
+    # Optional `catalog`.`schema`. qualification prefix (Phase C's databricks
+    # single-statement rewrite targets `catalog`.`schema`.`kpi_id_results`,
+    # not a bare view name -- the duckdb-dialect bare-name shape still
+    # matches with the prefix group empty).
+    r"create\s+or\s+replace\s+(?:temp\s+|temporary\s+)?view\s+"
+    r"(?:[`\"]?[A-Za-z0-9_]+[`\"]?\.[`\"]?[A-Za-z0-9_]+[`\"]?\.)?"
+    r"[`\"]?{view}[`\"]?\s+as",
     re.IGNORECASE,
 )
 KPI_SQL_PATTERN = re.compile(r"^kpi_\d{3}(?:_[a-z0-9_]+)?\.sql$", re.IGNORECASE)
@@ -37,6 +43,11 @@ INTENT_BLOCK_PATTERN = re.compile(
     r"^--\s*BLOCKED:.*decision required", re.IGNORECASE | re.MULTILINE
 )
 BLOCKED_PENDING_STATUS = "blocked_pending_decision"
+# Databricks-dialect execution attempted without AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1
+# set -- a deliberate gate refusal (Human-Gate/remote-approval rule), not a
+# computation failure: no warehouse call is ever attempted for a record in
+# this status. Mirrors BLOCKED_PENDING_STATUS's non-fatal treatment.
+BLOCKED_PENDING_REMOTE_APPROVAL_STATUS = "blocked_pending_remote_approval"
 SUM_INPUT_PATTERN = re.compile(
     r"sum\s*\(\s*(?:(?:distinct|disitnct)\s+)?([A-Za-z_][A-Za-z0-9_]*)",
     re.IGNORECASE,
@@ -56,6 +67,12 @@ class KPIExecutionRecord:
     sample_output_table: str = ""
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # Provenance for a databricks-dialect record (empty for duckdb -- local
+    # execution has no warehouse/statement to attribute). Mirrors the
+    # metadata shape StrictWarehouseBackend.execute() already records.
+    execution_backend: str = ""
+    warehouse_id: str = ""
+    statement_id: str = ""
 
     @property
     def ok(self) -> bool:
@@ -74,6 +91,9 @@ class KPIExecutionRecord:
             "sample_output_table": self.sample_output_table,
             "errors": self.errors,
             "warnings": self.warnings,
+            "execution_backend": self.execution_backend,
+            "warehouse_id": self.warehouse_id,
+            "statement_id": self.statement_id,
         }
 
 
@@ -101,9 +121,14 @@ class KPIExecutionHarnessResult:
                 1 for record in self.records
                 if record.status == BLOCKED_PENDING_STATUS
             ),
+            "blocked_pending_remote_approval_count": sum(
+                1 for record in self.records
+                if record.status == BLOCKED_PENDING_REMOTE_APPROVAL_STATUS
+            ),
             "failed_count": sum(
                 1 for record in self.records
-                if not record.ok and record.status != BLOCKED_PENDING_STATUS
+                if not record.ok
+                and record.status not in {BLOCKED_PENDING_STATUS, BLOCKED_PENDING_REMOTE_APPROVAL_STATUS}
             ),
             "records": [record.summary() for record in self.records],
             "manifest_path": self.manifest_path,
@@ -118,11 +143,19 @@ class KPIExecutionHarness:
         workspace: str | Path,
         *,
         sample_limit: int = 20,
+        dialect: str = "duckdb",
+        catalog: str = "workspace",
+        schema: str = "autoresearch",
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
         self.layout = WorkspaceLayout(project_root=self.workspace)
         self.sample_limit = sample_limit
+        self.dialect = dialect
+        self.catalog = catalog
+        self.schema = schema
+        if self.dialect not in {"duckdb", "databricks"}:
+            raise ValueError(f"Unsupported SQL dialect: {self.dialect}")
         self._registry_cache: dict[str, dict[str, Any]] | None = None
         self._mapping_cache: dict[str, dict[str, Any]] | None = None
         self._proven_pairs_cache: set[frozenset[str]] | None = None
@@ -152,6 +185,9 @@ class KPIExecutionHarness:
         return self._execute_records()
 
     def _execute_records(self) -> list[KPIExecutionRecord]:
+        if self.dialect == "databricks":
+            return self._execute_records_databricks()
+
         try:
             import duckdb
         except ImportError as exc:  # pragma: no cover - environment dependent
@@ -190,13 +226,30 @@ class KPIExecutionHarness:
         finally:
             conn.close()
 
+    def _dialect_suffix(self) -> str:
+        return "" if self.dialect == "duckdb" else f"_{self.dialect}"
+
     def _sql_files(self) -> list[Path]:
         if not self.layout.solutions_dir.exists():
             return []
+        suffix = self._dialect_suffix()
+        # Dialect-exact match: a workspace can carry BOTH kpi_001.sql
+        # (duckdb) and kpi_001_databricks.sql (databricks) for the same KPI
+        # simultaneously -- KPI_SQL_PATTERN's generic `(?:_[a-z0-9_]+)?` group
+        # matches either, so without this the harness would try to run a
+        # databricks-dialect (backtick-quoted, CTE-nested) statement through
+        # DuckDB or vice versa.
+        name_pattern = (
+            re.compile(r"^kpi_\d{3}\.sql$", re.IGNORECASE)
+            if not suffix
+            else re.compile(rf"^kpi_\d{{3}}{re.escape(suffix)}\.sql$", re.IGNORECASE)
+        )
         files = [
             path
             for path in sorted(self.layout.solutions_dir.glob("kpi_*.sql"))
-            if KPI_SQL_PATTERN.match(path.name) and path.name != "kpi_metrics.sql"
+            if KPI_SQL_PATTERN.match(path.name)
+            and path.name != "kpi_metrics.sql"
+            and name_pattern.match(path.name)
         ]
         # Orphan/stale guard: a solutions file whose kpi_id is no longer in
         # the current feature mapping is a stale leftover from an earlier
@@ -296,6 +349,146 @@ class KPIExecutionHarness:
         except Exception as exc:
             record.errors.append(str(exc))
             return record
+
+    def _execute_records_databricks(self) -> list[KPIExecutionRecord]:
+        """Real KPI execution against Databricks (Phase C).
+
+        Gate check FIRST, mirroring core.execution.backend.build_execution_backend's
+        existing check: if AUTORESEARCH_ALLOW_REMOTE_EXECUTION != "1", no warehouse
+        call is attempted at all -- every record is marked
+        BLOCKED_PENDING_REMOTE_APPROVAL_STATUS. No silent DuckDB fallback: a
+        databricks-dialect SQL file (backtick-quoted, catalog/schema-qualified,
+        CTE-nested) has no local data to run against, unlike the general-purpose
+        orchestration loop where DuckDB fallback is a legitimate degraded mode.
+        """
+        sql_files = self._sql_files()
+        if not sql_files:
+            return [
+                KPIExecutionRecord(
+                    kpi_id="workspace",
+                    sql_path="",
+                    status="failed",
+                    errors=["no generated databricks-dialect KPI SQL files found"],
+                )
+            ]
+
+        import os
+
+        if os.environ.get("AUTORESEARCH_ALLOW_REMOTE_EXECUTION") != "1":
+            return [
+                KPIExecutionRecord(
+                    kpi_id=_kpi_id_from_path(sql_path),
+                    sql_path=_rel(sql_path, self.repo_root),
+                    status=BLOCKED_PENDING_REMOTE_APPROVAL_STATUS,
+                    warnings=[
+                        "Databricks execution requires explicit approval. Set "
+                        "AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1 in the executing "
+                        "shell (a human, never an agent) to run this KPI against "
+                        "the warehouse."
+                    ],
+                )
+                for sql_path in sql_files
+            ]
+
+        from core.config import load as load_config
+        from core.execution.backend import _phi_gate_failure_for_task
+        from core.execution.databricks_client import DatabricksClient
+
+        cfg = load_config()
+        phi_failure = _phi_gate_failure_for_task(
+            {"workspace": _rel(self.workspace, self.repo_root)}, cfg
+        )
+        if phi_failure is not None:
+            message = getattr(phi_failure, "message", None) or str(phi_failure)
+            return [
+                KPIExecutionRecord(
+                    kpi_id=_kpi_id_from_path(sql_path),
+                    sql_path=_rel(sql_path, self.repo_root),
+                    status="failed",
+                    errors=[f"PHI/PCI gate denied remote execution: {message}"],
+                )
+                for sql_path in sql_files
+            ]
+
+        client = DatabricksClient(cfg.databricks)
+        if not client.is_configured():
+            return [
+                KPIExecutionRecord(
+                    kpi_id=_kpi_id_from_path(sql_path),
+                    sql_path=_rel(sql_path, self.repo_root),
+                    status="failed",
+                    errors=["Databricks is not configured (no valid profile/host+token)"],
+                )
+                for sql_path in sql_files
+            ]
+
+        return [self._execute_one_databricks(client, sql_path) for sql_path in sql_files]
+
+    def _execute_one_databricks(self, client: Any, sql_path: Path) -> KPIExecutionRecord:
+        kpi_id = _kpi_id_from_path(sql_path)
+        result_view = f"{kpi_id}_results"
+        record = KPIExecutionRecord(
+            kpi_id=kpi_id,
+            sql_path=_rel(sql_path, self.repo_root),
+            status="failed",
+            result_view=result_view,
+            execution_backend="databricks_warehouse",
+            warehouse_id=self._warehouse_id(client),
+        )
+        sql = sql_path.read_text(encoding="utf-8")
+        record.sql_sha256 = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+        if sql_is_intent_blocked(sql):
+            record.status = BLOCKED_PENDING_STATUS
+            record.warnings.append(_block_reason(sql))
+            return record
+        if not sql_defines_result_view(sql, result_view):
+            record.errors.append(
+                f"SQL must define final result view `{result_view}`; feature/staging views are not enough"
+            )
+            return record
+        semantic_errors = self._semantic_errors(kpi_id, sql)
+        if semantic_errors:
+            record.semantic_checks.extend(semantic_errors)
+            record.errors.extend(semantic_errors)
+            return record
+        qualified_view = self._qualified_result_view(result_view)
+        try:
+            # Single-statement rewrite: materializing the persisted view IS
+            # the whole KPI proof in one execute_query() call.
+            client.execute_query(sql)
+            count_columns, count_rows = client.execute_query(
+                f"SELECT COUNT(*) FROM {qualified_view}"
+            )
+            record.row_count = int(count_rows[0][0]) if count_rows else 0
+            sample_columns, sample_rows = client.execute_query(
+                f"SELECT * FROM {qualified_view} LIMIT {int(self.sample_limit)}"
+            )
+            record.columns = [str(c) for c in sample_columns]
+            record.sample_output_table = render_markdown_table(record.columns, sample_rows)
+            if not record.columns:
+                record.errors.append(f"final result view `{result_view}` has no columns")
+                return record
+            if _placeholder_result_columns(record.columns):
+                record.errors.append(
+                    f"final result view `{result_view}` exposes only placeholder readiness columns"
+                )
+                return record
+            if record.row_count == 0:
+                record.warnings.append(f"final result view `{result_view}` returned zero rows")
+            record.status = "passed"
+            return record
+        except Exception as exc:
+            record.errors.append(str(exc))
+            return record
+
+    def _qualified_result_view(self, result_view: str) -> str:
+        return f"`{self.catalog}`.`{self.schema}`.`{result_view}`"
+
+    def _warehouse_id(self, client: Any) -> str:
+        try:
+            return str(client._extract_warehouse_id())
+        except Exception:
+            return ""
 
     def _maybe_write_gold(self, conn, kpi_id: str, result_view: str) -> None:
         """Persist a verified KPI result view to gold as a Delta table when no
@@ -604,13 +797,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", required=True, help="Workspace path, for example workspaces/demo")
     parser.add_argument("--repo-root", default=".", help="Repository root. Defaults to current directory.")
     parser.add_argument("--sample-limit", type=int, default=20, help="Rows to show per KPI result sample.")
+    parser.add_argument("--dialect", choices=["duckdb", "databricks"], default="duckdb")
+    parser.add_argument("--catalog", default="workspace", help="Databricks catalog holding the result view.")
+    parser.add_argument("--schema", default="autoresearch", help="Databricks schema holding the result view.")
     parser.add_argument(
         "--quiet", action="store_true",
         help="Print a compact per-KPI status summary + report path instead of the full JSON.",
     )
     args = parser.parse_args(argv)
 
-    result = KPIExecutionHarness(args.repo_root, args.workspace, sample_limit=args.sample_limit).run()
+    result = KPIExecutionHarness(
+        args.repo_root,
+        args.workspace,
+        sample_limit=args.sample_limit,
+        dialect=args.dialect,
+        catalog=args.catalog,
+        schema=args.schema,
+    ).run()
     if args.quiet:
         status = "[ok] passed" if result.ok else "[x] failed"
         print(f"{status} kpi-execution: {result.workspace} ({len(result.records)} KPI SQL files)")

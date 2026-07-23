@@ -28,6 +28,7 @@ from core.onboarding.artifact_contracts import (
     WORKSPACE_FEATURE_DEFINITIONS_CONTRACT,
 )
 from core.onboarding.kpi.execution_harness import (
+    BLOCKED_PENDING_REMOTE_APPROVAL_STATUS,
     BLOCKED_PENDING_STATUS,
     sql_defines_result_view,
     sql_is_intent_blocked,
@@ -780,7 +781,9 @@ class WorkspaceArtifactValidator:
         # validator fail, which blocked applying the very answer that unblocks it.
         genuinely_failed = [
             r for r in records
-            if r.get("status") not in {"passed", BLOCKED_PENDING_STATUS}
+            if r.get("status") not in {
+                "passed", BLOCKED_PENDING_STATUS, BLOCKED_PENDING_REMOTE_APPROVAL_STATUS,
+            }
         ]
         if data.get("ok") is not True and genuinely_failed:
             self._error(path, "KPI execution harness did not pass")
@@ -822,6 +825,11 @@ class WorkspaceArtifactValidator:
                         f"harness record #{idx} for `{kpi_id}` claims "
                         f"`{BLOCKED_PENDING_STATUS}` but its SQL carries no intent-block marker",
                     )
+                continue
+            if status == BLOCKED_PENDING_REMOTE_APPROVAL_STATUS:
+                # A deliberate gate refusal -- no warehouse call was attempted,
+                # so there is nothing on the "real execution happened" side
+                # (columns/sample_output_table) to verify.
                 continue
             if status != "passed":
                 self._error(path, f"harness record #{idx} for `{kpi_id}` did not pass")

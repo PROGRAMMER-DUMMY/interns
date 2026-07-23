@@ -3,8 +3,12 @@ import tempfile
 import unittest
 from dataclasses import asdict
 from pathlib import Path
+from unittest import mock
 
-from core.onboarding.kpi.execution_harness import KPIExecutionHarness
+from core.onboarding.kpi.execution_harness import (
+    BLOCKED_PENDING_REMOTE_APPROVAL_STATUS,
+    KPIExecutionHarness,
+)
 from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator
 from core.onboarding.benchmark.agent_benchmark import AgentBenchmarkScorecardBuilder
 from core.onboarding.workspace.validation import WorkspaceArtifactValidator
@@ -747,6 +751,182 @@ class DenominatorScopeHarnessTests(unittest.TestCase):
             if "denominator_scope_not_realized" in e
         ]
         self.assertEqual(denom_errors, [])
+
+
+class DatabricksExecutionHarnessTests(unittest.TestCase):
+    """Phase C: real KPI execution against Databricks. Every scenario mocks
+    DatabricksClient -- no live warehouse dependency, matching
+    test_onboarding_databricks_source.py's existing convention.
+    """
+
+    def _workspace_with_sql(self, root: Path, sql: str) -> Path:
+        solutions = root / "workspaces" / "demo" / "interns" / "generated" / "solutions"
+        solutions.mkdir(parents=True)
+        (solutions / "kpi_001_databricks.sql").write_text(sql, encoding="utf-8")
+        return root / "workspaces" / "demo"
+
+    _SQL = (
+        "CREATE OR REPLACE VIEW `main`.`rcm`.`kpi_001_results` AS\n"
+        "WITH `t` AS (SELECT 1 AS answer)\n"
+        "SELECT * FROM `t`;"
+    )
+
+    def test_gate_off_blocks_every_record_no_client_call_attempted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._workspace_with_sql(root, self._SQL)
+            with mock.patch.dict("os.environ", {}, clear=False):
+                import os
+                os.environ.pop("AUTORESEARCH_ALLOW_REMOTE_EXECUTION", None)
+                with mock.patch(
+                    "core.execution.databricks_client.DatabricksClient.execute_query"
+                ) as fake_query:
+                    result = KPIExecutionHarness(
+                        root, "workspaces/demo", dialect="databricks",
+                        catalog="main", schema="rcm",
+                    ).run()
+            fake_query.assert_not_called()
+            self.assertEqual(len(result.records), 1)
+            self.assertEqual(result.records[0].status, BLOCKED_PENDING_REMOTE_APPROVAL_STATUS)
+            self.assertFalse(result.ok)
+
+    def test_mocked_success_returns_passed_with_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._workspace_with_sql(root, self._SQL)
+            with mock.patch.dict("os.environ", {"AUTORESEARCH_ALLOW_REMOTE_EXECUTION": "1"}), \
+                 mock.patch(
+                     "core.execution.backend._phi_gate_failure_for_task", return_value=None
+                 ), \
+                 mock.patch(
+                     "core.execution.databricks_client.DatabricksClient.is_configured",
+                     return_value=True,
+                 ), \
+                 mock.patch(
+                     "core.execution.databricks_client.DatabricksClient._extract_warehouse_id",
+                     return_value="wh-123",
+                 ), \
+                 mock.patch(
+                     "core.execution.databricks_client.DatabricksClient.execute_query"
+                 ) as fake_query:
+                fake_query.side_effect = [
+                    ([], []),  # CREATE OR REPLACE VIEW ...
+                    (["count"], [[1]]),  # SELECT COUNT(*)
+                    (["answer"], [[1]]),  # SELECT * ... LIMIT
+                ]
+                result = KPIExecutionHarness(
+                    root, "workspaces/demo", dialect="databricks",
+                    catalog="main", schema="rcm",
+                ).run()
+
+            record = result.records[0]
+            self.assertEqual(record.status, "passed")
+            self.assertTrue(result.ok)
+            self.assertEqual(record.execution_backend, "databricks_warehouse")
+            self.assertEqual(record.warehouse_id, "wh-123")
+            self.assertEqual(record.row_count, 1)
+            self.assertEqual(record.columns, ["answer"])
+            self.assertIn("| answer |", record.sample_output_table)
+            # Exactly one execute_query() call materializes the view, plus the
+            # harness's own count/sample readback -- proves the single-
+            # statement rewrite, not a hidden multi-statement chain.
+            self.assertEqual(fake_query.call_count, 3)
+            create_sql = fake_query.call_args_list[0].args[0]
+            self.assertIn("CREATE OR REPLACE VIEW", create_sql)
+
+    def test_warehouse_error_fails_with_no_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._workspace_with_sql(root, self._SQL)
+            with mock.patch.dict("os.environ", {"AUTORESEARCH_ALLOW_REMOTE_EXECUTION": "1"}), \
+                 mock.patch(
+                     "core.execution.backend._phi_gate_failure_for_task", return_value=None
+                 ), \
+                 mock.patch(
+                     "core.execution.databricks_client.DatabricksClient.is_configured",
+                     return_value=True,
+                 ), \
+                 mock.patch(
+                     "core.execution.databricks_client.DatabricksClient.execute_query",
+                     side_effect=RuntimeError("warehouse unreachable"),
+                 ):
+                result = KPIExecutionHarness(
+                    root, "workspaces/demo", dialect="databricks",
+                    catalog="main", schema="rcm",
+                ).run()
+
+            record = result.records[0]
+            self.assertEqual(record.status, "failed")
+            self.assertIn("warehouse unreachable", record.errors[0])
+            self.assertFalse(result.ok)
+
+    def test_phi_gate_denial_blocks_without_calling_warehouse(self):
+        from core.failures import remote_denied
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._workspace_with_sql(root, self._SQL)
+            denial = remote_denied("remote_execute", "workspace holds PHI; no covered remote target")
+            with mock.patch.dict("os.environ", {"AUTORESEARCH_ALLOW_REMOTE_EXECUTION": "1"}), \
+                 mock.patch(
+                     "core.execution.backend._phi_gate_failure_for_task", return_value=denial
+                 ), \
+                 mock.patch(
+                     "core.execution.databricks_client.DatabricksClient.execute_query"
+                 ) as fake_query:
+                result = KPIExecutionHarness(
+                    root, "workspaces/demo", dialect="databricks",
+                    catalog="main", schema="rcm",
+                ).run()
+
+            fake_query.assert_not_called()
+            record = result.records[0]
+            self.assertEqual(record.status, "failed")
+            self.assertIn("PHI/PCI gate denied", record.errors[0])
+
+    def test_intent_blocked_sql_is_pending_decision_not_failed_for_databricks(self):
+        sql = (
+            "-- BLOCKED: grain-bucketing decision required (no exploded GROUP BY emitted).\n"
+            "-- reason: raw continuous cut needs a bucketing decision\n"
+            "CREATE OR REPLACE VIEW `main`.`rcm`.`kpi_001_results` AS SELECT 1 AS ready_marker;"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._workspace_with_sql(root, sql)
+            with mock.patch.dict("os.environ", {"AUTORESEARCH_ALLOW_REMOTE_EXECUTION": "1"}), \
+                 mock.patch(
+                     "core.execution.backend._phi_gate_failure_for_task", return_value=None
+                 ), \
+                 mock.patch(
+                     "core.execution.databricks_client.DatabricksClient.is_configured",
+                     return_value=True,
+                 ), \
+                 mock.patch(
+                     "core.execution.databricks_client.DatabricksClient.execute_query"
+                 ) as fake_query:
+                result = KPIExecutionHarness(
+                    root, "workspaces/demo", dialect="databricks",
+                    catalog="main", schema="rcm",
+                ).run()
+
+            fake_query.assert_not_called()
+            self.assertEqual(result.records[0].status, "blocked_pending_decision")
+
+    def test_sql_files_only_picks_up_databricks_suffixed_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            solutions = root / "workspaces" / "demo" / "interns" / "generated" / "solutions"
+            solutions.mkdir(parents=True)
+            (solutions / "kpi_001.sql").write_text(
+                'CREATE OR REPLACE VIEW "kpi_001_results" AS SELECT 1;', encoding="utf-8"
+            )
+            (solutions / "kpi_002_databricks.sql").write_text(self._SQL, encoding="utf-8")
+            harness = KPIExecutionHarness(root, "workspaces/demo", dialect="databricks")
+            files = harness._sql_files()
+            self.assertEqual([f.name for f in files], ["kpi_002_databricks.sql"])
+            duckdb_harness = KPIExecutionHarness(root, "workspaces/demo", dialect="duckdb")
+            duckdb_files = duckdb_harness._sql_files()
+            self.assertEqual([f.name for f in duckdb_files], ["kpi_001.sql"])
 
 
 if __name__ == "__main__":

@@ -165,6 +165,11 @@ CURATED_MODULES: tuple[str, ...] = (
     # single-statement CTE rewrite that depends on it -- also promoted from
     # SWEEP_MODULES for the same reason.
     "tests.test_pipeline_sql_generator",
+    # Phase C: real KPI execution against Databricks -- the remote-approval
+    # gate, PHI-gate denial, mocked-success provenance, and warehouse-error
+    # handling for _execute_records_databricks(). No live warehouse
+    # dependency (DatabricksClient mocked), so always safe to enforce.
+    "tests.test_kpi_execution_harness",
     # Priority 2.1/3.6 minimal slice: medallion design-panel ratification.
     # Requires a real, non-blank --reasoning per item so a ratification
     # record can't collapse into a name-only rubber stamp.
@@ -206,7 +211,6 @@ SWEEP_MODULES: tuple[str, ...] = (
     "tests.test_kpi_proof_packet",
     "tests.test_workspace_definitions",
     "tests.test_workspace_flow",
-    "tests.test_kpi_execution_harness",
     "tests.test_kpi_format_detector",
     "tests.test_workbook_structure",
     "tests.test_kpi_confirmation_panel",
