@@ -29,6 +29,22 @@ class FeatureExpressionTests(unittest.TestCase):
         self.assertEqual(extracted.identifiers, ["PatientID", "departement"])
         self.assertIn({"function": "sum", "arguments": ["PatientID"]}, extracted.functions)
 
+    def test_extract_expression_skips_free_text_filler_words_and_possessive_fragments(self):
+        # Found live: "count(distinct disputed inv_no) / count(distinct inv_no),
+        # as a percentage" and "using KPI2's active definition" produced bogus
+        # candidate features "a" and "s" (the possessive apostrophe splits
+        # "KPI2's" into "KPI2" + "s"), which the downstream validator then
+        # rejected outright rather than ever asking the user about them.
+        extracted = extract_expression(
+            "count(distinct disputed inv_no) / count(distinct inv_no), as a percentage, "
+            "using KPI2's active definition, no damage claim"
+        )
+        self.assertNotIn("a", extracted.identifiers)
+        self.assertNotIn("s", extracted.identifiers)
+        self.assertNotIn("no", extracted.identifiers)
+        self.assertIn("inv_no", extracted.identifiers)
+        self.assertIn("KPI2", extracted.identifiers)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -43,11 +43,14 @@ SQL_KEYWORDS = {
 # from `interns/generated/contracts/workspace_vocabulary.json` per
 # workspace. Zero domain vocabulary hardcoded.
 BUSINESS_TEXT_STOPWORDS = {
+    "a",
     "above",
     "across",
+    "an",
     "average",
     "for",
     "highest",
+    "no",
     "number",
     "of",
     "percentage",
@@ -109,7 +112,8 @@ def extract_expression(
     for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", cleaned):
         token_norm = token.lower()
         if (
-            token_norm in SQL_KEYWORDS
+            len(token) <= 1
+            or token_norm in SQL_KEYWORDS
             or token_norm in COMMON_FUNCTIONS
             or token_norm in BUSINESS_TEXT_STOPWORDS
             or token_norm in extra_stopwords

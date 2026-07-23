@@ -142,6 +142,12 @@ CURATED_MODULES: tuple[str, ...] = (
     # Requires a real, non-blank --reasoning per item so a ratification
     # record can't collapse into a name-only rubber stamp.
     "tests.test_design_ratify",
+    # KPI metric-expression feature extraction: free-text filler words ("a",
+    # "no") and possessive-apostrophe fragments ("KPI2's" -> "s") must never
+    # become candidate features -- found live via Hostile_Synthetic KPI
+    # resolution, where the validator correctly rejected them but the fix
+    # belongs in extraction, not the downstream denylist.
+    "tests.test_feature_expression",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
