@@ -770,8 +770,9 @@ class WorkspaceArtifactValidator:
             sql_on_disk: str | None = None
             if sql_path_value:
                 sql_path = self.repo_root / sql_path_value
-                if not sql_path.exists():
-                    self._error(path, f"harness record #{idx} SQL path does not exist: {sql_path_value}")
+                if not sql_path.is_file():
+                    reason = "is not a file" if sql_path.exists() else "does not exist"
+                    self._error(path, f"harness record #{idx} SQL path {reason}: {sql_path_value}")
                 else:
                     sql_on_disk = sql_path.read_text(encoding="utf-8")
                     recorded_hash = str(record.get("sql_sha256") or "")

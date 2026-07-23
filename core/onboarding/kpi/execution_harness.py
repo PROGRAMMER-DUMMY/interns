@@ -169,7 +169,7 @@ class KPIExecutionHarness:
             return [
                 KPIExecutionRecord(
                     kpi_id="workspace",
-                    sql_path=_rel(self.layout.solutions_dir, self.repo_root),
+                    sql_path="",
                     status="failed",
                     errors=["no generated KPI SQL files found"],
                 )

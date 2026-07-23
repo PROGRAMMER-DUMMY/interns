@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from dataclasses import asdict
 from pathlib import Path
 
 from core.onboarding.kpi.execution_harness import KPIExecutionHarness
@@ -108,6 +109,53 @@ class KPIExecutionHarnessTests(unittest.TestCase):
             self._write_harness_artifact(root, payload)
             errs = WorkspaceArtifactValidator(root, "workspaces/demo").run().errors
             self.assertFalse([e for e in errs if "did not pass" in e or "has no result columns" in e])
+
+    def test_no_sql_files_record_has_no_sql_path_and_validator_does_not_crash(self):
+        # A workspace with zero generated KPI SQL previously recorded sql_path
+        # as the solutions DIRECTORY itself, which the validator then tried to
+        # read_text() -- PermissionError on Windows, IsADirectoryError on
+        # POSIX, crashing prepare-kpi-blocker-panel outright instead of
+        # reporting a normal validation error.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "workspaces" / "demo" / "interns" / "generated" / "solutions").mkdir(parents=True)
+            records = KPIExecutionHarness(root, "workspaces/demo").execute_only()
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0].sql_path, "")
+            self.assertEqual(records[0].status, "failed")
+
+            self._write_harness_artifact(root, {
+                "artifact_type": "kpi_execution_harness.json",
+                "version": 1,
+                "generated_by": "run-kpi-execution-harness",
+                "ok": False,
+                "records": [asdict(r) for r in records],
+            })
+            errs = WorkspaceArtifactValidator(root, "workspaces/demo").run().errors
+            self.assertTrue([e for e in errs if "did not pass" in e])
+
+    def test_validator_reports_structured_error_for_directory_sql_path(self):
+        # Defense-in-depth: even if some future record author sets sql_path to
+        # a directory again, the validator must report it, not crash.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "workspaces" / "demo" / "interns" / "generated" / "solutions").mkdir(parents=True)
+            self._write_harness_artifact(root, {
+                "artifact_type": "kpi_execution_harness.json",
+                "version": 1,
+                "generated_by": "run-kpi-execution-harness",
+                "ok": False,
+                "records": [{
+                    "kpi_id": "workspace",
+                    "sql_path": "workspaces/demo/interns/generated/solutions",
+                    "status": "failed",
+                    "result_view": "",
+                    "sql_sha256": "",
+                    "columns": [], "row_count": None, "sample_output_table": "",
+                }],
+            })
+            errs = WorkspaceArtifactValidator(root, "workspaces/demo").run().errors
+            self.assertTrue([e for e in errs if "is not a file" in e])
 
     def test_validator_rejects_tampered_passed_manifest(self):
         # The exact fabrication seen in the wild: flip a record to passed with a
