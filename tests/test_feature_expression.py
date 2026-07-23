@@ -75,6 +75,17 @@ class FeatureExpressionTests(unittest.TestCase):
         self.assertIn("period", extracted.identifiers)
         self.assertIn("account", extracted.identifiers)
 
+    def test_extract_expression_skips_relative_time_qualifiers(self) -> None:
+        # Found live: "accounts active last quarter but not active this
+        # quarter" produced a bogus candidate feature "last".
+        extracted = extract_expression(
+            "count(accounts active last quarter) / count(accounts active next quarter)"
+        )
+        self.assertNotIn("last", extracted.identifiers)
+        self.assertNotIn("next", extracted.identifiers)
+        self.assertIn("accounts", extracted.identifiers)
+        self.assertIn("quarter", extracted.identifiers)
+
 
 if __name__ == "__main__":
     unittest.main()
