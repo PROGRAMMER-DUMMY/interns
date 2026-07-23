@@ -45,6 +45,24 @@ class FeatureExpressionTests(unittest.TestCase):
         self.assertIn("inv_no", extracted.identifiers)
         self.assertIn("KPI2", extracted.identifiers)
 
+    def test_extract_expression_skips_arithmetic_operation_words(self):
+        # Found live: "sum(Amount) by month, divided by count(distinct
+        # accounts)" produced a bogus candidate feature "divided" -- the same
+        # class of false positive as "average"/"total"/"share", which were
+        # already stopwords; the arithmetic-verb family (divided/plus/minus/
+        # multiplied) was missing.
+        extracted = extract_expression(
+            "sum(Amount) divided by count(active), plus fee minus discount, "
+            "quantity multiplied by rate"
+        )
+        for word in ("divided", "plus", "minus", "multiplied"):
+            self.assertNotIn(word, extracted.identifiers)
+        self.assertIn("Amount", extracted.identifiers)
+        self.assertIn("fee", extracted.identifiers)
+        self.assertIn("discount", extracted.identifiers)
+        self.assertIn("quantity", extracted.identifiers)
+        self.assertIn("rate", extracted.identifiers)
+
 
 if __name__ == "__main__":
     unittest.main()
