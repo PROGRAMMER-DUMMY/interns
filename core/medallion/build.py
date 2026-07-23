@@ -224,7 +224,7 @@ def _run_build(
             _execute_silver(manifest, paths, con, state, governor,
                             only_table=only_table, db_path=str(db_path),
                             workspace_salt=workspace_salt,
-                            inc_plan=inc_plan, refresh=refresh)
+                            inc_plan=inc_plan, refresh=refresh, force=force)
 
         # 10. Gold layer
         if only_layer in (None, "gold"):
@@ -518,6 +518,7 @@ def _execute_silver(
     workspace_salt: Optional[str] = None,
     inc_plan: IncrementalPlan | None = None,
     refresh: RefreshManifest | None = None,
+    force: bool = False,
 ) -> None:
     for s in manifest.silver:
         if only_table and s.name != only_table:
@@ -534,8 +535,24 @@ def _execute_silver(
 
         p0_sql = sql_path.read_text(encoding="utf-8")
 
-        # Rewrite to P1 MERGE
-        merge_sql = emit_silver_merge(s.name, s.primary_key, p0_sql)
+        # The P1 MERGE (DELETE+INSERT) rewrite matches existing rows to delete
+        # by comparing PRIMARY KEY VALUES. When a column that's part of the PK
+        # (e.g. a dedup/business key) is corrected UPSTREAM -- a contract fix
+        # changes what value that column now produces for the same logical
+        # row -- the old row's PK no longer matches any freshly-computed row's
+        # PK, so the DELETE clause never matches it and it is never removed;
+        # only a new row is INSERTed alongside it. The table silently
+        # accumulates orphaned stale rows next to their corrected replacements.
+        # `--force` is documented as "rebuild every table" -- callers expect a
+        # truly fresh table, not another incremental MERGE against
+        # possibly-already-wrong existing rows. Found live: a PII-hashing
+        # correction upstream (hash removed from `acct`, a dedup-key column)
+        # left the OLD hashed rows in place forever under repeated `--force`
+        # runs, since MERGE-on-PK has no way to recognize they're the same
+        # entity once a PK-forming value changes. `--force` now executes the
+        # original CREATE OR REPLACE TABLE (full replace) instead of the
+        # incremental MERGE, which is immune to this by construction.
+        merge_sql = p0_sql if force else emit_silver_merge(s.name, s.primary_key, p0_sql)
 
         # Lint pass (on the original; merge SQL may reference tables not yet in EXPLAIN)
         findings = lint_sql(p0_sql, file_label=str(sql_path), db_path=db_path)

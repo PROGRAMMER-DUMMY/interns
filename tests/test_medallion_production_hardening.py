@@ -109,6 +109,57 @@ class IdempotentMergeTests(unittest.TestCase):
         self.assertEqual(n1, n2)
         self.assertEqual(n1, 2)
 
+    def test_merge_cannot_clean_up_rows_whose_pk_value_changed_upstream(self):
+        # Documents WHY --force must bypass emit_silver_merge (see build.py
+        # _execute_silver): the P1 MERGE deletes existing rows by matching
+        # PK VALUES against the freshly-computed rows. If a column that is
+        # part of the PK/dedup key is corrected upstream (e.g. a PII-hashing
+        # rule is removed so a "acct" column now yields plaintext instead of
+        # a hash), the old row's PK no longer matches ANY new row's PK, so
+        # the DELETE clause never touches it -- the stale row sits there
+        # forever, orphaned, alongside its corrected replacement. Only a
+        # true full-table replace (CREATE OR REPLACE, the raw p0 SQL) fixes
+        # this; re-running the MERGE again does not, no matter how many
+        # times it's re-applied.
+        con = self._con()
+        con.execute(
+            "CREATE TABLE bronze_src AS SELECT * FROM (VALUES "
+            "('hash-abc123', 'X')) t(acct, v);"
+        )
+        p0 = (
+            "CREATE OR REPLACE TABLE silver.contract AS\n"
+            "WITH unioned AS (SELECT *, 's' AS source_system FROM bronze_src)\n"
+            "SELECT * FROM unioned;"
+        )
+        merge = emit_silver_merge("contract", ["source_system", "acct"], p0)
+        for stmt in merge.split(";"):
+            if stmt.strip():
+                con.execute(stmt)
+        self.assertEqual(con.execute("SELECT COUNT(*) FROM silver.contract").fetchone()[0], 1)
+
+        # Upstream correction: acct is no longer hashed, same logical row.
+        con.execute("DELETE FROM bronze_src;")
+        con.execute("INSERT INTO bronze_src VALUES ('P-1001', 'X');")
+
+        # Re-running the MERGE does NOT clean up the stale hashed row --
+        # it only adds the corrected one, since the PK values differ.
+        merge2 = emit_silver_merge("contract", ["source_system", "acct"], p0)
+        for stmt in merge2.split(";"):
+            if stmt.strip():
+                con.execute(stmt)
+        stale_count = con.execute("SELECT COUNT(*) FROM silver.contract").fetchone()[0]
+        self.assertEqual(stale_count, 2)  # BUG (by design of MERGE-on-PK): both rows present
+
+        # A full replace (the raw p0 SQL, what --force now uses) fixes it.
+        for stmt in p0.split(";"):
+            if stmt.strip():
+                con.execute(stmt)
+        clean_count = con.execute("SELECT COUNT(*) FROM silver.contract").fetchone()[0]
+        self.assertEqual(clean_count, 1)
+        self.assertEqual(
+            con.execute("SELECT acct FROM silver.contract").fetchone()[0], "P-1001"
+        )
+
     def test_scd2_idempotent_and_tracks_history(self):
         con = self._con()
         con.execute("CREATE TABLE src AS SELECT * FROM (VALUES (1,'free'),(2,'free')) t(user_id, plan);")

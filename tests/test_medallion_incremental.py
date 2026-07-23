@@ -267,6 +267,64 @@ class IncrementalBuildEndToEndTests(unittest.TestCase):
                 self.assertEqual(changed.per_table_status[key].status, "ok", key)
             self.assertEqual(changed.per_table_status["gold.events_fact"].row_count_after, 3)
 
+    def test_force_replaces_stale_rows_left_by_a_pk_value_correction(self):
+        # Found live: emit_silver_merge deletes existing rows by matching PK
+        # VALUES against the freshly-computed rows. If a silver SQL edit
+        # changes what value a PK/dedup-key column now produces for the same
+        # logical row (e.g. a masking rule is corrected), the old row's PK
+        # no longer matches any new row's PK, so the P1 MERGE's DELETE never
+        # touches it -- it silently accumulates as an orphaned duplicate next
+        # to the corrected row. A plain (non-forced) rebuild goes through the
+        # same MERGE and does NOT clean this up. --force now runs the raw
+        # CREATE OR REPLACE TABLE SQL instead of the MERGE rewrite, which is
+        # immune to this by construction (a full replace, not a value-match).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._workspace(root)
+            silver_sql = (
+                workspace / "interns" / "generated" / "medallion" / "silver" / "events.duckdb.sql"
+            )
+            # Both versions keep "id" as VARCHAR (same type both builds) --
+            # only the runtime STRING VALUE differs, matching the real bug
+            # (a masking rule producing a hash vs. plaintext, both VARCHAR).
+            # A type change would fail the MERGE outright; a same-type VALUE
+            # change is the actually-silent, actually-dangerous case.
+            silver_sql.write_text(
+                "CREATE OR REPLACE TABLE silver.events AS\n"
+                "SELECT 'h-' || CAST(id AS VARCHAR) AS id, value FROM bronze.events;\n",
+                encoding="utf-8",
+            )
+            self._build(workspace, root)
+
+            # Simulate an upstream PK-value correction: "id" is now
+            # transformed differently (prefix removed), same logical rows,
+            # different PK value, same VARCHAR type.
+            silver_sql.write_text(
+                "CREATE OR REPLACE TABLE silver.events AS\n"
+                "SELECT 'e-' || CAST(id AS VARCHAR) AS id, value FROM bronze.events;\n",
+                encoding="utf-8",
+            )
+
+            # A normal (non-forced) rebuild: fingerprint changed so it rebuilds,
+            # but through the MERGE path -- the old un-prefixed rows persist.
+            self._build(workspace, root)
+            db_path = workspace / "interns" / "state" / "medallion" / "workspace.duckdb"
+            import duckdb
+
+            con = duckdb.connect(str(db_path))
+            unforced_count = con.execute("SELECT COUNT(*) FROM silver.events").fetchone()[0]
+            con.close()
+            self.assertEqual(unforced_count, 4)  # BUG (MERGE-on-PK): 2 old + 2 corrected
+
+            forced = self._build(workspace, root, force=True)
+            self.assertEqual(forced.per_table_status["silver.events"].status, "ok")
+            con = duckdb.connect(str(db_path))
+            forced_count = con.execute("SELECT COUNT(*) FROM silver.events").fetchone()[0]
+            ids = {row[0] for row in con.execute("SELECT id FROM silver.events").fetchall()}
+            con.close()
+            self.assertEqual(forced_count, 2)  # clean: stale rows replaced, not accumulated
+            self.assertEqual(ids, {"e-1", "e-2"})
+
     def test_skip_is_overridden_when_table_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
