@@ -536,7 +536,19 @@ class DuckDBKPISQLGenerator:
                 for sc in (feature.get("source_columns") or [])
                 if isinstance(sc, dict) and sc.get("column") and sc.get("dataset")
             }
+            # This loop builds the OUTER JOIN chain specifically (unlike
+            # _required_source_columns's identical-looking loop, which
+            # drives the catalog bootstrap and must stay inclusive). Only a
+            # column referenced BARE in the formula needs the outer join;
+            # a column only ever referenced dot-qualified (e.g. `i.acct`)
+            # is scoped to the formula's own subquery and needs the
+            # bootstrap view to exist (already ensured elsewhere) but not
+            # an outer join, which would fan the base grain out to one row
+            # per joined-table row.
+            bare = _bare_formula_columns(feature)
             for column in _formula_inputs(feature):
+                if column not in bare:
+                    continue
                 source = declared.get(column) or _source_for_column(column, base_source, profile_map)
                 if source:
                     required_refs.append({"dataset": source, "column": column})
@@ -871,6 +883,41 @@ def _formula_inputs(feature: dict[str, Any]) -> list[str]:
     return _unique_preserve_order(inputs)
 
 
+def _bare_formula_columns(feature: dict[str, Any]) -> set[str]:
+    """The subset of a derived formula's declared source_columns that need
+    the OUTER row's join, as opposed to only existing inside the formula's
+    own self-contained subqueries.
+
+    A formula may declare columns from a dataset OTHER than the KPI's base
+    source purely so the catalog bootstrap creates a view for that dataset
+    (so the formula's own inner subquery -- e.g. a correlated EXISTS check
+    against another table -- has something to reference via the FROM/JOIN
+    raw-table-name rewrite). Such a column is always written with an
+    explicit alias inside the formula (``i.acct``, ``x.Date``) and is never
+    substituted for the outer row (the substitution regex skips dot-
+    qualified occurrences on purpose). Only a column referenced BARE
+    (unqualified) anywhere in the formula text is genuinely correlated to
+    the outer row and needs that dataset outer-joined.
+
+    Treating every declared column as an outer-join need regardless
+    (the previous behavior) added a superfluous LEFT JOIN whenever a
+    formula referenced another table only inside its own subquery, fanning
+    the base grain out to one row per joined-table row and silently
+    inflating every downstream count -- found live: a per-account boolean
+    (238 accounts) summed to over 4,500 once the KPI accidentally joined in
+    every one of an account's invoices.
+    """
+    formula = _derived_formula(feature)
+    if not formula:
+        return set(_formula_inputs(feature))
+    bare: set[str] = set()
+    for column in _formula_inputs(feature):
+        pattern = rf'(?<![.\w"])(?:"{re.escape(column)}"|{re.escape(column)}\b)(?!")'
+        if re.search(pattern, formula):
+            bare.add(column)
+    return bare
+
+
 def _choose_base_source(
     refs: list[dict[str, str]],
     profile_map: dict[str, dict[str, Any]],
@@ -994,12 +1041,25 @@ def plan_required_sources(
         # is the canonical, explicitly cross-engine-shared source plan (SQL,
         # Polars, PySpark all consume it), so the bug reached every engine
         # from here, not just the SQL-specific copies.
+        #
+        # Also: only a BARE (unqualified) reference genuinely needs this
+        # dataset outer-joined into the base grain. A column the formula
+        # only ever references dot-qualified (e.g. `i.acct` inside its own
+        # correlated subquery) doesn't need an outer join at all -- adding
+        # one fans the base grain out to one row per joined-table row,
+        # silently inflating every downstream count. Found live: a per-
+        # account boolean (240 accounts) summed to over 4,500 once the plan
+        # joined in every one of an account's invoices for a formula that
+        # never referenced the outer join in the first place.
         declared = {
             str(sc.get("column") or ""): str(sc.get("dataset") or "")
             for sc in (feature.get("source_columns") or [])
             if isinstance(sc, dict) and sc.get("column") and sc.get("dataset")
         }
+        bare = _bare_formula_columns(feature)
         for column in _formula_inputs(feature):
+            if column not in bare:
+                continue
             source = declared.get(column) or _source_for_column(column, base_source, profile_map)
             if source:
                 required_refs.append({"dataset": source, "column": column})

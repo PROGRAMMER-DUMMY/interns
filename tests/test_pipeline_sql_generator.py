@@ -8,6 +8,7 @@ from pathlib import Path
 from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
 from core.onboarding.kpi.sql_generator import (
     DuckDBKPISQLGenerator,
+    _bare_formula_columns,
     _derived_formula,
     _formula_inputs,
     choose_feature_ref,
@@ -296,6 +297,74 @@ class DerivedFormulaRefsTests(unittest.TestCase):
             }
             refs = gen._derived_formula_refs(kpi, "workspaces/demo/datasets/party.csv", profile_map)
             self.assertEqual(refs, [{"dataset": "workspaces/demo/datasets/invoices.csv", "column": "acct"}])
+
+    def test_bare_formula_columns_excludes_dot_qualified_only_references(self) -> None:
+        # party_key is bare (correlated to the outer row); acct/Status/Date
+        # are always dot-qualified inside the formula's own subquery.
+        feature = {
+            "source_columns": [
+                {"dataset": "workspaces/demo/datasets/party.csv", "column": "party_key"},
+                {"dataset": "workspaces/demo/datasets/invoices.csv", "column": "acct"},
+                {"dataset": "workspaces/demo/datasets/invoices.csv", "column": "Status"},
+            ],
+            "evidence": [
+                {
+                    "type": "workspace_feature_definition",
+                    "detail": (
+                        "CASE WHEN EXISTS (SELECT 1 FROM \"invoices\" i "
+                        "WHERE i.acct = party_key AND i.Status != 'VOID') "
+                        "THEN 1 ELSE 0 END"
+                    ),
+                }
+            ],
+        }
+        bare = _bare_formula_columns(feature)
+        self.assertEqual(bare, {"party_key"})
+
+    def test_join_chain_skips_dot_qualified_only_dataset_no_fanout(self) -> None:
+        # End-to-end: a formula referencing another table ONLY inside its
+        # own subquery must not join that table into the base grain at all
+        # -- doing so fans the base grain out (found live: a 240-account
+        # table summed to over 4,500 once every one of an account's
+        # invoices got joined in for a formula that never used the join).
+        kpi = {
+            "kpi_id": "kpi_test",
+            "features": [
+                {
+                    "feature": "churned",
+                    "resolution_type": "derived_formula",
+                    "source_columns": [
+                        {"dataset": "workspaces/demo/datasets/party.csv", "column": "party_key"},
+                        {"dataset": "workspaces/demo/datasets/invoices.csv", "column": "acct"},
+                        {"dataset": "workspaces/demo/datasets/invoices.csv", "column": "Status"},
+                    ],
+                    "evidence": [
+                        {
+                            "type": "workspace_feature_definition",
+                            "detail": (
+                                "CASE WHEN EXISTS (SELECT 1 FROM \"invoices\" i "
+                                "WHERE i.acct = party_key AND i.Status != 'VOID') "
+                                "THEN 1 ELSE 0 END"
+                            ),
+                        }
+                    ],
+                }
+            ],
+        }
+        profile_map = {
+            "workspaces/demo/datasets/party.csv": {"schema": {"party_key": "string"}},
+            "workspaces/demo/datasets/invoices.csv": {"schema": {"acct": "string", "Status": "string"}},
+        }
+        # Pinned to party.csv, matching the real scenario: a human-confirmed
+        # base_source answer (per the platform's base_source_selection
+        # blocker) already settled this; the property under test is what
+        # happens to the OTHER (dot-qualified-only) dataset once a base is
+        # chosen, not the base-selection heuristic itself.
+        base_source, required_sources, chosen = plan_required_sources(
+            kpi, profile_map, Path("."), pinned="workspaces/demo/datasets/party.csv",
+        )
+        self.assertEqual(base_source, "workspaces/demo/datasets/party.csv")
+        self.assertNotIn("workspaces/demo/datasets/invoices.csv", required_sources)
 
     def test_plan_required_sources_trusts_declared_dataset_too(self) -> None:
         # plan_required_sources is the explicitly cross-engine-shared source
