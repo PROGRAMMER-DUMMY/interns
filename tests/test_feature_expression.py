@@ -63,6 +63,18 @@ class FeatureExpressionTests(unittest.TestCase):
         self.assertIn("quantity", extracted.identifiers)
         self.assertIn("rate", extracted.identifiers)
 
+    def test_extract_expression_skips_common_pronouns(self):
+        # Found live: a custom rule description ("... for that account in the
+        # period") produced a bogus candidate feature "that".
+        extracted = extract_expression(
+            "party_key WHERE EXISTS a non-void invoice for that account, this period, it counts"
+        )
+        for word in ("that", "this", "it"):
+            self.assertNotIn(word, extracted.identifiers)
+        self.assertIn("party_key", extracted.identifiers)
+        self.assertIn("period", extracted.identifiers)
+        self.assertIn("account", extracted.identifiers)
+
 
 if __name__ == "__main__":
     unittest.main()
