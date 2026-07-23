@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from core.storage.workspace_layout import WorkspaceLayout
+from core.wiki.layout import WikiLayout
 
 
 @dataclass(frozen=True)
@@ -208,12 +209,23 @@ class DatabricksAssetManifestBuilder:
         )
 
     def _workspace_assets(self) -> list[dict[str, Any]]:
+        # wiki/ and dashboard/ live at the workspace ROOT (siblings of interns/,
+        # datasets/, docs/), not under interns/ like the other five kinds --
+        # WorkspaceLayout.dashboard_dir and WikiLayout.wiki_root already resolve
+        # that convention, so reuse them rather than hardcoding the path twice.
+        # Both are workspace-facing, human-curated-or-overridden artifacts (dashboard
+        # specs carry user_overrides; wiki notes are meant to be read/edited by
+        # feature owners), so they fall through to the default edit_policy in
+        # _edit_policy() rather than joining the strict repo-managed set -- Databricks
+        # operators editing them there is expected, not drift.
         roots = [
             (self.layout.solutions_dir, "solutions"),
             (self.layout.evaluation_dir, "evaluation"),
             (self.layout.contracts_dir, "contracts"),
             (self.layout.requirements_dir, "requirements"),
             (self.layout.reports_dir, "reports"),
+            (self.layout.dashboard_dir, "dashboard"),
+            (WikiLayout(project_root=self.workspace).wiki_root, "wiki"),
         ]
         assets: list[dict[str, Any]] = []
         base_path = f"{self.workspace_root}/{self.environment}/{self.domain}"

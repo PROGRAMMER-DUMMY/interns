@@ -2731,6 +2731,60 @@ diff --git a/model.sql b/model.sql
             self.assertIn("edit_policy", workspace_asset)
             self.assertTrue((workspace / "interns" / "generated" / "requirements" / "databricks_asset_manifest.json").exists())
 
+    def test_databricks_asset_manifest_includes_wiki_and_dashboard(self):
+        # wiki/ and dashboard/ are generated per-workspace folders (siblings of
+        # interns/, not under it) that were missing from the asset manifest's
+        # workspace_assets roots entirely -- found live: a client asking "why
+        # isn't our wiki/dashboard content in the Databricks workspace" had no
+        # answer other than "it isn't wired in yet." Both should now push
+        # through the same governed, human-approved-import path as
+        # solutions/evaluation/contracts/requirements/reports.
+        try:
+            import polars  # noqa: F401
+        except ImportError:
+            self.skipTest("polars is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._create_demo_workspace(root)
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            (workspace / "dashboard").mkdir(parents=True, exist_ok=True)
+            (workspace / "dashboard" / "index.json").write_text("{}", encoding="utf-8")
+            (workspace / "wiki" / "kpis").mkdir(parents=True, exist_ok=True)
+            (workspace / "wiki" / "kpis" / "kpi_001.md").write_text(
+                "# KPI 1\n", encoding="utf-8"
+            )
+
+            result = DatabricksAssetManifestBuilder(
+                root, "workspaces/demo", environment="dev", domain="rcm",
+                workspace_root="/Workspace/Autoresearch", catalog="main", schema="rcm",
+            ).build()
+
+            manifest = json.loads((root / result.path).read_text(encoding="utf-8"))
+            by_kind_path = {a["target_path"]: a for a in manifest["workspace_assets"]}
+            dashboard_asset = next(
+                (a for path, a in by_kind_path.items() if "/dashboard/" in path), None
+            )
+            wiki_asset = next(
+                (a for path, a in by_kind_path.items() if "/wiki/" in path), None
+            )
+            self.assertIsNotNone(dashboard_asset, "dashboard/ asset missing from manifest")
+            self.assertIsNotNone(wiki_asset, "wiki/ asset missing from manifest")
+            self.assertTrue(
+                dashboard_asset["target_path"].startswith("/Workspace/Autoresearch/dev/rcm/dashboard/")
+            )
+            self.assertTrue(
+                wiki_asset["target_path"].startswith("/Workspace/Autoresearch/dev/rcm/wiki/")
+            )
+            # Human-curated/overridden artifacts, not repo-generated-only --
+            # Databricks-side edits are expected, not flagged as drift.
+            self.assertEqual(
+                dashboard_asset["edit_policy"], "databricks_operational_edits_allowed_with_manifest_update"
+            )
+            self.assertEqual(
+                wiki_asset["edit_policy"], "databricks_operational_edits_allowed_with_manifest_update"
+            )
+
     def test_genie_workspace_spec_generates_runbook_permissions_and_evolution(self):
         try:
             import polars  # noqa: F401
