@@ -455,6 +455,57 @@ class ReservedWordFormulaColumnTests(unittest.TestCase):
             self.assertEqual(len(re.findall(r"(?<!\.)\bEND\b(?!\")", expression)), 1)
 
 
+class ParenlessFormulaDetectionTests(unittest.TestCase):
+    """_derived_formula must recognize a formula-shaped workspace definition
+    even when it contains no function-call parens.
+
+    A "workspace_feature_definition" evidence detail is either a genuine
+    formula or a plain "dataset.column" pin (recorded for a direct_column /
+    physical_column apply) -- both share the same evidence type, so the
+    detail TEXT is the only way to tell them apart. Requiring "(" rejected a
+    bare CASE/comparison formula with no function call.
+
+    Found live (kpi_004, Hostile_Synthetic): `CASE WHEN Status = 'DELIVERED'
+    THEN 1 ELSE 0 END` has no parens at all, so _derived_formula returned ""
+    and the feature produced no SELECT item in the generated features view --
+    while the result view's WHERE clause still referenced it by name,
+    raising a DuckDB binder error ('delivered' not found).
+    """
+
+    def test_bare_case_formula_without_parens_is_recognized(self) -> None:
+        feature = {
+            "resolution_type": "derived_formula",
+            "source_columns": [
+                {"dataset": "workspaces/demo/datasets/shipments.csv", "column": "Status"},
+            ],
+            "evidence": [
+                {
+                    "type": "workspace_feature_definition",
+                    "detail": "CASE WHEN Status = 'DELIVERED' THEN 1 ELSE 0 END",
+                }
+            ],
+        }
+        self.assertEqual(
+            _derived_formula(feature),
+            "CASE WHEN Status = 'DELIVERED' THEN 1 ELSE 0 END",
+        )
+
+    def test_plain_column_pin_is_still_not_mistaken_for_a_formula(self) -> None:
+        feature = {
+            "resolution_type": "physical_column",
+            "source_columns": [
+                {"dataset": "workspaces/demo/datasets/shipments.csv", "column": "Id"},
+            ],
+            "evidence": [
+                {
+                    "type": "workspace_feature_definition",
+                    "detail": "workspaces/demo/datasets/shipments.csv.Id",
+                }
+            ],
+        }
+        self.assertEqual(_derived_formula(feature), "")
+
+
 class DerivedFormulaLatestEvidenceWinsTests(unittest.TestCase):
     """_derived_formula must use the MOST RECENTLY applied definition, not
     the first one ever recorded.

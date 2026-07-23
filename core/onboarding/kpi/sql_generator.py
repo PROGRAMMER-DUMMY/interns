@@ -868,13 +868,29 @@ def _derived_formula(feature: dict[str, Any]) -> str:
     # in favor of the original, already-superseded one.
     for ev in reversed(feature.get("evidence") or []):
         detail = str(ev.get("detail") or "")
-        if ev.get("type") == "workspace_feature_definition" and "(" in detail:
+        if ev.get("type") == "workspace_feature_definition" and _FORMULA_SHAPED.search(detail):
             return detail
     for column in feature.get("source_columns") or []:
         detail = str(column.get("detail") or "")
-        if "(" in detail:
+        if _FORMULA_SHAPED.search(detail):
             return detail
     return ""
+
+
+# Distinguishes a genuine SQL-formula "workspace_feature_definition" evidence
+# detail from a plain "dataset.column" pin string (both share the same
+# evidence type; only the detail text tells them apart). A plain pin like
+# "workspaces/demo/datasets/shipments.csv.Id" never has parens, comparison
+# operators, or CASE/EXISTS -- but neither does a bare-comparison formula
+# with no function call, e.g. `CASE WHEN Status = 'DELIVERED' THEN 1 ELSE 0
+# END`, which requiring "(" alone rejected (found live: kpi_004's "delivered"
+# formula silently vanished from the generated features view -- no formula
+# text was recognized at all, so the feature produced no SELECT item, and a
+# WHERE clause elsewhere still referenced it as a features-view column,
+# raising a binder error). Mirrors the same detection already used for
+# --custom-definition text in blocker_workflow.py's
+# _custom_definition_source_columns.
+_FORMULA_SHAPED = re.compile(r"[()<>=]|\bexists\b|\bcase\b", re.IGNORECASE)
 
 
 def _formula_inputs(feature: dict[str, Any]) -> list[str]:
