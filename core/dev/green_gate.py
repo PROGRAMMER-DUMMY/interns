@@ -160,6 +160,14 @@ CURATED_MODULES: tuple[str, ...] = (
     # candidate dataset in place forever even though state flips to
     # user_confirmed. Found live via Hostile_Synthetic KPI resolution.
     "tests.test_blocker_workflow_custom_definition",
+    # _dedupe_features_by_physical_column collapsed two UNRELATED, still-
+    # unresolved features into one whenever they happened to share the same
+    # generic candidate-column SET (not a real resolution) -- silently
+    # dropping a real, distinct blocker question. A significant, broadly-
+    # impactful correctness bug in feature resolution generally, not
+    # specific to any one workspace; promoted here from SWEEP_MODULES so
+    # it's always enforced, not just occasionally swept.
+    "tests.test_contextual_dictionary_mapping",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
@@ -168,7 +176,6 @@ ENTERPRISE_MODULES: tuple[str, ...] = ("tests.test_enterprise_optimization",)
 # Broader blast-radius modules only swept with --sweep. These are NOT part of the
 # strict gate; some carry known pre-existing failures (see KNOWN_BASELINE).
 SWEEP_MODULES: tuple[str, ...] = (
-    "tests.test_contextual_dictionary_mapping",
     "tests.test_kpi_proof_packet",
     "tests.test_workspace_definitions",
     "tests.test_workspace_flow",

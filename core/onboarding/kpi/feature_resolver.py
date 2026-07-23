@@ -907,7 +907,12 @@ def _dedupe_features_by_physical_column(
     ties, preserving the canonical name the registry expects downstream.
 
     Features without a resolved physical column are passed through untouched so
-    legitimately distinct (or still-unresolved) features are never merged.
+    legitimately distinct (or still-unresolved) features are never merged. A
+    feature only participates in a dedup group when it's genuinely resolved --
+    proven, or carrying exactly one unambiguous candidate; an unconfirmed
+    feature with several ranked candidates hasn't resolved to anything, and
+    two unrelated concepts sharing the same generic candidate SET (a common
+    false-positive shape, not a real resolution) must never collapse into one.
 
     A second pass handles unresolved features (e.g. ``candidate_unconfirmed``)
     that carry a *ranked candidate* column rather than a resolved one: if such a
@@ -918,6 +923,22 @@ def _dedupe_features_by_physical_column(
     """
     groups: dict[frozenset[tuple[str, str]], list[int]] = {}
     for position, feature in enumerate(features):
+        source_cols = feature.get("source_columns") or []
+        # A feature contributes to a dedup group only when it's genuinely
+        # RESOLVED -- proven, or carrying exactly one unambiguous candidate
+        # (a real single-column alias match). A candidate_unconfirmed
+        # feature with MULTIPLE ranked candidates hasn't resolved to
+        # anything; its key would be the shared, often generic, candidate
+        # SET, not a real column. Two unrelated concepts that both got the
+        # same low-confidence contextual guesses (e.g. two different
+        # unresolved tokens both matching four "ts" columns via generic
+        # scoring) would otherwise collapse into one, silently dropping a
+        # real, distinct blocker question -- found live: "churned" and
+        # "active_last_q" (two genuinely different derived features)
+        # shared the identical spurious "ts"-column candidate set and one
+        # was silently dropped.
+        if feature.get("state") not in READY_STATES and len(source_cols) != 1:
+            continue
         key = _physical_column_key(feature)
         if not key:
             continue

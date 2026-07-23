@@ -321,6 +321,44 @@ class PhysicalColumnDedupTests(unittest.TestCase):
         self.assertIn("candidate_unconfirmed", [f["state"] for f in deduped])
         self.assertEqual(len(deduped), 3)
 
+    def test_two_unrelated_unconfirmed_features_sharing_the_same_candidate_set_both_survive(self):
+        # Found live: two GENUINELY DIFFERENT derived features ("churned",
+        # "active_last_q") both got the identical generic, low-confidence
+        # candidate list (four unrelated "ts" columns matched via broad
+        # contextual scoring, not real relevance to either concept) -- with
+        # NO proven sibling anywhere. Sharing the same candidate SET is not
+        # the same thing as "resolving to the same physical column"; it's
+        # two independently-unresolved concepts landing on the same generic
+        # guess. One was silently dropped, permanently losing a real
+        # blocker question -- neither ever reached the panel.
+        features = [
+            self._contextual_candidate_feature(
+                "churned",
+                [
+                    ("datasets/audit_log.csv", "ts"),
+                    ("datasets/gps_pings.csv", "ts"),
+                    ("datasets/edi_messages.csv", "ts"),
+                    ("datasets/temperature_logs.csv", "ts"),
+                ],
+            ),
+            self._contextual_candidate_feature(
+                "active_last_q",
+                [
+                    ("datasets/audit_log.csv", "ts"),
+                    ("datasets/gps_pings.csv", "ts"),
+                    ("datasets/edi_messages.csv", "ts"),
+                    ("datasets/temperature_logs.csv", "ts"),
+                ],
+            ),
+        ]
+
+        deduped = _dedupe_features_by_physical_column(features)
+
+        self.assertEqual(
+            sorted(f["feature"] for f in deduped),
+            ["active_last_q", "churned"],
+        )
+
     def test_distinct_columns_are_never_merged(self):
         features = [
             self._feature("a", "proven_direct", "datasets/t.csv", "ColA"),
