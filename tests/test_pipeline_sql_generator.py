@@ -397,6 +397,64 @@ class DerivedFormulaRefsTests(unittest.TestCase):
         self.assertIn("workspaces/demo/datasets/invoices.csv", required_sources)
 
 
+class ReservedWordFormulaColumnTests(unittest.TestCase):
+    """A declared source column whose name collides with a SQL reserved
+    keyword used syntactically inside the formula (e.g. a column literally
+    named "END" alongside a CASE...END expression) must not have every bare
+    occurrence blindly substituted -- that rewrites the CASE-closing keyword
+    itself into a column reference and produces invalid SQL.
+
+    Found live (kpi_001, Hostile_Synthetic): `CASE WHEN date_diff('day',
+    START, END) <= sla_days THEN 1 ELSE 0 END`, where shipments has real
+    START/END columns, generated `... ELSE 0 s0."END" AS "on_time"` --
+    the formula's own closing END got rewritten.
+    """
+
+    def _generator(self, root: Path) -> DuckDBKPISQLGenerator:
+        (root / "workspaces" / "demo").mkdir(parents=True, exist_ok=True)
+        return DuckDBKPISQLGenerator(root, "workspaces/demo")
+
+    def test_bare_end_keyword_is_not_rewritten_when_end_is_also_a_column(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gen = self._generator(root)
+            feature = {
+                "resolution_type": "derived_formula",
+                "source_columns": [
+                    {"dataset": "workspaces/demo/datasets/shipments.csv", "column": "START"},
+                    {"dataset": "workspaces/demo/datasets/shipments.csv", "column": "END"},
+                    {"dataset": "workspaces/demo/datasets/svc_catalog.csv", "column": "sla_days"},
+                ],
+                "evidence": [
+                    {
+                        "type": "workspace_feature_definition",
+                        "detail": (
+                            "CASE WHEN date_diff('day', START, \"END\") <= sla_days "
+                            "THEN 1 ELSE 0 END"
+                        ),
+                    }
+                ],
+            }
+            source_aliases = {
+                "workspaces/demo/datasets/shipments.csv": "s0",
+                "workspaces/demo/datasets/svc_catalog.csv": "s1",
+            }
+            profile_map = {
+                "workspaces/demo/datasets/shipments.csv": {
+                    "schema": {"START": "date", "END": "date"}
+                },
+                "workspaces/demo/datasets/svc_catalog.csv": {"schema": {"sla_days": "int"}},
+            }
+            expression = gen._feature_expression(feature, source_aliases, profile_map)
+            self.assertEqual(
+                expression,
+                "CASE WHEN date_diff('day', s0.\"START\", s0.\"END\") <= s1.\"sla_days\" "
+                "THEN 1 ELSE 0 END",
+            )
+            # Exactly one bare, unqualified END remains: the CASE terminator.
+            self.assertEqual(len(re.findall(r"(?<!\.)\bEND\b(?!\")", expression)), 1)
+
+
 class DerivedFormulaLatestEvidenceWinsTests(unittest.TestCase):
     """_derived_formula must use the MOST RECENTLY applied definition, not
     the first one ever recorded.

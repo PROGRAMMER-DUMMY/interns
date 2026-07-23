@@ -26,6 +26,26 @@ from core.onboarding.relationships.contracts import (
 )
 from core.storage.workspace_layout import WorkspaceLayout
 
+# Standard ANSI SQL reserved words that also carry syntactic meaning inside a
+# derived-formula expression (e.g. CASE...END). When a declared column's name
+# collides with one of these (e.g. a "END"/"START" timestamp column used
+# inside `CASE WHEN ... END`), an unqualified, unquoted occurrence in the
+# formula text is inherently ambiguous between "the SQL keyword" and "the
+# column" -- exactly how real SQL treats it: an unquoted reserved word is
+# always parsed as the keyword, and quoting is required to reference it as an
+# identifier. So for these names only the explicitly quoted form ("END") is
+# substituted as a column reference; a bare occurrence is left untouched as
+# the keyword. Found live: `CASE WHEN date_diff('day', START, END) <= x THEN
+# 1 ELSE 0 END` (a column literally named END) had every bare "END" replaced
+# blindly, including the CASE-closing keyword, producing invalid SQL.
+_SQL_RESERVED_WORDS = frozenset({
+    "AND", "OR", "NOT", "IS", "IN", "AS", "ON", "BY",
+    "ALL", "ANY", "ASC", "DESC", "DISTINCT", "EXISTS", "BETWEEN", "LIKE",
+    "NULL", "TRUE", "FALSE", "INTERVAL", "CAST", "WITH", "UNION", "LIMIT",
+    "HAVING", "GROUP", "ORDER", "JOIN", "FROM", "WHERE", "SELECT",
+    "CASE", "WHEN", "THEN", "ELSE", "END",
+})
+
 
 @dataclass(frozen=True)
 class SQLGenerationResult:
@@ -680,11 +700,15 @@ class DuckDBKPISQLGenerator:
                     # qualification cannot nest quotes (s0."START"" bug), and
                     # never rewrite alias-prefixed references (p."START" inside
                     # a self-join formula belongs to the formula's own alias).
-                    formula = re.sub(
-                        rf'(?<![.\w"])(?:"{re.escape(column)}"|{re.escape(column)}\b)(?!")',
-                        qualified,
-                        formula,
-                    )
+                    # A column whose name is itself a SQL reserved word (END,
+                    # CASE, ...) is only substituted when explicitly quoted --
+                    # a bare occurrence is the keyword, not the column (see
+                    # _SQL_RESERVED_WORDS).
+                    if column.upper() in _SQL_RESERVED_WORDS:
+                        pattern = rf'"{re.escape(column)}"'
+                    else:
+                        pattern = rf'(?<![.\w"])(?:"{re.escape(column)}"|{re.escape(column)}\b)(?!")'
+                    formula = re.sub(pattern, qualified, formula)
             return formula
         ref = self._choose_feature_ref(
             feature,
