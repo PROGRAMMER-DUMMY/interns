@@ -13,11 +13,30 @@ from core.onboarding.workspace.idempotency import (
     get_applied_op,
     record_op,
 )
+from core.storage.workspace_layout import WorkspaceLayout
 from core.storage.workspace_lock import WorkspaceLockTimeout, workspace_lock
 
 
 def _resolve_workspace_path(repo_root: str, workspace: str) -> Path:
     return (Path(repo_root) / workspace).resolve()
+
+
+def _current_panel_question_id(workspace_path: Path) -> str:
+    """The panel's `question_id` (or `feature`) at call time -- must be part of
+    the idempotency key. Without it, answering the same literal --answer text
+    (e.g. `option_a`) for two DIFFERENT blockers in sequence collides on the
+    same op_id and the second application is silently skipped as a replay of
+    the first (found live: `shipments -> option_a` was skipped because
+    `cargo_claims -> option_a` had already claimed that op_id).
+    """
+    path = WorkspaceLayout(project_root=workspace_path).reports_dir / "blocker_question_panel" / "current.json"
+    if not path.exists():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return ""
+    return str(data.get("question_id") or data.get("feature") or "")
 
 
 
@@ -124,10 +143,13 @@ def apply_main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     workspace_path = _resolve_workspace_path(args.repo_root, args.workspace)
 
-    # Idempotency: deterministic op_id from the user-visible arguments. If the
-    # same call has been applied before and was successful, return the prior
-    # result instead of re-running the workflow (which would duplicate
-    # decision-history entries).
+    # Idempotency: deterministic op_id from the user-visible arguments PLUS
+    # which blocker is actually being answered (args.feature if targeting a
+    # specific one, else whatever the panel's `current` question is right
+    # now). The same literal --answer text (e.g. `option_a`) is common across
+    # unrelated blockers, so the question identity must be part of the key --
+    # otherwise the second answer collides with the first and is wrongly
+    # skipped as an idempotent replay.
     op_id = compute_op_id(
         "apply-kpi-panel-answer",
         workspace=args.workspace,
@@ -136,6 +158,7 @@ def apply_main(argv: list[str] | None = None) -> int:
         custom_definition=args.custom_definition,
         evidence_note=args.evidence_note,
         via_cli_agent=args.via_cli_agent,
+        question_id=args.feature or _current_panel_question_id(workspace_path),
     )
     if not args.allow_replay:
         prior = get_applied_op(workspace_path, op_id)

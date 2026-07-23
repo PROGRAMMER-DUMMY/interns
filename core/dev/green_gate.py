@@ -148,6 +148,12 @@ CURATED_MODULES: tuple[str, ...] = (
     # resolution, where the validator correctly rejected them but the fix
     # belongs in extraction, not the downstream denylist.
     "tests.test_feature_expression",
+    # apply-kpi-panel-answer idempotency must key on WHICH blocker was
+    # answered, not just the literal --answer text -- found live via
+    # Hostile_Synthetic KPI resolution: two different blockers both
+    # answered `option_a` collided on the same op_id, silently skipping
+    # the second application.
+    "tests.test_blocker_cli_op_id",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
