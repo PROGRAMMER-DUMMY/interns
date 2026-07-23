@@ -86,6 +86,20 @@ class FeatureExpressionTests(unittest.TestCase):
         self.assertIn("accounts", extracted.identifiers)
         self.assertIn("quarter", extracted.identifiers)
 
+    def test_extract_expression_skips_analysis_vocabulary_and_conjunctions(self) -> None:
+        # Closes the gap between this extractor's stopword list and the
+        # downstream validator's separate PARSER_ARTIFACT_FEATURES denylist
+        # (core.onboarding.workspace.validation) -- both lists exist to
+        # reject the same class of non-feature token, and letting them drift
+        # apart is exactly how "a" slipped through originally.
+        extracted = extract_expression(
+            "using the confirmed dimension, but not the grain or metric fields"
+        )
+        for word in ("using", "the", "but", "dimension", "grain", "metric"):
+            self.assertNotIn(word, extracted.identifiers)
+        self.assertIn("confirmed", extracted.identifiers)
+        self.assertIn("fields", extracted.identifiers)
+
 
 if __name__ == "__main__":
     unittest.main()
