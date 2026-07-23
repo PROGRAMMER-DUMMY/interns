@@ -10,7 +10,10 @@ from core.config import Config, DatabricksConfig
 from core.execution.backend import DuckDBBackend, StrictWarehouseBackend, build_execution_backend
 from core.failures import FailureKind, WorkflowBlockedError, validation_blocker
 from core.medallion.design import _preflight
-from core.onboarding.kpi.blocker_workflow import prepare_kpi_blocker_panel
+from core.onboarding.kpi.blocker_workflow import (
+    _is_stale_harness_freshness_error,
+    prepare_kpi_blocker_panel,
+)
 from core.onboarding.relationships.contracts import load_relationship_contracts
 from core.onboarding.relationships.source_to_target_planner import SourceToTargetPlanner
 from core.onboarding.workspace.validation import WorkspaceArtifactValidator
@@ -84,6 +87,35 @@ class FailureContractTests(unittest.TestCase):
 
             self.assertEqual(caught.exception.failure.kind, FailureKind.VALIDATION_BLOCKER)
             self.assertEqual(caught.exception.failure.stage, "prepare_kpi_blocker_panel.validation")
+
+    def test_stale_harness_freshness_error_does_not_block_panel_prep(self):
+        # prepare_kpi_blocker_panel's own job (resolve features, regenerate
+        # SQL) immediately invalidates any previously-recorded harness's
+        # sql_sha256, by construction, every time it succeeds. Treating that
+        # staleness as a hard blocker created a deadlock: the exact call
+        # meant to fix a workspace failed as a side effect of doing its job
+        # correctly. Found live: repeatedly had to bypass
+        # prepare_kpi_blocker_panel entirely and call KPIFeatureResolver
+        # directly to work around this. Only the two staleness-specific
+        # messages are exempt; a genuine execution failure still blocks.
+        self.assertTrue(_is_stale_harness_freshness_error(
+            "workspaces/demo/interns/generated/evidence/kpi_execution_harness.json: "
+            "harness record #1 for `kpi_001` is stale; SQL hash changed since execution"
+        ))
+        self.assertTrue(_is_stale_harness_freshness_error(
+            "workspaces/demo/interns/generated/evidence/kpi_execution_harness.json: "
+            "harness record #2 for `kpi_002` missing sql_sha256; rerun "
+            "run-kpi-execution-harness after SQL generation"
+        ))
+        self.assertFalse(_is_stale_harness_freshness_error(
+            "workspaces/demo/interns/generated/evidence/kpi_execution_harness.json: "
+            "KPI execution harness did not pass"
+        ))
+        self.assertFalse(_is_stale_harness_freshness_error(
+            "workspaces/demo/interns/generated/evidence/kpi_execution_harness.json: "
+            "harness record #3 for `kpi_003` claims passed but fresh execution "
+            "returned `failed` (possible tampered/stale manifest)"
+        ))
 
     def test_medallion_preflight_invalid_registry_is_typed(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -99,11 +99,12 @@ def prepare_kpi_blocker_panel(
     DerivedFeatureMarkdownConverter(root, _rel(workspace_path, root)).run()
     panel_result = BlockerQuestionPanelBuilder(root, _rel(workspace_path, root)).run()
     validation = WorkspaceArtifactValidator(root, _rel(workspace_path, root)).run()
-    if not validation.ok:
+    blocking_errors = [e for e in validation.errors if not _is_stale_harness_freshness_error(e)]
+    if blocking_errors:
         raise WorkflowBlockedError(
             validation_blocker(
                 "prepare_kpi_blocker_panel.validation",
-                "workspace artifact validation failed:\n" + "\n".join(validation.errors),
+                "workspace artifact validation failed:\n" + "\n".join(blocking_errors),
                 next_command=f"uv run validate-workspace-artifacts --workspace {_rel(workspace_path, root)}",
             )
         )
@@ -126,6 +127,29 @@ def prepare_kpi_blocker_panel(
             if panel_result.current_feature
             else "No blocker question remains."
         ),
+    )
+
+
+def _is_stale_harness_freshness_error(message: str) -> bool:
+    """True for a validator error that only means "the execution harness
+    hasn't been re-run since the SQL changed" -- not evidence anything is
+    actually wrong with the feature mapping or contracts this function just
+    produced.
+
+    prepare_kpi_blocker_panel's whole job is to resolve features and
+    regenerate SQL; doing that job successfully immediately invalidates any
+    previously-recorded harness's sql_sha256, by construction, every time.
+    Treating that as a hard blocker here made the validator fail as a
+    direct, unavoidable side effect of the very call meant to fix things --
+    a chicken-and-egg deadlock (the same class already fixed once for
+    `blocked_pending_decision` records, see _validate_kpi_execution_harness).
+    Deliberately narrow: only the two staleness-specific messages match. A
+    genuine execution failure ("did not pass", "claims passed but fresh
+    execution returned failed") is NOT matched and still blocks -- that's
+    real evidence something is wrong, not just freshness lag.
+    """
+    return "is stale; SQL hash changed since execution" in message or (
+        "missing sql_sha256; rerun run-kpi-execution-harness" in message
     )
 
 
