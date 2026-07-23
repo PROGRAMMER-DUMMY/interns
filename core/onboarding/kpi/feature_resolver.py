@@ -183,7 +183,9 @@ class KPIFeatureResolver:
         }
         definitions = load_workspace_definitions(self.layout)
         if definitions.get("definitions"):
-            apply_workspace_definitions_to_mapping(mapping, definitions)
+            updated = apply_workspace_definitions_to_mapping(mapping, definitions)
+            if updated:
+                _redupe_all_kpis_after_definitions(mapping)
         _label_kpis_without_supporting_evidence(mapping, kpis, schema_index, definitions)
         # Dictionary-vs-profile reconciliation: documented claims that profile
         # evidence contradicts become structured `dictionary_conflicts`, and a
@@ -1008,6 +1010,35 @@ def _dedupe_features_by_physical_column(
                 drop.add(position)
 
     return [feature for position, feature in enumerate(features) if position not in drop]
+
+
+def _redupe_all_kpis_after_definitions(mapping: dict[str, Any]) -> None:
+    """Re-run per-KPI physical-column dedup after workspace-level definitions
+    have been applied to the mapping.
+
+    ``_resolve_kpi`` already dedupes each KPI's own features by physical
+    column (its own ``_dedupe_features_by_physical_column`` call), but
+    ``apply_workspace_definitions_to_mapping`` runs AFTER every KPI is
+    resolved, updating an already-existing feature entry in place from a
+    reusable workspace-level definition. If that update makes the feature's
+    physical column match a SIBLING feature the KPI's own resolution pass
+    already proved (e.g. two differently-spelled cut tokens both landing on
+    the same column, one auto-proven via the alias/dictionary path inside
+    ``_resolve_kpi``, the other just confirmed via a workspace-level
+    definition answer), the duplicate dedup was meant to prevent reappears,
+    and nothing re-collapses it without this second pass.
+
+    Found live: kpi_002's "departement"/"Department"/"Name" all resolved to
+    departments.Name, but the generated SQL emitted 3 separate columns for
+    the same value, and the cuts→column resolver and the harness's
+    grain-coverage check picked DIFFERENT ones of the 3 as canonical, so the
+    harness failed claiming a dimension was "absent" that was actually
+    present under a sibling feature's name.
+    """
+    for kpi_entry in mapping.get("kpis", []):
+        features = kpi_entry.get("features")
+        if isinstance(features, list):
+            kpi_entry["features"] = _dedupe_features_by_physical_column(features)
 
 
 def _canonical_survivor(

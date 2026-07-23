@@ -7,6 +7,7 @@ from core.onboarding.kpi.blocker_question_panel import BlockerQuestionPanelBuild
 from core.onboarding.kpi.feature_resolver import (
     KPIFeatureResolver,
     _dedupe_features_by_physical_column,
+    _redupe_all_kpis_after_definitions,
 )
 from core.onboarding.workspace.onboarding import WorkspaceOnboarder
 
@@ -77,6 +78,81 @@ class ContextualDictionaryMappingTests(unittest.TestCase):
             )
             self.assertEqual(total_cost["state"], "proven_alias")
             self.assertEqual(total_cost["source_columns"][0]["column"], "TOTAL_CLAIM_COST")
+
+    def test_redupe_after_definitions_collapses_a_definition_reintroduced_duplicate(self):
+        # Found live (Healthcare-RCM-Data-Platform, kpi_002): _resolve_kpi
+        # dedupes each KPI's OWN features by physical column internally
+        # (its own _dedupe_features_by_physical_column call), but
+        # apply_workspace_definitions_to_mapping runs AFTER every KPI is
+        # resolved, updating an already-existing feature entry in place from
+        # a reusable workspace-level definition -- with no re-dedup
+        # afterward. "Department" auto-proved via the alias/dictionary path
+        # inside _resolve_kpi (resolving to departments.Name); a SEPARATE
+        # sibling feature "Name", still unresolved at the time _resolve_kpi's
+        # own dedup ran, later got confirmed via a reusable workspace
+        # definition pointing to the SAME physical column -- and nothing
+        # re-collapsed the two afterward. The generated SQL emitted two
+        # separate columns for the same value, and the SQL generator's
+        # cuts-resolution and the harness's grain-coverage check picked
+        # DIFFERENT ones of the two as canonical, so the harness failed
+        # claiming a dimension was "absent" that was actually present under
+        # a sibling feature's name.
+        dept_dataset = "workspaces/rcm/datasets/departments.csv"
+        mapping = {
+            "kpis": [
+                {
+                    "kpi_id": "kpi_002",
+                    "features": [
+                        {
+                            "feature": "Department",
+                            "state": "proven_alias",
+                            "resolution_type": "contextual_dictionary_column",
+                            "source_columns": [{"dataset": dept_dataset, "column": "Name"}],
+                        },
+                        {
+                            "feature": "Name",
+                            "state": "candidate_unconfirmed",
+                            "resolution_type": "contextual_column_candidate",
+                            "source_columns": [{"dataset": dept_dataset, "column": "Name"}],
+                            "candidates": [
+                                {"source": dept_dataset, "column": "Name", "name_matched": True}
+                            ],
+                        },
+                        {
+                            "feature": "VisitType",
+                            "state": "proven_direct",
+                            "resolution_type": "direct_column",
+                            "source_columns": [
+                                {"dataset": "workspaces/rcm/datasets/transactions.csv", "column": "VisitType"}
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+
+        # Simulates apply_workspace_definitions_to_mapping confirming "Name"
+        # via a reusable workspace-level definition, straight after
+        # _resolve_kpi's own per-KPI dedup already ran and left it
+        # unresolved (and therefore un-grouped with "Department").
+        name_feature = next(f for f in mapping["kpis"][0]["features"] if f["feature"] == "Name")
+        name_feature["state"] = "user_confirmed"
+        name_feature["resolution_type"] = "physical_column"
+
+        _redupe_all_kpis_after_definitions(mapping)
+
+        features = mapping["kpis"][0]["features"]
+        feature_names = [f["feature"] for f in features]
+        same_column_features = [
+            f for f in features
+            if f.get("source_columns") and f["source_columns"][0].get("column") == "Name"
+        ]
+        self.assertEqual(
+            len(same_column_features), 1,
+            f"expected departments.Name to collapse to one feature, got: {feature_names}",
+        )
+        # VisitType (a genuinely different column) must survive untouched.
+        self.assertIn("VisitType", feature_names)
 
     def test_resolver_creates_json_backed_time_derivation_options(self):
         try:
