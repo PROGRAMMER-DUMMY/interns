@@ -6,7 +6,12 @@ import unittest
 from pathlib import Path
 
 from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
-from core.onboarding.kpi.sql_generator import DuckDBKPISQLGenerator, _formula_inputs, choose_feature_ref
+from core.onboarding.kpi.sql_generator import (
+    DuckDBKPISQLGenerator,
+    _formula_inputs,
+    choose_feature_ref,
+    plan_required_sources,
+)
 from core.onboarding.pipeline_plan import (
     DataEngineeringRoutePlanner,
     PipelineDecisionRecorder,
@@ -290,6 +295,36 @@ class DerivedFormulaRefsTests(unittest.TestCase):
             }
             refs = gen._derived_formula_refs(kpi, "workspaces/demo/datasets/party.csv", profile_map)
             self.assertEqual(refs, [{"dataset": "workspaces/demo/datasets/invoices.csv", "column": "acct"}])
+
+    def test_plan_required_sources_trusts_declared_dataset_too(self) -> None:
+        # plan_required_sources is the explicitly cross-engine-shared source
+        # plan (SQL, Polars, PySpark all consume it) -- the same bare-name-
+        # matching bug lived here too, independently of the SQL-generator-
+        # only copies above, so a fix scoped to only those wouldn't have
+        # protected Polars/PySpark from the same wrong-table resolution.
+        kpi = {
+            "kpi_id": "kpi_test",
+            "features": [
+                {
+                    "feature": "churned",
+                    "resolution_type": "derived_formula",
+                    "source_columns": [
+                        {"dataset": "workspaces/demo/datasets/party.csv", "column": "party_key"},
+                        {"dataset": "workspaces/demo/datasets/invoices.csv", "column": "acct"},
+                    ],
+                }
+            ],
+        }
+        profile_map = {
+            "workspaces/demo/datasets/party.csv": {"schema": {"party_key": "string"}},
+            "workspaces/demo/datasets/addr.csv": {"schema": {"acct": "string"}},
+            "workspaces/demo/datasets/invoices.csv": {"schema": {"acct": "string"}},
+        }
+        base_source, required_sources, chosen = plan_required_sources(
+            kpi, profile_map, Path("."),
+        )
+        self.assertNotIn("workspaces/demo/datasets/addr.csv", required_sources)
+        self.assertIn("workspaces/demo/datasets/invoices.csv", required_sources)
 
 
 class BUG022NoMixSourceLayerTests(unittest.TestCase):

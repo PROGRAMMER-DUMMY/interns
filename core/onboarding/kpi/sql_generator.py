@@ -461,8 +461,19 @@ class DuckDBKPISQLGenerator:
         for feature in kpi.get("features", []):
             if feature.get("resolution_type") != "derived_formula":
                 continue
+            # Explicit source_columns win over _source_for_column's bare-
+            # name matching -- same fix as _derived_formula_refs, needed
+            # here too since this is a separate, duplicated inline copy of
+            # the same logic (found live: skipping this one still resolved
+            # `invoices.acct` to addr.csv here even after fixing the other
+            # copy).
+            declared = {
+                str(sc.get("column") or ""): str(sc.get("dataset") or "")
+                for sc in (feature.get("source_columns") or [])
+                if isinstance(sc, dict) and sc.get("column") and sc.get("dataset")
+            }
             for column in _formula_inputs(feature):
-                source = _source_for_column(column, base_source, profile_map)
+                source = declared.get(column) or _source_for_column(column, base_source, profile_map)
                 if source:
                     required_refs.append({"dataset": source, "column": column})
 
@@ -517,8 +528,16 @@ class DuckDBKPISQLGenerator:
         for feature in kpi.get("features", []):
             if feature.get("resolution_type") != "derived_formula":
                 continue
+            # Same fix as _derived_formula_refs / _required_source_columns:
+            # a third duplicated copy of this loop, same bare-name-matching
+            # bug.
+            declared = {
+                str(sc.get("column") or ""): str(sc.get("dataset") or "")
+                for sc in (feature.get("source_columns") or [])
+                if isinstance(sc, dict) and sc.get("column") and sc.get("dataset")
+            }
             for column in _formula_inputs(feature):
-                source = _source_for_column(column, base_source, profile_map)
+                source = declared.get(column) or _source_for_column(column, base_source, profile_map)
                 if source:
                     required_refs.append({"dataset": source, "column": column})
         required_sources = _unique_preserve_order(
@@ -958,8 +977,21 @@ def plan_required_sources(
     for feature in kpi.get("features", []):
         if feature.get("resolution_type") != "derived_formula":
             continue
+        # Same fix as the other three copies of this loop in this module:
+        # explicit source_columns win over _source_for_column's bare-name
+        # matching, which otherwise picks whichever profiled dataset
+        # happens to sort first alphabetically when more than one table
+        # shares a column name. This copy matters most -- plan_required_sources
+        # is the canonical, explicitly cross-engine-shared source plan (SQL,
+        # Polars, PySpark all consume it), so the bug reached every engine
+        # from here, not just the SQL-specific copies.
+        declared = {
+            str(sc.get("column") or ""): str(sc.get("dataset") or "")
+            for sc in (feature.get("source_columns") or [])
+            if isinstance(sc, dict) and sc.get("column") and sc.get("dataset")
+        }
         for column in _formula_inputs(feature):
-            source = _source_for_column(column, base_source, profile_map)
+            source = declared.get(column) or _source_for_column(column, base_source, profile_map)
             if source:
                 required_refs.append({"dataset": source, "column": column})
     chosen = [ref for ref in required_refs if ref and ref.get("dataset")]
