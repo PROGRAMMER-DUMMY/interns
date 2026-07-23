@@ -289,22 +289,8 @@ def _apply_option(
     if option_id == "custom":
         if not custom_definition:
             raise ValueError("--custom-definition is required when applying the custom option")
-        # A custom definition that is a SQL EXPRESSION (EXISTS/CASE/comparison/
-        # function call) must be recorded as a derived FORMULA so the features
-        # view materializes it under the feature's name — recording it as a
-        # plain business definition made resolution fall back to a column
-        # alias (a readmission flag column full of entity ids). Quoted
-        # identifiers in the formula are its input columns, exactly like the
-        # JSON-backed derived options.
         definition_text = str(custom_definition).strip()
-        looks_like_formula = bool(
-            re.search(r"[()<>=]|\bexists\b|\bcase\b", definition_text, re.IGNORECASE)
-        )
-        formula_inputs = (
-            list(dict.fromkeys(re.findall(r'"([A-Za-z_][A-Za-z0-9_]*)"', definition_text)))
-            if looks_like_formula
-            else []
-        )
+        looks_like_formula, formula_inputs = _custom_definition_source_columns(definition_text)
         return apply_workspace_definition(
             repo_root,
             workspace,
@@ -371,6 +357,43 @@ def _apply_option(
             applies_to_kpis=panel.get("applies_to_kpis") or [],
         )
     raise ValueError(f"Unsupported panel option shape for {option_id}")
+
+
+def _custom_definition_source_columns(definition_text: str) -> tuple[bool, list[str]]:
+    """(looks_like_formula, source_columns) for a human's --custom-definition
+    answer text.
+
+    A custom definition that is a SQL EXPRESSION (EXISTS/CASE/comparison/
+    function call) must be recorded as a derived FORMULA so the features view
+    materializes it under the feature's name -- recording it as a plain
+    business definition made resolution fall back to a column alias. Quoted
+    identifiers in the formula are its input columns, exactly like the
+    JSON-backed derived options.
+
+    source_columns must never come back empty for non-empty text: the
+    downstream merge into kpi_feature_mapping.json
+    (`if definition.get("source_columns"): item["source_columns"] = ...`)
+    only overwrites a feature's stale, pre-override candidate dataset when
+    source_columns is truthy. An empty list here means state/resolution_type
+    flip to user_confirmed but the join-proof/source-to-target planner keeps
+    reasoning off the ORIGINAL wrong dataset forever -- found live: a plain
+    "invoices.Amount" definition (no quotes, not formula-shaped at all) and a
+    formula whose author didn't quote identifiers ("party.party_key WHERE
+    EXISTS ... invoices.Status != 'VOID' ...") both produced zero quoted-
+    identifier matches. Falls back to any bare `table.column`-shaped
+    reference anywhere in the text, covering both cases.
+    """
+    looks_like_formula = bool(re.search(r"[()<>=]|\bexists\b|\bcase\b", definition_text, re.IGNORECASE))
+    formula_inputs = (
+        list(dict.fromkeys(re.findall(r'"([A-Za-z_][A-Za-z0-9_]*)"', definition_text)))
+        if looks_like_formula
+        else []
+    )
+    if not formula_inputs:
+        formula_inputs = list(dict.fromkeys(
+            re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*\b", definition_text)
+        ))
+    return looks_like_formula, formula_inputs
 
 
 def _resolve_answer(panel: dict[str, Any], answer: str) -> dict[str, Any]:

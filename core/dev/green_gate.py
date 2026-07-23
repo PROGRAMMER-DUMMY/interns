@@ -154,6 +154,12 @@ CURATED_MODULES: tuple[str, ...] = (
     # answered `option_a` collided on the same op_id, silently skipping
     # the second application.
     "tests.test_blocker_cli_op_id",
+    # A --custom-definition answer's source_columns must never come back
+    # empty for non-empty text -- an empty list silently no-ops the merge
+    # into kpi_feature_mapping.json, leaving a feature's stale pre-override
+    # candidate dataset in place forever even though state flips to
+    # user_confirmed. Found live via Hostile_Synthetic KPI resolution.
+    "tests.test_blocker_workflow_custom_definition",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
