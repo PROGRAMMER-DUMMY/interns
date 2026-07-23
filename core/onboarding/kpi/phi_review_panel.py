@@ -78,12 +78,26 @@ class PHIReviewPanelBuilder:
             for record in _load_json(disposition_path).get("columns", [])
             if isinstance(record, dict)
         }
+        # A `not_sensitive` answer is written to data_policy.json's
+        # not_sensitive_columns allowlist (_write_allowlist_override), not
+        # phi_disposition.json -- that's a SEPARATE file from the one checked
+        # above. semantic_contract.json's is_sensitive flag is a snapshot from
+        # whenever onboarding last ran; it does not update just because an
+        # answer was recorded, so relying on it alone means a `not_sensitive`
+        # answer can never satisfy this gate -- the panel re-flags the same
+        # column as pending forever, no matter how many times it's answered.
+        # Consult the allowlist directly so an answer takes effect immediately,
+        # regardless of contract staleness. This also honors a workspace
+        # owner's own hand-authored allowlist entries (data_policy.json is
+        # user-authored input per AGENTS.md), not only ones this panel wrote.
+        policy_path = find_policy_path(self.workspace) or (self.workspace / "data_policy.json")
+        already_not_sensitive = set(_load_json(policy_path).get("not_sensitive_columns") or [])
 
         pending = []
         for name, info in sorted(columns.items()):
             if not isinstance(info, dict) or not info.get("is_sensitive"):
                 continue
-            if name in already_dispositioned:
+            if name in already_dispositioned or name in already_not_sensitive:
                 continue
             pending.append(
                 {

@@ -146,6 +146,43 @@ class PHIReviewPanelTests(unittest.TestCase):
             names = {c["column"] for c in current["columns"]}
             self.assertEqual(names, {"PatientName", "InternalRiskScore"})
 
+    def test_not_sensitive_answer_also_drops_out_of_next_panel(self) -> None:
+        # Found live (RCM workspace): a `not_sensitive` answer is written to
+        # data_policy.json's not_sensitive_columns allowlist, a DIFFERENT file
+        # from phi_disposition.json (where the 3 real dispositions go). The
+        # panel's pending computation only ever checked phi_disposition.json
+        # and semantic_contract.json's (never-updated-post-answer) is_sensitive
+        # snapshot -- so a `not_sensitive` answer could never satisfy this
+        # gate. All 10 real columns answered `not_sensitive` for a real
+        # workspace still showed up as pending on every re-generation,
+        # forever, no matter how many times they were answered.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(tmp)
+            apply_phi_review_answer(
+                repo, ws, column="PatientName", answer=NOT_SENSITIVE_ANSWER,
+                confirmed_by="Dr. Smith",
+            )
+            result = PHIReviewPanelBuilder(repo, ws).run()
+            self.assertEqual(result.column_count, 2)
+            current = json.loads((repo / result.current_json).read_text(encoding="utf-8"))
+            names = {c["column"] for c in current["columns"]}
+            self.assertEqual(names, {"SSN", "InternalRiskScore"})
+            self.assertNotIn("PatientName", names)
+
+    def test_hand_authored_allowlist_entry_also_suppresses_the_panel(self) -> None:
+        # data_policy.json is user-authored input (AGENTS.md) -- a workspace
+        # owner can hand-write not_sensitive_columns directly, bypassing this
+        # panel/apply_phi_review_answer entirely. The panel must honor that
+        # pre-existing declaration too, not only entries it wrote itself.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(tmp)
+            _write_json(ws / "data_policy.json", {"not_sensitive_columns": ["SSN"]})
+            result = PHIReviewPanelBuilder(repo, ws).run()
+            self.assertEqual(result.column_count, 2)
+            current = json.loads((repo / result.current_json).read_text(encoding="utf-8"))
+            names = {c["column"] for c in current["columns"]}
+            self.assertEqual(names, {"PatientName", "InternalRiskScore"})
+
 
 if __name__ == "__main__":
     unittest.main()
