@@ -27,6 +27,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from core.orchestration import cosmos_dag
 from core.orchestration.pipeline_stages import STAGES, command_for
 
 _DEFAULT_WORKSPACE_ENV = "AUTORESEARCH_PIPELINE_WORKSPACE"
@@ -83,13 +84,22 @@ def build_dag(
     tasks: dict[str, Any] = {}
     with dag:
         for stage in dag_stages:
-            tasks[stage.key] = BashOperator(
-                task_id=stage.key,
-                bash_command=(
-                    f"cd {repo_root} && " + command_for(stage, ws or "${WORKSPACE}")
-                ),
-                doc_md=stage.description,
-            )
+            if stage.key == "dbt_build" and ws and cosmos_dag.cosmos_available():
+                # Cosmos (DBT_RUNNER, in-process) instead of a subprocess
+                # `dbt build` -- only possible with a concrete workspace
+                # known at DAG-parse time, see cosmos_dag.py's docstring.
+                _generate, build_task = cosmos_dag.build_dbt_tasks(
+                    workspace=ws, repo_root=str(repo_root), task_id_prefix=stage.key,
+                )
+                tasks[stage.key] = build_task
+            else:
+                tasks[stage.key] = BashOperator(
+                    task_id=stage.key,
+                    bash_command=(
+                        f"cd {repo_root} && " + command_for(stage, ws or "${WORKSPACE}")
+                    ),
+                    doc_md=stage.description,
+                )
         # Wire dependencies from the given topology.
         for stage in dag_stages:
             for up in stage.upstream:

@@ -216,6 +216,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # the same human-in-the-loop way KPI features already are, generating
     # real dbt schema tests with tiered severity from confirmed answers.
     "tests.test_data_quality_panel",
+    # dbt+Airflow production-backend Phase D3: workspace-aware stage
+    # topology (dbt_build supersedes medallion_build+kpi_results) and the
+    # Cosmos wiring that runs it via DBT_RUNNER instead of a subprocess.
+    "tests.test_cosmos_dag",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

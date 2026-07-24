@@ -223,6 +223,14 @@ dbt = [
     "dbt-databricks>=1.11,<2",   # Query Tags support requires 1.11+
     "dbt-duckdb>=1.9,<2",
 ]
+orchestration-airflow = [
+    # Cosmos wires the dbt_build stage's generated project into Airflow
+    # (core/orchestration/cosmos_dag.py) via DBT_RUNNER invocation mode.
+    # Both optional: airflow_dag.py falls back to a plain BashOperator
+    # subprocess `dbt build` when this group isn't installed.
+    "apache-airflow>=2.9",
+    "astronomer-cosmos>=1.9",
+]
 
 [tool.ruff]
 line-length    = 100
