@@ -224,6 +224,7 @@ class DbtProjectGenerator:
 
         self._write_project_files(dbt_dir, sources_needed)
         self._write_data_quality_tests(staging_dir)
+        self._write_exposures(dbt_dir, generated_kpi_ids)
 
         return DbtProjectResult(
             dbt_project_dir=_rel(dbt_dir, self.repo_root),
@@ -445,6 +446,47 @@ class DbtProjectGenerator:
             " built-ins -- no package needed.\n"
             "# dbt-expectations added here once a range/statistical check type"
             " is implemented.\npackages: []\n",
+            encoding="utf-8",
+        )
+
+    def _write_exposures(self, dbt_dir: Path, generated_kpi_ids: list[str]) -> None:
+        """Register the live dashboard (core.dashboard) as a formal dbt
+        `exposure` -- so `dbt docs`/lineage treats it as a real downstream
+        consumer of the marts layer, per the dbt+Airflow integration plan's
+        data-contracts section ("the dashboard reading a dbt-produced table
+        is an implicit contract today" -- this makes it explicit). Required
+        exposure fields per dbt's own spec: name, type, owner (name/email);
+        this platform does not track a real per-workspace owner identity
+        yet, so the email is a deterministic, clearly-synthetic placeholder
+        tied to the enterprise/project, not a fabricated real address.
+        """
+        if not generated_kpi_ids:
+            return
+        depends_on = "\n".join(
+            f"      - ref('fct_{kpi_id}')" for kpi_id in sorted(generated_kpi_ids)
+        )
+        owner_slug = self.enterprise_id or self._project_name
+        (dbt_dir / "models" / "exposures.yml").write_text(
+            "\n".join(
+                [
+                    "version: 2",
+                    "",
+                    "exposures:",
+                    f"  - name: {self._project_name}_dashboard",
+                    f'    label: "{self._project_name} Dashboard"',
+                    "    type: dashboard",
+                    "    maturity: high",
+                    "    description: >",
+                    "      The live dashboard (core.dashboard) rendering this workspace's",
+                    "      KPI results from these marts.",
+                    "    depends_on:",
+                    depends_on,
+                    "    owner:",
+                    f"      name: {self._project_name} dashboard",
+                    f"      email: dashboard@{owner_slug}.internal",
+                    "",
+                ]
+            ),
             encoding="utf-8",
         )
 

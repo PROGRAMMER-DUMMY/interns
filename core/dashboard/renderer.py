@@ -22,6 +22,7 @@ import plotly.graph_objs as go
 from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
 from core.dashboard.design_md import DesignTokens, load_design_tokens
+from core.dashboard.model.layers import gold_source_status
 from core.dashboard.spec import DashboardSpec, load_kpi_spec
 from core.onboarding.kpi.registry_loader import load_kpi_definitions
 from core.onboarding.workspace.flow import compute_workflow_diff
@@ -1279,6 +1280,32 @@ def _slice_rows(rows: list[dict[str, Any]], col: str, values: list[Any]) -> list
     return [r for r in rows if str(r.get(col)) in keep]
 
 
+def _staleness_banner(status: Any) -> Any:
+    """"Data as of X" -- a blocked/failed pipeline must be visibly
+    distinguishable from fresh data, never silently indistinguishable from
+    "no KPIs built yet" (dbt+Airflow plan section D4)."""
+    if status.source == "unavailable":
+        if status.mode == "local_files":
+            text = "No gold data yet — run the pipeline to build KPI results."
+        elif not status.remote_read_approved:
+            text = (
+                "Databricks-sourced workspace: remote read not approved "
+                "(AUTORESEARCH_ALLOW_REMOTE_EXECUTION unset) — no data shown."
+            )
+        else:
+            text = "Databricks-sourced workspace: no dbt-built gold marts found yet."
+        return html.Div(
+            text, className="staleness-banner staleness-warn",
+            style={"color": "#b45309", "fontSize": ".75rem", "marginTop": "4px"},
+        )
+    label = "local build" if status.source == "local_delta" else "Databricks dbt mart"
+    return html.Div(
+        f"Data as of {status.as_of or 'unknown'} — {label}",
+        className="staleness-banner",
+        style={"color": "var(--ink-soft, #667085)", "fontSize": ".75rem", "marginTop": "4px"},
+    )
+
+
 def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
     """Build the per-workspace BI Dash app: overview tiles (fit one viewport) + a
     drill-down detail showing the selected KPI's data-derived panels. Charts use
@@ -1435,7 +1462,8 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
 
     app.layout = html.Div([
         html.Header([html.P("Workspace Intelligence", className="ey"),
-                     html.H1(workspace.name.replace("-", " "))], className="mast"),
+                     html.H1(workspace.name.replace("-", " ")),
+                     _staleness_banner(gold_source_status(layout))], className="mast"),
         html.Div(strip_children or [html.Div("No KPIs registered yet.", className="n")], className="strip"),
         kpi_state,
         # Phase 2 drill state: {kpi_id, by, value} when a category is drilled,

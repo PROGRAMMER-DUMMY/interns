@@ -109,6 +109,15 @@ class DbtProjectGeneratorLocalCsvTests(unittest.TestCase):
             self.assertEqual(tags["env"], "prod")
             self.assertIn("project_name", tags)
 
+            # Dashboard registered as a formal dbt exposure (dbt+Airflow
+            # plan section D4): dbt docs/lineage treats it as a real
+            # downstream consumer of the marts layer, not an invisible one.
+            exposures_yml = (dbt_dir / "models" / "exposures.yml").read_text(encoding="utf-8")
+            self.assertIn("type: dashboard", exposures_yml)
+            self.assertIn("ref('fct_kpi_001')", exposures_yml)
+            self.assertIn("owner:", exposures_yml)
+            self.assertIn("email:", exposures_yml)
+
     def test_query_tags_project_name_is_the_enterprise_not_the_workspace(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

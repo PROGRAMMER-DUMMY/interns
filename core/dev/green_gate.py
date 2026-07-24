@@ -224,6 +224,12 @@ CURATED_MODULES: tuple[str, ...] = (
     # refuses an over-threshold date-range span without a human-confirmed
     # override (Human-Gate Provenance Rule), never automatic.
     "tests.test_dbt_backfill",
+    # dbt+Airflow production-backend Phase D4: the dashboard's gold read
+    # dispatches local-first between local Delta and a dbt-built Databricks
+    # mart, gated by the same remote-execution approval as every other
+    # Databricks path -- and the "data as of X" staleness banner.
+    "tests.test_dashboard_layers",
+    "tests.test_dashboard_staleness_banner",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
