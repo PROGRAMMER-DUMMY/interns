@@ -27,6 +27,19 @@ quoted Spark SQL this emits has not been verified, so profiles.yml declares
 one target, not two, until that's checked). A KPI whose derived_formula
 resolves to something this generator cannot express is skipped with a clear
 reason, never silently emitted as broken dbt SQL.
+
+Medallion layering: `--schema` is the BRONZE/source schema only (sources.yml
+reads the already-existing raw UC tables there -- exclusive mode has no
+ingestion step, bronze already exists). staging+intermediate models (the
+cleaned, conformed, joined layer) write to `--silver-schema` (default
+"silver"); marts models (the business-facing KPI output) write to
+`--gold-schema` (default "gold") -- same bronze/silver/gold semantics as
+this platform's local medallion pipeline, not a flat dump of every layer
+into the source schema. Real (dbt's own documented pattern, not a novel
+override -- see `generate_schema_name_for_env` in dbt-core's own
+get_custom_schema.sql): the generated project ships a `generate_schema_name`
+macro override so a model's `+schema:` config becomes the literal schema
+name, not dbt's default `{target_schema}_{custom_schema}` concatenation.
 """
 from __future__ import annotations
 from core.observability.cost_ledger import anchored
@@ -77,12 +90,26 @@ class DbtProjectGenerator:
         catalog: str,
         schema: str,
         enterprise_id: str = "",
+        silver_schema: str = "silver",
+        gold_schema: str = "gold",
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
         self.layout = WorkspaceLayout(project_root=self.workspace)
+        # `schema` is the BRONZE/source schema -- where dbt's sources.yml
+        # points to read the already-existing raw UC tables (exclusive mode:
+        # no ingestion, they already exist). Medallion layering happens
+        # WITHIN the same catalog via silver_schema/gold_schema, not by
+        # dumping every layer into the source schema -- staging+intermediate
+        # (the cleaned, conformed, joined layer) write to silver_schema;
+        # marts (the business-facing KPI output) write to gold_schema. Same
+        # bronze/silver/gold semantics as this platform's local medallion
+        # pipeline (WorkspaceLayout.bronze_dir/silver_dir/gold_dir), just
+        # expressed as dbt schemas instead of local directories.
         self.catalog = catalog
         self.schema = schema
+        self.silver_schema = silver_schema
+        self.gold_schema = gold_schema
         self.enterprise_id = enterprise_id or self.layout.enterprise_id()
         # Internal reuse only -- never writes sql_generator.py's own
         # solutions/*.sql output; only its private join/masking/quoting
@@ -290,6 +317,7 @@ class DbtProjectGenerator:
     def _write_project_files(
         self, dbt_dir: Path, sources_needed: dict[str, dict[str, Any]]
     ) -> None:
+        (dbt_dir / "macros").mkdir(parents=True, exist_ok=True)
         (dbt_dir / "dbt_project.yml").write_text(
             "\n".join(
                 [
@@ -300,16 +328,49 @@ class DbtProjectGenerator:
                     f"profile: '{self._project_name}'",
                     "",
                     'model-paths: ["models"]',
+                    'macro-paths: ["macros"]',
                     'test-paths: ["tests"]',
                     "",
                     "models:",
                     f"  {self._project_name}:",
                     "    staging:",
                     "      +materialized: view",
+                    f"      +schema: {self.silver_schema}",
                     "    intermediate:",
                     "      +materialized: view",
+                    f"      +schema: {self.silver_schema}",
                     "    marts:",
                     "      +materialized: table",
+                    f"      +schema: {self.gold_schema}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        # dbt's default generate_schema_name CONCATENATES the target schema
+        # with a model's `+schema:` (e.g. "bronze_silver") -- not what
+        # medallion layering needs. This override is dbt's own documented
+        # pattern (generate_schema_name_for_env in
+        # dbt/include/global_project/macros/get_custom_name/get_custom_schema.sql)
+        # for using the custom schema name directly: silver_schema/
+        # gold_schema become real schema names, not a mangled concatenation.
+        (dbt_dir / "macros" / "get_custom_schema.sql").write_text(
+            "\n".join(
+                [
+                    "{% macro generate_schema_name(custom_schema_name, node) -%}",
+                    "",
+                    "    {%- set default_schema = target.schema -%}",
+                    "    {%- if custom_schema_name is none -%}",
+                    "",
+                    "        {{ default_schema }}",
+                    "",
+                    "    {%- else -%}",
+                    "",
+                    "        {{ custom_schema_name | trim }}",
+                    "",
+                    "    {%- endif -%}",
+                    "",
+                    "{%- endmacro %}",
                     "",
                 ]
             ),
@@ -391,7 +452,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
     parser.add_argument("--catalog", required=True, help="Databricks catalog for this project.")
-    parser.add_argument("--schema", required=True, help="Databricks schema for this project.")
+    parser.add_argument(
+        "--schema", required=True,
+        help="BRONZE/source schema -- where sources.yml reads the already-existing raw UC tables.",
+    )
+    parser.add_argument(
+        "--silver-schema", default="silver",
+        help="Schema staging+intermediate models write to (the cleaned/conformed layer). Default: silver.",
+    )
+    parser.add_argument(
+        "--gold-schema", default="gold",
+        help="Schema marts models write to (the business-facing KPI layer). Default: gold.",
+    )
     parser.add_argument("--enterprise-id", default="", help="Overrides workspace_settings.json's databricks_source.enterprise_id.")
     args = parser.parse_args(argv)
     result = DbtProjectGenerator(
@@ -399,6 +471,8 @@ def main(argv: list[str] | None = None) -> int:
         args.workspace,
         catalog=args.catalog,
         schema=args.schema,
+        silver_schema=args.silver_schema,
+        gold_schema=args.gold_schema,
         enterprise_id=args.enterprise_id,
     ).generate()
     print(json.dumps(result.summary(), indent=2))

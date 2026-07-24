@@ -75,6 +75,17 @@ class DbtProjectGeneratorLocalCsvTests(unittest.TestCase):
             self.assertNotIn("`main`.`rcm`", mart_sql)
             self.assertIn("sum_paidamount", mart_sql.lower())
 
+            # Medallion layering: staging+intermediate write to silver,
+            # marts write to gold -- never dumped into the bronze/source
+            # schema itself. Found live: the first version of this generator
+            # wrote every layer into whatever single --schema was passed.
+            project_yml = (dbt_dir / "dbt_project.yml").read_text(encoding="utf-8")
+            self.assertIn("+schema: silver", project_yml)
+            self.assertIn("+schema: gold", project_yml)
+            macro_sql = (dbt_dir / "macros" / "get_custom_schema.sql").read_text(encoding="utf-8")
+            self.assertIn("generate_schema_name", macro_sql)
+            self.assertIn("custom_schema_name | trim", macro_sql)
+
             # Project scaffolding.
             self.assertTrue((dbt_dir / "dbt_project.yml").exists())
             profiles = (dbt_dir / "profiles.yml").read_text(encoding="utf-8")
