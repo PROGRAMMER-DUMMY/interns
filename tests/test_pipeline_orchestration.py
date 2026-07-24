@@ -3,10 +3,12 @@ Dagster wiring imports gracefully without Dagster installed.
 """
 from __future__ import annotations
 
+import os
 import unittest
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from core.onboarding.data_source_panel import DataSourceAnswerRecorder
 from core.orchestration.pipeline_stages import (
@@ -49,6 +51,17 @@ class PipelineTopologyTests(unittest.TestCase):
         cmd = command_for(stage, "workspaces/demo")
         self.assertIn("workspaces/demo", cmd)
         self.assertNotIn("{ws}", cmd)
+
+    def test_dbt_build_stage_retries_via_dbt_retry_before_a_full_rebuild(self):
+        # dbt retry (1.6+) resumes from target/run_results.json instead of
+        # rebuilding every model from scratch -- only correct here because
+        # this BashOperator path runs in the SAME stable {ws}/dbt directory
+        # every invocation (unlike the Cosmos path, which temp-clones).
+        cmd = command_for(DBT_BUILD_STAGE, "workspaces/demo")
+        retry_idx = cmd.index("dbt retry")
+        build_idx = cmd.index("dbt build")
+        self.assertLess(retry_idx, build_idx, "dbt retry must be attempted before dbt build")
+        self.assertIn("||", cmd)
 
 
 class StagesForWorkspaceTests(unittest.TestCase):
@@ -126,6 +139,18 @@ class AirflowWiringTests(unittest.TestCase):
         from core.orchestration import airflow_dag
         self.assertTrue(hasattr(airflow_dag, "build_dag"))
 
+    def test_does_not_use_the_removed_days_ago_helper(self):
+        # Found live against a real Airflow install: airflow.utils.dates.days_ago
+        # no longer exists (removed) -- and was Airflow's own documented
+        # anti-pattern anyway (a dynamic start_date shifts on every DAG
+        # re-parse, causing duplicate/missing runs). Static source check since
+        # this venv doesn't have Airflow installed to catch it at import time.
+        import inspect
+
+        from core.orchestration import airflow_dag
+        source = inspect.getsource(airflow_dag)
+        self.assertNotIn("from airflow.utils.dates import days_ago", source)
+
     def test_build_dag_requires_airflow_clearly(self):
         from core.orchestration import airflow_dag
         try:
@@ -143,6 +168,42 @@ class AirflowWiringTests(unittest.TestCase):
         except ImportError:
             with self.assertRaises(SystemExit):
                 airflow_dag.build_dag("workspaces/demo", stages=(DBT_BUILD_STAGE,))
+
+
+class NotifyFailureTests(unittest.TestCase):
+    """_notify_failure: webhook alert on a real task failure. Airflow's
+    on_failure_callback only fires once retries are exhausted, so every
+    call here is already "page-worthy" by construction -- no severity
+    routing needed at this layer."""
+
+    def test_no_webhook_url_is_a_silent_no_op(self):
+        from core.orchestration.airflow_dag import _notify_failure
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AUTORESEARCH_ALERT_WEBHOOK_URL", None)
+            with patch("urllib.request.urlopen") as mock_urlopen:
+                _notify_failure({"task_instance": None, "dag": None})
+                mock_urlopen.assert_not_called()
+
+    def test_webhook_url_set_posts_a_message(self):
+        from core.orchestration.airflow_dag import _notify_failure
+
+        ti = MagicMock(task_id="dbt_build")
+        dag = MagicMock(dag_id="autoresearch_medallion_pipeline")
+        with patch.dict(os.environ, {"AUTORESEARCH_ALERT_WEBHOOK_URL": "https://hooks.example/x"}):
+            with patch("urllib.request.urlopen") as mock_urlopen:
+                _notify_failure({"task_instance": ti, "dag": dag})
+                mock_urlopen.assert_called_once()
+                request = mock_urlopen.call_args[0][0]
+                self.assertEqual(request.full_url, "https://hooks.example/x")
+                self.assertIn(b"dbt_build", request.data)
+
+    def test_webhook_failure_never_raises(self):
+        from core.orchestration.airflow_dag import _notify_failure
+
+        with patch.dict(os.environ, {"AUTORESEARCH_ALERT_WEBHOOK_URL": "https://hooks.example/x"}):
+            with patch("urllib.request.urlopen", side_effect=RuntimeError("network down")):
+                _notify_failure({"task_instance": None, "dag": None})  # must not raise
 
 
 class OrchestratorChoiceTests(unittest.TestCase):

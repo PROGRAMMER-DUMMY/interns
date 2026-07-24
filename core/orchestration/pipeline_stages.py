@@ -87,13 +87,26 @@ DBT_BUILD_STAGE = Stage(
     key="dbt_build",
     command=(
         "uv run generate-dbt-project --workspace {ws} && "
-        "dbt build --project-dir {ws}/dbt --profiles-dir {ws}/dbt"
+        "(dbt retry --project-dir {ws}/dbt --profiles-dir {ws}/dbt "
+        "|| dbt build --project-dir {ws}/dbt --profiles-dir {ws}/dbt)"
     ),
+    # `dbt retry` (1.6+) resumes from target/run_results.json instead of
+    # rebuilding every model from scratch -- this only works because this
+    # BashOperator path runs `dbt build` in the SAME stable {ws}/dbt
+    # directory every time (generate-dbt-project never touches target/), so
+    # a prior failed run's state survives an Airflow task retry. `|| dbt
+    # build` covers the first-ever run (no run_results.json to retry yet)
+    # and any retry that itself needs a full rebuild. NOT wired into the
+    # Cosmos-backed path (cosmos_dag.py's DbtBuildLocalOperator) -- found
+    # live that Cosmos clones the project to a fresh temp directory on
+    # every invocation, so there is no persistent target/ for `dbt retry`
+    # to resume from without deeper Cosmos configuration this session
+    # hasn't verified; that stays a plain re-run there for now.
     upstream=("resolve_features",),
     description=(
         "Generate + build the dbt project (staging/intermediate/marts, medallion-"
         "layered bronze/silver/gold) for a workspace on the dbt path. Supersedes "
-        "medallion_build+kpi_results on that path."
+        "medallion_build+kpi_results on that path. Retries resume via `dbt retry`."
     ),
     produces=("{ws}/dbt/target/manifest.json", "{ws}/dbt/models/**/*.sql"),
 )
