@@ -10,12 +10,33 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from core.onboarding.data_source_panel import DataSourceAnswerRecorder
 from core.onboarding.kpi.dbt_project_generator import DbtProjectGenerator
 from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
 from core.onboarding.workspace.onboarding import WorkspaceOnboarder
 from core.storage.workspace_layout import WorkspaceLayout
+
+
+def _create_kpi001_workspace(root: Path) -> Path:
+    workspace = root / "workspaces" / "demo"
+    (workspace / "datasets").mkdir(parents=True)
+    (workspace / "docs").mkdir(parents=True)
+    (workspace / "datasets" / "transactions.csv").write_text(
+        "ClaimID,PaidAmount,LineOfBusiness\n"
+        "C1,10.50,Commercial\n"
+        "C2,20.25,Medicare\n",
+        encoding="utf-8",
+    )
+    (workspace / "docs" / "kpi_registry.csv").write_text(
+        "Key business question,Description,Cuts / grain hints,Metric,Data model refinement required\n"
+        "What is paid amount by line of business?,Baseline KPI,LineOfBusiness,sum(PaidAmount),\n",
+        encoding="utf-8",
+    )
+    WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+    KPIFeatureResolver(root, "workspaces/demo", domain="healthcare").run()
+    return workspace
 
 
 class DbtProjectGeneratorLocalCsvTests(unittest.TestCase):
@@ -193,6 +214,92 @@ class DbtProjectGeneratorUcSourcedTests(unittest.TestCase):
             written = (layout.contracts_dir.parent / "stg_cptcodes.sql").read_text(encoding="utf-8")
             self.assertIn("{{ source('raw', 'cptcodes') }}", written)
             self.assertNotIn("healthcare_rcm", written)
+
+
+class ContractEnforcementTests(unittest.TestCase):
+    """contract: enforced: true (dbt+Airflow plan section D5) -- column
+    data_types come from the REAL already-built table (DESCRIBE TABLE), not
+    a guess, so this suite mocks DatabricksClient rather than needing a live
+    warehouse (same split every other real-infra-dependent piece in this
+    generator already uses)."""
+
+    def test_enforce_contracts_false_by_default_writes_no_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _create_kpi001_workspace(root)
+            result = DbtProjectGenerator(
+                root, "workspaces/demo", catalog="main", schema="rcm",
+            ).generate()
+            self.assertFalse(
+                (root / result.dbt_project_dir / "models" / "marts" / "_contracts.yml").exists()
+            )
+
+    def test_enforce_contracts_true_reads_real_table_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _create_kpi001_workspace(root)
+
+            mock_cfg = MagicMock(is_active=lambda: True)
+            mock_client = MagicMock()
+            mock_client.execute_query.return_value = (
+                ["col_name", "data_type", "comment"],
+                [["lineofbusiness", "string", None], ["sum_paidamount", "double", None]],
+            )
+            with patch("core.config.resolve_databricks_config", return_value=mock_cfg), patch(
+                "core.execution.databricks_client.DatabricksClient", return_value=mock_client
+            ):
+                result = DbtProjectGenerator(
+                    root, "workspaces/demo", catalog="main", schema="rcm",
+                    enforce_contracts=True,
+                ).generate()
+
+            contracts_path = root / result.dbt_project_dir / "models" / "marts" / "_contracts.yml"
+            self.assertTrue(contracts_path.exists())
+            text = contracts_path.read_text(encoding="utf-8")
+            self.assertIn("name: fct_kpi_001", text)
+            self.assertIn("enforced: true", text)
+            self.assertIn("name: lineofbusiness", text)
+            self.assertIn("data_type: string", text)
+            self.assertIn("data_type: double", text)
+            mock_client.execute_query.assert_called_once_with(
+                "DESCRIBE TABLE `main`.`gold`.`fct_kpi_001`"
+            )
+
+    def test_mart_not_built_yet_is_skipped_not_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _create_kpi001_workspace(root)
+
+            mock_cfg = MagicMock(is_active=lambda: True)
+            mock_client = MagicMock()
+            mock_client.execute_query.side_effect = RuntimeError("TABLE_OR_VIEW_NOT_FOUND")
+            with patch("core.config.resolve_databricks_config", return_value=mock_cfg), patch(
+                "core.execution.databricks_client.DatabricksClient", return_value=mock_client
+            ):
+                result = DbtProjectGenerator(
+                    root, "workspaces/demo", catalog="main", schema="rcm",
+                    enforce_contracts=True,
+                ).generate()
+
+            self.assertEqual(result.kpi_count, 1)  # generation itself still succeeds
+            self.assertFalse(
+                (root / result.dbt_project_dir / "models" / "marts" / "_contracts.yml").exists()
+            )
+
+    def test_config_inactive_skips_without_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _create_kpi001_workspace(root)
+
+            mock_cfg = MagicMock(is_active=lambda: False)
+            with patch("core.config.resolve_databricks_config", return_value=mock_cfg):
+                result = DbtProjectGenerator(
+                    root, "workspaces/demo", catalog="main", schema="rcm",
+                    enforce_contracts=True,
+                ).generate()
+            self.assertFalse(
+                (root / result.dbt_project_dir / "models" / "marts" / "_contracts.yml").exists()
+            )
 
 
 if __name__ == "__main__":

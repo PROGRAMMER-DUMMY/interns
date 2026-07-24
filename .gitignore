@@ -39,3 +39,10 @@ build/
 /PLAN_*.md
 /docs/plans/*
 # (already-committed shared plans stay tracked; gitignore only hides new/untracked ones)
+
+# Databricks secrets
+*.token
+
+# Per-enterprise Databricks config (core.config.resolve_databricks_config) --
+# same "real values for this machine, not committed" treatment as config/lock.toml.
+config/enterprises/*/lock.toml

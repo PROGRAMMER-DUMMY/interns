@@ -956,11 +956,15 @@ class WorkspaceOnboarder:
         if not catalog or not schema:
             return []
         try:
-            from core.config import load as load_config
+            from core.config import resolve_databricks_config
             from core.execution.databricks_client import DatabricksClient
 
-            cfg = load_config()
-            client = DatabricksClient(cfg.databricks)
+            # Per-enterprise credential/catalog resolution (dbt+Airflow plan
+            # section 9): this workspace's declared enterprise_id (or its
+            # catalog as a fallback) picks its own config override when one
+            # exists, else the global config exactly as before.
+            db_cfg = resolve_databricks_config(self.layout.enterprise_id())
+            client = DatabricksClient(db_cfg)
             if not client.is_configured():
                 return []
             _, rows = client.execute_query(f"SHOW TABLES IN `{catalog}`.`{schema}`")
@@ -1300,12 +1304,14 @@ class WorkspaceOnboarder:
         warnings: list[str] = []
         if not table_fqns:
             return profiles, warnings
-        from core.config import load as load_config
+        from core.config import resolve_databricks_config
         from core.execution.databricks_client import DatabricksClient
         from core.profiling.databricks_table_profiler import profile_uc_table
 
-        cfg = load_config()
-        client = DatabricksClient(cfg.databricks)
+        # Per-enterprise credential/catalog resolution (dbt+Airflow plan
+        # section 9) -- same seam as _databricks_source_tables() above.
+        db_cfg = resolve_databricks_config(self.layout.enterprise_id())
+        client = DatabricksClient(db_cfg)
         for fqn in table_fqns:
             try:
                 catalog, schema, table = fqn.split(".", 2)

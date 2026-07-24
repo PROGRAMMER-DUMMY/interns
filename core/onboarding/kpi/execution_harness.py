@@ -391,10 +391,17 @@ class KPIExecutionHarness:
             ]
 
         from core.config import load as load_config
+        from core.config import resolve_databricks_config
         from core.execution.backend import _phi_gate_failure_for_task
         from core.execution.databricks_client import DatabricksClient
 
         cfg = load_config()
+        # Per-enterprise credential/catalog resolution (dbt+Airflow plan
+        # section 9) -- a workspace's declared enterprise_id (or its
+        # databricks_source.catalog as a fallback) picks its own config
+        # override when one exists; falls back to the global config exactly
+        # as before for every workspace that hasn't declared one.
+        cfg.databricks = resolve_databricks_config(self.layout.enterprise_id())
         phi_failure = _phi_gate_failure_for_task(
             {"workspace": _rel(self.workspace, self.repo_root)}, cfg
         )

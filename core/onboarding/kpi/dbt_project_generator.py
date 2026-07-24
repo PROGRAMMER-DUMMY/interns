@@ -92,6 +92,7 @@ class DbtProjectGenerator:
         enterprise_id: str = "",
         silver_schema: str = "silver",
         gold_schema: str = "gold",
+        enforce_contracts: bool = False,
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
@@ -111,6 +112,7 @@ class DbtProjectGenerator:
         self.silver_schema = silver_schema
         self.gold_schema = gold_schema
         self.enterprise_id = enterprise_id or self.layout.enterprise_id()
+        self.enforce_contracts = enforce_contracts
         # Internal reuse only -- never writes sql_generator.py's own
         # solutions/*.sql output; only its private join/masking/quoting
         # helpers are called directly from this generator.
@@ -225,6 +227,8 @@ class DbtProjectGenerator:
         self._write_project_files(dbt_dir, sources_needed)
         self._write_data_quality_tests(staging_dir)
         self._write_exposures(dbt_dir, generated_kpi_ids)
+        if self.enforce_contracts:
+            self._write_contracts(marts_dir, generated_kpi_ids)
 
         return DbtProjectResult(
             dbt_project_dir=_rel(dbt_dir, self.repo_root),
@@ -490,6 +494,61 @@ class DbtProjectGenerator:
             encoding="utf-8",
         )
 
+    def _write_contracts(self, marts_dir: Path, generated_kpi_ids: list[str]) -> None:
+        """Emit `contract: enforced: true` for each mart the dashboard reads,
+        per the dbt+Airflow integration plan's data-contracts section (D5):
+        "the dashboard reading a dbt-produced table is an implicit contract
+        today" -- this makes it explicit and dbt-enforced.
+
+        Column `data_type`s come from the REAL, already-built table
+        (`DESCRIBE TABLE`), not a guessed/inferred type -- a contract states
+        ground truth; a wrong guess would make every future `dbt build` fail
+        on a false mismatch. This means enforcement requires at least one
+        prior successful build: a KPI whose mart doesn't exist yet (first-
+        ever generation, or Databricks unreachable) is skipped, not an
+        error -- re-running this command after a build picks it up.
+        `enforce_contracts=False` (the default) never calls this at all, so
+        every existing generated project stays byte-identical.
+        """
+        from core.config import resolve_databricks_config
+        from core.execution.databricks_client import DatabricksClient
+
+        db_cfg = resolve_databricks_config(self.enterprise_id)
+        if not db_cfg.is_active():
+            return
+        client = DatabricksClient(db_cfg)
+        contracted: list[dict[str, Any]] = []
+        for kpi_id in sorted(generated_kpi_ids):
+            model_name = f"fct_{kpi_id}"
+            try:
+                cols, rows = client.execute_query(
+                    f"DESCRIBE TABLE `{self.catalog}`.`{self.gold_schema}`.`{model_name}`"
+                )
+            except Exception:
+                continue
+            columns = [
+                {"name": str(r[0]), "data_type": str(r[1])}
+                for r in rows
+                if r and r[0] and not str(r[0]).startswith("#")
+            ]
+            if not columns:
+                continue
+            contracted.append({"name": model_name, "columns": columns})
+        if not contracted:
+            return
+        lines = ["version: 2", "", "models:"]
+        for model in contracted:
+            lines.append(f"  - name: {model['name']}")
+            lines.append("    config:")
+            lines.append("      contract:")
+            lines.append("        enforced: true")
+            lines.append("    columns:")
+            for col in model["columns"]:
+                lines.append(f"      - name: {col['name']}")
+                lines.append(f"        data_type: {col['data_type']}")
+        lines.append("")
+        (marts_dir / "_contracts.yml").write_text("\n".join(lines), encoding="utf-8")
+
     def _write_data_quality_tests(self, staging_dir: Path) -> None:
         """Emit dbt schema tests from confirmed data_quality_panel.py answers
         (data_quality_decisions.json) -- never hand-maintained YAML. Attached
@@ -618,6 +677,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Schema marts models write to (the business-facing KPI layer). Default: gold.",
     )
     parser.add_argument("--enterprise-id", default="", help="Overrides workspace_settings.json's databricks_source.enterprise_id.")
+    parser.add_argument(
+        "--enforce-contracts", action="store_true",
+        help="Emit contract: enforced: true for each mart, with column data_types read from "
+        "the REAL already-built table (DESCRIBE TABLE) -- requires at least one prior "
+        "successful `dbt build`; a mart that doesn't exist yet is skipped, not an error.",
+    )
     args = parser.parse_args(argv)
     catalog, schema = args.catalog, args.schema
     if not catalog or not schema:
@@ -639,6 +704,7 @@ def main(argv: list[str] | None = None) -> int:
         silver_schema=args.silver_schema,
         gold_schema=args.gold_schema,
         enterprise_id=args.enterprise_id,
+        enforce_contracts=args.enforce_contracts,
     ).generate()
     print(json.dumps(result.summary(), indent=2))
     return 0

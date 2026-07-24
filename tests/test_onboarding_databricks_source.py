@@ -68,6 +68,30 @@ class DatabricksSourceTablesTests(unittest.TestCase):
             )
             fake_query.assert_called_once_with("SHOW TABLES IN `zzz_widgets`.`raw_layer`")
 
+    def test_resolves_config_through_the_per_enterprise_seam(self):
+        # dbt+Airflow plan section 9: table discovery must resolve its
+        # DatabricksClient via resolve_databricks_config(enterprise_id), not
+        # the global load().databricks directly -- so a workspace whose
+        # enterprise_id has its own config override actually uses it.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(
+                tmp,
+                settings={"databricks_source": {
+                    "catalog": "zzz_widgets", "schema": "raw_layer", "enterprise_id": "acme_corp",
+                }},
+            )
+            onboarder = WorkspaceOnboarder(repo, ws)
+            with mock.patch(
+                "core.config.resolve_databricks_config"
+            ) as fake_resolve, mock.patch(
+                "core.execution.databricks_client.DatabricksClient.is_configured", return_value=True
+            ), mock.patch(
+                "core.execution.databricks_client.DatabricksClient.execute_query",
+                return_value=(["database", "tableName", "isTemporary"], []),
+            ):
+                onboarder._databricks_source_tables()
+            fake_resolve.assert_called_once_with("acme_corp")
+
     def test_table_discovery_failure_does_not_raise(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo, ws = _fixture_workspace(
@@ -122,6 +146,25 @@ class ProfileDatabricksTablesTests(unittest.TestCase):
             onboarder = WorkspaceOnboarder(repo, ws)
             profiles, warnings = onboarder.profile_databricks_tables([])
             self.assertEqual((profiles, warnings), ([], []))
+
+    def test_resolves_config_through_the_per_enterprise_seam(self):
+        from core.profiling.data_model_profiler import ColumnProfile, DatasetProfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(
+                tmp, settings={"databricks_source": {"enterprise_id": "acme_corp"}}
+            )
+            onboarder = WorkspaceOnboarder(repo, ws)
+            fake_profile = DatasetProfile(
+                path="`c`.`s`.`t`", format="delta", row_count=1, file_count=1, size_bytes=0,
+                schema={"A": "string"}, columns=[ColumnProfile(name="A", dtype="string")],
+                downcast_recommendations=[], sources_used=["sql_warehouse_sample"], warnings=[],
+            )
+            with mock.patch("core.config.resolve_databricks_config") as fake_resolve, mock.patch(
+                "core.profiling.databricks_table_profiler.profile_uc_table", return_value=fake_profile
+            ):
+                onboarder.profile_databricks_tables(["c.s.t"])
+            fake_resolve.assert_called_once_with("acme_corp")
 
 
 class ExclusiveModeOnboardingTests(unittest.TestCase):

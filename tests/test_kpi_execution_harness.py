@@ -834,6 +834,31 @@ class DatabricksExecutionHarnessTests(unittest.TestCase):
             create_sql = fake_query.call_args_list[0].args[0]
             self.assertIn("CREATE OR REPLACE VIEW", create_sql)
 
+    def test_resolves_config_through_the_per_enterprise_seam(self):
+        # dbt+Airflow plan section 9: remote KPI execution must resolve its
+        # DatabricksClient via resolve_databricks_config(enterprise_id), not
+        # the global load().databricks directly.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._workspace_with_sql(root, self._SQL)
+            (ws / "workspace_settings.json").write_text(
+                json.dumps({"databricks_source": {"enterprise_id": "acme_corp"}}), encoding="utf-8"
+            )
+            with mock.patch.dict("os.environ", {"AUTORESEARCH_ALLOW_REMOTE_EXECUTION": "1"}), \
+                 mock.patch(
+                     "core.execution.backend._phi_gate_failure_for_task", return_value=None
+                 ), \
+                 mock.patch("core.config.resolve_databricks_config") as fake_resolve, \
+                 mock.patch(
+                     "core.execution.databricks_client.DatabricksClient.is_configured",
+                     return_value=False,
+                 ):
+                KPIExecutionHarness(
+                    root, "workspaces/demo", dialect="databricks",
+                    catalog="main", schema="rcm",
+                ).run()
+            fake_resolve.assert_called_once_with("acme_corp")
+
     def test_warehouse_error_fails_with_no_crash(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
