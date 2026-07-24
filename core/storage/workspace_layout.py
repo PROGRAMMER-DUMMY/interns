@@ -211,6 +211,23 @@ class WorkspaceLayout:
             return mode
         return "additive"
 
+    def enterprise_id(self) -> str:
+        """The tenant/enterprise a Databricks-sourced workspace belongs to,
+        for core.config.resolve_databricks_config(). Explicit
+        `databricks_source.enterprise_id` wins; falls back to
+        `databricks_source.catalog` (the natural per-enterprise isolation
+        boundary -- see the dbt+Airflow integration plan) when absent; empty
+        string (global config, today's only real case) when neither is set.
+        """
+        settings = self.load_settings()
+        source = settings.get("databricks_source")
+        if not isinstance(source, dict):
+            return ""
+        explicit = str(source.get("enterprise_id") or "").strip()
+        if explicit:
+            return explicit
+        return str(source.get("catalog") or "").strip()
+
     def is_dataset_allowed(self, path: Path) -> bool:
         settings = self.load_settings()
         return path_allowed_by_entries(path, project_root=self.project_root, settings=settings)

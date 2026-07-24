@@ -54,6 +54,7 @@ resolve-kpi-features = "core.onboarding.kpi.feature_resolver:main"
 plan-kpi-completion = "core.onboarding.kpi.parallel_completion:main"
 apply-kpi-definition = "core.onboarding.kpi.kpi_definition:main"
 generate-kpi-sql = "core.onboarding.kpi.sql_generator:main"
+generate-dbt-project = "core.onboarding.kpi.dbt_project_generator:main"
 generate-kpi-engines = "core.onboarding.kpi.generate_kpi_engines:main"
 kpi-local-warehouse = "core.onboarding.kpi.local_warehouse:main"
 run-kpi-execution-harness = "core.onboarding.kpi.execution_harness:main"
@@ -211,6 +212,14 @@ databricks = [
     "mlflow>=3.0",
     "pyspark>=3.5.1,<4",
     "deltalake>=1.5.1",
+]
+dbt = [
+    # Classic dbt-core, not Fusion: dbt-fusion's Databricks support is Private
+    # Preview and DuckDB support is Beta as of this pin -- the two adapters
+    # this platform needs. Revisit once Databricks support exits preview.
+    "dbt-core>=1.11,<2",
+    "dbt-databricks>=1.11,<2",   # Query Tags support requires 1.11+
+    "dbt-duckdb>=1.9,<2",
 ]
 
 [tool.ruff]

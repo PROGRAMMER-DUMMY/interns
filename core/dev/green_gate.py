@@ -206,6 +206,12 @@ CURATED_MODULES: tuple[str, ...] = (
     # specific to any one workspace; promoted here from SWEEP_MODULES so
     # it's always enforced, not just occasionally swept.
     "tests.test_contextual_dictionary_mapping",
+    # dbt+Airflow production-backend Phase D1: the per-enterprise config
+    # resolution seam (core.config.resolve_databricks_config /
+    # WorkspaceLayout.enterprise_id) and the dbt project generator itself --
+    # the piece every later phase of that plan depends on.
+    "tests.test_resolve_databricks_config",
+    "tests.test_dbt_project_generator",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

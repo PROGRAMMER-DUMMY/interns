@@ -162,6 +162,33 @@ class Config:
         return self.force_cli or not self.google_api_key
 
 
+def resolve_databricks_config(enterprise_id: str = "") -> DatabricksConfig:
+    """Resolve Databricks config scoped to one enterprise/tenant.
+
+    Every call site that constructs a DatabricksClient for workspace-driven
+    Databricks work (sql_generator.py, execution_harness.py, onboarding.py's
+    _databricks_source_tables(), the new dbt_project_generator.py) should call
+    through this seam instead of load().databricks directly -- so "add a
+    second enterprise's own catalog/credentials" is a real implementation
+    (drop a config/enterprises/<id>/lock.toml), not a retrofit of every call
+    site that currently reads the one global config.
+
+    Falls back to the single global config/lock.toml when no enterprise_id is
+    given, or no per-enterprise override file exists for it -- today's only
+    real case, and byte-identical to calling load().databricks directly, so
+    every existing single-tenant call site is unaffected until a second
+    enterprise's override file actually exists.
+    """
+    if enterprise_id:
+        override_path = ROOT / "config" / "enterprises" / enterprise_id / "lock.toml"
+        if override_path.exists():
+            try:
+                return DatabricksConfig.from_lock(toml.load(override_path))
+            except (toml.TomlDecodeError, OSError):
+                pass  # fall through to the global config below
+    return load().databricks
+
+
 def load() -> Config:
     """Load config from lock.toml + environment. Call once at startup."""
     lock = _load_lock()
