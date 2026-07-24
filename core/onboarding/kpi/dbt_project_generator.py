@@ -223,6 +223,7 @@ class DbtProjectGenerator:
             )
 
         self._write_project_files(dbt_dir, sources_needed)
+        self._write_data_quality_tests(staging_dir)
 
         return DbtProjectResult(
             dbt_project_dir=_rel(dbt_dir, self.repo_root),
@@ -416,9 +417,90 @@ class DbtProjectGenerator:
             encoding="utf-8",
         )
         (dbt_dir / "packages.yml").write_text(
-            "# dbt-expectations added here in Phase D2 (data-quality panel).\npackages: []\n",
+            "# not_null/accepted_values (data_quality_panel.py) are dbt-core"
+            " built-ins -- no package needed.\n"
+            "# dbt-expectations added here once a range/statistical check type"
+            " is implemented.\npackages: []\n",
             encoding="utf-8",
         )
+
+    def _write_data_quality_tests(self, staging_dir: Path) -> None:
+        """Emit dbt schema tests from confirmed data_quality_panel.py answers
+        (data_quality_decisions.json) -- never hand-maintained YAML. Attached
+        to the STAGING model for the decided column: shift-left, catches a
+        violation at the earliest point in the pipeline, before it can
+        silently propagate into a KPI number. A workspace with no confirmed
+        DQ decisions yet gets no schema.yml at all (byte-identical to before
+        this method existed) -- an empty/absent decisions file is not an
+        error, it just means no test has been authored yet.
+        """
+        decisions_path = self.layout.contracts_dir / "data_quality_decisions.json"
+        if not decisions_path.exists():
+            return
+        try:
+            data = json.loads(decisions_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
+        decisions = [d for d in (data.get("decisions") or []) if isinstance(d, dict)]
+        # Match by STEM, not the raw dataset string: kpi_feature_mapping.json's
+        # source_columns[].dataset stores an absolute local path for a CSV
+        # profile, while _required_source_columns()/_written_staging key by
+        # the repo-relative form -- same dataset, two valid representations.
+        # dataset_display_stem() (already the model-naming source of truth)
+        # is representation-agnostic for both local paths and UC fqns, so
+        # matching on it sidesteps the inconsistency instead of guessing
+        # which representation a given decision happens to use.
+        model_by_stem = {
+            _safe_name(dataset_display_stem(source)): model_name
+            for source, model_name in self._written_staging.items()
+        }
+        by_model: dict[str, list[dict[str, Any]]] = {}
+        for decision in decisions:
+            check_type = str(decision.get("check_type") or "")
+            if not check_type:
+                continue  # "skip" answers record no check
+            dataset = str(decision.get("dataset") or "")
+            model_name = model_by_stem.get(_safe_name(dataset_display_stem(dataset)))
+            if not model_name:
+                continue  # decision references a dataset this run didn't stage
+            by_model.setdefault(model_name, []).append(decision)
+        if not by_model:
+            return
+
+        lines = ["version: 2", "", "models:"]
+        for model_name in sorted(by_model):
+            lines.append(f"  - name: {model_name}")
+            lines.append("    columns:")
+            by_column: dict[str, list[dict[str, Any]]] = {}
+            for decision in by_model[model_name]:
+                by_column.setdefault(str(decision.get("column") or ""), []).append(decision)
+            for column in sorted(by_column):
+                lines.append(f"      - name: {column}")
+                lines.append("        tests:")
+                for decision in by_column[column]:
+                    lines.extend(_render_dbt_test(decision))
+        (staging_dir / "_data_quality.yml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _render_dbt_test(decision: dict[str, Any]) -> list[str]:
+    check_type = str(decision.get("check_type") or "")
+    severity = str(decision.get("severity") or "warn")
+    config = decision.get("check_config") or {}
+    if check_type == "accepted_values":
+        values = config.get("values") or []
+        values_yaml = ", ".join(json.dumps(v) for v in values)
+        return [
+            f"          - accepted_values:",
+            f"              values: [{values_yaml}]",
+            "              config:",
+            f"                severity: {severity}",
+        ]
+    # not_null and any future no-arg check type share this shape.
+    return [
+        f"          - {check_type}:",
+        "              config:",
+        f"                severity: {severity}",
+    ]
 
 
 def _apply_subs(text: str, subs: dict[str, str]) -> str:

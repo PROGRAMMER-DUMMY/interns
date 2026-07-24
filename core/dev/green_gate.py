@@ -212,6 +212,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # the piece every later phase of that plan depends on.
     "tests.test_resolve_databricks_config",
     "tests.test_dbt_project_generator",
+    # dbt+Airflow production-backend Phase D2: data-quality rules authored
+    # the same human-in-the-loop way KPI features already are, generating
+    # real dbt schema tests with tiered severity from confirmed answers.
+    "tests.test_data_quality_panel",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
