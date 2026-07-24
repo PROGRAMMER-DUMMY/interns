@@ -22,6 +22,35 @@ rules.
 5. `program.md` only when the active benchmark/task refers to it (optional, task-supplied file; not checked in to this repo).
 6. Relevant files in `core/`, `tools/`, `interns/`, `tests/`, or `workspaces/<project>/`.
 
+## Local-Native vs. Cloud-Native
+
+This platform's original, still-default shape is local-native: source data as local files under
+`workspaces/<project>/datasets/`, profiled and executed against local DuckDB. `databricks_source`
+mode is the concrete embodiment of moving a workspace to cloud-native: source data lives and is
+processed in a real Databricks Unity Catalog account instead, with the same onboarding →
+KPI-resolution → dbt-generation → orchestration pipeline running against it. Neither mode is more
+"correct" than the other — local-native is the right default for a smoke test, a POC, or any
+workspace without a real Databricks account behind it; `databricks_source: exclusive` is the right
+mode once a workspace has real, governed data landed in Unity Catalog. A workspace is one or the
+other by explicit declaration (see "Where a workspace's data actually lives", below), never by
+guessing from what files happen to exist.
+
+One invariant holds regardless of mode: **all generated onboarding output always lands in the same
+place**, `workspaces/<project>/interns/` (contracts, profiles, evidence, reports — see "Workspace
+Rule" below). Going cloud-native changes *where source data is read from* and *where a workspace's
+dbt project/gold marts are built* (a real Unity Catalog schema, not a local Delta table) — it never
+changes where this platform's own artifacts are written. A cloud-native workspace's generated dbt
+project itself (`workspaces/<project>/dbt/`) is also local, git-tracked repo content — only the data
+it reads and the tables it builds are remote.
+
+| | local-native (default) | cloud-native (`databricks_source`) |
+|---|---|---|
+| Source data | `workspaces/<project>/datasets/` | Unity Catalog (real catalog/schema) |
+| Profiling | Local file scan | `SHOW TABLES` + SQL-warehouse sampling |
+| KPI execution | Local DuckDB | dbt project → Databricks (Cosmos/Airflow) |
+| Generated artifacts | `workspaces/<project>/interns/` | same path, unchanged |
+| Credentials needed | None | Databricks CLI auth (see readiness check, below) |
+
 ## Step 0: Active Workflow Setup
 
 Before onboarding, optimizing, refactoring, or writing outputs, establish the active workflow.
@@ -108,6 +137,58 @@ Should I use these files for this workflow?
 After the user confirms, continue with the appropriate skill flow. Do not ask a generic
 "what would you like to do next?" question when the next workflow step is discoverable from the
 workspace state.
+
+### Where a workspace's data actually lives
+
+The file-set scan above answers "what's in the repo for this workspace" — it does not answer
+"where does this workspace's *source data* actually live." That is a separate, explicit
+declaration, not something inferred from which local files happen to exist:
+
+- Read `workspace_settings.json`'s `databricks_source` block (catalog, schema, `mode`, optional
+  `enterprise_id`). No block at all → `local_files` (every workspace's default; nothing changes for
+  it). A block with `mode: additive` → local files AND the declared Unity Catalog catalog/schema are
+  both profiled. A block with `mode: exclusive` → local dataset discovery is skipped entirely; the
+  declared catalog/schema is the only source.
+- If the mode is not yet explicitly declared for a workspace that looks cloud-native (the user
+  mentions Databricks, a catalog name, or an existing Unity Catalog data estate), do not guess or
+  silently default. Run `uv run prepare-data-source-panel --workspace workspaces/<project>` and ask
+  from that panel — the same "generate a panel, ask from it, never freehand" rule as every other
+  blocker in this guide. Record the answer with
+  `uv run apply-data-source-answer --workspace workspaces/<project> --answer <local_files|databricks_additive|databricks_exclusive> --catalog <c> --schema <s> --confirmed-by "<name>"`.
+  This is asked once per workspace, not once per session — it is durable workspace state.
+- `enterprise_id` (explicit, or the catalog name as a fallback) is what selects *which* Databricks
+  account/credentials a cloud-native workspace actually connects to
+  (`core.config.resolve_databricks_config`): if `config/enterprises/<enterprise_id>/lock.toml`
+  exists, that workspace's onboarding, KPI execution, dbt generation, and dashboard reads all use
+  it; otherwise they fall back to the single global `config/lock.toml`. This is the multi-tenant
+  seam — a second real enterprise is a matter of dropping in that one file, not touching any
+  workspace's own code path.
+
+### Platform readiness check
+
+Before attempting any step that touches Databricks (profiling a `databricks_source` workspace,
+resolving KPI features against it, `generate-dbt-project`, orchestrating via Airflow/Cosmos), and
+proactively near the start of a session where the user signals cloud-native intent, run:
+
+```powershell
+uv run check-platform-readiness --workspace workspaces/<project>
+```
+
+(Pass `--enterprise-id <id>` once the workspace's enterprise is known, to check the credentials that
+workspace will actually use rather than the global default.) This is read-only — it never mutates
+anything, only reports:
+
+- **Databricks**: `not_configured` (fine — the workspace may be local-native), `blocked`
+  (configured but unreachable/unauthenticated — a real stop, route to the `databricks-access-gates`
+  skill; the fix is almost always `databricks auth login` / `databricks configure` on the user's
+  machine, never a token pasted into chat), or `ready`.
+- **dbt** / **Airflow**: `not_installed`, `partial` (installed but missing the Databricks
+  adapter / astronomer-cosmos), or `ready`. Neither is ever a blocker on its own — the local-DuckDB
+  KPI flow works with neither installed; they are only required once a workspace actually declares
+  `databricks_source` and needs `generate-dbt-project` / scheduled orchestration.
+
+Only a `blocked` Databricks status should stop the agent and prompt the user; report `not_installed`
+dbt/Airflow status plainly (what it means, the install command) without treating it as broken.
 
 For KPI/query workspaces, always show the user two post-confirmation paths before onboarding unless
 they already gave a narrower command:
@@ -565,8 +646,9 @@ the matching `### <command>` section of `TOOLS.md` for the one command you are a
 
 | Stage | Commands (each is a `###` section in TOOLS.md) |
 | --- | --- |
-| Workspace selection | `list-workspace-files`, `prepare-workspace-selection`, `session-snapshot` |
+| Workspace selection | `list-workspace-files`, `prepare-workspace-selection`, `session-snapshot`, `prepare-data-source-panel`, `apply-data-source-answer` |
 | Onboarding | `onboard-workspace`, `kickstart-workspace`, `understand-data` |
+| Cloud-native (dbt/Airflow) | `check-platform-readiness`, `generate-dbt-project`, `prepare-data-quality-panel`, `apply-data-quality-answer`, `run-dbt-backfill` |
 | KPI definition + blockers | `prepare-kpi-blocker-panel`, `apply-kpi-panel-answer`, `apply-kpi-definition`, `confirm-cli-agent-proposal`, `prepare-kpi-generation`, `apply-kpi-generation-answer`, `finalize-kpi-generation` (deprecated redirects: `resolve-kpi-features`, `blocker-question-panel`, `derived-feature-markdown`) |
 | Data model | `prepare-data-model-generation`, `apply-data-model-answer`, `finalize-data-model-generation`, `prepare-data-model-blocker-panel`, `apply-data-model-blocker-answer`, `parse-data-model-images`, `export-data-model-diagram` |
 | Relationships + source-to-target | `build-relationship-contracts`, `apply-relationship-answer`, `plan-source-to-target` |

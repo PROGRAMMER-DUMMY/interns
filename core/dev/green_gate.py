@@ -230,6 +230,11 @@ CURATED_MODULES: tuple[str, ...] = (
     # Databricks path -- and the "data as of X" staleness banner.
     "tests.test_dashboard_layers",
     "tests.test_dashboard_staleness_banner",
+    # Platform readiness: read-only Databricks/dbt/Airflow status check
+    # (check-platform-readiness) surfaced at conversation start -- dbt/
+    # Airflow absence is a capability gap for the cloud-native path, never
+    # a blocker, since the local-DuckDB KPI flow works without either.
+    "tests.test_platform_readiness",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
