@@ -59,8 +59,22 @@ def resolve_project_path(
 
 def relative_to_project(path: str | Path) -> str:
     """Return a stable POSIX-style path relative to ``PROJECT_ROOT`` when possible."""
+    return rel_to(path, PROJECT_ROOT)
+
+
+def rel_to(path: str | Path, root: str | Path) -> str:
+    """Return a stable POSIX-style path relative to ``root`` when possible.
+
+    Parameterized sibling of :func:`relative_to_project` for callers whose
+    root is not the global ``PROJECT_ROOT`` (e.g. a workspace/repo root passed
+    as a function argument, or a test's temp-directory root). Consolidates a
+    ``_rel(path, root)`` helper that had drifted into ~6 near-identical local
+    copies across ``core/onboarding/**`` -- some normalized the not-relative
+    fallback to POSIX, others returned the OS-native ``str(path)``. This
+    always POSIX-normalizes, matching the most robust of the prior copies.
+    """
     resolved = Path(path).expanduser().resolve()
     try:
-        return resolved.relative_to(PROJECT_ROOT).as_posix()
+        return resolved.relative_to(Path(root).expanduser().resolve()).as_posix()
     except ValueError:
         return resolved.as_posix()

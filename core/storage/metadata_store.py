@@ -281,7 +281,7 @@ def _safe_name(value: str) -> str:
 def _write_delta_row(table_path: Path, row: dict[str, str]) -> None:
     try:
         import pyarrow as pa
-        from deltalake import write_deltalake
+        from deltalake import DeltaTable, write_deltalake
     except ImportError as exc:  # pragma: no cover - dependency is expected in project env
         raise RuntimeError("deltalake and pyarrow are required for DeltaMetadataStore") from exc
 
@@ -295,5 +295,21 @@ def _write_delta_row(table_path: Path, row: dict[str, str]) -> None:
             ("payload_json", pa.string()),
         ]),
     )
-    mode = "append" if (table_path / "_delta_log").exists() else "overwrite"
-    write_deltalake(str(table_path), table, mode=mode)
+    if (table_path / "_delta_log").exists():
+        # Real upsert: replace the existing (workspace, document_id) row
+        # instead of blind-appending a duplicate ("append" mode previously
+        # made every upsert() call an insert, so re-upserting the same
+        # document_id left stale rows behind for readers to trip over).
+        # `collection` is constant within one table (one Delta table per
+        # collection, per the caller), so it is not part of the merge key.
+        DeltaTable(str(table_path)).merge(
+            table,
+            predicate=(
+                "target.workspace = source.workspace "
+                "AND target.document_id = source.document_id"
+            ),
+            source_alias="source",
+            target_alias="target",
+        ).when_matched_update_all().when_not_matched_insert_all().execute()
+    else:
+        write_deltalake(str(table_path), table, mode="overwrite")

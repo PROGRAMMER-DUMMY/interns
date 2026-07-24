@@ -716,6 +716,28 @@ def declared_prose_filters(kpi: dict[str, Any]) -> list[tuple[str, str]]:
     return out
 
 
+def _age_threshold_present(value: str, sql_lower: str) -> bool:
+    """True when the age-threshold integer appears in a genuine numeric/
+    comparison context in the SQL, not merely as a bare substring anywhere in
+    the text -- a raw `value in sql_lower` check spuriously matches a `LIMIT
+    5`/`TOP 5`, a year (`2025`), or any other unrelated occurrence of the same
+    digits. Accepts the shapes the docstring below promises: the bare integer
+    next to a comparison operator, or inside a DATEDIFF/date_diff call.
+    """
+    n = re.escape(value)
+    try:
+        n_plus_1 = re.escape(str(int(value) + 1))
+    except ValueError:
+        n_plus_1 = n
+    pattern = (
+        rf"[<>]=?\s*{n}\b"                 # "> N" / ">= N" / "< N" (operator-first)
+        rf"|\b{n}\s*[<>]="                  # "N <=" (operand-first)
+        rf"|<\s*{n_plus_1}\b"               # "< N+1" (exclusive upper bound)
+        rf"|date_?diff[\s\S]{{0,80}}?\b{n}\b"  # DATEDIFF(...) ... N
+    )
+    return re.search(pattern, sql_lower) is not None
+
+
 def prose_filter_findings(kpi: dict[str, Any], sql: str) -> list[CoverageFinding]:
     """Check that prose-declared filters in the KPI name appear in the SQL.
 
@@ -751,7 +773,7 @@ def prose_filter_findings(kpi: dict[str, Any], sql: str) -> list[CoverageFinding
         elif filter_type == "age_threshold":
             # Accept any of: the bare integer, "> N", ">= N", "< N+1", or
             # "DATEDIFF/date_diff ... N" patterns in the SQL.
-            if value in sql_lower:
+            if _age_threshold_present(value, sql_lower):
                 continue
             findings.append(
                 CoverageFinding(

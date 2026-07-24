@@ -132,8 +132,15 @@ def _looks_like_id(col: dict[str, Any]) -> bool:
 
 
 def _name_has(col: dict[str, Any], hints: tuple[str, ...]) -> bool:
+    # Segment-exact, not substring: a raw `h in name` match let 2-char hints
+    # like "in"/"to"/"out" fire on any column whose name merely CONTAINS the
+    # hint text (e.g. a name ending "...routing_number" contains "out"; one
+    # starting "insured_..."/"origin_..." contains "in"; one starting
+    # "total_..." contains "to"). Column names are underscore/word-delimited,
+    # so split into segments and require an exact segment match instead.
     name = str(col.get("column") or "").lower()
-    return any(h in name for h in hints)
+    segments = set(re.split(r"[^a-z0-9]+", name))
+    return any(h in segments for h in hints)
 
 
 def _input_col(col: dict[str, Any], role: str) -> dict[str, Any]:

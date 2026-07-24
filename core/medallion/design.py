@@ -52,7 +52,7 @@ from core.medallion.design_naming import (
     source_system_from_silver_source,
 )
 from core.storage.workspace_layout import WorkspaceLayout
-from core.sql_safety import quote_ident_sql
+from core.sql_safety import escape_sql_literal, quote_ident_sql
 
 
 # ── Exit codes (Section 19 of the PRD) ────────────────────────────────────────
@@ -1482,6 +1482,19 @@ def _emit_bronze_sql_duckdb(manifest: Manifest, out_dir: Path, repo_root: Path, 
     return out
 
 
+def _null_default_literal_sql(raw_value: str) -> str:
+    """Render a `null_policies` "default:<value>" payload as a SQL literal.
+
+    A plain int/float token renders unquoted (COALESCE against a numeric
+    column must not compare a numeric branch to a string branch); anything
+    else renders as an escaped string literal.
+    """
+    text = raw_value.strip()
+    if re.fullmatch(r"-?\d+(\.\d+)?", text):
+        return text
+    return escape_sql_literal(text)
+
+
 def _emit_silver_sql_duckdb(manifest: Manifest, contract: SilverContract, out_dir: Path) -> list[Path]:
     out: list[Path] = []
     for s in manifest.silver:
@@ -1510,12 +1523,37 @@ def _emit_silver_sql_duckdb(manifest: Manifest, contract: SilverContract, out_di
         # should not fail the pipeline. Source/alias are quoted (quote_ident_sql):
         # an unquoted reserved-word column (e.g. a real "START"/"END" column) is
         # otherwise a SQL parser error, not a hypothetical.
+        # Null policies (drop / error / default:<value>): "error" is enforced as a
+        # post-load not_null assertion (_render_assertions_sql), routing through the
+        # existing fatal SILVER_ASSERTION_FAILED gate rather than new mid-load error
+        # mechanics. "drop" filters rows in the outer WHERE. "default:<value>"
+        # coalesces -- composed with any TRY_CAST on the same column (cast first,
+        # then fall back to the default) rather than emitting two REPLACE entries
+        # for one column.
+        default_cols = {
+            col for col, policy in tc.null_policies.items() if policy.policy.startswith("default:")
+        }
+        drop_conditions = [
+            f"{quote_ident_sql(col)} IS NOT NULL"
+            for col, policy in tc.null_policies.items()
+            if policy.policy == "drop" and col not in tc.pii_hash_columns and col not in exclude_cols
+        ]
+        cast_expr_by_col = {
+            col: f"TRY_CAST({quote_ident_sql(col)} AS {cast.to_type})" for col, cast in tc.type_casts.items()
+        }
         cast_replacements = [
             f"TRY_CAST({quote_ident_sql(col)} AS {cast.to_type}) AS {quote_ident_sql(col)}"
             for col, cast in tc.type_casts.items()
+            if col not in tc.pii_hash_columns and col not in exclude_cols and col not in default_cols
+        ]
+        default_replacements = [
+            f"COALESCE({cast_expr_by_col.get(col, quote_ident_sql(col))}, "
+            f"{_null_default_literal_sql(tc.null_policies[col].policy[len('default:'):])}) "
+            f"AS {quote_ident_sql(col)}"
+            for col in default_cols
             if col not in tc.pii_hash_columns and col not in exclude_cols
         ]
-        replacements = cast_replacements + pii_replacements
+        replacements = cast_replacements + default_replacements + pii_replacements
         exclude_clause = (
             f" EXCLUDE ({', '.join(quote_ident_sql(c) for c in exclude_cols)})" if exclude_cols else ""
         )
@@ -1523,6 +1561,7 @@ def _emit_silver_sql_duckdb(manifest: Manifest, contract: SilverContract, out_di
             "\n    REPLACE (\n        " + ",\n        ".join(replacements) + "\n    )"
             if replacements else ""
         )
+        where_clause = f"WHERE {' AND '.join(drop_conditions)}\n" if drop_conditions else ""
         derived_lines: list[str] = []
         for dname, dc in tc.derived_columns.items():
             duck = dc.formula_templates.duckdb_sql or ""
@@ -1534,7 +1573,7 @@ def _emit_silver_sql_duckdb(manifest: Manifest, contract: SilverContract, out_di
         sql_path = out_dir / f"{s.name}.duckdb.sql"
         body = (
             f"-- silver.{s.name}: cleaned from {', '.join(sources)}\n"
-            f"-- Contract applied: PK canonicalisation + type casts + PII hashing\n"
+            f"-- Contract applied: PK canonicalisation + type casts + null policies + PII hashing\n"
             f"-- (silver_contract.json#/{s.name}). Build rewrites this to an\n"
             f"-- idempotent MERGE-on-PK (merge_emitter.emit_silver_merge).\n"
             f"CREATE OR REPLACE TABLE silver.{s.name} AS\n"
@@ -1543,7 +1582,9 @@ def _emit_silver_sql_duckdb(manifest: Manifest, contract: SilverContract, out_di
             + ("\n".join(rename_items) + "\n" if rename_items else "")
             + (derived_block + "\n" if derived_block else "")
             + f"    *{exclude_clause}{replace_clause}\n"
-            + "FROM unioned;\n\n"
+            + "FROM unioned\n"
+            + where_clause
+            + ";\n\n"
             + f"\n-- Post-load assertions: see {assertion_path.name}\n"
         )
         sql_path.write_text(body, encoding="utf-8")
@@ -1557,8 +1598,10 @@ def _source_system_from_silver_src(src: str) -> str:
 
 def _render_assertions_sql(table: str, tc: TableContract) -> str:
     lines = [f"-- Assertions for silver.{table}\n"]
+    covered_not_null_cols: set[str] = set()
     for a in tc.assertions:
         if a.type == "not_null" and a.columns:
+            covered_not_null_cols.update(a.columns)
             cols = " OR ".join(f"{quote_ident_sql(c)} IS NULL" for c in a.columns)
             lines.append(
                 f"SELECT '{a.id}' AS assertion_id, COUNT(*) AS violations\n"
@@ -1601,6 +1644,15 @@ def _render_assertions_sql(table: str, tc: TableContract) -> str:
                 f"SELECT '{a.id}' AS assertion_id, "
                 f"CASE WHEN COUNT(*) = 0 THEN 1 ELSE 0 END AS violations\n"
                 f"FROM silver.{table};\n"
+            )
+    # null_policies "error" columns get an implicit not_null assertion (routes
+    # through the same fatal SILVER_ASSERTION_FAILED gate as an authored one)
+    # unless an explicit not_null assertion already covers the column.
+    for col, policy in tc.null_policies.items():
+        if policy.policy == "error" and col not in covered_not_null_cols:
+            lines.append(
+                f"SELECT 'null_policy_error_{col}' AS assertion_id, COUNT(*) AS violations\n"
+                f"FROM silver.{table} WHERE {quote_ident_sql(col)} IS NULL;\n"
             )
     return "\n".join(lines)
 

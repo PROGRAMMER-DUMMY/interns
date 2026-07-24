@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from core.governance.provenance import decision_source as decision_source_for
+from core.paths import rel_to as _rel
 from core.profiling.dataset_identity import is_uc_fqn
 from core.storage.workspace_layout import WorkspaceLayout
 from core.contracts.versioning import register_contract
@@ -450,14 +451,20 @@ def _parse_relationships_from_docs(
             right_column = _resolve_column(match.group("right_col") or match.group("left_col"), profiles[right_dataset])
             if not left_column or not right_column:
                 continue
+            # Emitted as documented-but-unproven (like every other doc-derived
+            # edge) -- _promote_documented_relationships (called on this
+            # function's output) is the ONLY path that ever marks an edge
+            # proven_data_model, and only after real uniqueness/RI evidence
+            # backs it. A free-text "X joins Y on COL" sentence alone is not
+            # data evidence.
             relationships.append(
                 _relationship(
                     left_dataset=left_dataset,
                     left_column=left_column,
                     right_dataset=right_dataset,
                     right_column=right_column,
-                    state="proven_data_model",
-                    confidence=0.92,
+                    state=DOCUMENTED_RELATIONSHIP_STATE,
+                    confidence=0.75,
                     evidence_sources=[
                         {
                             "type": "data_model_doc",
@@ -973,19 +980,35 @@ def _promote_profile_relationships_with_doc_context(
         if not evidence:
             promoted.append(relationship)
             continue
+        dimension_key_unique = _dimension_key_unique_from(relationship)
+        ri_ratio = _referential_integrity_ratio_from(relationship)
+        # A doc merely NAMING both entities + generic relationship language
+        # ("joins"/"foreign key"/"dimension"/...) is not data evidence -- only
+        # promote to proven_data_model when the underlying profile candidate
+        # already has CONFIRMED uniqueness + RI (the same bar
+        # _promote_documented_relationships uses for its own promotion). When
+        # either is unknown/failing, the doc mention is still attached as
+        # evidence (visible to a reviewer) but state/executability is
+        # untouched -- undetermined uniqueness/RI must not silently become
+        # executable just because a doc happened to name both tables.
+        proven = (
+            dimension_key_unique is True
+            and ri_ratio is not None
+            and ri_ratio >= _REFERENTIAL_INTEGRITY_THRESHOLD
+        )
         updated = _relationship(
             left_dataset=relationship["left_dataset"],
             left_column=relationship["left_column"],
             right_dataset=relationship["right_dataset"],
             right_column=relationship["right_column"],
-            state="proven_data_model",
-            confidence=0.84,
+            state="proven_data_model" if proven else relationship.get("state", "profile_validated"),
+            confidence=0.84 if proven else float(relationship.get("confidence") or 0.6),
             evidence_sources=[
                 *relationship.get("evidence_sources", []),
                 evidence,
             ],
-            dimension_key_unique=_dimension_key_unique_from(relationship),
-            referential_integrity_ratio=_referential_integrity_ratio_from(relationship),
+            dimension_key_unique=dimension_key_unique,
+            referential_integrity_ratio=ri_ratio,
         )
         promoted.append(updated)
     return promoted
@@ -1482,14 +1505,26 @@ def _relationships_from_diagram_sidecars(
             )
             if skip_reasons:
                 diagram_evidence["skip_reasons"] = skip_reasons
+            # "Diagram intent never overrides observed data quality" (see
+            # docstring) means an edge whose uniqueness/RI could not be
+            # determined at all (e.g. unreadable/Databricks-sourced dataset)
+            # must not become proven_data_model on diagram say-so alone --
+            # only a CONFIRMED pass promotes it. An undeterminable edge still
+            # surfaces (documented, non-executable, with the diagram evidence
+            # attached) rather than being silently dropped.
+            diagram_proven = (
+                dimension_key_unique is True
+                and ri_ratio is not None
+                and ri_ratio >= _REFERENTIAL_INTEGRITY_THRESHOLD
+            )
             relationships.append(
                 _relationship(
                     left_dataset=left_dataset,
                     left_column=left_column,
                     right_dataset=right_dataset,
                     right_column=right_column,
-                    state="proven_data_model",
-                    confidence=diagram_confidence,
+                    state="proven_data_model" if diagram_proven else DOCUMENTED_RELATIONSHIP_STATE,
+                    confidence=diagram_confidence if diagram_proven else min(diagram_confidence, 0.6),
                     evidence_sources=[diagram_evidence],
                     dimension_key_unique=dimension_key_unique,
                     referential_integrity_ratio=ri_ratio,
@@ -2055,13 +2090,6 @@ def _repo_path(value: str, root: Path) -> str:
     if path.is_absolute():
         return _rel(path, root)
     return normalized
-
-
-def _rel(path: Path, root: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(root.resolve())).replace("\\", "/")
-    except ValueError:
-        return str(path)
 
 
 def _now() -> str:

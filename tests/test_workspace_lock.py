@@ -19,9 +19,9 @@ from core.storage.workspace_lock import WorkspaceLockTimeout, workspace_lock
 # pair with a brief hold, then release. Several of these launched together let
 # the test prove the lock excludes across *processes* (the real CLI scenario),
 # not just across threads in one process. The hold window forces waiters to be
-# mid-poll while the holder runs its release path (which unlinks the lock
-# file) -- the exact window where a faulty unlink-on-release would let two
-# processes hold simultaneously.
+# mid-poll while the holder runs its release path -- the exact window where a
+# flock-with-unlink hazard (now removed: the lock file is never deleted on
+# release) would have let two processes hold simultaneously.
 _CROSS_PROCESS_WORKER = textwrap.dedent(
     """
     import json, os, sys, time
@@ -48,7 +48,13 @@ class WorkspaceLockTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.workspace = Path(self._tmp.name)
 
-    def test_acquire_and_release_creates_and_removes_lock_file(self) -> None:
+    def test_acquire_and_release_creates_a_persistent_lock_file(self) -> None:
+        # The lock file is deliberately NOT deleted on release: unlinking it
+        # is the classic flock-with-unlink hazard (a concurrent waiter can
+        # hold an fd to the deleted inode while a third process locks a
+        # different new inode at the same path -- a genuine double-acquire).
+        # The file persists as a small, harmless sentinel; only the OS-level
+        # flock is released, and a later acquirer overwrites its content.
         lock_path_seen: Path | None = None
         with workspace_lock(self.workspace) as lock_path:
             lock_path_seen = lock_path
@@ -59,10 +65,14 @@ class WorkspaceLockTests(unittest.TestCase):
             self.assertIn("hostname", payload)
 
         assert lock_path_seen is not None
-        self.assertFalse(
+        self.assertTrue(
             lock_path_seen.exists(),
-            f"Lock file {lock_path_seen} should be removed on release",
+            f"Lock file {lock_path_seen} must persist after release (not unlinked)",
         )
+        # A fresh acquisition still works immediately (the flock, not the
+        # file's existence, is what actually excludes).
+        with workspace_lock(self.workspace) as lock_path2:
+            self.assertEqual(lock_path2, lock_path_seen)
 
     def test_second_acquire_from_other_thread_times_out(self) -> None:
         """A different owner (here: another thread) must still time out.

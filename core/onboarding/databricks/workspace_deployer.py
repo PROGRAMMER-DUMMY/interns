@@ -25,8 +25,6 @@ import argparse
 import base64
 import json
 import os
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -157,25 +155,6 @@ class DatabricksWorkspaceApi:
             statement=statement,
             wait_timeout="30s",
         )
-
-    def post_api(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        url = self.db_client.cfg.host.rstrip("/") + path
-        request = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.db_client.cfg.token}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.db_client.cfg.http_timeout_sec) as response:
-                body = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"databricks_api_failed:{path}:{exc.code}:{body}") from exc
-        return json.loads(body) if body else {}
 
 
 class DatabricksWorkspaceDeploymentPlanner:

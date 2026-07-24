@@ -258,26 +258,23 @@ def workspace_lock(
                 acquired = True
                 break
             # Stale-holder reclamation: if the recorded PID is no longer alive
-            # (process crashed, SIGKILL'd, or exited without cleanup), reset
-            # the file once and retry. Only attempted once per acquire to
-            # avoid spinning if the holder churns between checks.
+            # (process crashed, SIGKILL'd, or exited without cleanup), retry
+            # on THIS SAME fd/inode. Only attempted once per acquire to avoid
+            # spinning if the holder churns between checks.
+            #
+            # Deliberately NOT unlink+reopen: on POSIX, flock is tied to the
+            # open file DESCRIPTION, not the path. A dead holder's flock is
+            # already released by the kernel when its process exits (every fd
+            # it held closes), so our own fd's next _try_lock() on the same
+            # inode already sees it free -- no reclaim dance needed. Unlinking
+            # and recreating the file here was the actual hazard: two waiters
+            # can both decide the holder is dead, both unlink+recreate, and
+            # each locks a DIFFERENT new inode -- a genuine double-acquire,
+            # since neither holds a lock on the file the other is watching.
             if not stale_reclaim_attempted:
                 stale_reclaim_attempted = True
                 holder_pid = _read_existing_holder_pid(lock_path)
                 if holder_pid != "unknown" and not _pid_alive(holder_pid):
-                    # Close + reopen to drop any stale kernel state, then try
-                    # to lock again immediately. Windows requires this dance
-                    # because msvcrt.locking releases on close, so a fresh
-                    # handle gets a clean slate.
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
-                    try:
-                        lock_path.unlink()
-                    except OSError:
-                        pass
-                    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
                     if _try_lock(fd):
                         acquired = True
                         break
@@ -304,13 +301,16 @@ def workspace_lock(
             os.close(fd)
         except OSError:
             pass
-        # Best-effort cleanup of the lock file. On Windows a concurrent
-        # waiter may already have re-opened it, in which case removal will
-        # fail and that's fine.
-        try:
-            lock_path.unlink()
-        except OSError:
-            pass
+        # Deliberately NOT unlinked here. Deleting the lock file on release is
+        # the classic flock-with-unlink hazard: a concurrent waiter that
+        # already opened this path holds an fd to the about-to-be-deleted
+        # inode, and once the path is free a third process can create+lock a
+        # DIFFERENT new inode at the same path -- two processes then each
+        # believe they hold "the" workspace lock while actually holding locks
+        # on two disconnected files, protecting nothing. The lock file is a
+        # small, persistent sentinel (like a PID file); its content is
+        # overwritten by whoever next acquires the lock, so nothing stale
+        # lingers except the (harmless) presence of the file itself.
 
 
 __all__ = ["WorkspaceLockTimeout", "workspace_lock"]

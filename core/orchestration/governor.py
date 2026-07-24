@@ -1,19 +1,23 @@
 """
-core/orchestration/governor.py — Multi-Agent Governance & Routing.
+core/orchestration/governor.py — Medallion pipeline error routing.
 
-Orchestrates the lifecycle of specialist agents, performs deterministic error routing,
-and enforces retry limits (circuit breaker).
+Deterministic error->specialist routing with a per-stage retry cap (circuit
+breaker), used by core/medallion/build.py to route Bronze/Silver/Gold stage
+failures.
+
+This module previously also carried a KPI/SQL-error routing variant
+(`decide_routing`) and a specialist-invocation helper (`run_specialist`) --
+both confirmed to have zero callers anywhere in the platform (the medallion
+build path only ever calls `decide_medallion_routing`) and removed rather than
+left half-wired. If KPI-level error routing is needed later, build it as a
+real, wired feature rather than resurrecting dead code.
 """
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Dict
 
-from core.agents.registry import InternRegistry
 from core.config import Config
-
-logger = logging.getLogger(__name__)
 
 @dataclass
 class RoutingDecision:
@@ -34,42 +38,9 @@ MEDALLION_ROUTING: Dict[str, tuple[str, int]] = {
 
 
 class Governor:
-    def __init__(self, cfg: Config, registry: InternRegistry):
+    def __init__(self, cfg: Config):
         self.cfg = cfg
-        self.registry = registry
         self._retry_map: Dict[str, int] = {}
-        self.MAX_RETRIES = 3
-
-    def decide_routing(self, kpi_id: str, error_message: str) -> RoutingDecision:
-        retries = self._retry_map.get(kpi_id, 0)
-        
-        if retries >= self.MAX_RETRIES:
-            return RoutingDecision(
-                target_agent="human",
-                reason=f"Exceeded max retries ({self.MAX_RETRIES}) for KPI {kpi_id}.",
-                retry_count=retries,
-                is_terminal=True
-            )
-
-        # Deterministic Routing Logic
-        error_lower = error_message.lower()
-        
-        if "binder error" in error_lower or "syntax error" in error_lower or "column not found" in error_lower:
-            target = "sql_specialist"
-            reason = "SQL syntax or column reference error detected."
-        elif "relationship" in error_lower or "join" in error_lower or "mapping" in error_lower:
-            target = "data_engineer"
-            reason = "Schema mapping or relationship discovery issue detected."
-        else:
-            target = "sql_specialist" # Default fallback
-            reason = f"Unknown error type: {error_message[:100]}..."
-
-        self._retry_map[kpi_id] = retries + 1
-        return RoutingDecision(
-            target_agent=target,
-            reason=reason,
-            retry_count=retries + 1
-        )
 
     def decide_medallion_routing(self, stage_code: str, error_message: str) -> RoutingDecision:
         """Route a medallion pipeline error to the correct specialist with retry cap."""
@@ -88,8 +59,3 @@ class Governor:
             reason=f"{stage_code}: routing to {specialist}",
             retry_count=retries + 1,
         )
-
-    def run_specialist(self, agent_name: str, request: str, context: Dict[str, Any]) -> str:
-        agent = self.registry.get_intern(agent_name)
-        logger.info(f"Invoking agent '{agent_name}' with request: {request[:100]}...")
-        return agent.run(request, context)

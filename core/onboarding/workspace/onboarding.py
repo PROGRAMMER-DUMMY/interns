@@ -17,6 +17,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 from core.paths import PROJECT_ROOT
+from core.paths import rel_to as _rel
 from core.onboarding.kpi.text_parser import (
     KPI_CUTS_HEADERS,
     cell_at,
@@ -1718,7 +1719,7 @@ if __name__ == "__main__":
         else:
             lines += [
                 "## Next Steps", "",
-                "1. Run `uv run resolve-kpi-features --workspace " + inputs.workspace + " --domain <domain>`.",
+                "1. Run `uv run prepare-kpi-blocker-panel --workspace " + inputs.workspace + " --domain <domain>`.",
                 "2. If `blocked_kpi_count > 0`, review `interns/reports/blocker_question_panel/current.md`.",
                 "3. Run `uv run generate-kpi-sql --workspace " + inputs.workspace + " --kpi-id <id>` per ready KPI.",
                 "",
@@ -2509,13 +2510,6 @@ def _clean_cell(value: Any) -> str:
     return clean_cell(value)
 
 
-def _rel(path: Path, root: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(root.resolve())).replace("\\", "/")
-    except ValueError:
-        return str(path)
-
-
 def _total_existing_bytes(paths: list[str], repo_root: Path) -> int:
     total = 0
     for raw in paths:
@@ -2545,10 +2539,7 @@ def _onboarding_next_command(
 ) -> str:
     if not kpis and profiles:
         return f"uv run build-source-family-contracts --workspace {inputs.workspace}"
-    return (
-        f"uv run resolve-kpi-features --workspace {inputs.workspace} "
-        "--domain <domain> --include-candidates"
-    )
+    return f"uv run prepare-kpi-blocker-panel --workspace {inputs.workspace} --domain <domain>"
 
 
 def _safe_stem(path: Path, root: Path) -> str:

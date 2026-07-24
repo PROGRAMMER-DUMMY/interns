@@ -248,6 +248,15 @@ class SourceToTargetPlanner:
                     "sources": selected_sources,
                 }
             )
+        for risk in join_plan["fan_trap_risk"]:
+            blockers.append(
+                {
+                    "type": "fan_trap_risk",
+                    "message": risk["reason"],
+                    "shared_dimension": risk["shared_dimension"],
+                    "fact_sources": risk["fact_sources"],
+                }
+            )
         is_deferred = kpi_id in self.deferred_kpi_ids or _kpi_is_undefined(kpi)
         medallion = {
             "bronze_inputs": selected_sources,
@@ -478,8 +487,53 @@ def _join_plan(
         "join_keys": join_keys,
         "executable_relationships": executable,
         "relationship_graph_connected": _relationship_graph_connected(selected_sources, executable),
+        "fan_trap_risk": _fan_trap_risks(executable),
         "requires_review": len(selected_sources) > 1,
     }
+
+
+def _fan_trap_risks(executable: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Detect the classic fan-trap/chasm-trap shape: two distinct "many"-side
+    sources joined into the SAME "one"-side (dimension) source, with no direct
+    edge between the two many-side sources. Combining both in one query fans
+    out through the shared dimension -- each many-side row is duplicated once
+    per matching row on the other many-side -- silently double-counting or
+    inflating results. Per-pair uniqueness/RI gating (already enforced by
+    `_relationship`) cannot see this: it is a property of the SELECTED SET of
+    sources for one KPI, not any single edge.
+    """
+    by_dimension: dict[str, set[str]] = {}
+    direct_pairs: set[frozenset[str]] = set()
+    for edge in executable:
+        left, right = edge.get("left_dataset", ""), edge.get("right_dataset", "")
+        if not left or not right:
+            continue
+        by_dimension.setdefault(right, set()).add(left)
+        direct_pairs.add(frozenset({left, right}))
+    risks: list[dict[str, Any]] = []
+    for dimension, facts in sorted(by_dimension.items()):
+        if len(facts) < 2:
+            continue
+        fact_list = sorted(facts)
+        unconnected = [
+            [a, b]
+            for i, a in enumerate(fact_list)
+            for b in fact_list[i + 1:]
+            if frozenset({a, b}) not in direct_pairs
+        ]
+        if unconnected:
+            risks.append({
+                "shared_dimension": dimension,
+                "fact_sources": fact_list,
+                "unconnected_pairs": unconnected,
+                "reason": (
+                    f"{len(fact_list)} sources join {dimension} independently with no "
+                    "direct relationship between them -- combining them in one query "
+                    "fans out through the shared dimension (many-to-many double-count "
+                    "risk), not just a many-to-one join."
+                ),
+            })
+    return risks
 
 
 def _relationship_graph_connected(

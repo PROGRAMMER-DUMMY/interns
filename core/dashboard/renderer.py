@@ -75,13 +75,6 @@ _DATE_NAME_RE = re.compile(
 )
 
 
-def _spec_date_column(spec: DashboardSpec) -> str:
-    x_col = str(spec.config.get("x") or "")
-    if x_col and _DATE_NAME_RE.search(x_col):
-        return x_col
-    return ""
-
-
 def _coerce_date(value: Any) -> date | None:
     if value is None:
         return None
@@ -189,26 +182,48 @@ def _apply_corporate_theme(fig: go.Figure, *, percent_axis: str | None = None) -
 
 
 def _aggregate_rows(
-    rows: list[dict[str, Any]], x_col: str, color_col: str | None, y_col: str
+    rows: list[dict[str, Any]], x_col: str, color_col: str | None, y_col: str,
+    *, agg: str = "sum",
 ) -> list[dict[str, Any]]:
-    """Sum the measure over the group keys (x[, color]). Charts must show one value
-    per category/series — plotting raw granular rows produces dot-stripes (line) or
-    a broken >100% stack (share). Order of first appearance is preserved."""
+    """Collapse the measure over the group keys (x[, color]) using `agg`
+    ("sum" | "avg" | "min" | "max"). An avg/ratio measure must never be summed
+    across groups (sum-of-averages is meaningless) — callers derive `agg` from
+    the KPI's real aggregation via ``core.dashboard.model.cuts.measure_func``.
+    Charts must show one value per category/series — plotting raw granular
+    rows produces dot-stripes (line) or a broken >100% stack (share). Order of
+    first appearance is preserved."""
     keys = [c for c in (x_col, color_col) if c]
     if not keys:
         return rows
-    agg: dict[tuple, dict[str, Any]] = {}
+    groups: dict[tuple, list[Any]] = {}
+    meta: dict[tuple, dict[str, Any]] = {}
     order: list[tuple] = []
     for r in rows:
         k = tuple(r.get(c) for c in keys)
-        if k not in agg:
-            agg[k] = {c: r.get(c) for c in keys}
-            agg[k][y_col] = 0
+        if k not in groups:
+            groups[k] = []
+            meta[k] = {c: r.get(c) for c in keys}
             order.append(k)
         val = r.get(y_col)
         if isinstance(val, (int, float)):
-            agg[k][y_col] += val
-    return [agg[k] for k in order]
+            groups[k].append(val)
+    out: list[dict[str, Any]] = []
+    for k in order:
+        vals = groups[k]
+        if not vals:
+            value: Any = 0
+        elif agg == "avg":
+            value = sum(vals) / len(vals)
+        elif agg == "min":
+            value = min(vals)
+        elif agg == "max":
+            value = max(vals)
+        else:
+            value = sum(vals)
+        row = dict(meta[k])
+        row[y_col] = value
+        out.append(row)
+    return out
 
 
 def _normalize_percent(data: list[dict[str, Any]], y_col: str) -> list[dict[str, Any]]:
@@ -736,6 +751,13 @@ def _figure_from_spec(
     color_col = color if color and color in (rows[0] if rows else {}) else None
 
     y_is_percent = str(config.get("y_format") or "").lower() == "percent"
+    # Per-category aggregation function, derived from the metric/measure text
+    # (never the stored "agg" hint, which the generator always writes as
+    # "sum" regardless of real kind). An avg/median measure must be averaged
+    # per group, not summed -- sum-of-averages is meaningless.
+    from core.dashboard.model.cuts import measure_func
+    _fn = measure_func(str(config.get("metric") or ""), y_col)
+    group_agg = "avg" if _fn in ("avg", "median") else _fn if _fn in ("min", "max") else "sum"
     # Palette by series count (decision 4): single-series -> editorial accent;
     # multi-series (a color split, or always-multi stacked-percent) -> the
     # colorblind-safe categorical ramp so series are genuinely separable. Forced
@@ -751,7 +773,7 @@ def _figure_from_spec(
         if chart_type == "line":
             # V2: aggregate the measure by period (and optional series) so a trend
             # is one value per x, not a scatter of every raw row.
-            data = _aggregate_rows(rows, x_col, color_col, y_col)
+            data = _aggregate_rows(rows, x_col, color_col, y_col, agg=group_agg)
             fig = px.line(
                 data, x=x_col, y=y_col, color=color_col, title=title, markers=True,
                 color_discrete_sequence=seq,
@@ -762,7 +784,7 @@ def _figure_from_spec(
             # per entity, sort desc, limit to N. Plotly draws the first category at the
             # bottom, so reverse to put the largest bar on top.
             rank_col = _first_non_constant_categorical(rows, y_col, preferred=x_col)
-            data = _aggregate_rows(rows, rank_col, None, y_col)
+            data = _aggregate_rows(rows, rank_col, None, y_col, agg=group_agg)
             if y_is_percent:
                 data = _normalize_percent(data, y_col)
             limit = int(config.get("limit") or 10)
@@ -788,7 +810,7 @@ def _figure_from_spec(
             )
             fig.update_layout(barmode="stack", barnorm="percent")
         elif chart_type == "grouped_bar":
-            data = _aggregate_rows(rows, x_col, color_col, y_col)
+            data = _aggregate_rows(rows, x_col, color_col, y_col, agg=group_agg)
             fig = px.bar(
                 data, x=x_col, y=y_col, color=color_col, barmode="group", title=title,
                 color_discrete_sequence=seq,
@@ -828,7 +850,7 @@ def _figure_from_spec(
             # the chart says nothing. Each dot is value-labeled; a full-width
             # pale guide ties the dot to its category label.
             rank_col = _first_non_constant_categorical(rows, y_col, preferred=x_col)
-            data = _aggregate_rows(rows, rank_col, None, y_col)
+            data = _aggregate_rows(rows, rank_col, None, y_col, agg=group_agg)
             if y_is_percent:
                 data = _normalize_percent(data, y_col)
             limit = int(config.get("limit") or 10)
@@ -857,7 +879,7 @@ def _figure_from_spec(
             fig.update_xaxes(range=[lo - pad, hi + pad * 2.2])
         elif chart_type == "treemap":
             # Part-to-whole across more categories than a donut holds legibly.
-            data = _aggregate_rows(rows, x_col, None, y_col)
+            data = _aggregate_rows(rows, x_col, None, y_col, agg=group_agg)
             data = [r for r in data if isinstance(r.get(y_col), (int, float)) and r[y_col] > 0]
             fig = px.treemap(
                 data, path=[x_col], values=y_col, title=title,
@@ -866,7 +888,7 @@ def _figure_from_spec(
             fig.update_traces(textinfo="label+percent root")
         elif chart_type == "heatmap":
             # Two categorical dimensions x one measure: the interaction view.
-            data = _aggregate_rows(rows, x_col, color_col, y_col)
+            data = _aggregate_rows(rows, x_col, color_col, y_col, agg=group_agg)
             xs = sorted({str(r.get(x_col)) for r in data})
             ys = sorted({str(r.get(color_col)) for r in data})
             lookup = {
@@ -885,7 +907,7 @@ def _figure_from_spec(
             fig.update_layout(title=title)
         elif chart_type == "stacked_area":
             # Few-series share evolution: composition over time.
-            data = _aggregate_rows(rows, x_col, color_col, y_col)
+            data = _aggregate_rows(rows, x_col, color_col, y_col, agg=group_agg)
             fig = px.area(
                 data, x=x_col, y=y_col, color=color_col, title=title,
                 color_discrete_sequence=list(_ACTIVE.categorical),
@@ -895,7 +917,7 @@ def _figure_from_spec(
             # a donut reads composition at a glance and gives each slice its
             # own ramp color. The label+percent is on the slice, so the legend
             # is redundant noise.
-            data = _aggregate_rows(rows, x_col, None, y_col)
+            data = _aggregate_rows(rows, x_col, None, y_col, agg=group_agg)
             fig = px.pie(
                 data, names=x_col, values=y_col, title=title, hole=0.45,
                 color_discrete_sequence=seq,
@@ -903,7 +925,7 @@ def _figure_from_spec(
             fig.update_traces(textinfo="label+percent", textposition="inside")
             fig.update_layout(showlegend=False)
         else:
-            data = _aggregate_rows(rows, x_col, color_col, y_col)
+            data = _aggregate_rows(rows, x_col, color_col, y_col, agg=group_agg)
             if y_is_percent and not color_col:
                 data = _normalize_percent(data, y_col)
             if not color_col and chart_type == "bar" and len(data) <= 8:
@@ -1043,52 +1065,6 @@ def _non_sql_dialect_card(kpi_id: str, dialect: str, source_path: str, spec: Das
         ],
         className="mb-3 shadow-sm border-secondary",
     )
-
-
-def _build_kpi_figure(
-    repo_root: Path,
-    layout: WorkspaceLayout,
-    spec: DashboardSpec,
-    *,
-    start: date | None = None,
-    end: date | None = None,
-) -> go.Figure:
-    sql_path_rel = str(spec.config.get("sql_path") or "")
-    sql_path = (repo_root / sql_path_rel).resolve() if sql_path_rel else None
-    view_name = f"{spec.kpi_id}_results"
-    rows = _execute_sql_view(repo_root, sql_path, view_name) if sql_path else []
-    date_col = _spec_date_column(spec)
-    if date_col:
-        rows = _filter_rows_by_date(rows, date_col, start, end)
-    return _figure_from_spec(spec, rows)
-
-
-def _kpi_render_data(repo_root: Path, layout: WorkspaceLayout, spec: DashboardSpec) -> dict[str, Any]:
-    """Execute the KPI's SQL ONCE and build its data-derived panel figures +
-    headline. Returns figures (not HTML) for the live Dash app. Each panel is
-    (title, figure); falls back to a single chart when the spec has no `panels`.
-    """
-    sql_path_rel = str(spec.config.get("sql_path") or "")
-    sql_path = (repo_root / sql_path_rel).resolve() if sql_path_rel else None
-    rows = _execute_sql_view(repo_root, sql_path, f"{spec.kpi_id}_results") if sql_path else []
-    definition = spec.config.get("definition") or {}
-    panels: list[tuple[str, go.Figure]] = []
-    panels_cfg = spec.config.get("panels") or []
-    if panels_cfg:
-        for i, p in enumerate(panels_cfg):
-            fig = _figure_from_spec(_panel_spec(spec, p), rows, show_title=False)
-            panels.append((str(p.get("title") or f"View {i + 1}"), fig))
-    else:
-        panels.append((str(spec.config.get("title") or spec.kpi_id),
-                       _figure_from_spec(spec, rows, show_title=False)))
-    return {
-        "kpi_id": spec.kpi_id,
-        "title": str(spec.config.get("title") or spec.kpi_id),
-        "metric": str(definition.get("metric") or ""),
-        "cuts": str(definition.get("cuts") or ""),
-        "headline": _kpi_headline(rows, spec),
-        "panels": panels,
-    }
 
 
 def _kpi_blocker_card(kpi_id: str, gap: dict[str, Any]) -> dbc.Card:
@@ -1336,10 +1312,35 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
     # KPI rather than all-at-once.
     meta: dict[str, dict[str, Any]] = {}
     blocked: dict[str, dict[str, Any]] = {}
+    # Non-SQL-dialect KPIs (Polars/PySpark) have no sql_path for the live DuckDB
+    # renderer to execute, but that is NOT "blocked" -- the KPI is complete, just
+    # not embeddable here. Route these to their own bucket + dialect card instead
+    # of silently falling into the blocked tile ("no executable SQL" is misleading).
+    non_sql: dict[str, dict[str, Any]] = {}
     for kpi_id, definition in sorted(definitions.items()):
         spec = load_kpi_spec(layout, kpi_id)
         gap = gaps_by_id.get(kpi_id) or {}
-        if str(gap.get("status")) == "blocked" or not (spec and spec.config.get("sql_path")):
+        is_blocked_status = str(gap.get("status")) == "blocked"
+        has_sql = bool(spec and spec.config.get("sql_path"))
+        if not is_blocked_status and not has_sql:
+            dialect = _detect_artifact_dialect(repo_root, layout, kpi_id)
+            if dialect in ("polars", "pyspark"):
+                source = layout.solutions_dir / f"{kpi_id}.{dialect}.py"
+                try:
+                    source_path = str(source.relative_to(repo_root))
+                except ValueError:
+                    source_path = str(source)
+                card_spec = spec or DashboardSpec(
+                    kpi_id=kpi_id, config={}, machine_defaults={}, user_overrides={}, spec_path="",
+                )
+                non_sql[kpi_id] = {
+                    "dialect": dialect,
+                    "source_path": source_path,
+                    "spec": card_spec,
+                    "title": str(card_spec.config.get("title") or kpi_id),
+                }
+                continue
+        if is_blocked_status or not has_sql:
             blocked[kpi_id] = gap or {"blockers": ["spec_missing"], "recovery_commands": []}
             continue
         sql_path = (repo_root / str(spec.config.get("sql_path"))).resolve()
@@ -1364,7 +1365,7 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         }
 
     ready_ids = sorted(meta, key=lambda k: (meta[k]["group"], k))  # group together
-    first = ready_ids[0] if ready_ids else ""
+    first = ready_ids[0] if ready_ids else next(iter(non_sql), "")
 
     _fig_cache: dict[tuple[str, int], go.Figure] = {}
 
@@ -1408,16 +1409,31 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
              html.Div("no executable SQL", className="n")],
             className="tile",
         ))
+    for kid, info in non_sql.items():
+        # Selectable (same {"role": "kpi-tile", ...} id shape as ready tiles) so a
+        # click routes through the existing _tile_to_pick / _highlight_tile
+        # callbacks for free -- this is not a dead end like a blocked tile.
+        strip_children.append(html.Div(
+            [html.Div(kid.replace("_", " ").upper(), className="t"),
+             html.Div(info["dialect"], className="h", style={"color": "var(--ink-soft)"}),
+             html.Div(info["title"], className="n", title=info["title"])],
+            id={"role": "kpi-tile", "kpi_id": kid},
+            className="tile" + (" sel" if kid == first else ""),
+            n_clicks=0,
+        ))
 
     # The KPI selector is now driven entirely by clicking a tile in the rail, so
     # the old "KPI | <title> | Views" control row is gone (it read as noise). The
     # dropdown is KEPT but HIDDEN — it is the single source of "current KPI" that
     # the detail/explore/drill callbacks all read, and tile clicks write to it.
+    kpi_options = [{"label": meta[k]["title"], "value": k} for k in ready_ids] + [
+        {"label": f"{info['title']} ({info['dialect']})", "value": k} for k, info in non_sql.items()
+    ]
     kpi_state = dcc.Dropdown(
         id="kpi-pick",
-        options=[{"label": meta[k]["title"], "value": k} for k in ready_ids],
+        options=kpi_options,
         value=first, clearable=False, className="hidden",
-    ) if ready_ids else dcc.Dropdown(id="kpi-pick", className="hidden")
+    ) if kpi_options else dcc.Dropdown(id="kpi-pick", className="hidden")
 
     # Explore — promoted to a prominent card at the TOP of the scroll region (it is
     # the comparison/customization surface the board asked for). The four dropdowns
@@ -1503,6 +1519,9 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
         )
 
     def _detail_children(kpi_id: str, xfilter: dict[str, list[Any]] | None = None) -> Any:
+        if kpi_id in non_sql:
+            info = non_sql[kpi_id]
+            return [_non_sql_dialect_card(kpi_id, info["dialect"], info["source_path"], info["spec"])]
         m = meta.get(kpi_id)
         if not m:
             return html.Div("Select a KPI above.", className="dm")
@@ -1791,22 +1810,6 @@ def build_dash_app(repo_root: Path, workspace_rel: str) -> dash.Dash:
     return app
 
 
-def render_kpi_html(repo_root: Path, layout: WorkspaceLayout, spec: DashboardSpec) -> str:
-    """Render a single KPI's chart as a standalone HTML fragment."""
-    sql_path_rel = str(spec.config.get("sql_path") or "")
-    sql_path = (repo_root / sql_path_rel).resolve() if sql_path_rel else None
-    view_name = f"{spec.kpi_id}_results"
-    rows = _execute_sql_view(repo_root, sql_path, view_name) if sql_path else []
-    fig = _figure_from_spec(spec, rows, show_title=False)
-    return fig.to_html(
-        include_plotlyjs="cdn",
-        full_html=False,
-        div_id=f"chart_{spec.kpi_id}",
-        config={"responsive": True, "displayModeBar": False},
-        default_width="100%",
-    )
-
-
 def _format_measure(value: Any, y_col: str, *, percent: bool) -> str:
     """Format a single measure value for a headline: percent / currency / count.
 
@@ -1816,7 +1819,13 @@ def _format_measure(value: Any, y_col: str, *, percent: bool) -> str:
     if not isinstance(value, (int, float)):
         return str(value)
     name = (y_col or "").lower()
-    if percent or "percent" in name or "share" in name or "rate" in name or "ratio" in name:
+    if percent:
+        # y_format="percent" is a declared contract: the KPI SQL / _normalize_percent
+        # already emit percent UNITS (0-100), never a 0-1 fraction here. Trust it
+        # instead of guessing from magnitude -- a genuine <1% share (e.g. 0.8 meaning
+        # 0.8%) was previously misread as a 0-1 fraction and scaled to 80%.
+        return f"{value:.1f}%"
+    if "percent" in name or "share" in name or "rate" in name or "ratio" in name:
         return f"{value:.1f}%" if value > 1 else f"{value * 100:.1f}%"
     is_currency = any(t in name for t in ("amount", "paid", "revenue", "cost", "price", "spend", "sales"))
     prefix = "$" if is_currency else ""
@@ -1846,7 +1855,10 @@ def _kpi_headline(rows: list[dict[str, Any]], spec: DashboardSpec) -> str:
         # Match V4: rank by the same non-constant categorical the chart uses, then
         # aggregate so the headline reflects the true top entity (not a filter constant).
         rank_col = _first_non_constant_categorical(rows, y_col, preferred=str(config.get("x") or ""))
-        agg = _aggregate_rows(rows, rank_col, None, y_col)
+        from core.dashboard.model.cuts import measure_func
+        _fn = measure_func(str(config.get("metric") or ""), y_col)
+        group_agg = "avg" if _fn in ("avg", "median") else _fn if _fn in ("min", "max") else "sum"
+        agg = _aggregate_rows(rows, rank_col, None, y_col, agg=group_agg)
         top = max(agg, key=lambda r: r.get(y_col) or 0)
         label = str(top.get(rank_col, "")) if rank_col in top else ""
         return f"{label}: {_format_measure(top.get(y_col), y_col, percent=percent)}".strip(": ")
@@ -2060,7 +2072,6 @@ __all__ = [
     "render_kpi_inline",
     "set_active_design",
     "build_dash_app",
-    "render_kpi_html",
     "_classify_columns",
     "_explore_figure",
     "_explore_chart_options",

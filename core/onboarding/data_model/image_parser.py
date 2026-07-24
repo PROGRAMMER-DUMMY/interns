@@ -470,6 +470,18 @@ def _warnings(ocr: dict[str, Any], remote: dict[str, Any]) -> list[str]:
 
 
 def _parse_ocr_schema_text(text: str) -> dict[str, Any]:
+    """Deterministic regex/heuristic table+relationship extraction from raw
+    Tesseract OCR text.
+
+    Injection-guard exemption (verified, not assumed): this text never reaches
+    an LLM call. `_run_local_ocr` is a local Tesseract subprocess only, the
+    remote multimodal-vision path (`_remote_status`) is a permanent stub that
+    never fires, and every downstream consumer of the parsed schema
+    (`relationships/contracts.py`'s diagram-sidecar promotion) is
+    deterministic profile/RI matching, not a prompt. No `neutralize_text` call
+    is needed here; add one only if a real LLM-facing consumer of this text
+    is introduced.
+    """
     lines = _clean_ocr_lines(text)
     if not lines:
         return {

@@ -1011,6 +1011,8 @@ def _workspace_default_section(rows: list[dict[str, Any]]) -> str:
     return str(first or "datasets")
 
 def _chat_artifact_context(matches: list[dict], ws: str, scope: str, advanced: list[str] | None) -> str:
+    from core.governance.injection_guard import neutralize_text
+
     scope_mode = scope or "workspace"
     root_labels = _scope_root_labels(scope_mode, ws, advanced)
     lines = [
@@ -1021,10 +1023,13 @@ def _chat_artifact_context(matches: list[dict], ws: str, scope: str, advanced: l
         "Relevant artifacts:",
     ]
     for row in matches[:8]:
-        lines.append(
-            f"- {row.get('interpreter') or row.get('kind')}: {row.get('label')} "
-            f"({row.get('size', 0)} bytes)"
-        )
+        # Artifact label/interpreter come from workspace-controlled filenames
+        # (a workspace owner or data supplier chooses them) and land directly
+        # in the LLM chat prompt below -- neutralize before inclusion so a
+        # hostile filename can't inject instructions into the chat context.
+        interpreter = neutralize_text(str(row.get("interpreter") or row.get("kind") or ""))
+        label = neutralize_text(str(row.get("label") or ""))
+        lines.append(f"- {interpreter}: {label} ({row.get('size', 0)} bytes)")
     return "\n".join(lines)
 
 _DASHBOARD_DANGEROUS_TERMS = (

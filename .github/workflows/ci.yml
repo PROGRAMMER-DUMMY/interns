@@ -50,3 +50,21 @@ jobs:
         env:
           CI_RUN_SPARK: "1"
         run: python -m unittest -v tests.test_ci_pyspark_parity
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t autoresearch:${{ github.sha }} .
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: autoresearch:${{ github.sha }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json

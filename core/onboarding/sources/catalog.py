@@ -27,6 +27,7 @@ from typing import Any
 import aiohttp
 import polars as pl
 
+from core.paths import rel_to as _rel
 from core.resource.manager import ResourceManager
 from core.storage.external_data import (
     is_external_path,
@@ -2045,13 +2046,6 @@ def _find_action(actions: list[dict[str, Any]], source_id: str) -> dict[str, Any
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _rel(path: Path, root: Path) -> str:
-    try:
-        return path.resolve().relative_to(root.resolve()).as_posix()
-    except ValueError:
-        return str(path)
 
 
 

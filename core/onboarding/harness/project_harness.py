@@ -14,6 +14,7 @@ from core.onboarding.harness.workflow_guard_harness import WorkflowGuardHarness
 from core.onboarding.benchmark.agent_benchmark import AgentBenchmarkScorecardBuilder
 from core.onboarding.kpi.execution_harness import KPIExecutionHarness
 from core.onboarding.workspace.validation import WorkspaceArtifactValidator
+from core.paths import rel_to as _rel
 from core.storage.workspace_layout import WorkspaceLayout
 from tools.git_hygiene import collect_staged_paths, render_issues, validate_paths
 
@@ -676,13 +677,6 @@ def _load_json(path: Path) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return data if isinstance(data, dict) else {}
-
-
-def _rel(path: Path, root: Path) -> str:
-    try:
-        return path.resolve().relative_to(root.resolve()).as_posix()
-    except ValueError:
-        return path.as_posix()
 
 
 

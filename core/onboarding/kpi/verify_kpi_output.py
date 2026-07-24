@@ -23,9 +23,12 @@ from core.observability.cost_ledger import anchored
 
 import argparse
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -511,14 +514,22 @@ class KPIOutputVerifier:
         if importlib.util.find_spec("pyspark") is None:
             record.warnings.append("PySpark not installed; PySpark↔SQL parity not checked")
             return
+        # Own the Spark scratch dir here (not left to the child JVM's shutdown
+        # hook): a subprocess.run timeout kills the child hard, skipping any
+        # graceful cleanup, and would otherwise leak shuffle/blockmgr scratch
+        # files to the OS temp root on every green-gate run.
+        spark_tmp = tempfile.mkdtemp(prefix="green_gate_spark_")
         try:
+            env = {**os.environ, "SPARK_LOCAL_DIR_OVERRIDE": spark_tmp}
             proc = subprocess.run(
                 [sys.executable, str(pyspark_path)],
-                capture_output=True, text=True, timeout=1200,
+                capture_output=True, text=True, timeout=1200, env=env,
             )
         except Exception as exc:  # pragma: no cover - environment dependent
             record.warnings.append(f"could not run PySpark script for parity: {exc}")
             return
+        finally:
+            shutil.rmtree(spark_tmp, ignore_errors=True)
         if proc.returncode != 0:
             stderr = (proc.stderr or "")
             # A broken local Spark/JVM (no JAVA_HOME, SparkEnv null, py4j gateway) is an

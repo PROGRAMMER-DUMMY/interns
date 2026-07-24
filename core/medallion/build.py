@@ -163,7 +163,7 @@ def _run_build(
         started_at=started_at,
     )
 
-    governor = Governor(cfg=cfg, registry=None) if cfg else _NullGovernor()
+    governor = Governor(cfg=cfg) if cfg else _NullGovernor()
 
     from core.medallion.mlflow_emit import finalize_run as mlflow_finalize, start_run as mlflow_start
     mlflow_start(workspace.name, run_id, declared_target, manifest_hash)
@@ -719,6 +719,20 @@ def _execute_kpi_regen(
     workspace: Path,
     repo_root: Path,
 ) -> None:
+    """Row-equality check between two KPI SQL bundles keyed by '-- KPI: <id>'
+    anchor comments: regen_cfg.row_equality_check_against (v1, the pre-Gold
+    baseline) vs regen_cfg.target_file (v2, a Gold-targeted regeneration).
+
+    This does NOT itself regenerate v2 from v1 -- a workspace that wants
+    Gold-parity evidence must produce a real v2 SQL bundle at
+    regen_cfg.target_file (e.g. via a KPI SQL generator pointed at Gold
+    tables) before this check has anything to compare. It never fabricates
+    v2 by copying v1 (that would always compare equal to itself and prove
+    nothing), and it skips -- rather than silently reporting an empty,
+    all-clear diff -- when neither file carries '-- KPI:' anchors (e.g. v1 is
+    onboarding's baseline manifest `kpi_metrics.sql`, which is a metadata
+    VALUES table, not a per-KPI SQL bundle).
+    """
     regen_cfg = manifest.kpi_regeneration
     kpi_registry_path = layout.contracts_dir / "kpi_registry.json"
     if not kpi_registry_path.exists():
@@ -726,28 +740,26 @@ def _execute_kpi_regen(
 
     kpi_registry = json.loads(kpi_registry_path.read_text(encoding="utf-8"))
 
-    # v1 legacy SQL
     v1_path = workspace / regen_cfg.row_equality_check_against
     v2_path = workspace / regen_cfg.target_file
+    if not v1_path.exists() or not v2_path.exists():
+        return
+    v1_text = v1_path.read_text(encoding="utf-8")
+    v2_text = v2_path.read_text(encoding="utf-8")
+    if "-- KPI:" not in v1_text and "-- KPI:" not in v2_text:
+        return
 
-    # If v2 already exists use it; otherwise copy v1 as the starting point
-    if not v2_path.exists() and v1_path.exists():
-        v2_path.parent.mkdir(parents=True, exist_ok=True)
-        v2_path.write_text(v1_path.read_text(encoding="utf-8"), encoding="utf-8")
-
-    # Row-equality check
-    if v1_path.exists() and v2_path.exists():
-        diff = _row_equality_check(con, v1_path, v2_path, kpi_registry)
-        state.kpi_diff = diff
-        for kpi_id, info in diff.items():
-            if not info.get("equal", True):
-                entry = f"kpi_diff:{kpi_id}"
-                state.blocker_entries_added.append(entry)
-                _route(
-                    governor, state, "KPI_ROW_EQUALITY_FAIL",
-                    f"{kpi_id}: v1={info.get('row_count_v1')} v2={info.get('row_count_v2')}",
-                    fatal=False,
-                )
+    diff = _row_equality_check(con, v1_path, v2_path, kpi_registry)
+    state.kpi_diff = diff
+    for kpi_id, info in diff.items():
+        if not info.get("equal", True):
+            entry = f"kpi_diff:{kpi_id}"
+            state.blocker_entries_added.append(entry)
+            _route(
+                governor, state, "KPI_ROW_EQUALITY_FAIL",
+                f"{kpi_id}: v1={info.get('row_count_v1')} v2={info.get('row_count_v2')}",
+                fatal=False,
+            )
 
 
 def _row_equality_check(

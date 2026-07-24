@@ -182,6 +182,17 @@ class RelationshipContractTests(unittest.TestCase):
                 "orders joins website_sessions on website_session_id.\n",
                 encoding="utf-8",
             )
+            # A free-text doc join is documented-but-unproven on its own (no
+            # data evidence gate is bypassed) -- it only promotes to
+            # proven_data_model when real key-overlap/uniqueness backs it, so
+            # the fixture needs actual CSV data for the "proven pair exists"
+            # premise this test is checking.
+            (workspace / "website_sessions.csv").write_text(
+                "website_session_id,user_id\n1,10\n2,11\n3,12\n", encoding="utf-8",
+            )
+            (workspace / "orders.csv").write_text(
+                "website_session_id,user_id\n1,10\n2,11\n", encoding="utf-8",
+            )
             (layout.profiles_dir / "profile_index.json").write_text(
                 json.dumps(
                     {

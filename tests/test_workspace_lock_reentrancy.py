@@ -79,7 +79,9 @@ class WorkspaceLockReentrancyTests(unittest.TestCase):
                     self.assertTrue(p1.exists())
                 self.assertTrue(p1.exists(), "inner exit must not release")
             self.assertTrue(p1.exists(), "middle exit must not release")
-        self.assertFalse(p1.exists(), "outermost exit must release and clean up")
+        # The lock file is deliberately never unlinked (flock-with-unlink
+        # hazard); it persists as a small sentinel after the outermost exit.
+        self.assertTrue(p1.exists(), "lock file persists after outermost exit")
 
     def test_inner_exit_keeps_lock_held_until_outer_exit(self) -> None:
         """While nested, another owner must still be excluded; after the

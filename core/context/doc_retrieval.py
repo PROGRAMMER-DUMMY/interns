@@ -1,8 +1,13 @@
 """Bounded retrieval over the platform's INTERNAL docs (``docs/**/*.md``).
 
-An ambiguous model often does not know which internal doc explains a topic.
-Rather than guess, it can call :func:`retrieve_docs` with the topic/ambiguity
-string and pull the single most relevant *bounded* section into context.
+Manual-operator surface: an agent working this repo (or a human) that does not
+know which internal doc explains a topic can run ``uv run retrieve-docs
+--query <topic>`` (or call :func:`retrieve_docs` directly) and get back the
+top-K most relevant *bounded* sections. Nothing in the platform calls this
+automatically -- no onboarding/blocker-panel/ambiguity-resolution code path is
+wired to it, so it does not participate in any agent's reasoning unless that
+agent (or a human) explicitly invokes the CLI. Kept for manual use because it
+already works; wire it into an automatic path only if a real caller emerges.
 
 Design mirrors :mod:`core.context.router` (manifest of derived pages + small
 excerpts, never a full-file dump) and reuses the heading-bounded section

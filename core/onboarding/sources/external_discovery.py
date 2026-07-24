@@ -23,7 +23,14 @@ DATA_SUFFIXES = {".csv", ".parquet", ".pq", ".json", ".jsonl", ".ndjson"}
 DOC_SUFFIXES = {".pdf", ".md", ".txt", ".doc", ".docx", ".html", ".htm", ".png", ".jpg", ".jpeg", ".xlsx", ".xls"}
 DB_SUFFIXES = {".duckdb", ".db", ".sqlite", ".sqlite3"}
 LOG_SUFFIXES = {".log", ".jsonl"}
-SYSTEM_DIR_NAMES = {"system", "sessions", "state", "__pycache__"}
+# ".jsonl" is in both DATA_SUFFIXES (checked first) and LOG_SUFFIXES, so
+# suffix alone never routes it to log_or_state -- a real NDJSON application
+# log is classified as an ingestible dataset unless caught by the
+# directory-name check below, which runs BEFORE the suffix check. "logs"/
+# "log" close the common real case (app logs live in a logs/ dir) without
+# reclassifying every .jsonl by suffix, which would wrongly catch genuine
+# NDJSON datasets living outside a log directory.
+SYSTEM_DIR_NAMES = {"system", "sessions", "state", "__pycache__", "logs", "log"}
 
 
 @dataclass(frozen=True)

@@ -94,10 +94,3 @@ class CLIEngine(LLMEngine):
         except Exception as exc:
             print(f"[CLIEngine] {exe_name} failed: {exc}", flush=True)
             return None
-
-class StubLLMEngine(LLMEngine):
-    def __init__(self, stub_response: Optional[str] = None):
-        self.stub_response = stub_response
-
-    def generate(self, system: str, user: str, max_tokens: int, model: str) -> Optional[str]:
-        return self.stub_response

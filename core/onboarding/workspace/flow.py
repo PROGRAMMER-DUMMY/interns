@@ -97,6 +97,18 @@ from tools.workspace_gc import (
 
 
 FLOW_VERSION = 1
+# "full_kpi_sql" is the real, heavily-used default pipeline intent (dozens of
+# tests + tooling reference it by name). "usual_workflow" is a narrower signal
+# set internally when a KPI-generation-interview route selects it (see
+# `result.stage == "usual_workflow_selected"` below) -- today
+# `_advance_until_stop` does not branch on either value, so both currently
+# drive the identical pipeline. Investigated as part of the lingering-issues
+# plan (Q6): NOT collapsed -- `full_kpi_sql`'s existing call-site surface is
+# too large to rename safely, and giving `usual_workflow` real divergent
+# behavior (e.g. deferring to WorkspaceWorkflowOrchestrator) is a genuine
+# design decision, not a quick fix. Left as-is with this note so a future
+# reader knows the lack of branching is a known, evaluated gap, not an
+# oversight.
 INTENTS = {"kpi_generation", "usual_workflow", "full_kpi_sql"}
 
 # Maximum number of rows shown in the KPI result preview packet.
