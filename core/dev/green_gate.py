@@ -220,6 +220,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # topology (dbt_build supersedes medallion_build+kpi_results) and the
     # Cosmos wiring that runs it via DBT_RUNNER instead of a subprocess.
     "tests.test_cosmos_dag",
+    # dbt+Airflow production-backend Phase D3: bounded/dry-run backfill --
+    # refuses an over-threshold date-range span without a human-confirmed
+    # override (Human-Gate Provenance Rule), never automatic.
+    "tests.test_dbt_backfill",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
