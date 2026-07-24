@@ -23,6 +23,7 @@ module still imports (documenting the shape); the topology + the plain
 from __future__ import annotations
 
 import os
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -36,12 +37,18 @@ def build_dag(
     *,
     dag_id: str = "autoresearch_medallion_pipeline",
     schedule: Optional[str] = None,
+    stages: Any = None,
 ) -> Any:
-    """Render STAGES into an Airflow DAG (one BashOperator per stage, wired by
-    dependencies). Raises a clear error if Airflow is not installed.
+    """Render a stage topology into an Airflow DAG (one BashOperator per
+    stage, wired by dependencies). Raises a clear error if Airflow is not
+    installed.
 
     ``schedule`` is an Airflow cron/preset (None = manual trigger only). The
-    workspace comes from the arg or ``AUTORESEARCH_PIPELINE_WORKSPACE``."""
+    workspace comes from the arg or ``AUTORESEARCH_PIPELINE_WORKSPACE``.
+    ``stages`` defaults to STAGES (every existing caller's behavior,
+    unchanged); pass ``pipeline_stages.stages_for_workspace(repo_root, ws)``
+    to get the dbt_build-substituted topology for a workspace on the dbt
+    path instead."""
     try:
         from airflow import DAG
         from airflow.operators.bash import BashOperator
@@ -55,18 +62,27 @@ def build_dag(
 
     ws = workspace or os.environ.get(_DEFAULT_WORKSPACE_ENV, "")
     repo_root = Path(__file__).resolve().parents[2]
+    dag_stages = stages if stages is not None else STAGES
 
     dag = DAG(
         dag_id=dag_id,
         schedule=schedule,                       # None -> trigger manually
         start_date=days_ago(1),
+        # Backfill is a deliberate, separate trigger, never automatic
+        # catch-up scheduling -- see the dbt+Airflow integration plan's
+        # backfill-safety section.
         catchup=False,
-        default_args={"retries": 1},
+        default_args={
+            "retries": 1,
+            "retry_delay": timedelta(minutes=5),
+            "retry_exponential_backoff": True,
+            "max_retry_delay": timedelta(minutes=30),
+        },
         tags=["autoresearch", "medallion", "kpi"],
     )
     tasks: dict[str, Any] = {}
     with dag:
-        for stage in STAGES:
+        for stage in dag_stages:
             tasks[stage.key] = BashOperator(
                 task_id=stage.key,
                 bash_command=(
@@ -74,8 +90,8 @@ def build_dag(
                 ),
                 doc_md=stage.description,
             )
-        # Wire dependencies from the shared topology.
-        for stage in STAGES:
+        # Wire dependencies from the given topology.
+        for stage in dag_stages:
             for up in stage.upstream:
                 tasks[up] >> tasks[stage.key]
     return dag

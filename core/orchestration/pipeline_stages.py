@@ -11,7 +11,7 @@ today). Dependencies encode the real data flow: design -> build -> kpi -> dash.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 
 @dataclass(frozen=True)
@@ -73,13 +73,69 @@ STAGES: tuple[Stage, ...] = (
 )
 
 
-def stage_map() -> dict[str, Stage]:
-    return {s.key: s for s in STAGES}
+# NOT a member of STAGES: unlike every stage above, this one is only correct
+# for a workspace on the dbt path (WorkspaceLayout.databricks_source_mode()
+# in {"additive", "exclusive"}) -- generate-dbt-project requires a declared
+# databricks_source, so this stage would simply fail for a local-only
+# workspace. stages_for_workspace() below splices it in (replacing
+# medallion_build+kpi_results, repointing dashboard's upstream) only for a
+# workspace that actually declared one; STAGES itself -- what every existing
+# caller (airflow_dag.py, dagster_defs.py, plain pipeline-run) already
+# renders unconditionally -- stays exactly as it was, byte-identical, for
+# every workspace that doesn't opt in.
+DBT_BUILD_STAGE = Stage(
+    key="dbt_build",
+    command=(
+        "uv run generate-dbt-project --workspace {ws} && "
+        "dbt build --project-dir {ws}/dbt --profiles-dir {ws}/dbt"
+    ),
+    upstream=("resolve_features",),
+    description=(
+        "Generate + build the dbt project (staging/intermediate/marts, medallion-"
+        "layered bronze/silver/gold) for a workspace on the dbt path. Supersedes "
+        "medallion_build+kpi_results on that path."
+    ),
+    produces=("{ws}/dbt/target/manifest.json", "{ws}/dbt/models/**/*.sql"),
+)
 
 
-def topological_order() -> list[str]:
+def stages_for_workspace(repo_root: str, workspace: str) -> tuple[Stage, ...]:
+    """The real stage set for one specific workspace.
+
+    Byte-identical to STAGES for every existing local-only workspace (the
+    overwhelming majority, no databricks_source declared at all) -- this
+    function is purely additive. For a workspace on the dbt path
+    (databricks_source_mode() in {"additive", "exclusive"}), dbt_build
+    replaces medallion_build+kpi_results and dashboard's upstream repoints
+    to it, so the DAG a workspace actually gets reflects which backend it
+    declared, not a hardcoded assumption either way.
+    """
+    from pathlib import Path
+
+    from core.storage.workspace_layout import WorkspaceLayout
+
+    layout = WorkspaceLayout(project_root=(Path(repo_root) / workspace).resolve())
+    if layout.databricks_source_mode() == "local_files":
+        return STAGES
+
+    kept = [s for s in STAGES if s.key not in {"medallion_build", "kpi_results"}]
+    result: list[Stage] = []
+    for stage in kept:
+        if stage.key == "dashboard":
+            result.append(DBT_BUILD_STAGE)
+            result.append(replace(stage, upstream=("dbt_build",)))
+        else:
+            result.append(stage)
+    return tuple(result)
+
+
+def stage_map(stages: tuple[Stage, ...] = STAGES) -> dict[str, Stage]:
+    return {s.key: s for s in stages}
+
+
+def topological_order(stages: tuple[Stage, ...] = STAGES) -> list[str]:
     """Stage keys in a valid dependency order (raises on a cycle/unknown dep)."""
-    smap = stage_map()
+    smap = stage_map(stages)
     visited: dict[str, int] = {}  # 0 = visiting, 1 = done
     order: list[str] = []
 
@@ -97,7 +153,7 @@ def topological_order() -> list[str]:
         visited[key] = 1
         order.append(key)
 
-    for s in STAGES:
+    for s in stages:
         visit(s.key, ())
     return order
 
@@ -138,6 +194,7 @@ def recommend_orchestrator(
 
 
 __all__ = [
-    "Stage", "STAGES", "stage_map", "topological_order", "command_for",
+    "Stage", "STAGES", "DBT_BUILD_STAGE", "stages_for_workspace",
+    "stage_map", "topological_order", "command_for",
     "recommend_orchestrator",
 ]

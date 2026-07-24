@@ -5,6 +5,8 @@ Jinja references instead of quoted-identifier SQL text.
 """
 from __future__ import annotations
 
+import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -95,6 +97,33 @@ class DbtProjectGeneratorLocalCsvTests(unittest.TestCase):
             self.assertIn("name: transactions", sources_yml)
             self.assertIn("database: main", sources_yml)
             self.assertIn("schema: rcm", sources_yml)
+
+            # Query Tags (dbt-databricks 1.11+): per-enterprise cost
+            # attribution via system.query_history.query_tags. Must be a
+            # JSON-encoded STRING (the adapter's own credentials.py types
+            # it Optional[str] and parses it via json.loads()) -- a nested
+            # YAML mapping fails adapter schema validation.
+            match = re.search(r"query_tags: '(.*)'", profiles)
+            self.assertIsNotNone(match, "query_tags line not found")
+            tags = json.loads(match.group(1))
+            self.assertEqual(tags["env"], "prod")
+            self.assertIn("project_name", tags)
+
+    def test_query_tags_project_name_is_the_enterprise_not_the_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_workspace(root)
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            KPIFeatureResolver(root, "workspaces/demo", domain="healthcare").run()
+
+            result = DbtProjectGenerator(
+                root, "workspaces/demo", catalog="main", schema="rcm",
+                enterprise_id="acme_corp",
+            ).generate()
+            profiles = (root / result.dbt_project_dir / "profiles.yml").read_text(encoding="utf-8")
+            match = re.search(r"query_tags: '(.*)'", profiles)
+            tags = json.loads(match.group(1))
+            self.assertEqual(tags["project_name"], "acme_corp")
 
     def test_no_feature_mapping_at_all_raises_clear_error(self):
         # Feature resolution never ran for this workspace -- no

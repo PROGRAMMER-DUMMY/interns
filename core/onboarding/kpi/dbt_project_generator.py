@@ -377,25 +377,49 @@ class DbtProjectGenerator:
             ),
             encoding="utf-8",
         )
-        (dbt_dir / "profiles.yml").write_text(
-            "\n".join(
-                [
-                    f"{self._project_name}:",
-                    "  target: prod",
-                    "  outputs:",
-                    "    prod:",
-                    f"      type: {_DBT_ADAPTER_TYPE}",
-                    "      catalog: " + self.catalog,
-                    "      schema: " + self.schema,
-                    "      host: \"{{ env_var('DATABRICKS_HOST') }}\"",
-                    "      http_path: \"{{ env_var('DATABRICKS_HTTP_PATH') }}\"",
-                    "      token: \"{{ env_var('DATABRICKS_TOKEN') }}\"",
-                    "      threads: 4",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
-        )
+        profiles_lines = [
+            f"{self._project_name}:",
+            "  target: prod",
+            "  outputs:",
+            "    prod:",
+            f"      type: {_DBT_ADAPTER_TYPE}",
+            "      catalog: " + self.catalog,
+            "      schema: " + self.schema,
+            "      host: \"{{ env_var('DATABRICKS_HOST') }}\"",
+            "      http_path: \"{{ env_var('DATABRICKS_HTTP_PATH') }}\"",
+            "      token: \"{{ env_var('DATABRICKS_TOKEN') }}\"",
+            "      threads: 4",
+        ]
+        # dbt-databricks 1.11+ Query Tags: auto-injects dbt_model_name/
+        # dbt_materialized/dbt_core_version/dbt_databricks_version into every
+        # query with zero config; project_name/env below are the ONLY custom
+        # tags this platform needs to add for per-enterprise cost attribution
+        # via system.query_history.query_tags (see the dbt+Airflow
+        # integration plan's cost-governance section). project_name is
+        # deliberately the enterprise, not the workspace -- that's the
+        # billing/attribution boundary, matching resolve_databricks_config's
+        # per-enterprise scoping. Empty when no enterprise_id is resolvable
+        # (today's single-tenant default) -- still valid YAML, just an
+        # empty-string tag until a real enterprise_id is declared.
+        #
+        # `env` is a literal, not `{{ target.name }}`: found live -- `target`
+        # is only in scope inside MODEL/macro Jinja compilation, not inside
+        # profiles.yml's own (much more limited) rendering context, which
+        # only exposes env_var() and a few connection-level helpers. Only
+        # one target ("prod") exists in this generator's scope today, so a
+        # literal is honest; this needs to become genuinely target-aware
+        # once a second (e.g. dev/duckdb) target is added.
+        #
+        # `query_tags` is a JSON-encoded STRING, not a YAML mapping -- found
+        # live: the adapter's own credentials.py types it `Optional[str]`
+        # and connections.py parses it via `json.loads()` (utils.py's
+        # QueryTagsUtils.parse_query_tags), rejecting a nested-dict profile
+        # value with a schema-validation error. Confirmed against the
+        # installed dbt-databricks 1.12.2 source, not assumed from docs.
+        query_tags_json = json.dumps({"project_name": self.enterprise_id, "env": "prod"})
+        profiles_lines.append(f"      query_tags: '{query_tags_json}'")
+        profiles_lines.append("")
+        (dbt_dir / "profiles.yml").write_text("\n".join(profiles_lines), encoding="utf-8")
         source_tables = "\n".join(
             f"      - name: {_safe_name(dataset_display_stem(source))}"
             for source in sorted(sources_needed)
@@ -533,10 +557,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
-    parser.add_argument("--catalog", required=True, help="Databricks catalog for this project.")
     parser.add_argument(
-        "--schema", required=True,
-        help="BRONZE/source schema -- where sources.yml reads the already-existing raw UC tables.",
+        "--catalog", default="",
+        help="Databricks catalog for this project. Defaults to workspace_settings.json's "
+        "databricks_source.catalog when omitted -- required only if that isn't declared.",
+    )
+    parser.add_argument(
+        "--schema", default="",
+        help="BRONZE/source schema -- where sources.yml reads the already-existing raw UC tables. "
+        "Defaults to workspace_settings.json's databricks_source.schema when omitted.",
     )
     parser.add_argument(
         "--silver-schema", default="silver",
@@ -548,11 +577,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--enterprise-id", default="", help="Overrides workspace_settings.json's databricks_source.enterprise_id.")
     args = parser.parse_args(argv)
+    catalog, schema = args.catalog, args.schema
+    if not catalog or not schema:
+        layout = WorkspaceLayout(project_root=Path(args.repo_root).resolve() / args.workspace)
+        declared = layout.load_settings().get("databricks_source")
+        declared = declared if isinstance(declared, dict) else {}
+        catalog = catalog or str(declared.get("catalog") or "")
+        schema = schema or str(declared.get("schema") or "")
+        if not catalog or not schema:
+            parser.error(
+                "--catalog/--schema were not given and workspace_settings.json declares no "
+                "databricks_source.catalog/.schema to default from."
+            )
     result = DbtProjectGenerator(
         args.repo_root,
         args.workspace,
-        catalog=args.catalog,
-        schema=args.schema,
+        catalog=catalog,
+        schema=schema,
         silver_schema=args.silver_schema,
         gold_schema=args.gold_schema,
         enterprise_id=args.enterprise_id,
