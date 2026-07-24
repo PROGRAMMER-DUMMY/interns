@@ -494,6 +494,34 @@ class DbtProjectGenerator:
             encoding="utf-8",
         )
 
+    # Model versioning (dbt+Airflow plan section 5's breaking-change policy)
+    # is deliberately NOT automated here -- there is no way to generically
+    # detect "is this KPI's new SQL a breaking change" from a metric/cuts
+    # diff alone, and auto-versioning every regeneration would make version
+    # bumps meaningless noise. It's a dbt-native, workspace-owner-driven
+    # action, exercised for real this session (D5) against a genuine
+    # breaking rename on a live mart and confirmed:
+    #   - a new `models/marts/fct_<kpi_id>_v2.sql` file (the new shape)
+    #     alongside the existing `fct_<kpi_id>.sql` (kept as-is, v1),
+    #   - a properties file declaring both versions:
+    #       models:
+    #         - name: fct_<kpi_id>
+    #           latest_version: 2
+    #           versions:
+    #             - v: 1
+    #               defined_in: fct_<kpi_id>   # the existing, unrenamed file
+    #               deprecation_date: "YYYY-MM-DD"
+    #             - v: 2
+    #               defined_in: fct_<kpi_id>_v2
+    #   - `dbt build` then materializes BOTH as real tables
+    #     (`fct_<kpi_id>_v1`, `fct_<kpi_id>_v2`), and every unpinned
+    #     `ref('fct_<kpi_id>')` (including this generator's own
+    #     exposures.yml) resolves to latest_version automatically --
+    #     confirmed via the real manifest.json (exposure depends_on ->
+    #     `model.<project>.fct_<kpi_id>.v2`). A future deprecation_date
+    #     does not block the build; dbt only refuses to delete/undeclare
+    #     that version once the date has passed.
+
     def _write_contracts(self, marts_dir: Path, generated_kpi_ids: list[str]) -> None:
         """Emit `contract: enforced: true` for each mart the dashboard reads,
         per the dbt+Airflow integration plan's data-contracts section (D5):
