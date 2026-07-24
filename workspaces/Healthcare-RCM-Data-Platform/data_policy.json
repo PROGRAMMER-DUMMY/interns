@@ -1,7 +1,0 @@
-{
-  "artifact_type": "workspace_data_policy.json",
-  "version": 1,
-  "not_sensitive_columns": ["Name"],
-  "aggregate_ages_over_89": false,
-  "notes": "Name appears only on departments.csv (Emergency, Cardiology, ...) and is an organizational dimension, not patient PII. Person names live in FirstName/LastName/MiddleName, which remain protected. Dataset is synthetic sample data (not real PHI), so exact ages are shown instead of the HIPAA Safe Harbor 90+ bucket."
-}

@@ -1,6 +1,0 @@
-{
-  "databricks_source": {
-    "catalog": "healthcare_rcm",
-    "schema": "bronze"
-  }
-}

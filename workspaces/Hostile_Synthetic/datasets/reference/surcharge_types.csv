@@ -1,7 +1,0 @@
-sur_cd,Name,calc_method
-S-FUEL,Fuel surcharge,PCT_OF_BASE
-S-RES,Residential delivery,FLAT
-S-LIFT,Tail-lift,FLAT
-S-WAIT,Waiting time,PER_15MIN
-S-REWT,Reweigh correction,DELTA
-S-ADR,Hazardous handling,PCT_OF_BASE

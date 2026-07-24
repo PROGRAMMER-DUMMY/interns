@@ -1,5 +1,0 @@
-shift_id,Name,START,END
-SH1,Early,06:00,14:00
-SH2,Late,14:00,22:00
-SH3,Night trunk,22:00,06:00
-SH4,Weekend,08:00,18:00
