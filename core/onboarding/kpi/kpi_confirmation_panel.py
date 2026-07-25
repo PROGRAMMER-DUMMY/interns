@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.governance.injection_guard import neutralize_text
 from core.onboarding.kpi.kpi_format_detector import (
     CANONICAL_ROLES,
     KpiFormatDetection,
@@ -155,8 +156,10 @@ def render_kpi_confirmation_markdown(panel: dict[str, Any]) -> str:
         for rb in read_back:
             lines.append(f"Row {rb.get('row_index')}:")
             for role in CANONICAL_ROLES:
+                # Raw KPI-workbook cell value, literally as typed -- untrusted.
                 val = rb.get("fields", {}).get(role)
                 if val:
+                    val = neutralize_text(val)
                     label = _ROLE_LABEL.get(role, role)
                     shown = val if len(val) <= 80 else val[:77] + "..."
                     lines.append(f"  - {label:22} -> {shown}")

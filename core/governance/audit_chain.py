@@ -45,6 +45,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.storage.workspace_lock import workspace_lock
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -62,9 +64,18 @@ def append_audit_record(chain_path: Path, record: dict[str, Any]) -> dict[str, A
     """Append *record* to the hash-chain at *chain_path* and return the entry.
 
     The chain file is created (including parent directories) if absent.
-    The append is done with a single ``file.write`` call so that concurrent
-    writers on most POSIX file-systems get at-least-once line atomicity; a
-    full distributed lock is out of scope for this stdlib-only module.
+
+    Locked end-to-end (tail-read through write) around the workspace this
+    chain belongs to -- ``chain_path`` is always
+    ``<workspace>/interns/state/audit_chain.jsonl`` (every real caller
+    constructs it this way; see ``main()`` below), so the workspace root is
+    derived from it rather than requiring every caller to pass one
+    separately. Without this, two racing appends can both read the same
+    ``(prev_hash, seq)`` tail and both write -- not just a lost entry, but a
+    ``seq`` discontinuity ``verify_chain`` reports as **tampered**, when it
+    was actually a benign race. A single ``file.write`` call is NOT
+    sufficient on its own: it only makes the final write atomic, not the
+    read-then-write gap this function's own tail-read creates.
 
     Parameters
     ----------
@@ -80,20 +91,22 @@ def append_audit_record(chain_path: Path, record: dict[str, Any]) -> dict[str, A
     entry_hash, record}``).
     """
     chain_path.parent.mkdir(parents=True, exist_ok=True)
+    workspace_path = chain_path.parent.parent.parent  # state -> interns -> workspace
 
-    prev_hash, seq = _tail(chain_path)
-    canonical = _canonical_json(record)
-    entry_hash = _sha256(prev_hash + canonical)
-    entry: dict[str, Any] = {
-        "seq": seq,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "prev_hash": prev_hash,
-        "entry_hash": entry_hash,
-        "record": record,
-    }
-    line = json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n"
-    with chain_path.open("a", encoding="utf-8") as fh:
-        fh.write(line)
+    with workspace_lock(workspace_path):
+        prev_hash, seq = _tail(chain_path)
+        canonical = _canonical_json(record)
+        entry_hash = _sha256(prev_hash + canonical)
+        entry: dict[str, Any] = {
+            "seq": seq,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "prev_hash": prev_hash,
+            "entry_hash": entry_hash,
+            "record": record,
+        }
+        line = json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n"
+        with chain_path.open("a", encoding="utf-8") as fh:
+            fh.write(line)
     return entry
 
 

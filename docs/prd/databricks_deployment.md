@@ -2,7 +2,11 @@
 
 **Project:** autoresearch / interns platform
 **Date:** 2026-06-12
-**Status:** Approved for implementation (plan generation shipped; apply pending)
+**Status:** Implemented -- plan generation AND apply both shipped. `core/onboarding/databricks/
+workspace_deployer.py`'s medallion-deploy path (`deploy_medallion_from_approval`) consumes
+`deploy_approval.json` and performs the real Unity Catalog deployment behind gates G1-G5, per
+section 9 of this PRD. This doc's G1-G5 gate design and deploy boundary are still the accurate
+reference; only this status line was stale.
 **Relationship to prior work:** Extends the 2026-05-11 "Databricks Full Integration"
 PRD (ExecutionBackend / TelemetryBackend / MLflow). That PRD covers HOW the
 platform talks to Databricks (auth, backends, telemetry); this one covers WHAT

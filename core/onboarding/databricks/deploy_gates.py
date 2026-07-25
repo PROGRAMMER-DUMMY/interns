@@ -197,6 +197,24 @@ def run_deploy_gates(
     ]
 
 
+def main(argv: list[str] | None = None) -> int:
+    """Standalone CLI: is `AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1` set right now?
+
+    Reuses `check_remote_approval()` -- the same G5 check the medallion deploy
+    path gates on -- as a fast synchronous gate other execution surfaces that
+    aren't Python call sites (a shell command chain, e.g. `pipeline_stages.py`'s
+    `DBT_BUILD_STAGE`) can shell out to: `cmd1 && check-remote-execution-gate &&
+    cmd2`. Prints the blocking reason and exits 1 when not set; silent exit 0
+    when set. No `--workspace` -- this checks one process-global env var, not
+    workspace state.
+    """
+    verdict = check_remote_approval()
+    if not verdict.ok:
+        print(f"[x] {verdict.blocking_reason}")
+        return 1
+    return 0
+
+
 __all__ = [
     "GATE_NAMES",
     "GateVerdict",
@@ -206,5 +224,10 @@ __all__ = [
     "check_local_green",
     "check_plan_freshness",
     "check_remote_approval",
+    "main",
     "run_deploy_gates",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

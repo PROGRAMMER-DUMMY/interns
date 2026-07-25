@@ -21,7 +21,7 @@ from core.onboarding.kpi.panel_preview_cache import (
     save_cached_preview,
 )
 from core.onboarding.kpi.panel_preview_executor import execute_preview
-from core.governance.injection_guard import neutralize_rows
+from core.governance.injection_guard import neutralize_json, neutralize_rows, neutralize_text
 from core.onboarding.kpi.pii_redaction import is_pii_column, redact_rows, redact_sample_values
 
 
@@ -2134,7 +2134,11 @@ def _render_markdown_compact(panel: dict[str, Any]) -> str:
     source_truth = panel.get("kpi_source_truth") or []
     for truth in source_truth:
         kpi_id = str(truth.get("kpi_id") or "")
-        question = str(truth.get("business_question") or "")
+        # business_question is raw prose typed by a business user into the
+        # workspace's own source workbook -- untrusted, and this is the
+        # panel's declared primary_artifact (current.md), read verbatim by
+        # the orchestrating CLI agent.
+        question = neutralize_text(str(truth.get("business_question") or ""))
         lines.append(f"**{kpi_id}** — {question}" if kpi_id else question)
         meta = []
         metric = str(truth.get("metric") or "")
@@ -2172,7 +2176,9 @@ def _render_markdown_compact(panel: dict[str, Any]) -> str:
             lines.append(f"   {reason}")
         samples = _compact_option_samples(option)
         if samples:
-            lines.append("   Samples: " + ", ".join(str(s) for s in samples))
+            # observed_values/sample_values are raw column content from the
+            # workspace's own data -- untrusted.
+            lines.append("   Samples: " + ", ".join(neutralize_text(str(s)) for s in samples))
     lines.append("")
 
     # How to answer.
@@ -2269,7 +2275,10 @@ def _render_markdown(panel: dict[str, Any]) -> str:
             ]
         )
         if prior.get("has_user_why") and prior.get("user_why"):
-            lines.extend(["### User-recorded *why*", "", str(prior.get("user_why")), ""])
+            # Human-typed freeform note, read straight off disk -- untrusted.
+            lines.extend(
+                ["### User-recorded *why*", "", neutralize_text(str(prior.get("user_why"))), ""]
+            )
     if panel.get("kpi_source_truth"):
         lines.extend(["## KPI Source Truth", ""])
         for truth in panel.get("kpi_source_truth") or []:
@@ -2277,8 +2286,9 @@ def _render_markdown(panel: dict[str, Any]) -> str:
                 [
                     f"### {truth.get('kpi_id', '')}",
                     "",
-                    f"- Business question: {truth.get('business_question', '')}",
-                    f"- Description: {truth.get('description', '')}",
+                    # Raw workbook prose typed by a business user -- untrusted.
+                    f"- Business question: {neutralize_text(str(truth.get('business_question', '')))}",
+                    f"- Description: {neutralize_text(str(truth.get('description', '')))}",
                     f"- Metric from source: `{truth.get('metric', '')}`",
                     f"- Cuts / dimensions from source: {', '.join(truth.get('cuts') or [])}",
                     f"- Source: `{truth.get('source', '')}`",
@@ -2340,7 +2350,7 @@ def _render_markdown(panel: dict[str, Any]) -> str:
                     f"- Presentation level: `{item.get('presentation_level', '')}`",
                     f"- Requires understanding approval: `{item.get('requires_understanding_approval')}`",
                     f"- Affected unresolved feature: `{item.get('affected_unresolved_feature', '')}`",
-                    f"- Original KPI: {original.get('business_question', '')}",
+                    f"- Original KPI: {neutralize_text(str(original.get('business_question', '')))}",
                     f"- Source metric: `{original.get('metric', '')}`",
                     f"- Source cuts / filters: {', '.join(original.get('cuts') or [])}",
                     "",
@@ -2408,7 +2418,10 @@ def _render_markdown(panel: dict[str, Any]) -> str:
         for detail in blocked_details:
             lines.append(f"### {detail.get('kpi_id', '')} -- {detail.get('name', '')}")
             lines.append("")
-            prose = str(detail.get("prose_excerpt") or "").strip()
+            # Raw KPI-prose excerpt sourced from the workspace's own
+            # documents -- untrusted; whitespace normalization alone isn't
+            # sanitization.
+            prose = neutralize_text(str(detail.get("prose_excerpt") or "").strip())
             if prose:
                 lines.append("> " + " ".join(prose.split())[:400])
                 lines.append("")
@@ -2463,6 +2476,14 @@ def _render_markdown(panel: dict[str, Any]) -> str:
             )
     evidence_pack = panel.get("cli_agent_evidence_pack") or {}
     if evidence_pack:
+        # The bounded evidence pack the orchestrating CLI agent reads to
+        # propose a mapping -- contains raw sample_values, human/agent-typed
+        # evidence_note freeform text, and (via data_dictionary_excerpts) raw
+        # PDF/DOCX text extracted from the workspace's own documents. All of
+        # it untrusted. Neutralize every string leaf before serializing,
+        # rather than the dumped JSON text (which risks a match spanning
+        # JSON syntax and corrupting structure).
+        safe_evidence_pack = neutralize_json(evidence_pack)
         lines.extend(
             [
                 "## CLI Agent Evidence Pack",
@@ -2475,7 +2496,7 @@ def _render_markdown(panel: dict[str, Any]) -> str:
                 str(evidence_pack.get("no_raw_data_policy", "")),
                 "",
                 "```json",
-                json.dumps(evidence_pack, indent=2, default=str),
+                json.dumps(safe_evidence_pack, indent=2, default=str),
                 "```",
                 "",
             ]
@@ -2543,7 +2564,11 @@ def _render_sample_evidence(rows: list[dict]) -> list[str]:
     lines.append("| " + " | ".join("---" for _ in header_columns) + " |")
     for row in rows:
         samples = row.get("first_samples") or []
-        sample_text = ", ".join(str(value) for value in samples) if samples else "(no samples)"
+        # Raw column content -- already PII-redacted upstream (redact_sample_values)
+        # but that's a different concern from injection; neutralize separately.
+        sample_text = (
+            ", ".join(neutralize_text(str(value)) for value in samples) if samples else "(no samples)"
+        )
         values = [
             _table_cell(row.get("feature")),
             _table_cell(row.get("column")),

@@ -3,9 +3,15 @@
 Source: forced code audit (see `docs/core_audit/GO_NO_GO_2026-07.md`). These three
 items gate enterprise rollout, not the data-team launch, which is already GO.
 
-## P1.1 — salt_store.py silent `except: pass` risks PII-hash salt desync
+## P1.1 — salt_store.py silent `except: pass` risks PII-hash salt desync — **RESOLVED (verified 2026-07-24)**
 
-**Tracked as:** [GitHub issue #23](https://github.com/PROGRAMMER-DUMMY/interns/issues/23)
+**Tracked as:** [GitHub issue #23](https://github.com/PROGRAMMER-DUMMY/interns/issues/23) — confirm
+closed there; verified independently against current code below.
+
+Both sites now use `except Exception as exc:` with `logger.warning(...)` before falling through to
+the next salt source — no longer a bare, silent `except: pass`. `tests/test_medallion_p2_p3.py`
+covers `salt_store`/`get_workspace_salt`. Acceptance criteria appear met; original finding kept
+below for context.
 
 **Location:** `core/medallion/salt_store.py:34` and `core/medallion/salt_store.py:52` —
 both bare `except: pass`.

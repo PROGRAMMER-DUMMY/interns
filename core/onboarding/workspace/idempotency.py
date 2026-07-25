@@ -108,25 +108,37 @@ def record_op(
     command: str,
     payload: dict | None = None,
 ) -> bool:
-    """Append a new applied-op record. Returns False if op_id is a duplicate."""
+    """Append a new applied-op record. Returns False if op_id is a duplicate.
 
-    if is_duplicate_op(workspace_path, op_id):
-        return False
+    The duplicate CHECK and the append are locked together as one critical
+    section -- not just the append. Locking only the write still leaves a
+    check-then-act race: two concurrent calls with the same op_id can both
+    see "not a duplicate yet" before either has recorded it, and both
+    record -- silently defeating the exact idempotency guarantee every
+    apply-*/finalize-* command relies on this module for. Local import (not
+    module-level): this module deliberately stays core.*-import-free (see
+    module docstring).
+    """
+    from core.storage.workspace_lock import workspace_lock
 
-    path = _log_path(workspace_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    with workspace_lock(Path(workspace_path)):
+        if is_duplicate_op(workspace_path, op_id):
+            return False
 
-    record = AppliedOp(
-        op_id=op_id,
-        command=command,
-        applied_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-        payload=dict(payload) if payload else {},
-    )
+        path = _log_path(workspace_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(asdict(record), sort_keys=True))
-        handle.write("\n")
-    return True
+        record = AppliedOp(
+            op_id=op_id,
+            command=command,
+            applied_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+            payload=dict(payload) if payload else {},
+        )
+
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(asdict(record), sort_keys=True))
+            handle.write("\n")
+        return True
 
 
 def get_applied_op(workspace_path: Path, op_id: str) -> AppliedOp | None:

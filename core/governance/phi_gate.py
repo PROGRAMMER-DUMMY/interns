@@ -45,28 +45,47 @@ HIPAA_IDENTIFIER_PATTERNS: dict[str, tuple[str, ...]] = {
         r"beneficiary|guarantor|provider|guardian|dependent|insured|"
         r"policy[_ ]?holder)[_ ]?name$",
     ),
-    "ssn": (r"^ssn$", r"^social[_ ]?security([_ ]?(no|number))?$"),
+    "ssn": (
+        r"^ssn([_ ]?(no|num|number))?$",
+        r"^social[_ ]?security([_ ]?(no|num|number))?$",
+    ),
     "date_of_birth": (r"^dob$", r"^date[_ ]?of[_ ]?birth$", r"^birth[_ ]?date$"),
-    "phone": (r"^(phone|mobile|cell|fax)([_ ]?(no|number))?$",),
+    # HIPAA Safe Harbor covers ALL date elements directly tied to an individual's
+    # care episode, not just DOB -- death dates unambiguously imply a person
+    # regardless of table, so they're unconditional here. Admission/discharge/
+    # service/encounter dates are NOT here: those words are also plausible on
+    # non-person tables (equipment servicing, contract terms, ...), so they are
+    # table-gated via ``_AMBIGUOUS_DATE_PATTERNS`` (same ambiguity class as a
+    # bare ``name`` column -- see below).
+    "individual_linked_date": (
+        r"^(date[_ ]?of[_ ]?)?death([_ ]?date)?$", r"^deceased([_ ]?date)?$",
+    ),
+    "phone": (r"^(phone|mobile|cell|fax)([_ ]?(no|num|number))?$",),
     "email": (r"^e[_ ]?mail([_ ]?address)?$",),
     "address": (
         r"^address(_?line\d*)?$", r"^street$", r"^city$",
         r"^zip([_ ]?code)?$", r"^postal([_ ]?code)?$",
     ),
-    "medical_record_number": (r"^mrn$", r"^medical[_ ]?record([_ ]?(no|number))?$"),
-    "account_number": (r"^account([_ ]?(no|number))?$", r"^acct([_ ]?(no|number))?$"),
+    "medical_record_number": (r"^mrn$", r"^medical[_ ]?record([_ ]?(no|num|number))?$"),
+    "account_number": (
+        r"^account([_ ]?(no|num|number))?$", r"^acct([_ ]?(no|num|number))?$",
+    ),
     "health_plan_beneficiary": (
         r"^medicaid([_ ]?id)?$", r"^medicare([_ ]?id)?$",
         r"^beneficiary([_ ]?id)?$", r"^subscriber([_ ]?id)?$",
-        r"^health[_ ]?plan([_ ]?id)?$",
+        r"^health[_ ]?plan([_ ]?id)?$", r"^policy([_ ]?(no|num|number))?$",
     ),
     "certificate_or_license": (
-        r"^(license|licence|certificate)([_ ]?(no|number))?$", r"^npi$",
+        r"^(license|licence|certificate)([_ ]?(no|num|number))?$", r"^npi$",
     ),
-    "device_identifier": (r"^device([_ ]?(id|serial))?$", r"^serial([_ ]?(no|number))?$"),
+    "device_identifier": (
+        r"^device([_ ]?(id|serial))?$", r"^serial([_ ]?(no|num|number))?$",
+    ),
     "ip_address": (r"^ip([_ ]?address)?$",),
     "url": (r"^url$", r"^website$"),
-    "vehicle_identifier": (r"^vin$", r"^(license[_ ]?)?plate([_ ]?(no|number))?$"),
+    "vehicle_identifier": (
+        r"^vin$", r"^(license[_ ]?)?plate([_ ]?(no|num|number))?$",
+    ),
     "biometric": (r"^(fingerprint|biometric|retina|voiceprint)([_ ]?id)?$",),
 }
 
@@ -86,7 +105,7 @@ PCI_IDENTIFIER_PATTERNS: dict[str, tuple[str, ...]] = {
     ),
     "card_verification": (
         r"^cvv2?$", r"^cvc2?$", r"^cid$",
-        r"^card[_ ]?verification([_ ]?(code|value|no|number))?$",
+        r"^card[_ ]?verification([_ ]?(code|value|no|num|number))?$",
         r"^security[_ ]?code$",
     ),
     "card_expiry": (
@@ -101,7 +120,7 @@ PCI_IDENTIFIER_PATTERNS: dict[str, tuple[str, ...]] = {
     "bank_account": (
         r"^iban$", r"^routing[_ ]?(no|num|number)$",
         r"^bank[_ ]?account([_ ]?(no|num|number))?$",
-        r"^(aba|swift|bic)([_ ]?(code|no|number))?$",
+        r"^(aba|swift|bic)([_ ]?(code|no|num|number))?$",
     ),
 }
 
@@ -145,6 +164,16 @@ _PERSON_ENTITY_TOKENS: tuple[str, ...] = (
 
 _BARE_NAME_RE = re.compile(r"^name$", re.IGNORECASE)
 
+# Same ambiguity class as a bare ``name``: "admission"/"discharge"/"service"/
+# "encounter" date words are plausible on non-person tables too (equipment
+# servicing, contract terms, ...), so they are PHI only on a person-entity
+# table -- HIPAA Safe Harbor's "any date tied to an individual's care episode"
+# rule, scoped the same conservative way the bare-name rule already is.
+_AMBIGUOUS_DATE_RE = re.compile(
+    r"^(admi(t|ssion)|discharge|service|encounter|visit)([_ ]?date)?$",
+    re.IGNORECASE,
+)
+
 
 def _is_person_entity_table(table: Any) -> bool:
     """True when ``table`` (a dataset path or table name) describes people, so a
@@ -164,10 +193,13 @@ def identifier_category(column_name: str, table: Any = None) -> str | None:
     """Return the HIPAA identifier category a column name matches, else None.
 
     ``table`` is the column's dataset/table identity (path or name) and only
-    affects the ambiguous bare ``name`` column: it is classified as a person
-    name (PHI) on a person-entity table, but is treated as an organizational
-    label (not PHI) on a non-person/unknown table. Every other identifier
-    (``ssn``, ``patient_name``, ``dob`` ...) is table-independent.
+    affects ambiguous columns: a bare ``name`` is classified as a person name
+    (PHI) on a person-entity table, but an organizational label (not PHI) on a
+    non-person/unknown table; an ``admission``/``discharge``/``service``/
+    ``encounter``/``visit`` date is classified as an individual-linked PHI
+    date on a person-entity table, but left unclassified elsewhere (equipment
+    servicing, contract terms, ...). Every other identifier (``ssn``,
+    ``patient_name``, ``dob`` ...) is table-independent.
     """
     category = _match_category(column_name, _COMPILED)
     if category:
@@ -175,6 +207,8 @@ def identifier_category(column_name: str, table: Any = None) -> str | None:
     name = column_name if isinstance(column_name, str) else ""
     if _BARE_NAME_RE.match(name.strip()) and _is_person_entity_table(table):
         return "name"
+    if _AMBIGUOUS_DATE_RE.match(name.strip()) and _is_person_entity_table(table):
+        return "individual_linked_date"
     return None
 
 

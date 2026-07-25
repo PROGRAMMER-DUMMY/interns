@@ -56,6 +56,15 @@ def emit_event(
 ) -> None:
     """Append a single JSONL event line. Never raises."""
     try:
+        # Local import (not module-level): this module deliberately avoids
+        # core.* imports at parse time so it stays importable from anywhere
+        # without creating a cycle (see module docstring); workspace_lock.py
+        # itself has no core.* deps, but the invariant is worth preserving
+        # here regardless. Fires on every command via time_command(), same
+        # as cost_ledger.append() -- unlocked, this loses entries under
+        # concurrent commands exactly like that bug did.
+        from core.storage.workspace_lock import workspace_lock
+
         path = _events_path(workspace_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         safe_details = _safe_details(details)
@@ -76,8 +85,9 @@ def emit_event(
             # Final defensive fallback: replace details with a repr string.
             record["details"] = {"_repr": str(details)}
             line = json.dumps(record, default=str)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+        with workspace_lock(Path(workspace_path)):
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
     except Exception as exc:  # pragma: no cover - best-effort path
         _LOGGER.warning("emit_event failed: %s", exc)
 

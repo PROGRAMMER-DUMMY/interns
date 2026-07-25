@@ -8,6 +8,7 @@ test_dbt_project_generator.py already uses -- it never calls a live
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +19,13 @@ from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
 from core.onboarding.workspace.onboarding import WorkspaceOnboarder
 from core.orchestration.dbt_backfill import DbtBackfillRunner
 from core.storage.workspace_layout import WorkspaceLayout
+
+# run() now checks the remote-execution gate before actually calling
+# subprocess.run (Security S1) -- tests below that exercise OTHER behavior
+# (execution succeeding/failing, span-bound confirmation) authorize remote
+# execution explicitly so they keep testing what they always tested, isolated
+# from the new gate's own state.
+_AUTHORIZED_ENV = {"AUTORESEARCH_ALLOW_REMOTE_EXECUTION": "1"}
 
 
 def _build_real_dbt_project(root: Path) -> Path:
@@ -117,7 +125,7 @@ class ExecutionGateTests(unittest.TestCase):
             root = Path(tmp)
             _build_real_dbt_project(root)
             mock_proc = MagicMock(returncode=0, stdout="Completed successfully", stderr="")
-            with patch(
+            with patch.dict(os.environ, _AUTHORIZED_ENV), patch(
                 "core.orchestration.dbt_backfill.subprocess.run", return_value=mock_proc
             ) as mock_run:
                 result = DbtBackfillRunner(root, "workspaces/demo").run(
@@ -132,7 +140,9 @@ class ExecutionGateTests(unittest.TestCase):
             root = Path(tmp)
             _build_real_dbt_project(root)
             mock_proc = MagicMock(returncode=0, stdout="Completed successfully", stderr="")
-            with patch("core.orchestration.dbt_backfill.subprocess.run", return_value=mock_proc):
+            with patch.dict(os.environ, _AUTHORIZED_ENV), patch(
+                "core.orchestration.dbt_backfill.subprocess.run", return_value=mock_proc
+            ):
                 result = DbtBackfillRunner(root, "workspaces/demo").run(
                     event_time_start="2026-01-01", event_time_end="2026-01-05",
                 )
@@ -143,7 +153,9 @@ class ExecutionGateTests(unittest.TestCase):
             root = Path(tmp)
             _build_real_dbt_project(root)
             mock_proc = MagicMock(returncode=1, stdout="", stderr="Compilation Error")
-            with patch("core.orchestration.dbt_backfill.subprocess.run", return_value=mock_proc):
+            with patch.dict(os.environ, _AUTHORIZED_ENV), patch(
+                "core.orchestration.dbt_backfill.subprocess.run", return_value=mock_proc
+            ):
                 with self.assertRaises(RuntimeError):
                     DbtBackfillRunner(root, "workspaces/demo").run(
                         event_time_start="2026-01-01", event_time_end="2026-01-05",

@@ -83,10 +83,19 @@ STAGES: tuple[Stage, ...] = (
 # caller (airflow_dag.py, dagster_defs.py, plain pipeline-run) already
 # renders unconditionally -- stays exactly as it was, byte-identical, for
 # every workspace that doesn't opt in.
+#
+# `check-remote-execution-gate` (thin CLI over deploy_gates.check_remote_approval,
+# the same G5 check the medallion deploy path uses) runs between project
+# generation and the actual `dbt build`/`dbt retry` -- this is the real
+# production-execution surface shared by plain `pipeline-run`, Dagster, and the
+# Airflow BashOperator fallback (Cosmos's own path gates separately, see
+# cosmos_dag.py); without it this stage ran `dbt build` against a workspace's
+# configured target (often prod) with zero human authorization.
 DBT_BUILD_STAGE = Stage(
     key="dbt_build",
     command=(
         "uv run generate-dbt-project --workspace {ws} && "
+        "uv run check-remote-execution-gate && "
         "(dbt retry --project-dir {ws}/dbt --profiles-dir {ws}/dbt "
         "|| dbt build --project-dir {ws}/dbt --profiles-dir {ws}/dbt)"
     ),

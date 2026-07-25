@@ -1,6 +1,9 @@
 # Design: Governed PDF / Document Ingestion (opendataloader-pdf)
 
-Status: Design (not yet implemented)
+Status: Implemented -- `opendataloader-pdf==2.4.7` is a real pinned dependency (`pyproject.toml`'s
+`documents` group) and is wired into `core/onboarding/documents/{classifier,document_loader}.py`.
+This doc is the original design; verify current exact behavior against the code for any specific
+detail.
 Author: platform
 Library: https://github.com/opendataloader-project/opendataloader-pdf (Apache-2.0)
 Related: `core/onboarding/workspace/onboarding.py` (input inventory), `core/onboarding/data_model/image_parser.py`

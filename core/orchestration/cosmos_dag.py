@@ -34,6 +34,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Tuple
 
+from core.onboarding.databricks.deploy_gates import check_remote_approval
+
 
 def cosmos_available() -> bool:
     """Cheap presence check -- lets a caller (airflow_dag.py) decide whether
@@ -86,6 +88,33 @@ def build_dbt_tasks(
     context active on the call stack (i.e. from inside `with dag:`), same
     requirement as any other operator construction.
     """
+    # Checked first, before the optional-dependency import below: the
+    # cheapest precondition first, and it makes this gate verifiable by tests
+    # regardless of whether astronomer-cosmos happens to be installed. Same
+    # G5 gate the medallion deploy path and dbt_backfill.py use. DAG modules
+    # are parsed repeatedly by a persistent Airflow scheduler process, so
+    # this is necessarily a coarser authorization boundary than a one-shot
+    # CLI's "set it in your own shell": the scheduler's OWN process
+    # environment must carry AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1 for this
+    # DAG to be schedulable against `target=prod` at all. That is a deliberate
+    # deployment-time decision an operator makes once, not a per-run check --
+    # still never settable by this codebase itself (verify-only, same as G5).
+    remote_gate = check_remote_approval()
+    if not remote_gate.ok:
+        raise SystemExit(
+            f"Cosmos dbt_build wiring refused: {remote_gate.blocking_reason} "
+            "Set AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1 in the Airflow scheduler's "
+            "own environment to authorize this DAG to run dbt build against prod."
+        )
+
+    if not workspace:
+        raise ValueError(
+            "Cosmos wiring requires a concrete workspace known at DAG-parse "
+            "time -- it cannot use the ${WORKSPACE}-deferred placeholder "
+            "the BashOperator path supports. Pass build_dag(workspace=...) "
+            "explicitly or set AUTORESEARCH_PIPELINE_WORKSPACE before import."
+        )
+
     try:
         from airflow.operators.bash import BashOperator
         from cosmos.config import ProfileConfig
@@ -98,14 +127,6 @@ def build_dbt_tasks(
             "BashOperator airflow_dag.build_dag() falls back to for the "
             "dbt_build stage when Cosmos is unavailable."
         ) from exc
-
-    if not workspace:
-        raise ValueError(
-            "Cosmos wiring requires a concrete workspace known at DAG-parse "
-            "time -- it cannot use the ${WORKSPACE}-deferred placeholder "
-            "the BashOperator path supports. Pass build_dag(workspace=...) "
-            "explicitly or set AUTORESEARCH_PIPELINE_WORKSPACE before import."
-        )
 
     dbt_dir = Path(repo_root) / workspace / "dbt"
 

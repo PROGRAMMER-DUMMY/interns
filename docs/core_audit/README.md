@@ -1,7 +1,9 @@
 # core/ Full-Read Audit
 
-> **New session? Read `HANDOFF.md` first**, then `SUMMARY.md` (themes), then
-> `REMEDIATION_PLAN.md` (phased fix plan with `file:line` + progress ledger).
+> **New session? Read `GO_NO_GO_2026-07.md` first** (current launch status), then `SUMMARY.md`
+> (themes), then `REMEDIATION_PLAN.md` (phased fix plan with `file:line` + progress ledger).
+> (`HANDOFF.md` was deleted 2026-07-24 — stale, contradicted by `GO_NO_GO_2026-07.md` and the real
+> P2-P5 remediation commits already in git log.)
 
 
 Section-by-section deep read of `core/` (227 files, ~86.9k lines). Each package is read

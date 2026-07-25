@@ -1,4 +1,20 @@
-"""Run the governed project harness and write scoreable proof artifacts."""
+"""Run the governed project harness and write scoreable proof artifacts.
+
+SCOPE NOTE (Security S4): this harness checks data-quality, evidence-
+completeness, and workflow-reliability (artifact validation, KPI execution
+proof, cross-engine parity, git hygiene byte-size limits, AI-CLI eval,
+workflow guardrails via WorkflowGuardHarness, evidence-graph health,
+pipeline/data-quality harness presence) -- it has NO security dimension. It
+does not check for prompt injection, secret exposure, destructive actions, or
+unauthorized execution. A green/passing score here means "there is real
+evidence this workspace's KPI output can be trusted," never "this release is
+secure." Confirmed empirically: grepping this harness and
+WorkflowGuardHarness for injection/secret/credential/destructive/security
+returns no real matches. Do not treat this harness's result as a security
+gate when reasoning about release readiness -- see the deploy gates in
+`core/onboarding/databricks/deploy_gates.py` and the checks tracked in
+`docs/core_audit/PROD_SECURITY_GAPS.md` for the actual security posture.
+"""
 from __future__ import annotations
 from core.observability.cost_ledger import anchored
 

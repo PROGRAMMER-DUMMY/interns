@@ -28,11 +28,40 @@
   only at narrow third-party integration boundaries that require it, with the reason
   documented and conversion back to Polars kept local.
 
+## Cloud-Native KPI/Dashboard Pipeline Concepts
+
+A separate pipeline from the optimization loop above (KPI onboarding -> dashboard, not
+experiment-candidate optimization). See `AGENTS.md`'s "Local-Native vs. Cloud-Native" section for
+the operating rules; these are the domain concepts behind it.
+
+- **`databricks_source` mode**: A workspace's explicit, durable declaration of where its data
+  lives — `local_files` (default), `additive` (local + Unity Catalog both profiled), or `exclusive`
+  (Unity Catalog only, local discovery skipped). Read via `WorkspaceLayout.databricks_source_mode()`;
+  set via `prepare-data-source-panel`/`apply-data-source-answer`, never inferred.
+- **`resolve_databricks_config(enterprise_id)`**: The per-tenant credential/catalog resolution seam
+  (`core/config.py`). Reads `config/enterprises/<id>/lock.toml` when present, else the global
+  `config/lock.toml` — the mechanism that makes a second real enterprise a config drop-in, not a
+  code change.
+- **`DbtProjectGenerator`** (`core/onboarding/kpi/dbt_project_generator.py`): Generates a real,
+  git-tracked dbt project (staging/intermediate/marts, medallion-layered silver/gold) from the same
+  confirmed KPI contracts `sql_generator.py` reads for the local CTE path — dbt is the production
+  mechanism for a workspace on the dbt path, not a parallel system. Also emits `exposures.yml`
+  (dashboard as a formal dbt-lineage consumer) and, optionally, `contract: enforced: true` on marts
+  with column types read from the real already-built table.
+  Cost is attributed per enterprise via Query Tags in `system.query.history`.
+- **`dbt_build` pipeline stage**: Supersedes `medallion_build`+`kpi_results` for a workspace on the
+  dbt path (`pipeline_stages.stages_for_workspace()`). Runs via Cosmos's `DbtBuildLocalOperator`
+  (DBT_RUNNER, in-process dbt-core) when Airflow+Cosmos are installed, else a plain subprocess
+  BashOperator — `dbt retry` is attempted before a full rebuild on the BashOperator path (Cosmos
+  temp-clones per invocation, so it can't resume there yet).
+
 ## Core Package Layout
 
 `core/` is split by platform responsibility:
 
-- `core/orchestration/`: experiment loop and runner.
+- `core/orchestration/`: experiment loop and runner, plus the dbt/Airflow pipeline-stage graph
+  (`pipeline_stages.py`), Airflow DAG rendering (`airflow_dag.py`), Cosmos/dbt-Runner wiring
+  (`cosmos_dag.py`), and the bounded dbt-microbatch backfill CLI (`dbt_backfill.py`).
 - `core/execution/`: local and Databricks execution backends.
 - `core/governance/`: contracts, policies, semantic rules, mode planning, and promotion gates.
 - `core/optimization/`: diff classification, strategy planning, decision strategy, and adaptive memory.

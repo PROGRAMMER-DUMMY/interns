@@ -185,8 +185,8 @@ class GenieWorkspaceSpecBuilder:
                 "name": f"autoresearch-{manifest['environment']}-{manifest['domain']}-operator",
                 "target_path": f"{base_path}/genie/kpi_operator",
                 "description": (
-                    "Interactive Genie space for searching RCM data assets, explaining KPI blockers, "
-                    "and guiding Databricks validation workflows."
+                    "Interactive Genie space for searching workspace data assets, explaining KPI "
+                    "blockers, and guiding Databricks validation workflows."
                 ),
                 "allowed_tables": target_tables,
                 "allowed_workspace_paths": folders,
@@ -403,7 +403,7 @@ def _starter_prompts(manifest: dict[str, Any], target_tables: list[str]) -> list
         ),
         (
             f"Search Unity Catalog under `{manifest['catalog']}.{manifest['schema']}` and identify "
-            "which tables could support the unresolved RCM KPI features."
+            "which tables could support the unresolved KPI features."
         ),
         (
             "Inspect the generated contracts and explain which KPIs are ready for Databricks SQL "

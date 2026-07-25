@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from core.storage.workspace_layout import WorkspaceLayout
+from core.storage.workspace_lock import named_lock
 
 
 WIKI_MEMORY_VERSION = 1
@@ -49,10 +50,17 @@ class WorkspaceWikiMemoryBuilder:
         self._validate_workspace()
         self.layout.ensure_runtime_dirs()
         definitions = self._collect_workspace_definitions()
-        shared = self._load_shared_memory()
-        cards = self._reuse_cards(definitions, shared)
-        shared = self._merge_shared_memory(shared, definitions)
-        self._write_json(self.shared_memory_path, shared)
+        # shared_memory_path lives under <repo_root>/state/team_memory/, NOT
+        # under this workspace -- it's read-modify-written by EVERY
+        # workspace's prepare-wiki-memory call, so a per-workspace
+        # workspace_lock couldn't protect it even if used. named_lock is the
+        # same mechanism, keyed on a fixed cross-workspace sentinel instead.
+        lock_path = self.shared_memory_path.parent / ".wiki_memory.lock"
+        with named_lock(lock_path):
+            shared = self._load_shared_memory()
+            cards = self._reuse_cards(definitions, shared)
+            shared = self._merge_shared_memory(shared, definitions)
+            self._write_json(self.shared_memory_path, shared)
         workspace_memory = {
             "artifact_type": "wiki_memory_candidates.json",
             "version": WIKI_MEMORY_VERSION,

@@ -131,6 +131,28 @@ Agents should read `compact.md` first and run `session-snapshot verify` at check
 after edits, after command failures, after deletes, after user corrections, and before final
 answers.
 
+### doctor
+
+Command:
+
+```powershell
+uv run doctor
+uv run doctor --json
+uv run doctor --workspace workspaces/<project>
+```
+
+Read-only, one pass over everything that can make the platform unusable before you even get to a
+workspace: Python version, `uv`/`.venv` presence, whether the local Java toolchain is PySpark-
+compatible (Spark 3.5 needs Java 8/11/17 -- a newer JDK reports `blocked`, not just a vague crash
+later), Databricks/dbt/Airflow readiness (delegates to `check-platform-readiness`), and git hygiene
+(delegates to `validate-git-hygiene --all`). No new checking logic beyond Python/uv/Java -- it
+reuses the same primitives those other commands already call.
+
+Run this first in any new session, or whenever something that used to work suddenly doesn't --
+`[ok]`/`[x]`/`[~]` per check, exit code 1 iff there is a real `[x]` blocker. `not_installed` /
+`partial` (dbt, Airflow) are never blockers -- they only matter for the cloud-native/orchestration
+path, and are reported so you know the gap, not to alarm you.
+
 ### onboard-workspace
 
 Command:

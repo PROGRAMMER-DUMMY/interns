@@ -1055,9 +1055,18 @@ Never commit `.env`, tokens, local `state/`, DuckDB databases, CSV/PDF source du
 
 ## Verify
 
+Run tests with the venv interpreter, NOT `uv run` — `uv run` resyncs and reinstalls pre-release
+pyspark 4.1.1 (no Delta), which breaks the pyspark-backed tests (see `AGENTS.md` > Verification).
+
 ```bash
-uv run python -m unittest tests.test_enterprise_optimization
-uv run python -m compileall core interns tools tests dashboard.py
+.venv/Scripts/python.exe -m unittest tests.test_enterprise_optimization
+.venv/Scripts/python.exe -m compileall core interns tools tests dashboard.py
+```
+
+Or just run the portable green gate, which does both plus the full curated suite:
+
+```bash
+green-gate
 ```
 
 Workspace-specific benchmarks require local/catalog data to be provisioned first.

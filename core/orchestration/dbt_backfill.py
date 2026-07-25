@@ -34,6 +34,7 @@ from typing import Any
 
 from core.contracts.versioning import register_contract
 from core.governance.provenance import decision_source as decision_source_for
+from core.onboarding.databricks.deploy_gates import check_remote_approval
 from core.paths import PROJECT_ROOT
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -91,6 +92,12 @@ class DbtBackfillRunner:
         source = decision_source_for(confirmed_by)
         over_bound = span_days > max_span_days
         would_refuse = over_bound and source != "human"
+        # Independent of the span-bound check above: a within-bound backfill
+        # still executes real `dbt build` against the workspace's configured
+        # target (often prod). Same G5 gate the medallion deploy path uses --
+        # AUTORESEARCH_ALLOW_REMOTE_EXECUTION must be set by a human's own
+        # shell; nothing in this codebase ever sets it programmatically.
+        remote_gate = check_remote_approval()
 
         cmd = [
             "dbt", "build",
@@ -109,6 +116,8 @@ class DbtBackfillRunner:
             status = "dry_run"
         elif would_refuse:
             status = "refused"
+        elif not remote_gate.ok:
+            status = "refused_no_remote_approval"
         else:
             proc = subprocess.run(cmd, cwd=str(self.repo_root), capture_output=True, text=True)
             returncode = proc.returncode
@@ -126,6 +135,8 @@ class DbtBackfillRunner:
             "max_span_days": max_span_days,
             "over_bound": over_bound,
             "would_refuse": would_refuse,
+            "remote_approval_ok": remote_gate.ok,
+            "remote_approval_blocking_reason": remote_gate.blocking_reason,
             "confirmed_by": confirmed_by,
             "source": source,
             "dry_run": dry_run,
@@ -147,6 +158,11 @@ class DbtBackfillRunner:
                 f"Backfill span {span_days}d exceeds the bound ({max_span_days}d) and "
                 "was not human-confirmed. Pass --confirmed-by \"<real name>\" to approve "
                 "a wider span, or narrow --event-time-start/--event-time-end. "
+                f"Report written to {_rel(current_json, self.repo_root)}."
+            )
+        if status == "refused_no_remote_approval":
+            raise PermissionError(
+                f"{remote_gate.blocking_reason} "
                 f"Report written to {_rel(current_json, self.repo_root)}."
             )
         if status == "failed":
@@ -171,6 +187,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
         + ("OVER BOUND" if report["over_bound"] else "within bound"),
         f"Confirmed by: {report['confirmed_by'] or '(none -- agent-asserted)'} "
         f"(source: `{report['source']}`)",
+        f"Remote execution approved: {'yes' if report['remote_approval_ok'] else 'NO -- ' + report['remote_approval_blocking_reason']}",
         f"Status: `{report['status']}`"
         + (" -- WOULD REFUSE without human confirmation" if report["would_refuse"] and report["dry_run"] else ""),
         "",

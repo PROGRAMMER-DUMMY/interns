@@ -218,9 +218,42 @@ def workspace_lock(
         WorkspaceLockTimeout: If acquisition does not succeed within
             ``timeout_seconds``.
     """
-
     workspace_path = Path(workspace_path)
     lock_path = workspace_path.joinpath(*_LOCK_RELATIVE_PATH)
+    with _file_lock(lock_path, timeout_seconds=timeout_seconds, poll_interval=poll_interval) as held:
+        yield held
+
+
+def named_lock(
+    lock_path: Path,
+    *,
+    timeout_seconds: float = 30.0,
+    poll_interval: float = 0.25,
+) -> "Iterator[Path]":
+    """Same exclusive-lock mechanism as :func:`workspace_lock` (same-fd
+    stale-holder retry, no-unlink-on-release, reentrant within one
+    pid+thread), for state that is NOT scoped to a single workspace --
+    e.g. a file shared across every workspace in the repo, where
+    ``workspace_lock`` has no single workspace root to key on.
+
+    ``lock_path`` is used exactly as given (no ``interns/state/`` suffix
+    appended) -- callers own their own lock file naming, typically a
+    ``.<name>.lock`` sentinel next to the shared file it protects.
+    """
+    return _file_lock(lock_path, timeout_seconds=timeout_seconds, poll_interval=poll_interval)
+
+
+@contextmanager
+def _file_lock(
+    lock_path: Path,
+    *,
+    timeout_seconds: float,
+    poll_interval: float,
+) -> Iterator[Path]:
+    """Shared mechanics behind both :func:`workspace_lock` and
+    :func:`named_lock`: same-fd stale-holder retry, never unlink-on-release,
+    reentrant within one pid+thread, keyed by the resolved lock file path."""
+    lock_path = Path(lock_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     key = _lock_key(lock_path)
@@ -313,4 +346,4 @@ def workspace_lock(
         # lingers except the (harmless) presence of the file itself.
 
 
-__all__ = ["WorkspaceLockTimeout", "workspace_lock"]
+__all__ = ["WorkspaceLockTimeout", "named_lock", "workspace_lock"]

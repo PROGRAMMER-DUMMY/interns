@@ -1,6 +1,8 @@
 # Design: KPI Intent Contract
 
-Status: Design (not yet implemented)
+Status: Implemented (see `core/onboarding/kpi/intent_coverage.py`, 789 lines) — this doc is the
+original design; verify current exact behavior against the code, not this file, for any specific
+detail.
 Author: platform
 Related: `core/onboarding/kpi/intent_coverage.py`, `core/onboarding/kpi/result_view_builder.py`,
 `core/onboarding/workspace/flow.py` (review + gate provenance), blocker-question-panel,

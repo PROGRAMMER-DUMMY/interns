@@ -4,6 +4,7 @@ The onboarder treats ``workspaces/<project>`` as user input and writes every
 generated artifact under ``workspaces/<project>/interns``.
 """
 from __future__ import annotations
+from core.governance.injection_guard import neutralize_text
 from core.observability.cost_ledger import anchored
 
 import argparse
@@ -211,7 +212,12 @@ class WorkspaceOnboarder:
             dictionary_dir.mkdir(parents=True, exist_ok=True)
             safe_stem = _safe_stem(path, self.workspace)
             text_path = dictionary_dir / f"{safe_stem}.txt"
-            text_path.write_text(text, encoding="utf-8")
+            # Neutralized at the SOURCE, not just at whatever currently reads
+            # this file (_cli_agent_evidence_pack): this text is raw PDF/DOCX
+            # content from the workspace's own uploaded documents, and every
+            # current and future consumer of interns/generated/data_dictionary/
+            # *.txt should get the protection, not just today's one reader.
+            text_path.write_text(neutralize_text(text), encoding="utf-8")
             extracted.append(
                 {
                     "path": _rel(path, self.repo_root),

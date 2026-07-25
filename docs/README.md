@@ -50,6 +50,10 @@ source of truth for "what kind of doc is this".
 ## Logs — append-only records
 
 - `bugs/` — bug logs. See its own `index.md` for the catalog; current session: `bugs/BUG_SESSION_REPORT.md`. [log]
+- `core_audit/` — full-read `core/` audit (227 files, 44 docs): per-package findings, phased
+  remediation ledger, and current launch status. Start at `core_audit/README.md`, which points to
+  `GO_NO_GO_2026-07.md` (current status) then `SUMMARY.md`/`REMEDIATION_PLAN.md`. Closed findings,
+  not live guidance -- several are already fixed per the remediation commits in git log. [log]
 
 ## Local / ephemeral
 

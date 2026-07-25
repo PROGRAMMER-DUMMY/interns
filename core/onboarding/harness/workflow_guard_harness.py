@@ -4,6 +4,13 @@ This harness catches failures that happen around the governed tools rather than
 inside generated KPI SQL: unsupported shell commands, raw-data reads that bypass
 profiles, and blocker panels that ask about invented or non-source-backed
 features.
+
+SCOPE NOTE (Security S4): this is a workflow-reliability/data-quality check,
+NOT a security control. It has no awareness of prompt injection, secret
+exposure, or destructive/unauthorized actions -- passing it provides no
+security assurance. See `core/onboarding/databricks/deploy_gates.py` for the
+actual production-execution authorization gates, and
+`docs/core_audit/PROD_SECURITY_GAPS.md` for the tracked security posture.
 """
 from __future__ import annotations
 

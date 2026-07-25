@@ -14,6 +14,7 @@ from core.observability.log_redaction import redact
 from core.paths import PROJECT_ROOT
 from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
+from core.storage.workspace_lock import workspace_lock
 
 
 TRAJECTORY_VERSION = 1
@@ -87,45 +88,55 @@ class WorkspaceTrajectoryRecorder:
                 continue
             record[key] = _redact(value)
 
-        self.trajectory_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.trajectory_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+        # Locked: this fires on every tool_start/tool_result for every CLI
+        # command, so two racing commands appending to the SAME
+        # trajectory.jsonl (this repo's own workflow-guard/delegation paths
+        # both write it too) is a real, not theoretical, race.
+        with workspace_lock(self.workspace):
+            self.trajectory_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.trajectory_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, sort_keys=True, default=str) + "\n")
 
-        # Additive: also append to the tamper-evident audit chain.
-        # Failures here MUST NOT break trajectory recording — degrade silently.
-        try:
-            _audit_chain_path = self.trajectory_path.parent / "audit_chain.jsonl"
-            append_audit_record(_audit_chain_path, record)
-        except Exception:  # noqa: BLE001
-            pass
+            # Additive: also append to the tamper-evident audit chain.
+            # Failures here MUST NOT break trajectory recording — degrade silently.
+            try:
+                _audit_chain_path = self.trajectory_path.parent / "audit_chain.jsonl"
+                append_audit_record(_audit_chain_path, record)
+            except Exception:  # noqa: BLE001
+                pass
 
         return self.render()
 
     def render(self) -> TrajectoryRecordResult:
         self._validate_workspace()
         self.layout.ensure_runtime_dirs()
-        records = load_trajectory(self.trajectory_path)
-        report = {
-            "artifact_type": "trajectory/current.json",
-            "version": TRAJECTORY_VERSION,
-            "generated_by": "record-workspace-trajectory",
-            "workspace": self.workspace_rel,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "event_count": len(records),
-            "summary": _summarize(records),
-            "events": records[-100:],
-        }
-        report_dir = self.layout.reports_dir / "trajectory"
-        evidence_dir = self.layout.evidence_dir / "trajectory"
-        report_dir.mkdir(parents=True, exist_ok=True)
-        evidence_dir.mkdir(parents=True, exist_ok=True)
-        current_json = report_dir / "current.json"
-        current_md = report_dir / "current.md"
-        evidence_path = evidence_dir / "current.json"
-        payload = json.dumps(report, indent=2, default=str) + "\n"
-        current_json.write_text(payload, encoding="utf-8")
-        evidence_path.write_text(payload, encoding="utf-8")
-        current_md.write_text(_render_markdown(report), encoding="utf-8")
+        # Locked (reentrant -- a no-op nested acquire when called from
+        # record(), a real one when called standalone): reads trajectory.jsonl
+        # then writes 3 files from it; an unlocked concurrent call could
+        # interleave/truncate mid-write on any of them.
+        with workspace_lock(self.workspace):
+            records = load_trajectory(self.trajectory_path)
+            report = {
+                "artifact_type": "trajectory/current.json",
+                "version": TRAJECTORY_VERSION,
+                "generated_by": "record-workspace-trajectory",
+                "workspace": self.workspace_rel,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "event_count": len(records),
+                "summary": _summarize(records),
+                "events": records[-100:],
+            }
+            report_dir = self.layout.reports_dir / "trajectory"
+            evidence_dir = self.layout.evidence_dir / "trajectory"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            evidence_dir.mkdir(parents=True, exist_ok=True)
+            current_json = report_dir / "current.json"
+            current_md = report_dir / "current.md"
+            evidence_path = evidence_dir / "current.json"
+            payload = json.dumps(report, indent=2, default=str) + "\n"
+            current_json.write_text(payload, encoding="utf-8")
+            evidence_path.write_text(payload, encoding="utf-8")
+            current_md.write_text(_render_markdown(report), encoding="utf-8")
         return TrajectoryRecordResult(
             workspace=self.workspace_rel,
             ok=True,

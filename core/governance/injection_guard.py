@@ -132,10 +132,32 @@ def neutralize_rows(
     return sanitized
 
 
+def neutralize_json(value: object, *, marker: str = NEUTRALIZED_MARKER) -> object:
+    """Recursively apply :func:`neutralize_text` to every string leaf in an
+    arbitrarily nested dict/list structure. Returns a new structure; never
+    mutates the input.
+
+    For a value about to be ``json.dumps``-ed into an agent-facing artifact
+    (e.g. a "bounded evidence pack") where enumerating every individual
+    untrusted field by hand is fragile against future additions -- neutralize
+    every string leaf here, before serialization, rather than the dumped
+    text afterward (which risks a match spanning JSON syntax characters and
+    corrupting structure).
+    """
+    if isinstance(value, str):
+        return neutralize_text(value, marker=marker)
+    if isinstance(value, dict):
+        return {k: neutralize_json(v, marker=marker) for k, v in value.items()}
+    if isinstance(value, list):
+        return [neutralize_json(v, marker=marker) for v in value]
+    return value
+
+
 __all__ = [
     "INJECTION_PATTERNS",
     "NEUTRALIZED_MARKER",
     "InjectionFinding",
+    "neutralize_json",
     "neutralize_rows",
     "neutralize_text",
     "scan_text",

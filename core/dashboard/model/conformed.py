@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 import polars as pl
@@ -149,7 +150,7 @@ def _clean_table(
     # is a non-PII derived dimension -- same rule the KPI SQL uses).
     dob = next((c for c in df.columns if c.lower() == "dob"), None)
     if dob and df.schema.get(dob) == pl.Date and "age" not in df.columns:
-        df = df.with_columns((pl.lit(2026) - pl.col(dob).dt.year()).alias("age"))
+        df = df.with_columns((pl.lit(date.today().year) - pl.col(dob).dt.year()).alias("age"))
     # Qualify a small lookup-dim label column so it survives as a category.
     if is_dim and entity and "Name" in df.columns and df.height <= _SMALL_DIM_MAX:
         df = df.rename({"Name": f"{entity.rstrip('s')}_name"})

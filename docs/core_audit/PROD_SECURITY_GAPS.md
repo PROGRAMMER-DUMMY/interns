@@ -556,7 +556,10 @@ a PHI shadow copy that may be overlooked in breach inventory.
 
 **Priority:** MED
 **Effort:** S (audit + targeted code fix)
-**Status:** Open audit item — paths below require code-owner verification.
+**Status:** Substantially closed (2026-07-25, "Security S3" of the lingering-issues plan). Item 3
+(dashboard chat context) was fixed earlier the same session ("Security S6" equivalent). Item 1
+(image OCR) was traced and confirmed safe, not patched. Item 2 (external intake) remains open —
+not yet audited.
 
 ### Threat
 
@@ -565,63 +568,54 @@ inject prompt-manipulation payloads into an LLM call if the text passes through 
 untrusted-to-LLM path that does NOT call `injection_guard.neutralize_text` or
 `injection_guard.neutralize_rows`.
 
-### Current state (verified)
+### Current state (verified 2026-07-25, supersedes the original findings below)
 
-- `core/governance/injection_guard.py` — `neutralize_text`, `neutralize_rows`, `scan_text`
-  are implemented with pattern coverage for: override_instructions, role_hijack,
-  chat_template_markers, exfiltration_request, jailbreak_marker, tool_abuse.
-- `injection_guard` is imported and called in exactly TWO files (verified by grep across
-  all of `core/`):
-  1. `core/onboarding/kpi/blocker_question_panel.py` — blocks injections in the panel
-     text surfaced to the LLM-driven blocker resolution flow.
-  2. `core/onboarding/documents/document_loader.py` — blocks injections in loaded
-     document text before it is passed to the LLM for classification or sidecar
-     generation.
-- The following paths were verified to have NO call to injection_guard:
-  1. `core/onboarding/data_model/image_parser.py` — OCR text from uploaded data-model
-     images (`_parse_ocr_schema_text(str(ocr.get("text") or ""))` at `image_parser.py:123`)
-     is converted to schema metadata and passed to profile matching. If the image contains
-     a QR code or text block with injection payload, it passes to downstream artifact
-     generation without neutralization.
-  2. `core/onboarding/sources/external_intake_workflow.py` — external source metadata
-     (source names, descriptions, catalog entries from external APIs) flows into catalog
-     and profile artifacts. No injection_guard call found.
-  3. Dashboard chat context assembly (`dashboard.py:1013-1028`, `_chat_artifact_context`):
-     artifact labels and interpreter strings from artifact inventory are assembled into
-     the LLM chat system/user prompt without neutralization. A workspace artifact named
-     with injection text (e.g., a file named "ignore all previous instructions.csv")
-     would appear verbatim in the prompt.
+- `core/governance/injection_guard.py` gained a third primitive, `neutralize_json(value)` —
+  recursively neutralizes every string leaf in a nested dict/list, for JSON structures
+  serialized into an artifact (applied before `json.dumps`, not to the dumped text, to avoid
+  a match spanning JSON syntax and corrupting structure).
+- `core/onboarding/kpi/blocker_question_panel.py` was credited with coverage in the original
+  version of this gap, but that credit was misleading: only one narrow function
+  (`_execute_option_preview`) was actually guarded. The panel's own declared
+  `primary_artifact` (`current.md`) and `current_full.md` rendered raw KPI business-question
+  prose, raw sample/observed values, a human-typed wiki "why" note, blocked-KPI prose
+  excerpts, and the full CLI-agent evidence pack (including PDF/DOCX-extracted data-dictionary
+  excerpts) completely unguarded. All now fixed — see the render functions
+  `_render_markdown_compact`, `_render_markdown`, `_render_sample_evidence`.
+- `core/onboarding/kpi/kpi_confirmation_panel.py`'s `render_kpi_confirmation_markdown`
+  ("Real row, read back" section) had the same gap — raw workbook cell values rendered
+  truncated but unneutralized. Fixed.
+- Fixed at the SOURCE, not just the reader: `core/onboarding/workspace/onboarding.py`'s
+  `_extract_data_model_documents` now neutralizes raw PDF/DOCX-extracted text before writing
+  it to `interns/generated/data_dictionary/*.txt`, so every current and future consumer of
+  that file is protected, not only the one reader this audit originally traced.
+- Item 3 (dashboard chat context, `_chat_artifact_context`) was fixed earlier in the same
+  session as an unrelated wiring-decision pass — `neutralize_text` now wraps each
+  `label`/`interpreter` value.
+- Item 1 (`image_parser.py` OCR text) was traced end-to-end and confirmed to never reach an
+  LLM call (it feeds only deterministic regex/profile matching) — documented as an exemption
+  in the module rather than patched with a no-op neutralize call.
+- **Item 2 remains genuinely open**: `core/onboarding/sources/external_intake_workflow.py`'s
+  external source metadata has NOT been re-audited as part of this pass. A separate,
+  lower-confidence finding (not yet confirmed as a real sink) also flagged
+  `core/onboarding/sources/catalog.py::_normalize_catalog_entry` for a similar reason — worth
+  a follow-up pass specifically on the external-source-intake path.
 
 ### Production consequence
 
-A hostile workspace owner (or a data supplier who controls dataset file naming or data
-dictionary content) can inject instructions into the LLM prompt, potentially causing the
-agent to exfiltrate data, disregard governance rules, or take unintended actions in the
-dashboard chat or the blocker resolution flow.
+A hostile workspace owner (or a data supplier who controls dataset file naming, KPI workbook
+prose, or data dictionary content) can inject instructions into the LLM prompt via the
+now-fixed paths above. The remaining open path (external source intake) has the same
+consequence and has not yet been verified either way.
 
 ### Open audit items to verify
 
-The following paths MUST be audited by the code owner and either confirmed as safe
-(with explanation of why the text never reaches an LLM prompt) or patched to add
-`neutralize_text` / `neutralize_rows` before LLM surfacing:
-
-1. `core/onboarding/data_model/image_parser.py` — OCR text path at line 123.
-   Specifically: does `_parse_ocr_schema_text` output flow into any LLM call downstream?
-   Trace from `image_parser.py:_parse_sidecar` through `data_understanding_cli.py`.
-2. `core/onboarding/sources/external_intake_workflow.py` — external metadata fields
+1. `core/onboarding/sources/external_intake_workflow.py` — external metadata fields
    (source description, column descriptions from external catalog). Trace to any panel
    or LLM-facing surface.
-3. `dashboard.py:1013-1028` — `_chat_artifact_context` builds the LLM system/user prompt
-   from artifact inventory rows. Add `neutralize_text` to each `row.get('label')` and
-   `row.get('interpreter')` value before inclusion.
-4. Any renderer in `core/dashboard/renderer.py` or `core/dashboard/screener.py` that
-   passes workspace-derived strings into Markdown or HTML that is subsequently fed to
-   an LLM agent.
-
-**Recommended fix for item 3 (highest confidence, lowest ambiguity):**
-In `_chat_artifact_context` (`dashboard.py:1022-1028`), wrap each label/interpreter
-with `injection_guard.neutralize_text(...)` before appending to `lines`. This is a
-one-function patch with no architectural change required.
+2. `core/onboarding/sources/catalog.py::_normalize_catalog_entry` — embeds raw external-catalog
+   `description`/`title` into human-review reports; confirm whether those reports are ever
+   re-read into an LLM/agent prompt (not confirmed either way as of 2026-07-25).
 
 ---
 
@@ -636,13 +630,23 @@ one-function patch with no architectural change required.
 | 5   | HIGH/MED   | L      | infra-roadmap            | Platform / Infra  |
 | 6   | MED        | S      | being-fixed-in-code      | Core / SecEng     |
 | 7   | MED        | S      | being-fixed-in-code      | Observability     |
-| 8   | MED        | S      | open audit item          | Core / AI-Sec     |
+| 8   | MED        | S      | substantially closed (2026-07-25) | Core / AI-Sec |
 
 **Immediate actions (before any network-reachable deployment):**
 - Gap 1: Enforce reverse proxy + TLS + auth env vars in the deployment runbook.
 - Gap 3: Confirm no `.env` file on the production host; move to Vault or cloud secret
   manager before first external user accesses the dashboard.
-- Gap 8, item 3: Add `neutralize_text` to `_chat_artifact_context` in `dashboard.py:1022`.
+- Gap 8: the blocker-panel/dashboard/data-dictionary paths are fixed; the one remaining
+  open item is auditing `external_intake_workflow.py`.
+
+**Not a security control — do not conflate with the above:** `core/onboarding/harness/
+project_harness.py` and `core/onboarding/harness/workflow_guard_harness.py` (the "meta
+harness" run before a workspace is called complete) check data-quality, evidence
+completeness, and workflow reliability only. Confirmed empirically (2026-07-25): neither
+has any awareness of injection, secrets, or destructive/unauthorized actions. A green
+harness result says nothing about any of the 8 gaps in this document. The actual security-
+relevant gates are `core/onboarding/databricks/deploy_gates.py` (G1-G5, production deploy
+authorization) and the fixes tracked in this file.
 
 ---
 
@@ -659,11 +663,13 @@ secrets management and encryption at rest (all credentials live in process envir
 variables; no disk encryption or key management infrastructure exists), and containerized
 execution sandboxing for generated code (the `IsolatedDuckDBBackend` stub exists but is
 unwired, and the worker subprocess inherits the full process environment and filesystem
-scope). The eighth gap is an open AI-security audit item: `injection_guard` is wired at
-only two of the confirmed LLM-facing surfaces; OCR text from image_parser, external
-catalog metadata, and dashboard chat artifact context assembly have no verified neutralization
-coverage and must be audited by the code owner before the platform handles adversarially-
-supplied workspace content at scale. Given the healthcare-RCM data context (HIPAA-18
+scope). The eighth gap (AI-security / injection-guard coverage) is substantially closed as
+of 2026-07-25 -- the blocker-panel, KPI-confirmation-panel, data-dictionary-extraction, and
+dashboard-chat paths are all now neutralized at their actual render/write points (the
+original finding undercounted the gap: `blocker_question_panel.py` was credited with
+coverage it did not actually have beyond one narrow preview function). OCR text from
+image_parser was traced and confirmed to never reach an LLM call. One item remains open:
+external catalog/source-intake metadata has not yet been re-audited. Given the healthcare-RCM data context (HIPAA-18
 identifiers, PCI cardholder fields, both detected and enforced by `phi_gate.py`), Gaps 1,
 2, and 3 carry direct regulatory consequence and should be the first target of the
 production hardening sprint.

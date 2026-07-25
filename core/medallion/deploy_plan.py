@@ -53,7 +53,7 @@ _LOCAL_GREEN_GATES = [
     "uv run medallion build --workspace <workspace> exits 0 with tables_failed=0",
     "Silver assertions all pass in the latest run.json",
     "KPI row-equality diff has 0 unequal KPIs (run.json kpi_diff)",
-    "RCM/project execution harness passes (run-kpi-execution-harness)",
+    "Project execution harness passes (run-kpi-execution-harness)",
     "green-gate suite green (core/dev/green_gate.py)",
     "validate-workspace-artifacts reports no errors",
 ]

@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from core.storage.workspace_layout import WorkspaceLayout
+from core.storage.workspace_lock import workspace_lock
 
 
 DELEGATION_VERSION = 1
@@ -419,12 +420,16 @@ def _write_delegation_handoff(
 
 
 def _append_trajectory(layout: WorkspaceLayout, event: dict[str, Any]) -> None:
+    # Same trajectory.jsonl trajectory_recorder.py's WorkspaceTrajectoryRecorder
+    # writes -- locked on the same workspace root so the two writers
+    # coordinate on one lock file, not two unaware of each other.
     path = layout.state_dir / "trajectory.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, default=str))
-            handle.write("\n")
+        with workspace_lock(layout.project_root):
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event, default=str))
+                handle.write("\n")
     except OSError:
         pass
 

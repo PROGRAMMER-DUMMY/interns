@@ -63,6 +63,7 @@ from core.onboarding.kpi.pii_redaction import (
     workspace_redaction_patterns,
 )
 from core.storage.workspace_layout import WorkspaceLayout
+from core.storage.workspace_lock import workspace_lock
 from core.onboarding.workspace.flow_io import _read_json
 from core.onboarding.workspace.flow_panels import (
     _compact_panel,
@@ -1773,12 +1774,25 @@ class WorkspaceFlow:
         path = self._state_path()
         if not path.exists():
             raise FileNotFoundError(f"workspace-flow session not found: {self.session_id}")
-        return json.loads(path.read_text(encoding="utf-8"))
+        with workspace_lock(self.workspace):
+            return json.loads(path.read_text(encoding="utf-8"))
 
     def _write_state(self, state: dict[str, Any]) -> None:
+        # Locked: closes torn/interleaved writes to this session's state file
+        # from two concurrent commands. NOTE this does not by itself make a
+        # load-mutate-write call site atomic end-to-end (a caller's own
+        # `state = self._load_state(); ...; self._write_state(state)`
+        # sequence can still race across its own two lock acquisitions) --
+        # closing that fully needs each such call site to hold one lock
+        # across its whole read-mutate-write span, which several methods in
+        # this file do separately. Flagged as a follow-up, not silently
+        # treated as fully closed by this narrower fix (lower plausibility
+        # than the other Security S2 sites -- requires the same session_id
+        # driven concurrently, not every command).
         path = self._state_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(state, indent=2, default=str) + "\n", encoding="utf-8")
+        with workspace_lock(self.workspace):
+            path.write_text(json.dumps(state, indent=2, default=str) + "\n", encoding="utf-8")
 
     def _result_from_state(self, state: dict[str, Any]) -> WorkspaceFlowResult:
         panel = state.get("current_panel", {})
