@@ -40,6 +40,13 @@ build/
 /docs/plans/*
 # (already-committed shared plans stay tracked; gitignore only hides new/untracked ones)
 
+# --- Internal dev/audit/enterprise-spec docs: not customer-facing, kept local by default ---
+# core_audit/ includes security-gap and threat-model reports; enterprise/ is per-client spec
+# material. Same rule as docs/plans/ above: only stops NEW/untracked files from being committed --
+# it does not untrack or remove anything already committed.
+/docs/core_audit/*
+/docs/enterprise/*
+
 # Databricks secrets
 *.token
 
