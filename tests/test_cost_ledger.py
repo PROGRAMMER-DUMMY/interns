@@ -75,6 +75,27 @@ class SessionJoinKeyTests(unittest.TestCase):
     def test_absent_session_id_is_empty_none_not_fabricated(self):
         self.assertEqual(resolve_agent_session({}), ("", "none"))
 
+    def test_explicit_override_wins_over_claude_native_marker(self):
+        # Generic across any CLI: an explicit AUTORESEARCH_SESSION_ID (set by
+        # a wrapper script, CI, or a human) is the base case, not a fallback
+        # -- it must win even when a native marker is ALSO present.
+        sid, source = resolve_agent_session(
+            {
+                "AUTORESEARCH_SESSION_ID": "codex-run-42",
+                "CLAUDE_CODE_SESSION_ID": "b8fb0956-c1b5-4ffe-9efc-c370f4bcc89a",
+            }
+        )
+        self.assertEqual(sid, "codex-run-42")
+        self.assertEqual(source, "env:AUTORESEARCH_SESSION_ID")
+
+    def test_explicit_override_works_with_no_native_marker_at_all(self):
+        # The actual gap this closes: a CLI with no verified native marker
+        # (Codex, Gemini, or anything not yet named) still gets correct
+        # session-scoped run grouping via the override alone.
+        sid, source = resolve_agent_session({"AUTORESEARCH_SESSION_ID": "gemini-run-7"})
+        self.assertEqual(sid, "gemini-run-7")
+        self.assertEqual(source, "env:AUTORESEARCH_SESSION_ID")
+
     def test_platform_session_id_is_never_the_join_key(self):
         # A platform session_snapshot id (session-<digest>) must NOT be mistaken
         # for the agent-native session id. build_anchor keeps them separate.

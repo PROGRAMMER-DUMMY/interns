@@ -934,6 +934,27 @@ metadata, then user clarification. Do not generate executable KPI logic from unp
 If a required dictionary, metadata file, catalog path, SLA, policy, contract, or derivation rule is
 missing, ask for it and save the request under the active workspace's `interns/reports/open_questions.md`.
 
+## Multi-Phase Plan Persistence
+
+This repo is driven by multiple interchangeable agentic CLIs (`claude-code`, `codex`,
+`gemini-cli` — see `core/agents/llm_engine.py`'s `_CLI_DISPATCH`), never assume only one
+of them is in use. When a task spans multiple phases/sessions (a remediation plan, a
+multi-step build-out, anything with its own progress ledger), the plan file belongs
+under `docs/plans/` in this repo, never in a CLI's own private config/state directory
+(`~/.claude/plans/`, `~/.codex/`, `~/.gemini/`, or any future tool's equivalent). A plan
+tracked in a CLI-private location is invisible to a teammate driving the same repo with
+a different tool, and is lost entirely if that tool's local config is ever wiped —
+whether or not the CLI you're currently using happens to offer its own plan-mode
+feature, write the actual plan file into the repo. Update it live as phases land, the
+same way any other governed artifact in this repo is updated, not only after the work
+is finished. `docs/plans/*` is gitignored by default (keeps in-progress scratch plans
+out of history) -- once a plan is worth keeping as a shared record (done, or a
+teammate/another CLI needs to see it), `git add -f` it to promote it to tracked, the
+same way every currently-committed file under `docs/plans/` got there. See
+`docs/plans/index.md` for the existing convention and an example
+(`security_governance_hardening_2026-07.md`, the first plan migrated here for exactly
+this reason).
+
 ## Verification
 
 Run the portable green gate before claiming done or committing. It runs the curated

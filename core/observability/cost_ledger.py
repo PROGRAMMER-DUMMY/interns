@@ -77,10 +77,20 @@ _AGENT_ENV_MARKERS: tuple[tuple[str, str, str], ...] = (
     ("CODEX_SANDBOX", "codex", "env:CODEX_SANDBOX"),
 )
 
+# Explicit, CLI-agnostic override -- checked BEFORE any tool-native marker.
+# Native detection below only ever covers the specific CLIs someone has
+# empirically verified; a wrapper script, CI job, or a human running a CLI
+# this module has never heard of can set this directly and still get correct
+# session-scoped run grouping. This is the generic base case; native
+# detection is a zero-config convenience layered on top, not the foundation.
+SESSION_ID_OVERRIDE_ENV = "AUTORESEARCH_SESSION_ID"
+
 # (env_var, agent_hint). Order = precedence. ONLY CLAUDE_CODE_SESSION_ID is
 # empirically verified exposed to subprocesses (live check 2026-07-18). Codex and
 # Gemini session-id env vars are UNVERIFIED and gated on Phase 1a.2's per-agent
-# capture; adding one here is a one-line data change once verified.
+# capture; adding one here is a one-line data change once verified. Until then,
+# SESSION_ID_OVERRIDE_ENV above is how a Codex/Gemini/future-CLI run gets the
+# same "one session = one run" grouping Claude Code gets natively.
 _SESSION_ID_ENV: tuple[tuple[str, str], ...] = (
     ("CLAUDE_CODE_SESSION_ID", "claude-code"),
 )
@@ -101,10 +111,19 @@ def detect_agent(env: Mapping[str, str]) -> tuple[Optional[str], str]:
 def resolve_agent_session(env: Mapping[str, str]) -> tuple[str, str]:
     """Return ``(agent_session_id, agent_session_source)`` -- the OTel join key.
 
-    ``("", "none")`` when no known agent-native session id is present in the
-    environment. This is the load-bearing value: 1a.2 joins OTel token metrics to
-    anchors on ``agent_session_id``.
+    ``("", "none")`` when neither the explicit override nor a known
+    agent-native session id is present. This is the load-bearing value: 1a.2
+    joins OTel token metrics to anchors on ``agent_session_id``, and
+    ``run_id_for`` uses it to collapse a whole session's commands into one
+    run instead of fragmenting into one run per process.
+
+    ``SESSION_ID_OVERRIDE_ENV`` is checked first and wins over any native
+    marker -- generic across any CLI tool, not just the ones this module has
+    a verified env-var marker for.
     """
+    override = str(env.get(SESSION_ID_OVERRIDE_ENV) or "").strip()
+    if override:
+        return override, f"env:{SESSION_ID_OVERRIDE_ENV}"
     for var, _agent in _SESSION_ID_ENV:
         value = str(env.get(var) or "").strip()
         if value:
@@ -543,6 +562,7 @@ def entry_point_scripts() -> dict[str, str]:
 __all__ = [
     "EXEMPTIONS",
     "SCHEMA_VERSION",
+    "SESSION_ID_OVERRIDE_ENV",
     "UNATTRIBUTED_FAIL_FRACTION",
     "AnchorEntry",
     "CostLedger",
