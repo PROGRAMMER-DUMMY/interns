@@ -27,6 +27,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from core.dashboard.model.cuts import headline_agg
+
 
 _DATE_NAME_PATTERN = re.compile(
     r"(date|month|year|week|day|time|timestamp|created|service|invoice|filed|posted)",
@@ -233,7 +235,7 @@ def _detect_top_n(definition: dict[str, Any]) -> int | None:
 # Main inference entry point
 # ---------------------------------------------------------------------------
 
-def infer_chart(
+def _infer_chart_branches(
     *,
     definition: dict[str, Any],
     result_columns: list[str] | None = None,
@@ -413,3 +415,28 @@ __all__ = [
     "validate_spec_columns",
     "SpecColumnError",
 ]
+
+
+def infer_chart(
+    *,
+    definition: dict[str, Any],
+    result_columns: list[str] | None = None,
+) -> dict[str, Any]:
+    """Default chart spec for a KPI, with measure semantics normalised.
+
+    `_infer_chart_branches` picks chart type and axes across six branches, each
+    of which historically hardcoded ``"agg": "sum"``. Normalising here rather
+    than in every branch means a NEW branch cannot reintroduce the defect this
+    guards: a share rendered with ``y_format: percent`` and ``agg: sum``, i.e.
+    summed percentages (2026-07-26 audit).
+
+    `cuts.headline_agg` has always encoded the rule -- the branches simply never
+    asked it.
+    """
+    spec = _infer_chart_branches(definition=definition, result_columns=result_columns)
+    metric = str((definition or {}).get("metric") or "")
+    measure = str(spec.get("y") or "")
+    y_format = str(spec.get("y_format") or "")
+    if y_format.lower() == "percent" or _SHARE_NAME_PATTERN.search(metric)             or _SHARE_NAME_PATTERN.search(measure):
+        spec["agg"] = headline_agg(metric, measure, y_format or "percent")
+    return spec
