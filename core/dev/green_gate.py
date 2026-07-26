@@ -225,6 +225,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # refuses an over-threshold date-range span without a human-confirmed
     # override (Human-Gate Provenance Rule), never automatic.
     "tests.test_dbt_backfill",
+    # Phase 1.4: `dbt show` verification after generation -- a generated project
+    # that compiles but returns zero rows is a blank deliverable, not a pass,
+    # and a run without the remote-execution gate is refused, never "verified".
+    "tests.test_dbt_verify",
     # dbt+Airflow production-backend Phase D4: the dashboard's gold read
     # dispatches local-first between local Delta and a dbt-built Databricks
     # mart, gated by the same remote-execution approval as every other

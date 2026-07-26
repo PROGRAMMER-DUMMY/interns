@@ -1516,6 +1516,12 @@
       "summary": "``verify-audit-chain`` console script."
     },
     {
+      "name": "verify-dbt-project",
+      "command": "uv run verify-dbt-project --workspace <workspace>",
+      "entry_point": "core.orchestration.dbt_verify:main",
+      "summary": "Verify a generated dbt project actually runs, with `dbt show`."
+    },
+    {
       "name": "verify-kpi-output",
       "command": "uv run verify-kpi-output --workspace <workspace>",
       "entry_point": "core.onboarding.kpi.verify_kpi_output:main",
