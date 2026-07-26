@@ -229,6 +229,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # that compiles but returns zero rows is a blank deliverable, not a pass,
     # and a run without the remote-execution gate is refused, never "verified".
     "tests.test_dbt_verify",
+    # Phase 1.2: offline dbt lineage + blast radius. Answers "what breaks
+    # if I change this" with no warehouse -- the question nobody could
+    # answer when an agent deleted a safety check blind.
+    "tests.test_dbt_index",
     # dbt+Airflow production-backend Phase D4: the dashboard's gold read
     # dispatches local-first between local Delta and a dbt-built Databricks
     # mart, gated by the same remote-execution approval as every other

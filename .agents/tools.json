@@ -433,6 +433,12 @@
       "summary": "``dataops``: data-engineering system-design knowledge, decisions, reviews and"
     },
     {
+      "name": "dbt-index",
+      "command": "uv run dbt-index --workspace <workspace>",
+      "entry_point": "core.orchestration.dbt_index:main",
+      "summary": "Local dbt model lineage and blast radius -- no warehouse, no dbt install."
+    },
+    {
       "name": "deploy-databricks-workspace",
       "command": "uv run deploy-databricks-workspace --workspace <workspace>",
       "entry_point": "core.onboarding.databricks.workspace_deployer:main",
