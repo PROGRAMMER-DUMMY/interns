@@ -30,7 +30,7 @@ class MaskingParityTests(unittest.TestCase):
         from core.onboarding.kpi.sensitive_masking import load_sensitive_columns
 
         with TemporaryDirectory() as tmp:
-            layout = WorkspaceLayout(project_root=Path(tmp))
+            layout = WorkspaceLayout(project_root=Path(tmp) / "workspaces" / "demo")
             # Flat shape the onboarder writes.
             _write(
                 layout.contracts_dir / "semantic_contract.json",
@@ -210,7 +210,7 @@ class PciSingleSourceTests(unittest.TestCase):
 # ── P1e: phi_gate fails closed on a stale profile ────────────────────────────
 class PhiGateFreshnessTests(unittest.TestCase):
     def _layout_with_profile(self, tmp: str, *, stale: bool, column: str = "dept"):
-        layout = WorkspaceLayout(project_root=Path(tmp))
+        layout = WorkspaceLayout(project_root=Path(tmp) / "workspaces" / "demo")
         dataset = Path(tmp) / "datasets" / "d.csv"
         dataset.parent.mkdir(parents=True, exist_ok=True)
         dataset.write_text("a,b\n1,2\n", encoding="utf-8")

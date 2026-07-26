@@ -54,7 +54,7 @@ class MemoryStoreDurabilityTests(unittest.TestCase):
         from core.storage.workspace_layout import WorkspaceLayout
 
         with TemporaryDirectory() as tmp:
-            layout = WorkspaceLayout(project_root=Path(tmp))
+            layout = WorkspaceLayout(project_root=Path(tmp) / "workspaces" / "demo")
             path = workspace_definitions_path(layout)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('{"definitions": [ truncated', encoding="utf-8")

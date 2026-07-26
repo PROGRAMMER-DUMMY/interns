@@ -348,7 +348,7 @@ class VisionReviewTest(unittest.TestCase):
         import json
         from pathlib import Path
 
-        report_dir = Path(tmp) / "ws" / "interns" / "reports" / "dashboard_screener"
+        report_dir = Path(tmp) / "workspaces" / "ws" / "interns" / "reports" / "dashboard_screener"
         report_dir.mkdir(parents=True)
         (report_dir / "current.json").write_text(
             json.dumps({
@@ -370,11 +370,11 @@ class VisionReviewTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._workspace(tmp)
             root = Path(tmp)
-            self.assertTrue(vision_review_pending(root, "ws"))
-            review = record_vision_review(root, "ws", reviewed_by="", notes="clean")
+            self.assertTrue(vision_review_pending(root, "workspaces/ws"))
+            review = record_vision_review(root, "workspaces/ws", reviewed_by="", notes="clean")
             self.assertEqual(review["source"], "agent")  # provenance rule
-            self.assertFalse(vision_review_pending(root, "ws"))
-            human = record_vision_review(root, "ws", reviewed_by="Shubham")
+            self.assertFalse(vision_review_pending(root, "workspaces/ws"))
+            human = record_vision_review(root, "workspaces/ws", reviewed_by="Shubham")
             self.assertEqual(human["source"], "human")
 
     def test_no_report_is_not_pending_and_record_raises(self) -> None:
@@ -387,9 +387,9 @@ class VisionReviewTest(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertFalse(vision_review_pending(Path(tmp), "ws"))
+            self.assertFalse(vision_review_pending(Path(tmp), "workspaces/ws"))
             with self.assertRaises(FileNotFoundError):
-                record_vision_review(Path(tmp), "ws")
+                record_vision_review(Path(tmp), "workspaces/ws")
 
     def test_workflow_guard_flags_pending_review(self) -> None:
         import tempfile
@@ -398,7 +398,7 @@ class VisionReviewTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             self._workspace(tmp)
-            harness = WorkflowGuardHarness(tmp, "ws")
+            harness = WorkflowGuardHarness(tmp, "workspaces/ws")
             findings = harness._check_vision_review_done()
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0]["code"], "dashboard_vision_review_pending")

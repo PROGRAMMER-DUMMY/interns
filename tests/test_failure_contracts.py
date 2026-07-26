@@ -119,7 +119,7 @@ class FailureContractTests(unittest.TestCase):
 
     def test_medallion_preflight_invalid_registry_is_typed(self):
         with tempfile.TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / "demo"
+            workspace = Path(tmp) / "workspaces" / "demo"
             layout = WorkspaceLayout(project_root=workspace)
             layout.contracts_dir.mkdir(parents=True)
             layout.profiles_dir.mkdir(parents=True)

@@ -247,11 +247,11 @@ class RunPipelineAnchorTests(unittest.TestCase):
             env = {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "uuid-live"}
             with mock.patch.object(dagster_defs, "_run_command", return_value=ok), \
                     mock.patch.dict("os.environ", env, clear=True):
-                results = dagster_defs.run_pipeline("ws", repo_root=repo_root)
+                results = dagster_defs.run_pipeline("workspaces/ws", repo_root=repo_root)
 
             self.assertTrue(results["_ok"])
             run_id = results["_run_id"]
-            ledger = CostLedger(ledger_dir_for("ws", repo_root))
+            ledger = CostLedger(ledger_dir_for("workspaces/ws", repo_root))
             entries = ledger.entries_for_run(run_id)
             self.assertEqual(len(entries), len(STAGES))
             self.assertEqual(
@@ -286,7 +286,8 @@ class RunGroupingTests(unittest.TestCase):
 class DecoratorTests(unittest.TestCase):
     def test_marks_and_writes_one_anchor_keyed_by_session(self):
         with tempfile.TemporaryDirectory() as tmp:
-            ws = tmp  # absolute path -> ledger stays in tmp, never a real workspace
+            # absolute path -> ledger stays in tmp, never a real workspace
+            ws = str(Path(tmp) / "workspaces" / "demo")
 
             @anchored("my-command")
             def fake_main():

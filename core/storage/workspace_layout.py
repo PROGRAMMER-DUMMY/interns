@@ -22,6 +22,20 @@ from core.storage.external_data import (
 class WorkspaceLayout:
     project_root: Path
 
+    def __post_init__(self) -> None:
+        # Containment: every governed artifact path below is derived from this
+        # root, so a root outside a `workspaces/` tree silently materialises a
+        # parallel governed tree elsewhere -- observed live on 2026-07-26 as
+        # `<repo>/rcm_dashboard/interns/reports/cost_ledger/`. Anchoring on the
+        # parent directory name rather than on PROJECT_ROOT keeps temp-dir
+        # fixtures (`<tmp>/workspaces/<name>`) valid.
+        root = Path(self.project_root)
+        if root.parent.name != "workspaces":
+            raise ValueError(
+                f"workspace root must be a directory under `workspaces/`, got {root}. "
+                "Pass `workspaces/<project>`, not a bare name or an arbitrary path."
+            )
+
     @classmethod
     def from_task(cls, task: dict[str, Any], repo_root: Path) -> "WorkspaceLayout":
         workspace_value = task.get("workspace")
