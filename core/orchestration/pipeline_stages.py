@@ -64,9 +64,19 @@ STAGES: tuple[Stage, ...] = (
         produces=("interns/generated/evidence/kpi_execution_harness.json",),
     ),
     Stage(
+        key="kpi_intent_coverage",
+        command="uv run validate-kpi-intent-coverage --workspace {ws}",
+        upstream=("kpi_results",),
+        description=(
+            "Check generated SQL realizes each KPI's declared intent (temporal anchor, "
+            "grain, cuts). Error-severity findings fail the stage."
+        ),
+        produces=("interns/reports/kpi_intent_coverage.md",),
+    ),
+    Stage(
         key="dashboard",
         command="uv run workspace-dashboard --workspace {ws} --screen",
-        upstream=("kpi_results",),
+        upstream=("kpi_intent_coverage",),
         description="Build live dashboard from gold; structure-aware screener gate.",
         produces=("interns/reports/dashboard_screener/current.json",),
     ),
@@ -143,7 +153,10 @@ def stages_for_workspace(repo_root: str, workspace: str) -> tuple[Stage, ...]:
     kept = [s for s in STAGES if s.key not in {"medallion_build", "kpi_results"}]
     result: list[Stage] = []
     for stage in kept:
-        if stage.key == "dashboard":
+        if stage.key == "kpi_intent_coverage":
+            # dbt_build supersedes kpi_results on this path, so the intent check
+            # repoints to it -- it still runs AFTER SQL generation and BEFORE the
+            # dashboard, which is the invariant that matters.
             result.append(DBT_BUILD_STAGE)
             result.append(replace(stage, upstream=("dbt_build",)))
         else:

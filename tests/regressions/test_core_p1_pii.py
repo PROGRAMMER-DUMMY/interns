@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import time
 import unittest
 from pathlib import Path
@@ -265,6 +266,9 @@ class PhiGateFreshnessTests(unittest.TestCase):
 class BackendFailClosedTests(unittest.TestCase):
     def test_gate_internal_error_denies_remote(self) -> None:
         from core import governance
+        # Importing the package alone does not bind the submodule attribute; the
+        # patch target below needs `core.governance.phi_gate` imported explicitly.
+        import core.governance.phi_gate  # noqa: F401
         from core.execution import backend
 
         def _boom(*a, **k):
@@ -272,14 +276,22 @@ class BackendFailClosedTests(unittest.TestCase):
 
         original = governance.phi_gate.enforce_remote_sensitive_gate
         governance.phi_gate.enforce_remote_sensitive_gate = _boom
+        # `_phi_gate_failure_for_task` returns None early when the workspace path
+        # does not exist, so the workspace must be REAL for the gate to be reached.
+        # Previously this named a checked-in workspace that was later deleted, so
+        # the test silently exercised the early return instead of the gate. Create
+        # a throwaway one under the repo root instead of depending on the tree.
+        ws_dir = backend.ROOT / "workspaces" / "_tmp_phi_gate_failclosed"
+        ws_dir.mkdir(parents=True, exist_ok=True)
         try:
-            # A workspace that exists under repo root so the early returns pass.
-            task = {"workspace": "workspaces/Healthcare-RCM-Data-Platform"}
+            task = {"workspace": f"workspaces/{ws_dir.name}"}
             cfg = SimpleNamespace(databricks=SimpleNamespace(phi_covered=False, pci_covered=False))
             failure = backend._phi_gate_failure_for_task(task, cfg)
             self.assertIsNotNone(failure)  # fail CLOSED, not None (fail-open)
+            self.assertEqual(failure.stage, "remote_execute_phi_gate_error")
         finally:
             governance.phi_gate.enforce_remote_sensitive_gate = original
+            shutil.rmtree(ws_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

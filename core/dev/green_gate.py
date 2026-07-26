@@ -22,6 +22,7 @@ import argparse
 import io
 import json
 import unittest
+from pathlib import Path
 
 # Curated, deterministic suite -- mirrors the `tests` job in ci.yml. This is THE
 # green gate: any failure here is a hard stop.
@@ -274,6 +275,27 @@ KNOWN_BASELINE: frozenset[str] = frozenset(
 )
 
 
+def regression_modules() -> tuple[str, ...]:
+    """Every `tests/regressions/*.py` module, discovered -- never curated.
+
+    A regression test exists to stop one specific defect coming back. If it has to
+    be hand-added to a list to run, it protects nothing until someone remembers.
+    Discovered on purpose so a NEW regression file is gated the moment it lands.
+
+    This was found live (2026-07-26): the whole `tests/regressions/` tree -- 37
+    files, including the fan-trap detector suite -- was in neither CURATED_MODULES
+    nor SWEEP_MODULES, so the gate reported "all green" while two of those tests
+    were failing on a tree whose safety check had been deleted.
+    """
+    here = Path(__file__).resolve().parents[2] / "tests" / "regressions"
+    if not here.is_dir():
+        return ()
+    return tuple(
+        f"tests.regressions.{p.stem}"
+        for p in sorted(here.glob("test_*.py"))
+    )
+
+
 def _run(modules: tuple[str, ...]) -> tuple[unittest.TestResult, list[tuple[str, str]]]:
     """Load and run the given test modules in-process. Returns (result, load_errors)."""
     loader = unittest.TestLoader()
@@ -305,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="Emit a machine-readable JSON summary.")
     args = parser.parse_args(argv)
 
-    gate_modules = CURATED_MODULES + ENTERPRISE_MODULES
+    gate_modules = CURATED_MODULES + ENTERPRISE_MODULES + regression_modules()
     gate_result, gate_load_errors = _run(gate_modules)
     gate_failures = _failing_ids(gate_result)
 

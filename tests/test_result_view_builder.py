@@ -7,7 +7,9 @@ prove the builder is workspace-agnostic.
 """
 from __future__ import annotations
 
+import os
 import unittest
+from unittest import mock
 
 from core.onboarding.kpi.result_view_builder import (
     Aggregation,
@@ -668,18 +670,23 @@ class AgeAsOfEventDateRegressionTests(unittest.TestCase):
         self.assertNotIn('CAST("total" AS DATE)', sql)
         self.assertNotIn("AS age", sql)
 
-    def test_age_falls_back_to_current_date_without_event_date(self):
-        # No time-grain source column => no event date => CURRENT_DATE (legacy).
+    def test_age_falls_back_to_a_pinned_as_of_date_without_event_date(self):
+        # No time-grain source column => no event date => as-of fallback. The
+        # fallback must be a PINNED literal, never the execution-time CURRENT_DATE:
+        # deferring the anchor to execution makes the view stop being a function of
+        # the data alone, so a historical number cannot be reproduced.
         kpi = _kpi_uc(
             metric="count(distinct customer_id)",
             cuts="age (date_of_birth)",
         )
-        sql = build_result_view_sql(
-            kpi, kpi_id="k", feature_view='"f"', result_view='"r"',
-        )
+        with mock.patch.dict(os.environ, {"AUTORESEARCH_AS_OF_DATE": "2026-01-15"}):
+            sql = build_result_view_sql(
+                kpi, kpi_id="k", feature_view='"f"', result_view='"r"',
+            )
         self.assertIn(
-            "date_diff('year', CAST(\"date_of_birth\" AS DATE), CURRENT_DATE)", sql,
+            "date_diff('year', CAST(\"date_of_birth\" AS DATE), DATE '2026-01-15')", sql,
         )
+        self.assertNotIn("CURRENT_DATE", sql)
 
     def test_days_since_also_uses_event_date_when_present(self):
         kpi = _kpi_uc(
@@ -1069,16 +1076,17 @@ class GrainBucketingBlockTests(unittest.TestCase):
 
     def test_exact_value_grain_keeps_exact_age_unbanded(self):
         # The explicit exact-value opt-out keeps one row per exact age (no FLOOR).
-        sql = build_result_view_sql(
-            self._share_age_kpi(),
-            kpi_id="kpi_share", feature_view='"f"', result_view='"r"',
-            grain_bucketing="exact_value_grain",
-        )
+        with mock.patch.dict(os.environ, {"AUTORESEARCH_AS_OF_DATE": "2026-01-15"}):
+            sql = build_result_view_sql(
+                self._share_age_kpi(),
+                kpi_id="kpi_share", feature_view='"f"', result_view='"r"',
+                grain_bucketing="exact_value_grain",
+            )
         self.assertNotIn("-- BLOCKED: grain-bucketing", sql)
         self.assertNotIn("FLOOR(", sql)
         self.assertNotIn("age_band", sql)
         self.assertIn(
-            "date_diff('year', CAST(\"date_of_birth\" AS DATE), CURRENT_DATE)", sql
+            "date_diff('year', CAST(\"date_of_birth\" AS DATE), DATE '2026-01-15')", sql
         )
 
     def test_band_continuous_cuts_is_generic_for_days_since(self):

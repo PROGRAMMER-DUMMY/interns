@@ -135,6 +135,31 @@ class OnboardingResult:
         }
 
 
+# Relations THIS platform writes into a warehouse schema. Discovery must never
+# re-ingest them as sources -- that closes a loop where the pipeline's own output
+# becomes its own input (observed live: a `kpi_*_results` view was re-discovered as
+# a bronze source, non-idempotently, with a computed share column in its natural
+# key). Each prefix/suffix is a naming convention owned by one of our generators:
+#   `kpi_<id>_results`  -> core.onboarding.kpi.result_view_builder
+#   `stg_` / `int_` / `fct_` -> core.onboarding.kpi.dbt_project_generator
+# ponytail: string convention, not a registry. If a generator ever renames its
+# output, this must move to a shared constant those generators also read.
+_PLATFORM_RELATION_PREFIXES = ("stg_", "int_", "fct_")
+_PLATFORM_RELATION_SUFFIXES = ("_results", "_features")
+
+
+def _is_platform_written_relation(name: str) -> bool:
+    """Whether a warehouse relation was written by this platform, not a source."""
+    lowered = str(name).strip().strip("`").lower()
+    if not lowered:
+        return False
+    if lowered.startswith(_PLATFORM_RELATION_PREFIXES):
+        return True
+    # Suffix rule is scoped to our own `kpi_*` outputs so a genuine source table
+    # called e.g. `lab_results` is NOT excluded.
+    return lowered.startswith("kpi_") and lowered.endswith(_PLATFORM_RELATION_SUFFIXES)
+
+
 class WorkspaceOnboarder:
     def __init__(
         self,
@@ -977,7 +1002,17 @@ class WorkspaceOnboarder:
             _, rows = client.execute_query(f"SHOW TABLES IN `{catalog}`.`{schema}`")
             # SHOW TABLES columns: database, tableName, isTemporary (order/
             # names are stable Spark SQL output, not Databricks-specific).
-            return sorted(f"{catalog}.{schema}.{row[1]}" for row in rows)
+            #
+            # Platform-written relations are excluded for the same reason
+            # `_is_platform_governance_note` excludes the wiki tree: re-ingesting
+            # our own output as INPUT is circular. Observed live -- a KPI result
+            # view emitted into the source schema came back as a bronze source
+            # with `percentage_share` (a computed measure) in its natural key.
+            return sorted(
+                f"{catalog}.{schema}.{row[1]}"
+                for row in rows
+                if not _is_platform_written_relation(str(row[1]))
+            )
         except Exception:
             # Table discovery must never break onboarding for a workspace
             # that declared a source but has no reachable warehouse right

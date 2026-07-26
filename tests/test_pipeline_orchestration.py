@@ -44,7 +44,10 @@ class PipelineTopologyTests(unittest.TestCase):
         self.assertIn("medallion_design", smap["medallion_build"].upstream)
         self.assertIn("medallion_build", smap["kpi_results"].upstream)
         self.assertIn("resolve_features", smap["kpi_results"].upstream)
-        self.assertIn("kpi_results", smap["dashboard"].upstream)
+        # The dashboard is gated by the intent-coverage guard, which is itself
+        # downstream of generation -- guards are stages, not optional CLIs.
+        self.assertIn("kpi_intent_coverage", smap["dashboard"].upstream)
+        self.assertIn("kpi_results", smap["kpi_intent_coverage"].upstream)
 
     def test_command_templating(self):
         stage = stage_map()["medallion_build"]
@@ -89,8 +92,12 @@ class StagesForWorkspaceTests(unittest.TestCase):
             self.assertIn("dbt_build", keys)
             self.assertNotIn("medallion_build", keys)
             self.assertNotIn("kpi_results", keys)
+            # dbt_build supersedes kpi_results, and the intent guard repoints onto
+            # it -- still after SQL generation, still gating the dashboard.
+            guard = next(s for s in result if s.key == "kpi_intent_coverage")
+            self.assertEqual(guard.upstream, ("dbt_build",))
             dashboard = next(s for s in result if s.key == "dashboard")
-            self.assertEqual(dashboard.upstream, ("dbt_build",))
+            self.assertEqual(dashboard.upstream, ("kpi_intent_coverage",))
             # Every other stage's identity/command is untouched.
             onboard = next(s for s in result if s.key == "onboard")
             self.assertEqual(onboard, stage_map()["onboard"])

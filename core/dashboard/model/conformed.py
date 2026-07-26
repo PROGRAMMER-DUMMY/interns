@@ -25,6 +25,7 @@ import polars as pl
 
 from core.dashboard.model.aggregate import is_numeric_dtype, resolve_column
 from core.dashboard.model.layers import list_bronze_tables, read_bronze
+from core.profiling.dataset_identity import dataset_display_stem
 from core.onboarding.kpi.pii_redaction import (
     is_pii_column,
     workspace_redaction_patterns,
@@ -77,8 +78,14 @@ class ConformedModel:
 
 
 def _stem(path: str) -> str:
-    base = str(path).replace("\\", "/").rsplit("/", 1)[-1]
-    return base.rsplit(".", 1)[0].lower()
+    """Canonical table identity for a dataset reference.
+
+    Delegates to the ONE shared implementation (`core.profiling.dataset_identity`)
+    which handles both a local file path and a backtick-quoted Unity Catalog FQN.
+    Deriving identity by ad-hoc string splitting here is what collapsed distinct
+    UC tables onto a single identity; do not reintroduce a local parser.
+    """
+    return dataset_display_stem(path).lower()
 
 
 def approved_edges(layout: WorkspaceLayout) -> list[Edge]:

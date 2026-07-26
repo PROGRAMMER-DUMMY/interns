@@ -4,10 +4,12 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
+from core.profiling.dataset_identity import dataset_display_stem
+
 
 def dataset_name_key(dataset: dict[str, Any]) -> str:
     path = dataset.get("path", "")
-    return Path(path).stem if path else "*"
+    return dataset_display_stem(path) if path else "*"
 
 
 def logical_entity_from_path(path: str) -> str:
@@ -17,8 +19,14 @@ def logical_entity_from_path(path: str) -> str:
     underscore-delimited segment as the entity (dropping any trailing
     source-system qualifiers), then singularizes a trailing `s` plural
     marker. Workspace-agnostic: no domain-specific tokens are referenced.
+
+    Identity comes from `dataset_display_stem`, which understands both a local
+    file path and a backtick-quoted Unity Catalog FQN. `Path(...).stem` must not
+    be used here: it strips only the LAST dotted suffix, so every table in
+    `` `cat`.`schema`.`tbl` `` form collapsed onto the same `` `cat`.`schema` ``
+    identity (and then onto `` `cat `` via the underscore split below).
     """
-    stem = Path(path).stem.lower()
+    stem = dataset_display_stem(path).lower()
     stem = re.sub(r"_data$", "", stem)
     entity = stem.split("_", 1)[0] if "_" in stem else stem
     entity = entity[:-1] if entity.endswith("s") else entity

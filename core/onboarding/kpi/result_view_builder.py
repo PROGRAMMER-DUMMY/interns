@@ -21,10 +21,27 @@ comment instead of silently producing wrong SQL.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
+
+
+def _as_of_date() -> str:
+    """The as-of date pinned into generated date arithmetic (ISO `YYYY-MM-DD`).
+
+    Overridable via `AUTORESEARCH_AS_OF_DATE` so a backfill or a reproduction run
+    can regenerate the exact SQL a previous run emitted. Defaults to today (UTC).
+    """
+    override = (os.environ.get("AUTORESEARCH_AS_OF_DATE") or "").strip()
+    if override:
+        try:
+            return date.fromisoformat(override).isoformat()
+        except ValueError:
+            pass  # malformed override: fall through to today rather than emit junk
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 _TIME_BUCKET_PATTERNS: list[tuple[str, str]] = [
@@ -774,7 +791,8 @@ def _detect_date_arithmetic(
         if not source:
             continue
         col = _resolve_column(source, lookup)
-        base = f"date_diff('year', CAST({_quote(col, dialect)} AS DATE), {as_of_expr})"
+        unit_yr = "year" if dialect == "databricks" else "'year'"
+        base = f"date_diff({unit_yr}, CAST({_quote(col, dialect)} AS DATE), {as_of_expr})"
         if band_width:
             out.append((_band_expr(base, band_width), "age_band",
                         _band_label_expr(base, band_width)))
@@ -783,7 +801,8 @@ def _detect_date_arithmetic(
     for match in _DAYS_SINCE_PATTERN.finditer(cuts_text):
         source = match.group(1)
         col = _resolve_column(source, lookup)
-        base = f"date_diff('day', CAST({_quote(col, dialect)} AS DATE), {as_of_expr})"
+        unit_dy = "day" if dialect == "databricks" else "'day'"
+        base = f"date_diff({unit_dy}, CAST({_quote(col, dialect)} AS DATE), {as_of_expr})"
         alias = f"days_since_{_norm_alias(col)}"
         if band_width:
             out.append((_band_expr(base, band_width), f"{alias}_band",
@@ -997,16 +1016,22 @@ def parse_kpi(
     # is the KPI's time-grain source column (e.g. Month(ServiceDate)); when none
     # exists we fall back to CURRENT_DATE.
     event_date_col = _detect_event_date_column(cuts_text, lookup)
-    as_of_expr = (
-        f"CAST({_quote(event_date_col, dialect)} AS DATE)" if event_date_col else "CURRENT_DATE"
-    )
-    if not event_date_col:
-        # Record the fallback so it is auditable in the contract AND visible in
-        # the emitted SQL (comment) + result packet, instead of silently making
-        # date arithmetic drift with the run date.
+    if event_date_col:
+        as_of_expr = f"CAST({_quote(event_date_col, dialect)} AS DATE)"
+    else:
+        # No event-date anchor exists in the KPI grain. Semantically "as of now" is
+        # the right reading, but emitting the literal CURRENT_DATE defers the anchor
+        # to EXECUTION time, so the view stops being a function of the data alone:
+        # re-running the same SQL later silently reshapes its own age bands and a
+        # historical number cannot be reproduced. Pin the anchor to a literal date
+        # captured at GENERATION time instead -- same semantics for this run,
+        # reproducible forever after. Regeneration is an explicit act that records a
+        # new date.
+        as_of_date = _as_of_date()
+        as_of_expr = f"DATE '{as_of_date}'"
         parsed.age_as_of_assumption = (
-            "date arithmetic anchored to CURRENT_DATE (no event-date column in "
-            "the KPI grain); values shift as the run date advances"
+            f"date arithmetic anchored to a pinned as-of date {as_of_date} (no "
+            "event-date column in the KPI grain); regenerate to advance it"
         )
 
     # Mismatched-grain percentage is handled via window functions.
@@ -1675,6 +1700,9 @@ def build_result_view_sql(
     for dim in parsed.dimensions:
         select_terms.append(f"{dim.display_expression or dim.expression} AS {dim.alias}")
         if not windowed_only:
+            # GROUP BY the EXPRESSION, not the output alias. Alias-grouping is legal in
+            # DuckDB/Databricks but resolves to a same-named SOURCE column when one
+            # exists, silently regrouping the result. (Reverted an agy-session edit.)
             group_by_terms.append(dim.expression)
     for agg in parsed.aggregations:
         if not agg.project:

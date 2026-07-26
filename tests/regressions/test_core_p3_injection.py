@@ -124,7 +124,9 @@ class MedallionEmitterValidationTests(unittest.TestCase):
         p0 = "CREATE OR REPLACE TABLE silver.patients AS SELECT 1 AS PatientID;"
         out = emit_silver_merge("patients", ["PatientID"], p0)
         self.assertIn("DELETE FROM silver.patients", out)
-        self.assertIn("(PatientID) IN", out)
+        # The PK is emitted as a QUOTED identifier -- that quoting is the injection
+        # hardening this suite exists to protect, so assert the quoted form.
+        self.assertIn('("PatientID") IN', out)
 
 
 # ── P3c: KPI generator filter value/op + formula sanitization ────────────────

@@ -638,10 +638,20 @@ class WorkspaceFlow:
             if kpi_id in deferred_ids:
                 continue
             try:
+                settings = self.layout.load_settings()
+                db_source = settings.get("databricks_source") or {}
+                if db_source and db_source.get("catalog") and db_source.get("schema"):
+                    sql_gen = DuckDBKPISQLGenerator(
+                        self.repo_root,
+                        self.workspace_rel,
+                        dialect="databricks",
+                        catalog=db_source["catalog"],
+                        schema=db_source["schema"],
+                    )
+                else:
+                    sql_gen = DuckDBKPISQLGenerator(self.repo_root, self.workspace_rel)
                 generated.append(
-                    DuckDBKPISQLGenerator(self.repo_root, self.workspace_rel)
-                    .generate(kpi_id)
-                    .summary()
+                    sql_gen.generate(kpi_id).summary()
                 )
             except ValueError as exc:
                 # Defense in depth: a KPI whose metric/grain looked present but
@@ -693,7 +703,18 @@ class WorkspaceFlow:
             "ok",
             {"generated": generated, "deferred_kpis": deferred_kpis},
         )
-        harness = KPIExecutionHarness(self.repo_root, self.workspace_rel).run()
+        settings = self.layout.load_settings()
+        db_source = settings.get("databricks_source") or {}
+        if db_source and db_source.get("catalog") and db_source.get("schema"):
+            harness = KPIExecutionHarness(
+                self.repo_root,
+                self.workspace_rel,
+                dialect="databricks",
+                catalog=db_source["catalog"],
+                schema=db_source["schema"]
+            ).run()
+        else:
+            harness = KPIExecutionHarness(self.repo_root, self.workspace_rel).run()
         self._record_step(
             state,
             "run_kpi_execution_harness",
@@ -3756,10 +3777,14 @@ def pipeline_main(argv: list[str] | None = None) -> int:
             print(f"  Panel: {result.current_panel_path}")
         return 0
 
-    # Unexpected status — surface it.
-    print(f"[~] Pipeline reached status `{result.status}` at stage `{result.stage}` — inspect manually.")
+    # Unexpected status — surface it. NON-ZERO on purpose: this path emits no result
+    # packet, so exiting 0 told every caller (and every agent reading $?) that a run
+    # which never completed had succeeded. Step 5's gates all live inside the
+    # `status == "complete"` branch above and cannot fire here.
+    print(f"[x] Pipeline reached unexpected status `{result.status}` at stage `{result.stage}`"
+          " — no result packet was emitted. Inspect manually.")
     print(f"    Panel: {result.current_markdown_path}")
-    return 0
+    return 2
 
 
 if __name__ == "__main__":

@@ -51,6 +51,7 @@ from core.medallion.design_naming import (
     source_system_from_path,
     source_system_from_silver_source,
 )
+from core.profiling.dataset_identity import dataset_display_stem
 from core.storage.workspace_layout import WorkspaceLayout
 from core.sql_safety import escape_sql_literal, quote_ident_sql
 
@@ -581,7 +582,10 @@ def _split_schema_incompatible_groups(
             if _schema_compatible(anchor_cols, _dataset_column_set(ds)):
                 result[logical].append(ds)
             else:
-                stem = Path(ds.get("path", "")).stem.lower() or logical
+                # Schema-incompatible sibling: split it out under its OWN identity.
+                # `Path(...).stem` would collapse every UC table in a schema to one
+                # key here, re-merging the very datasets this branch is separating.
+                stem = dataset_display_stem(ds.get("path", "")).lower() or logical
                 result.setdefault(stem, []).append(ds)
     return result
 
@@ -1258,12 +1262,22 @@ def _build_bronze_tables(inputs: dict[str, Any], *, semantic_contract: Any, repo
             ]
             natural_key = [c for c in cols if c]
         watermark = _detect_watermark(schema)
-        pii_cols = _sensitive_cols_for_dataset(pii_by_ds, Path(path).stem, schema)
+        # Identity must come from the shared helper: `Path(...).stem` collapses every
+        # `cat`.`schema`.`tbl` in one schema onto the same key, which would look the
+        # PII/sensitive columns up under the WRONG dataset.
+        pii_cols = _sensitive_cols_for_dataset(pii_by_ds, dataset_display_stem(path), schema)
         rel_path = _safe_relative_posix(Path(path), repo_root)
+        # `append_watermarked` without a watermark column is a full append on every
+        # run -- the one non-idempotent load strategy. Degrade to `full_refresh`,
+        # which is idempotent by construction, so the manifest states what the load
+        # actually is. (No emitter branches on bronze load_strategy today; this is
+        # the declared contract the deploy plan and SLA reader consume.)
+        load_strategy = "append_watermarked" if watermark else "full_refresh"
         out.append(BronzeTable(
             name=name,
             source_file=rel_path,
             source_system=source_system,
+            load_strategy=load_strategy,
             watermark_column=watermark,
             natural_key=natural_key,
             pii_columns=pii_cols,
