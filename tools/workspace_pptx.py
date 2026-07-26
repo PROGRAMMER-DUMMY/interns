@@ -44,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
                          "image = pixel-perfect images of the live dashboard.")
     ap.add_argument("--force", action="store_true",
                     help="Regenerate + export even if DQ certification reports failures.")
+    ap.add_argument("--allow-unscreened", action="store_true",
+                    help="Export even when the screener/vision review is not satisfied.")
     ap.add_argument("--no-refresh", action="store_true",
                     help="Skip regeneration; export the last-generated dashboard as-is.")
     ap.add_argument("--open", dest="open_after", action="store_true",
@@ -88,7 +90,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         _layout, root, _gen, warnings = prepare_minus_root(
-            repo_root, args.workspace, force=args.force, no_refresh=args.no_refresh)
+            repo_root, args.workspace, force=args.force, no_refresh=args.no_refresh,
+            allow_unscreened=args.allow_unscreened)
     except (FileNotFoundError, RuntimeError) as exc:
         print(f"[x] {exc}", file=sys.stderr)
         return 2

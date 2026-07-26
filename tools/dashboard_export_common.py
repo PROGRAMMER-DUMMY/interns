@@ -8,6 +8,7 @@ warning) so an export never silently ships stale-and-unflagged data.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -24,8 +25,44 @@ def add_vendor_to_path(repo_root: Path | str) -> None:
         sys.path.insert(0, vendor)
 
 
+def screener_review_state(layout: WorkspaceLayout) -> tuple[bool, str]:
+    """(satisfied, detail) for the dashboard screener + vision review.
+
+    An export is a DISTRIBUTED artifact: the 2026-07-26 audit found a .pptx
+    shipped with row-level patient identifiers on an executive slide, from a
+    spec no human or agent had ever looked at, because `--screen` is an opt-in
+    flag on `workspace-dashboard` and was never passed.
+
+    Gated here rather than in `minus_adapter.generate()` on purpose: the
+    screener has to RENDER a dashboard in order to review it, so gating
+    generation would make a first-ever dashboard impossible to produce.
+    Rendering is safe; distributing unreviewed output is not.
+    """
+    report = layout.reports_dir / "dashboard_screener" / "current.json"
+    if not report.exists():
+        return False, (
+            "no screener report; run: workspace-dashboard --workspace <ws> --screen"
+        )
+    try:
+        data = json.loads(report.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return False, f"screener report unreadable ({type(exc).__name__})"
+    if not data.get("ok"):
+        count = data.get("error_count", "?")
+        return False, f"screener reported {count} finding(s); fix them and re-screen"
+    review = data.get("vision_review") or {}
+    if not review.get("recorded_at"):
+        return False, (
+            "screener is clean but no vision review recorded; run: "
+            "workspace-dashboard --workspace <ws> --record-vision-review "
+            "--reviewed-by <name> --notes <findings>"
+        )
+    return True, f"reviewed by {review.get('reviewed_by') or 'unknown'}"
+
+
 def prepare_minus_root(repo_root: Path | str, workspace_rel: str, *,
-                       force: bool = False, no_refresh: bool = False
+                       force: bool = False, no_refresh: bool = False,
+                       allow_unscreened: bool = False
                        ) -> tuple[WorkspaceLayout, Path, Optional[dict], list[str]]:
     """Ensure a generated MinusAnalyst root exists for the workspace.
 
@@ -37,6 +74,14 @@ def prepare_minus_root(repo_root: Path | str, workspace_rel: str, *,
     if not workspace.exists():
         raise FileNotFoundError(f"workspace not found: {workspace}")
     layout = WorkspaceLayout(project_root=workspace)
+
+    if not allow_unscreened:
+        satisfied, detail = screener_review_state(layout)
+        if not satisfied:
+            raise RuntimeError(
+                f"refusing to export an unreviewed dashboard: {detail}. "
+                "Pass --allow-unscreened to override deliberately."
+            )
 
     from core.dashboard.minus_adapter import generate, minus_root
 
@@ -94,4 +139,5 @@ def open_file(path: Path | str) -> None:
         pass
 
 
-__all__ = ["add_vendor_to_path", "prepare_minus_root", "default_out", "open_file"]
+__all__ = ["add_vendor_to_path", "prepare_minus_root", "screener_review_state",
+           "default_out", "open_file"]
