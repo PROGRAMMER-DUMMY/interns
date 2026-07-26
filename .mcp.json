@@ -17,6 +17,16 @@
       }
     },
 
+    "airflow": {
+      "$comment": "Astronomer's MCP server for the Airflow REST API -- DAG runs, task instances, logs. This repo GENERATES Airflow DAGs (core/orchestration/airflow_dag.py, cosmos_dag.py) and until now had no way to ask a running Airflow what happened to them; reading a scheduler log by hand was the only option. Requires AIRFLOW_API_URL plus AIRFLOW_AUTH_TOKEN (or AIRFLOW_USERNAME/AIRFLOW_PASSWORD) -- set them in your shell, never committed. With no AIRFLOW_API_URL it defaults to http://localhost:8080, the Astro CLI's local dev address. Read-only in practice for our use: query DAG state, never trigger production runs from an agent. Disabled by default until an endpoint is set.",
+      "command": "uvx",
+      "args": ["astro-airflow-mcp", "--transport", "stdio"],
+      "env": {
+        "AIRFLOW_API_URL": "${AIRFLOW_API_URL}",
+        "AIRFLOW_AUTH_TOKEN": "${AIRFLOW_AUTH_TOKEN}"
+      }
+    },
+
     "databricks": {
       "$comment": "Unity Catalog discovery, lineage, and SQL execution for the source-to-target / KPI work. Requires DATABRICKS_HOST and DATABRICKS_TOKEN (or a configured profile in ~/.databrickscfg). This community server is one option; Databricks also ships managed MCP servers governed via Unity AI Gateway -- see https://docs.databricks.com/aws/en/generative-ai/mcp/ . Disabled by default until creds are set.",
       "command": "uvx",

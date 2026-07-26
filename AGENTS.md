@@ -710,6 +710,20 @@ Do not paste raw datasets into prompts. If bounded sampling is needed, state why
 profile evidence was insufficient and save the result under the active workspace's `interns/`
 artifacts when it affects decisions.
 
+### Fetching dbt docs
+
+`docs.getdbt.com` serves Markdown for every page: append `.md` to the URL. Fetch that, not the
+HTML — the HTML page is mostly navigation chrome and burns tokens for the same paragraph.
+
+```text
+https://docs.getdbt.com/reference/node-selection/defer.md
+https://docs.getdbt.com/docs/build/incremental-strategies.md
+https://docs.getdbt.com/llms-full.txt      # the whole corpus, for searching when the URL is unknown
+```
+
+Search `llms-full.txt` for the concept, take the path it names, then fetch that one page's `.md`.
+Do not fetch `llms-full.txt` to answer a question you already have a URL for.
+
 ## Secret And Environment Display Guardrail
 
 Never print, paste, summarize verbatim, or screenshot secret-bearing values. This is a hard stop,
