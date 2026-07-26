@@ -392,6 +392,47 @@ def _emitted_columns(lookup: dict[str, str]) -> set[str]:
     return {col for col in lookup.values() if col}
 
 
+def _measure_input_columns(metric_text: str, lookup: dict[str, str]) -> set[str]:
+    """Columns consumed as an aggregate's ARGUMENT in the metric, lowercased.
+
+    Such a column is what is being MEASURED, never a grain to group by. Emitting
+    it as a dimension collapses the result to one row per entity and, for a
+    share, spreads the total across every individual -- which also turns an
+    identifier column into exported row-level data. Observed 2026-07-26: a
+    `count(distinct PatientID) ... for patients` metric fuzzy-resolved its own
+    "for <group>" token back onto `PatientID`, giving one row per patient at
+    0.023% each, and the identifiers reached an exported slide.
+
+    Reuses `_AGG_FN_PATTERN` (the same parser the metric itself is read with) so
+    a new aggregate function is recognised here for free. Non-column arguments
+    (`*`, a `col = 'x'` predicate, a nested expression) are skipped.
+    """
+    out: set[str] = set()
+    for match in _AGG_FN_PATTERN.finditer(str(metric_text or "")):
+        inner = match.group(3).strip().strip('"`')
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_ ]*", inner):
+            continue
+        resolved = _resolve_column(inner, lookup)
+        if resolved:
+            out.add(resolved.lower())
+    return out
+
+
+def _drop_measure_inputs(
+    dimensions: list["Dimension"], measure_inputs: set[str]
+) -> list["Dimension"]:
+    """Dimensions minus any that is a bare reference to a measure-input column.
+
+    Only bare column references are dropped: a derived expression over the same
+    column (``date_trunc('month', "OrderDate")`` while the metric is
+    ``min(OrderDate)``) is a legitimate grain and does not match.
+    """
+    return [
+        d for d in dimensions
+        if d.expression.strip('"`').lower() not in measure_inputs
+    ]
+
+
 def _dataset_token_index(kpi: dict[str, Any]) -> list[tuple[str, str]]:
     """Map each feature's source-dataset stem to the column it resolves to.
 
@@ -950,6 +991,31 @@ def parse_kpi(
     grain_bucketing: str | None = None,
     dialect: str = "duckdb",
 ) -> ParsedKPI:
+    """Parse a KPI, then drop any dimension that is the metric's own input.
+
+    The branch bodies live in `_parse_kpi_branches`; every one of them can
+    append a Dimension, and each has its own `return`. Normalising once at this
+    single exit is what keeps a future branch from reintroducing the
+    measure-input-as-dimension defect (see `_measure_input_columns`). The
+    mismatched-grain branch additionally filters its own `grain_dimensions`
+    before deriving window PARTITION BY terms from them -- a projection-only
+    filter here would leave that window at the finer grain.
+    """
+    parsed = _parse_kpi_branches(kpi, denominator_scope, grain_bucketing, dialect)
+    measure_inputs = _measure_input_columns(
+        str(kpi.get("metric") or ""), _features_view_column_lookup(kpi)
+    )
+    if measure_inputs:
+        parsed.dimensions = _drop_measure_inputs(parsed.dimensions, measure_inputs)
+    return parsed
+
+
+def _parse_kpi_branches(
+    kpi: dict[str, Any],
+    denominator_scope: str | None = None,
+    grain_bucketing: str | None = None,
+    dialect: str = "duckdb",
+) -> ParsedKPI:
     """Parse a KPI registry entry into structured aggregations/dimensions/filters.
 
     Parameters
@@ -1135,6 +1201,15 @@ def parse_kpi(
             # never emit a PARTITION BY on an UNRESOLVED token (BUG-011); that is
             # already prevented above by only adding emitted columns / a resolved
             # group column.
+            # The metric's own aggregate argument is not a grain. Filtered HERE,
+            # not only at parse_kpi's exit, because grain_terms below become the
+            # numerator's window PARTITION BY and the attribution ORDER BY: a
+            # projection-only filter would leave those at the finer grain and the
+            # share would still be computed per entity.
+            grain_dimensions = _drop_measure_inputs(
+                grain_dimensions,
+                _measure_input_columns(metric_text, lookup),
+            )
             parsed.dimensions.extend(grain_dimensions)
             grain_terms = tuple(d.expression for d in grain_dimensions)
 
