@@ -15,6 +15,12 @@ succeeds and always writes the report (including a wide span that WOULD be
 refused), so a human can review the resolved command and the bound check
 before deciding whether to add `--confirmed-by`.
 
+`--defer` narrows the same invocation to `state:modified+` and resolves every
+unchanged `ref()` against the production artifacts at `DBT_STATE_PATH`, so a
+backfill rebuilds what actually changed instead of the whole graph. The state
+path must be object storage (or at least outside the working tree) -- see
+`_resolve_state_path`.
+
 This CLI performs one synchronous `dbt build` invocation -- no internal
 concurrency, so a Databricks job-level `max_concurrent_runs: 1` guard
 (coordinating with bronze ingestion checkpoints, per plan section 4) is the
@@ -26,6 +32,7 @@ from core.observability.cost_ledger import anchored
 
 import argparse
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -46,6 +53,51 @@ register_contract("dbt_backfill/current.json", current_version=REPORT_VERSION)
 # wording ("a defined threshold"). Not tuned per-workspace; widen via
 # --max-span-days + --confirmed-by when a real case needs it.
 DEFAULT_MAX_SPAN_DAYS = 31
+
+# Where the PRODUCTION dbt artifacts (manifest.json) live, for `--defer` +
+# `--select state:modified+`. Deliberately an env var pointing at object
+# storage, never a manifest committed to this repo: a committed manifest is a
+# snapshot of one machine's last run that goes stale the moment prod moves on,
+# and every branch then merges conflicting binaries. Set it to the location the
+# production job uploads its `target/` to.
+DBT_STATE_PATH_ENV = "DBT_STATE_PATH"
+
+# What `--defer` selects when the caller names no `--select`. `state:modified+`
+# is the whole point: build only what changed plus its children, and resolve
+# every unchanged `ref()` against prod instead of rebuilding it.
+STATE_MODIFIED_SELECTOR = "state:modified+"
+
+
+def _resolve_state_path() -> str:
+    """The production-artifacts path for `--defer`, validated.
+
+    Refuses a path inside this repo: that is the committed-manifest anti-pattern
+    the plan rules out. A local path must exist -- otherwise dbt discovers the
+    miss only after the span bound and remote gate have already passed. A remote
+    URI (`s3://`, `abfss://`, ...) is taken on trust; only dbt can resolve it.
+    """
+    raw = (os.environ.get(DBT_STATE_PATH_ENV) or "").strip()
+    if not raw:
+        raise ValueError(
+            f"--defer needs {DBT_STATE_PATH_ENV} set to the location the production "
+            "job uploads its dbt `target/` to (e.g. s3://<bucket>/dbt-state/prod). "
+            "It is intentionally not a manifest committed to this repo."
+        )
+    if "://" in raw:
+        return raw
+    resolved = Path(raw).expanduser().resolve()
+    if resolved.is_relative_to(PROJECT_ROOT):
+        raise ValueError(
+            f"{DBT_STATE_PATH_ENV} points inside the repo ({resolved}). A committed "
+            "manifest goes stale the moment production moves on. Point it at object "
+            "storage, or at a path outside the working tree."
+        )
+    if not (resolved / "manifest.json").exists():
+        raise FileNotFoundError(
+            f"{DBT_STATE_PATH_ENV}={resolved} has no manifest.json -- nothing to "
+            "compare against, so `state:modified` would select every model."
+        )
+    return str(resolved)
 
 
 @dataclass(frozen=True)
@@ -74,6 +126,7 @@ class DbtBackfillRunner:
         confirmed_by: str = "",
         max_span_days: int = DEFAULT_MAX_SPAN_DAYS,
         select: str = "",
+        defer: bool = False,
     ) -> BackfillResult:
         start = _parse_date(event_time_start, "--event-time-start")
         end = _parse_date(event_time_end, "--event-time-end")
@@ -99,6 +152,11 @@ class DbtBackfillRunner:
         # shell; nothing in this codebase ever sets it programmatically.
         remote_gate = check_remote_approval()
 
+        # Resolved BEFORE the gates so a misconfigured DBT_STATE_PATH fails on
+        # the config, not halfway through a warehouse run.
+        state_path = _resolve_state_path() if defer else ""
+        effective_select = select or (STATE_MODIFIED_SELECTOR if defer else "")
+
         cmd = [
             "dbt", "build",
             "--project-dir", str(dbt_dir),
@@ -106,8 +164,10 @@ class DbtBackfillRunner:
             "--event-time-start", start.isoformat(),
             "--event-time-end", end.isoformat(),
         ]
-        if select:
-            cmd += ["--select", select]
+        if defer:
+            cmd += ["--defer", "--state", state_path]
+        if effective_select:
+            cmd += ["--select", effective_select]
 
         returncode: int | None = None
         stdout = ""
@@ -140,6 +200,9 @@ class DbtBackfillRunner:
             "confirmed_by": confirmed_by,
             "source": source,
             "dry_run": dry_run,
+            "defer": defer,
+            "state_path": state_path,
+            "select": effective_select,
             "status": status,
             "command": cmd,
             "returncode": returncode,
@@ -188,6 +251,8 @@ def _render_markdown(report: dict[str, Any]) -> str:
         f"Confirmed by: {report['confirmed_by'] or '(none -- agent-asserted)'} "
         f"(source: `{report['source']}`)",
         f"Remote execution approved: {'yes' if report['remote_approval_ok'] else 'NO -- ' + report['remote_approval_blocking_reason']}",
+        f"Selection: `{report['select'] or '(all models)'}`"
+        + (f" deferred to `{report['state_path']}`" if report["defer"] else ""),
         f"Status: `{report['status']}`"
         + (" -- WOULD REFUSE without human confirmation" if report["would_refuse"] and report["dry_run"] else ""),
         "",
@@ -229,6 +294,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--event-time-start", required=True)
     parser.add_argument("--event-time-end", required=True)
     parser.add_argument("--select", default="")
+    parser.add_argument(
+        "--defer", action="store_true",
+        help=f"build only state:modified+ against {DBT_STATE_PATH_ENV} production artifacts",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--confirmed-by", default="")
     parser.add_argument("--max-span-days", type=int, default=DEFAULT_MAX_SPAN_DAYS)
@@ -244,11 +313,13 @@ def main(argv: list[str] | None = None) -> int:
             confirmed_by=args.confirmed_by,
             max_span_days=args.max_span_days,
             select=args.select,
+            defer=args.defer,
         ),
         metadata={
             "event_time_start": args.event_time_start,
             "event_time_end": args.event_time_end,
             "dry_run": args.dry_run,
+            "defer": args.defer,
             "confirmed_by": args.confirmed_by,
         },
     )
