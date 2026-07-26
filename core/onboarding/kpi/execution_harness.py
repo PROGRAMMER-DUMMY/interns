@@ -22,6 +22,25 @@ from core.presentation.console_tables import render_markdown_table
 from core.storage.workspace_layout import WorkspaceLayout
 
 
+# KPI result views are GOLD-grain output. Writing them into the declared SOURCE
+# schema puts derived results beside raw tables, and discovery then re-ingests
+# them as sources -- observed live on 2026-07-26, where
+# `healthcare_rcm.bronze.kpi_002_results` came back as a bronze input with the
+# computed `percentage_share` column inside its natural key.
+DEFAULT_RESULT_SCHEMA = "gold"
+
+
+def result_schema_for(settings: dict) -> str:
+    """Schema that KPI result views are created in -- never the source schema.
+
+    Overridable per workspace via `databricks_source.result_schema`.
+    """
+    source = (settings or {}).get("databricks_source") or {}
+    explicit = str(source.get("result_schema") or "").strip()
+    return explicit or DEFAULT_RESULT_SCHEMA
+
+
+
 RESULT_VIEW_PATTERN = re.compile(
     # Optional `catalog`.`schema`. qualification prefix (Phase C's databricks
     # single-statement rewrite targets `catalog`.`schema`.`kpi_id_results`,
@@ -145,7 +164,7 @@ class KPIExecutionHarness:
         sample_limit: int = 20,
         dialect: str = "duckdb",
         catalog: str = "workspace",
-        schema: str = "autoresearch",
+        schema: str = DEFAULT_RESULT_SCHEMA,
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()

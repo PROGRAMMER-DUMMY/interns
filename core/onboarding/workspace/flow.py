@@ -27,7 +27,7 @@ from core.onboarding.data_quality import DataQualityHarness, DuplicateDecisionRe
 from core.onboarding.harness.trajectory_recorder import record_trajectory_event_safe
 from core.onboarding.kpi.blocker_workflow import apply_kpi_panel_answer, prepare_kpi_blocker_panel
 from core.onboarding.kpi.engine_parity import PARITY_MODE_ROW, run_polars_parity
-from core.onboarding.kpi.execution_harness import KPIExecutionHarness
+from core.onboarding.kpi.execution_harness import KPIExecutionHarness, result_schema_for
 from core.onboarding.kpi.generation_workflow import KPIGenerationWorkflow
 from core.onboarding.kpi.registry_loader import load_kpi_definitions, render_kpi_block
 from core.wiki import WikiLayout, build_kpi_completion_scaffold, upsert_kpi_note
@@ -706,12 +706,15 @@ class WorkspaceFlow:
         settings = self.layout.load_settings()
         db_source = settings.get("databricks_source") or {}
         if db_source and db_source.get("catalog") and db_source.get("schema"):
+            # NOT db_source["schema"]: that is the SOURCE schema. A KPI result
+            # view is gold-grain output, and writing it beside raw tables let
+            # discovery re-ingest it as a source (2026-07-26 audit).
             harness = KPIExecutionHarness(
                 self.repo_root,
                 self.workspace_rel,
                 dialect="databricks",
                 catalog=db_source["catalog"],
-                schema=db_source["schema"]
+                schema=result_schema_for(settings),
             ).run()
         else:
             harness = KPIExecutionHarness(self.repo_root, self.workspace_rel).run()
