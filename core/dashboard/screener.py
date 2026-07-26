@@ -707,13 +707,7 @@ def _capture_fallback(state, port: int, workspace: Path, shots_dir: Path) -> lis
 
 
 def _unique(items: list) -> list:
-    seen: set = set()
-    out = []
-    for it in items:
-        if it not in seen:
-            seen.add(it)
-            out.append(it)
-    return out
+    return list(dict.fromkeys(items))
 
 
 def record_vision_review(

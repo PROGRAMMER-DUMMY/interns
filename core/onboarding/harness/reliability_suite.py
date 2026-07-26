@@ -367,14 +367,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
 
 
 def _dedupe(values: list[str]) -> list[str]:
-    seen = set()
-    result = []
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        result.append(value)
-    return result
+    return list(dict.fromkeys(values))
 
 
 def _now() -> str:

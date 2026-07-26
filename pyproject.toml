@@ -16,16 +16,19 @@ dependencies = [
     # "httpx>=0.27",
     # "pandas>=2.2",
     "aiohttp>=3.9.5",
-    "notebook>=7.5.6",
     "polars>=1.40.1",
     "rich>=15.0.0",
     "deltalake>=1.5.1",
     "pyspark>=3.5.1,<4",  # Pin <4: Spark 4.x (pre-release here) has no matching Delta build
     "sqlalchemy>=2.0.49",
     "pyarrow>=4.0.0",    # relaxed upper bound — mlflow 3.x requires pyarrow<24
-    "numpy>=1.26,<2.0",  # <--- THE FIX: Capped below 2.0 to prevent ancient numba fallback
-    "scikit-learn>=1.5",
-    "shap>=0.46",
+    # The <2.0 cap was originally shap's numba path, and shap/scikit-learn have
+    # moved to the `ml` extra -- so the stated reason is gone. NOT lifted here:
+    # this venv still has numpy 1.26.4 and `uv sync` resyncs pyspark to a
+    # pre-release with no Delta build (see core/dev/green_gate.py), so the lift
+    # cannot be gate-verified in place. Lift it in a controlled sync, then run
+    # green-gate under numpy 2 -- pyspark<4 and mlflow are the two to watch.
+    "numpy>=1.26,<2.0",
     "fastexcel>=0.12.0",
     "xlsxwriter>=3.2.0",
     "duckdb>=1.5.2",
@@ -35,7 +38,6 @@ dependencies = [
     # Databricks integration
     "databricks-sdk>=0.20",
     "mlflow>=3.0",
-    "tabulate>=0.10.0",
     "pdfplumber>=0.11.9",
     "pyyaml>=6.0",
     "openpyxl>=3.1.5",
