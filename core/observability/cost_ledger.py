@@ -545,6 +545,8 @@ EXEMPTIONS: dict[str, str] = {
     "retrieve-docs": "repo-level doc retrieval; no --workspace to key",
     "generate-skill-adapters": "repo-level skill-adapter generation; no --workspace",
     "validate-git-hygiene": "repo-level git-hygiene check; no --workspace",
+    "build-tool-index": "repo-level agent tool-index generation; no --workspace to key, "
+    "and it reads pyproject/docstrings only -- no workspace pipeline work to account for",
     "check-remote-execution-gate": "repo-level env-var gate check, no --workspace to key; "
     "called synchronously inside shell `&&` chains (pipeline_stages.py's DBT_BUILD_STAGE), "
     "anchoring overhead there would be pure waste on a check that must fail fast",

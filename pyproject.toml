@@ -46,6 +46,7 @@ dependencies = [
 ]
 
 [project.scripts]
+build-tool-index = "core.dev.tool_index:main"
 loop      = "core.orchestration.loop:main"
 retrieve-docs = "core.context.doc_retrieval_cli:main"
 onboard-workspace = "core.onboarding.workspace.onboarding:main"
@@ -84,6 +85,7 @@ validate-project-harness = "core.onboarding.harness.project_harness:main"
 harness = "core.dev.harness_cli:main"
 validate-engine-generation = "core.onboarding.harness.engine_generation_harness:main"
 record-workspace-trajectory = "core.onboarding.harness.trajectory_recorder:main"
+workspace-state-health = "core.onboarding.harness.state_health:main"
 build-workspace-evidence-graph = "core.onboarding.evidence_graph:main"
 query-workspace-evidence-graph = "core.onboarding.evidence_graph:query_main"
 prepare-workspace-bug-report = "core.onboarding.workspace.bugs:main"
