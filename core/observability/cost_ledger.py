@@ -301,7 +301,14 @@ class LivenessResult:
     unattributable: int
     unattributable_fraction: float
     without_session_id: int  # join-coverage signal (reported, NOT gated in 1a.1)
-    threshold: float
+    # Rows whose driving agent never resolved. Reported, NOT gated: an
+    # unrecognised CLI is a legitimate state, and failing the run for it
+    # would punish the honest answer. The audited run was 92/92 -- driven by
+    # a CLI with no env marker and no AUTORESEARCH_MAIN_AGENT set -- and the
+    # summary said nothing, so it read as a defect in capture rather than a
+    # one-line fix in the caller. Now it says which one it is.
+    without_agent: int = 0
+    threshold: float = UNATTRIBUTED_FAIL_FRACTION
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -316,6 +323,9 @@ def liveness_check(
     without_session = sum(
         1 for e in entries if not str(e.get("agent_session_id") or "").strip()
     )
+    without_agent = sum(
+        1 for e in entries if str(e.get("agent") or "unknown").strip() in ("", "unknown")
+    )
     if total == 0:
         return LivenessResult(
             ok=False,
@@ -324,6 +334,7 @@ def liveness_check(
             unattributable=0,
             unattributable_fraction=0.0,
             without_session_id=0,
+            without_agent=0,
             threshold=threshold,
         )
     unattributable = sum(1 for e in entries if _is_unattributable(e))
@@ -346,6 +357,7 @@ def liveness_check(
         unattributable=unattributable,
         unattributable_fraction=round(fraction, 4),
         without_session_id=without_session,
+        without_agent=without_agent,
         threshold=threshold,
     )
 
@@ -415,6 +427,14 @@ class CostLedger:
             f"- agent_session_id(s): `{', '.join(session_ids) or 'none'}`",
             f"- liveness: `{'ok' if live.ok else 'FAIL'}` -- {live.reason}",
             f"- rows without a session id (join-coverage): `{live.without_session_id}`",
+            f"- rows with an unresolved agent: `{live.without_agent}`"
+            + (
+                ""
+                if not live.without_agent
+                else "  -- this CLI exposes no env marker this module recognises. "
+                "Set `AUTORESEARCH_MAIN_AGENT=<name>` in the driving shell; it is "
+                "recorded as `agent_detection_source: config`, which is honest."
+            ),
             "",
             "All token/cost columns are NULL by design at anchor time "
             "(`capture_method: anchor_only`, `cost_source: unreconciled`). Phase "
@@ -459,6 +479,31 @@ def _workspace_from_argv(argv: list[str]) -> str:
         if tok.startswith("--workspace="):
             return tok.split("=", 1)[1]
     return ""
+
+
+# The run id, exported to any SUBPROCESS whose warehouse work should be
+# attributable back to this run. dbt tags every query it issues with it (see
+# dbt_project_generator's `query_tags`), which is what makes
+# `system.query.history.query_tags['run_id']` join to a ledger row at all --
+# without it the tag carries only enterprise + env and warehouse cost cannot be
+# attributed to a run, only to a tenant.
+RUN_ID_ENV = "AUTORESEARCH_RUN_ID"
+
+
+def current_run_id(workspace_id: str, env: Optional[Mapping[str, str]] = None) -> tuple[str, str]:
+    """The run id an individually-invoked command in this process anchors under.
+
+    Same derivation `_try_anchor` uses, exposed so a caller that shells out can
+    hand the SAME id to the subprocess. An explicit `AUTORESEARCH_RUN_ID` in the
+    environment wins: a seam (`run_pipeline`) mints its own run id and passes it
+    down, and a child must not re-derive a different one.
+    """
+    environ = os.environ if env is None else env
+    explicit = str(environ.get(RUN_ID_ENV) or "").strip()
+    if explicit:
+        return explicit, "inherited_env"
+    agent_session_id, _ = resolve_agent_session(environ)
+    return run_id_for(agent_session_id, workspace_id)
 
 
 def _try_anchor(
@@ -564,6 +609,7 @@ def entry_point_scripts() -> dict[str, str]:
 __all__ = [
     "EXEMPTIONS",
     "SCHEMA_VERSION",
+    "RUN_ID_ENV",
     "SESSION_ID_OVERRIDE_ENV",
     "UNATTRIBUTED_FAIL_FRACTION",
     "AnchorEntry",
@@ -572,6 +618,7 @@ __all__ = [
     "anchored",
     "assert_ledger_active",
     "build_anchor",
+    "current_run_id",
     "detect_agent",
     "entry_point_scripts",
     "ledger_dir_for",

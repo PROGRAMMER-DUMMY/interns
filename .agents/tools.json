@@ -1275,6 +1275,12 @@
       "summary": "Complexity- and size-aware engine recommendation."
     },
     {
+      "name": "reconcile-warehouse-cost",
+      "command": "uv run reconcile-warehouse-cost --workspace <workspace>",
+      "entry_point": "core.observability.warehouse_cost:main",
+      "summary": "Read warehouse spend back out of Databricks and attribute it to one run."
+    },
+    {
       "name": "record-engine-evolution",
       "command": "uv run record-engine-evolution --workspace <workspace>",
       "entry_point": "core.optimization.engine_evolution:main",

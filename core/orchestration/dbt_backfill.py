@@ -41,6 +41,7 @@ from typing import Any
 
 from core.contracts.versioning import register_contract
 from core.governance.provenance import decision_source as decision_source_for
+from core.observability.cost_ledger import RUN_ID_ENV, current_run_id
 from core.onboarding.databricks.deploy_gates import check_remote_approval
 from core.paths import PROJECT_ROOT
 from core.storage.workspace_layout import WorkspaceLayout
@@ -155,6 +156,7 @@ class DbtBackfillRunner:
         # Resolved BEFORE the gates so a misconfigured DBT_STATE_PATH fails on
         # the config, not halfway through a warehouse run.
         state_path = _resolve_state_path() if defer else ""
+        run_id, run_id_source = current_run_id(_rel(self.workspace, self.repo_root))
         effective_select = select or (STATE_MODIFIED_SELECTOR if defer else "")
 
         cmd = [
@@ -179,7 +181,14 @@ class DbtBackfillRunner:
         elif not remote_gate.ok:
             status = "refused_no_remote_approval"
         else:
-            proc = subprocess.run(cmd, cwd=str(self.repo_root), capture_output=True, text=True)
+            # dbt's query_tags carry `run_id` as an env_var() -- resolved here,
+            # in the child's environment, so every warehouse query this build
+            # issues is attributable back to this run's ledger rows. Without it
+            # the tag is tenant-scoped only and the cost cannot be reconciled.
+            child_env = {**os.environ, RUN_ID_ENV: run_id}
+            proc = subprocess.run(
+                cmd, cwd=str(self.repo_root), capture_output=True, text=True, env=child_env,
+            )
             returncode = proc.returncode
             stdout, stderr = proc.stdout, proc.stderr
             status = "executed" if returncode == 0 else "failed"
@@ -200,6 +209,8 @@ class DbtBackfillRunner:
             "confirmed_by": confirmed_by,
             "source": source,
             "dry_run": dry_run,
+            "run_id": run_id,
+            "run_id_source": run_id_source,
             "defer": defer,
             "state_path": state_path,
             "select": effective_select,

@@ -121,5 +121,58 @@ class MainCliTests(unittest.TestCase):
             fake_resolve.assert_called_once_with("acme_corp")
 
 
+class CostTelemetryCheckTests(unittest.TestCase):
+    """3.1: system.billing/system.query are NOT on by default. A warehouse that
+    works perfectly and a cost query that returns nothing is the failure mode."""
+
+    def test_not_probed_without_the_remote_gate_and_never_claimed_ready(self):
+        import os
+
+        mock_cfg = MagicMock(enabled=True, catalog="c", execution="warehouse")
+        with patch("core.config.resolve_databricks_config", return_value=mock_cfg), patch(
+            "core.execution.databricks_client.DatabricksClient.health_check",
+            return_value=(True, "ok"),
+        ), patch("core.execution.databricks_client.DatabricksClient.execute_query") as q:
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("AUTORESEARCH_ALLOW_REMOTE_EXECUTION", None)
+                report = check("")
+        q.assert_not_called()
+        self.assertEqual(report.cost_telemetry["status"], "unknown")
+        self.assertIn("system-schemas enable", report.cost_telemetry["detail"])
+
+    def test_an_unreadable_system_schema_is_blocked_with_the_enable_command(self):
+        import os
+
+        mock_cfg = MagicMock(enabled=True, catalog="c", execution="warehouse")
+        with patch("core.config.resolve_databricks_config", return_value=mock_cfg), patch(
+            "core.execution.databricks_client.DatabricksClient.health_check",
+            return_value=(True, "ok"),
+        ), patch(
+            "core.execution.databricks_client.DatabricksClient.execute_query",
+            side_effect=RuntimeError("TABLE_OR_VIEW_NOT_FOUND"),
+        ), patch.dict(os.environ, {"AUTORESEARCH_ALLOW_REMOTE_EXECUTION": "1"}):
+            report = check("")
+        self.assertEqual(report.cost_telemetry["status"], "blocked")
+        self.assertIn("system.billing.usage", report.cost_telemetry["detail"])
+        self.assertIn("system-schemas enable", report.cost_telemetry["detail"])
+        # A capability gap, not a broken platform -- the local path still works.
+        self.assertEqual(report.blockers(), [])
+
+    def test_all_three_readable_is_ready(self):
+        import os
+
+        mock_cfg = MagicMock(enabled=True, catalog="c", execution="warehouse")
+        with patch("core.config.resolve_databricks_config", return_value=mock_cfg), patch(
+            "core.execution.databricks_client.DatabricksClient.health_check",
+            return_value=(True, "ok"),
+        ), patch(
+            "core.execution.databricks_client.DatabricksClient.execute_query",
+            return_value=(["1"], [["1"]]),
+        ), patch.dict(os.environ, {"AUTORESEARCH_ALLOW_REMOTE_EXECUTION": "1"}):
+            report = check("")
+        self.assertEqual(report.cost_telemetry["status"], "ready")
+        self.assertIn("reconcile-warehouse-cost", report.cost_telemetry["detail"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -233,6 +233,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # if I change this" with no warehouse -- the question nobody could
     # answer when an agent deleted a safety check blind.
     "tests.test_dbt_index",
+    # Phase 3: warehouse spend read back out of system.query/system.billing
+    # and attributed to one run. Warehouse dollars stay in their OWN
+    # artifact -- AnchorEntry.cost_usd is agent-token cost, a different basis.
+    "tests.test_warehouse_cost",
     # dbt+Airflow production-backend Phase D4: the dashboard's gold read
     # dispatches local-first between local Delta and a dbt-built Databricks
     # mart, gated by the same remote-execution approval as every other

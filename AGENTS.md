@@ -648,7 +648,7 @@ the matching `### <command>` section of `TOOLS.md` for the one command you are a
 | --- | --- |
 | Workspace selection | `list-workspace-files`, `prepare-workspace-selection`, `session-snapshot`, `prepare-data-source-panel`, `apply-data-source-answer` |
 | Onboarding | `onboard-workspace`, `kickstart-workspace`, `understand-data` |
-| Cloud-native (dbt/Airflow) | `check-platform-readiness`, `generate-dbt-project`, `prepare-data-quality-panel`, `apply-data-quality-answer`, `verify-dbt-project`, `dbt-index`, `run-dbt-backfill` |
+| Cloud-native (dbt/Airflow) | `check-platform-readiness`, `generate-dbt-project`, `prepare-data-quality-panel`, `apply-data-quality-answer`, `verify-dbt-project`, `dbt-index`, `run-dbt-backfill`, `reconcile-warehouse-cost` |
 | KPI definition + blockers | `prepare-kpi-blocker-panel`, `apply-kpi-panel-answer`, `apply-kpi-definition`, `confirm-cli-agent-proposal`, `prepare-kpi-generation`, `apply-kpi-generation-answer`, `finalize-kpi-generation` (deprecated redirects: `resolve-kpi-features`, `blocker-question-panel`, `derived-feature-markdown`) |
 | Data model | `prepare-data-model-generation`, `apply-data-model-answer`, `finalize-data-model-generation`, `prepare-data-model-blocker-panel`, `apply-data-model-blocker-answer`, `parse-data-model-images`, `export-data-model-diagram` |
 | Relationships + source-to-target | `build-relationship-contracts`, `apply-relationship-answer`, `plan-source-to-target` |

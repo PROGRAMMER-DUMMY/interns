@@ -42,7 +42,7 @@ macro override so a model's `+schema:` config becomes the literal schema
 name, not dbt's default `{target_schema}_{custom_schema}` concatenation.
 """
 from __future__ import annotations
-from core.observability.cost_ledger import anchored
+from core.observability.cost_ledger import RUN_ID_ENV, anchored
 
 import argparse
 import json
@@ -153,6 +153,19 @@ class DbtProjectGenerator:
         generated_kpi_ids: list[str] = []
         skipped: list[dict[str, str]] = []
 
+        # Collect and merge required columns per source across all ready KPIs first
+        merged_required_columns: dict[str, set[str]] = {}
+        for kpi in ready_kpis:
+            try:
+                req_sources, req_cols = self._sql._required_source_columns(
+                    kpi, profile_map, relationships
+                )
+                for src in req_sources:
+                    if src in req_cols:
+                        merged_required_columns.setdefault(src, set()).update(req_cols[src])
+            except Exception:
+                pass
+
         for kpi in ready_kpis:
             kpi_id = str(kpi.get("kpi_id") or "")
             try:
@@ -165,7 +178,7 @@ class DbtProjectGenerator:
 
                 for source in required_sources:
                     sources_needed[source] = profile_map.get(source, {})
-                    self._ensure_staging_model(source, profile_map, required_columns, staging_dir)
+                    self._ensure_staging_model(source, profile_map, merged_required_columns, staging_dir)
 
                 stage_views = {
                     source: self._written_staging[source] for source in required_sources
@@ -421,8 +434,28 @@ class DbtProjectGenerator:
         # QueryTagsUtils.parse_query_tags), rejecting a nested-dict profile
         # value with a schema-validation error. Confirmed against the
         # installed dbt-databricks 1.12.2 source, not assumed from docs.
-        query_tags_json = json.dumps({"project_name": self.enterprise_id, "env": "prod"})
-        profiles_lines.append(f"      query_tags: '{query_tags_json}'")
+        #
+        # `run_id` is what makes the tag JOINABLE back to a cost-ledger row.
+        # project_name+env alone attribute warehouse spend to a TENANT, never to
+        # a run -- which is why the audited run tagged 92 queries and could not
+        # price any of them. It is an `env_var()` deliberately, not a literal:
+        # profiles.yml is generated ONCE and reused by every later invocation,
+        # so a baked-in id would stamp the first run's id onto all of them. The
+        # value is resolved at dbt-invocation time from the shell dbt runs in
+        # (`AUTORESEARCH_RUN_ID`, exported by core.observability.cost_ledger's
+        # RUN_ID_ENV). Absent -> empty string: the reconciler then finds nothing
+        # for that run and says so, which is honest.
+        query_tags_json = json.dumps({
+            "project_name": self.enterprise_id,
+            "env": "prod",
+            "run_id": "{{ env_var('" + RUN_ID_ENV + "', '') }}",
+        })
+        # Double-quoted YAML scalar (not single-quoted): the value contains
+        # single quotes from the Jinja call, and YAML's '' escape nested inside a
+        # JSON string is unreadable. Escaping the JSON's own double quotes is the
+        # legible half of the trade.
+        yaml_scalar = query_tags_json.replace("\\", "\\\\").replace('"', '\\"')
+        profiles_lines.append(f'      query_tags: "{yaml_scalar}"')
         profiles_lines.append("")
         (dbt_dir / "profiles.yml").write_text("\n".join(profiles_lines), encoding="utf-8")
         source_tables = "\n".join(

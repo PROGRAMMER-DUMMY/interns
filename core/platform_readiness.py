@@ -19,15 +19,13 @@ import argparse
 import importlib.util
 import json
 from pathlib import Path
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
-def _check_databricks(enterprise_id: str) -> dict[str, Any]:
-    from core.config import resolve_databricks_config
+def _check_databricks(cfg: Any) -> dict[str, Any]:
     from core.execution.databricks_client import DatabricksClient
 
-    cfg = resolve_databricks_config(enterprise_id)
     if not cfg.enabled:
         return {
             "status": "not_configured",
@@ -85,11 +83,50 @@ def _check_airflow() -> dict[str, Any]:
     return {"status": "ready", "detail": "Airflow + astronomer-cosmos installed."}
 
 
+def _check_cost_telemetry(cfg: Any) -> dict[str, Any]:
+    """Whether the system schemas Phase 3 reads back are actually queryable.
+
+    `system.billing` and `system.query` are NOT enabled by default and an admin
+    must turn them on per metastore -- so the honest failure mode is a warehouse
+    that works perfectly and a cost query that returns nothing. Checked with the
+    same read-only client every other path uses; never enables anything.
+    """
+    from core.onboarding.databricks.deploy_gates import check_remote_approval
+
+    enable_hint = (
+        "An account admin must enable them once per metastore: "
+        "`databricks system-schemas enable <metastore-id> billing` and "
+        "`... query`."
+    )
+    if not cfg.enabled:
+        return {"status": "not_configured",
+                "detail": "databricks is not enabled; there is no warehouse spend to read."}
+    gate = check_remote_approval()
+    if not gate.ok:
+        return {"status": "unknown", "detail": f"{gate.blocking_reason}; cannot probe. {enable_hint}"}
+    from core.execution.databricks_client import DatabricksClient
+
+    client = DatabricksClient(cfg)
+    missing: list[str] = []
+    for table in ("system.billing.usage", "system.billing.list_prices", "system.query.history"):
+        try:
+            client.execute_query(f"SELECT 1 FROM {table} LIMIT 1")
+        except Exception as exc:  # not enabled / not granted / does not exist
+            missing.append(f"{table} ({type(exc).__name__})")
+    if missing:
+        return {"status": "blocked",
+                "detail": f"unreadable: {', '.join(missing)}. {enable_hint}"}
+    return {"status": "ready",
+            "detail": "system.billing + system.query readable; "
+                      "`reconcile-warehouse-cost` can attribute run cost."}
+
+
 @dataclass
 class ReadinessReport:
     databricks: dict[str, Any]
     dbt: dict[str, Any]
     airflow: dict[str, Any]
+    cost_telemetry: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
         return asdict(self)
@@ -103,10 +140,16 @@ class ReadinessReport:
 
 
 def check(enterprise_id: str = "") -> ReadinessReport:
+    # Resolved ONCE and handed to both Databricks checks: two calls would
+    # double every per-enterprise config read for no gain.
+    from core.config import resolve_databricks_config
+
+    cfg = resolve_databricks_config(enterprise_id)
     return ReadinessReport(
-        databricks=_check_databricks(enterprise_id),
+        databricks=_check_databricks(cfg),
         dbt=_check_dbt(),
         airflow=_check_airflow(),
+        cost_telemetry=_check_cost_telemetry(cfg),
     )
 
 

@@ -265,6 +265,50 @@ class RunPipelineAnchorTests(unittest.TestCase):
             self.assertNotIn("_anchor_errors", results)
 
 
+class AgentAttributionTests(unittest.TestCase):
+    """The audited run was 92/92 `agent: unknown` and the summary said nothing
+    about it, so an unrecognised CLI read as a capture defect. It is reported,
+    not gated -- an unknown agent is a legitimate state with a one-line fix."""
+
+    def _rows(self, agents: list[str]) -> list[dict]:
+        return [
+            build_anchor(
+                run_id="r1", workspace_id="workspaces/w", pipeline_stage=f"s{i}",
+                env={"CLAUDE_CODE_SESSION_ID": "uuid-1"},
+                configured_agent=agent or None,
+            ).to_dict()
+            for i, agent in enumerate(agents)
+        ]
+
+    def test_unresolved_agents_are_counted(self):
+        result = liveness_check(self._rows(["", "", "codex"]))
+        self.assertEqual(result.without_agent, 2)
+
+    def test_an_unknown_agent_does_not_fail_the_gate(self):
+        # Attribution of TOKENS keys on the session id, not the agent name.
+        result = liveness_check(self._rows(["", "", ""]))
+        self.assertTrue(result.ok)
+        self.assertEqual(result.without_agent, 3)
+
+    def test_the_summary_names_the_env_var_that_fixes_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = CostLedger(Path(tmp))
+            for row in self._rows(["", ""]):
+                ledger.append(AnchorEntry(**{
+                    k: v for k, v in row.items()
+                    if k not in ("artifact_type", "schema_version")
+                }))
+            text = ledger.write_summary("r1").read_text(encoding="utf-8")
+            self.assertIn("rows with an unresolved agent: `2`", text)
+            self.assertIn("AUTORESEARCH_MAIN_AGENT", text)
+
+    def test_a_configured_agent_resolves_and_records_its_source(self):
+        row = self._rows(["antigravity"])[0]
+        self.assertEqual(row["agent"], "antigravity")
+        self.assertEqual(row["agent_detection_source"], "config")
+        self.assertEqual(liveness_check([row]).without_agent, 0)
+
+
 class RunGroupingTests(unittest.TestCase):
     def test_session_present_is_stable_and_time_free(self):
         # All commands in one session+workspace collapse to ONE run id (no time

@@ -244,6 +244,45 @@ class DeferTests(unittest.TestCase):
             self.assertNotIn("--select", report["command"])
 
 
+class RunIdTaggingTests(unittest.TestCase):
+    """The dbt child must carry AUTORESEARCH_RUN_ID: the generated profiles.yml
+    resolves its `run_id` query tag from it, and without that tag the warehouse
+    cost of this build cannot be attributed back to this run's ledger rows."""
+
+    def test_the_dbt_subprocess_inherits_the_run_id(self):
+        from core.observability.cost_ledger import RUN_ID_ENV
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _build_real_dbt_project(root)
+            mock_proc = MagicMock(returncode=0, stdout="ok", stderr="")
+            env = {**_AUTHORIZED_ENV, "CLAUDE_CODE_SESSION_ID": "uuid-live"}
+            with patch.dict(os.environ, env), patch(
+                "core.orchestration.dbt_backfill.subprocess.run", return_value=mock_proc
+            ) as mock_run:
+                result = DbtBackfillRunner(root, "workspaces/demo").run(
+                    event_time_start="2026-01-01", event_time_end="2026-01-05",
+                )
+            self.assertEqual(result.status, "executed")
+            child_env = mock_run.call_args.kwargs["env"]
+            report = json.loads((root / result.current_json_path).read_text(encoding="utf-8"))
+            self.assertTrue(report["run_id"])
+            # The id in the child env is the SAME one the report records --
+            # otherwise the tag joins to a run that has no ledger rows.
+            self.assertEqual(child_env[RUN_ID_ENV], report["run_id"])
+            self.assertEqual(report["run_id_source"], "session_workspace")
+
+    def test_an_inherited_run_id_is_not_re_derived(self):
+        from core.observability.cost_ledger import RUN_ID_ENV, current_run_id
+
+        # A seam (run_pipeline) mints a run id and passes it down; a child must
+        # adopt it rather than mint a second id for the same run.
+        self.assertEqual(
+            current_run_id("workspaces/demo", {RUN_ID_ENV: "seam-1"}),
+            ("seam-1", "inherited_env"),
+        )
+
+
 class ProvenanceTests(unittest.TestCase):
     def test_agent_style_confirmed_by_is_not_treated_as_human(self):
         with tempfile.TemporaryDirectory() as tmp:

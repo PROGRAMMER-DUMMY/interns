@@ -577,6 +577,41 @@ def _render_data_understanding_markdown(payload: dict[str, Any]) -> str:
     lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
+def _run_cost_lines(run_cost: Any) -> list[str]:
+    """The run's warehouse cost, or an honest statement that it was never read.
+
+    The audited run rendered `cost_usd: 0` on all 92 rows and that read as
+    "this run was free". It was not -- nothing had ever queried the cost back.
+    An absent reconciliation now says so and names the command, because a
+    missing number must never render as a zero.
+
+    Warehouse dollars only. Agent-token cost is a separate basis and is not
+    summed into this figure (see core.observability.warehouse_cost).
+    """
+    if not isinstance(run_cost, dict):
+        return [
+            "- Warehouse cost: not reconciled -- run "
+            "`uv run reconcile-warehouse-cost --workspace <ws>` "
+            "(needs a human-set AUTORESEARCH_ALLOW_REMOTE_EXECUTION).",
+            "",
+        ]
+    status = str(run_cost.get("status") or "")
+    if status != "reconciled":
+        return [
+            f"- Warehouse cost: not available (`{status or 'unknown'}`) -- "
+            f"{run_cost.get('reason') or 'see interns/reports/cost_ledger/warehouse_cost.md'}.",
+            "",
+        ]
+    return [
+        f"- Warehouse cost (run `{run_cost.get('run_id', '')}`): "
+        f"**${float(run_cost.get('warehouse_usd') or 0.0):.2f}** "
+        f"({float(run_cost.get('warehouse_dbus') or 0.0):.2f} DBU, "
+        f"`{run_cost.get('cost_source', '')}`). Agent-token cost is tracked "
+        "separately and is NOT included.",
+        "",
+    ]
+
+
 def _render_results_markdown(payload: dict[str, Any], *, compact: bool = False) -> str:
     lines = [
         "# KPI Query Results",
@@ -585,6 +620,7 @@ def _render_results_markdown(payload: dict[str, Any], *, compact: bool = False) 
         f"- KPI count: {len(payload.get('kpis', []))}",
         "",
     ]
+    lines.extend(_run_cost_lines(payload.get("run_cost")))
     if compact:
         lines.append(
             "- Compact view: SQL is linked per KPI (`SQL:` line), not inlined. "

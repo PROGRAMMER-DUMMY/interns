@@ -1414,6 +1414,41 @@ class WorkspaceFlow:
         status = "ok" if abs(total_value - 100.0) <= 0.5 else "not_a_partition"
         return {"column": column, "sum": total_value, "status": status}
 
+    def _run_cost_block(self) -> dict[str, Any] | None:
+        """The warehouse-cost reconciliation for this run, if one was ever done.
+
+        `None` when the artifact is absent -- the packet then says the cost was
+        never read and names the command, rather than printing a zero. A stale
+        artifact from a DIFFERENT run is also treated as absent: attributing
+        another run's spend to this one is worse than reporting nothing.
+        """
+        path = self.layout.reports_dir / "cost_ledger" / "warehouse_cost.json"
+        if not path.exists():
+            return None
+        try:
+            report = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        from core.observability.cost_ledger import current_run_id
+
+        run_id = current_run_id(self.workspace_rel)[0]
+        if str(report.get("run_id") or "") != run_id:
+            return {
+                "status": "stale",
+                "reason": (
+                    f"the reconciliation on disk is for run `{report.get('run_id')}`, "
+                    f"not this run (`{run_id}`); re-run reconcile-warehouse-cost"
+                ),
+            }
+        return {
+            "status": report.get("status"),
+            "run_id": report.get("run_id"),
+            "warehouse_usd": report.get("warehouse_usd"),
+            "warehouse_dbus": report.get("warehouse_dbus"),
+            "cost_source": report.get("cost_source"),
+            "reason": report.get("remote_approval_blocking_reason") or "",
+        }
+
     def _write_result_preview(self, *, preview_rows: int) -> dict[str, Any]:
         import duckdb
 
@@ -1650,6 +1685,10 @@ class WorkspaceFlow:
             "workspace": self.workspace_rel,
             "generated_at": _now(),
             "preview_rows": preview_rows,
+            # Phase 3.4: a missing cost must never render as a zero, so the
+            # packet always carries a run_cost block -- reconciled figure or an
+            # explicit statement that nothing was read. See _run_cost_lines.
+            "run_cost": self._run_cost_block(),
             "kpis": entries,
         }
         json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")

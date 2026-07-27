@@ -12,6 +12,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import yaml
+
+from core.observability.cost_ledger import RUN_ID_ENV
+
 from core.onboarding.data_source_panel import DataSourceAnswerRecorder
 from core.onboarding.kpi.dbt_project_generator import DbtProjectGenerator
 from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
@@ -37,6 +41,30 @@ def _create_kpi001_workspace(root: Path) -> Path:
     WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
     KPIFeatureResolver(root, "workspaces/demo", domain="healthcare").run()
     return workspace
+
+
+
+def _query_tags_raw(profiles_yml: str) -> str:
+    """The `query_tags` scalar as dbt receives it, YAML-decoded but pre-Jinja.
+
+    Parsed with a real YAML loader rather than a regex: the value now contains
+    both JSON quoting and a Jinja call, and a regex over that is how the
+    escaping silently breaks.
+    """
+    profile = next(iter(yaml.safe_load(profiles_yml).values()))
+    return profile["outputs"]["prod"]["query_tags"]
+
+
+def _query_tags(profiles_yml: str, run_id: str = "") -> dict:
+    """The tag dict dbt-databricks ends up json.loads()-ing, with env_var()
+    resolved the way dbt would resolve it at invocation time."""
+    raw = _query_tags_raw(profiles_yml)
+    rendered = re.sub(
+        r"\{\{\s*env_var\(\s*'" + re.escape(RUN_ID_ENV) + r"'\s*,\s*''\s*\)\s*\}\}",
+        run_id,
+        raw,
+    )
+    return json.loads(rendered)
 
 
 class DbtProjectGeneratorLocalCsvTests(unittest.TestCase):
@@ -124,11 +152,14 @@ class DbtProjectGeneratorLocalCsvTests(unittest.TestCase):
             # JSON-encoded STRING (the adapter's own credentials.py types
             # it Optional[str] and parses it via json.loads()) -- a nested
             # YAML mapping fails adapter schema validation.
-            match = re.search(r"query_tags: '(.*)'", profiles)
-            self.assertIsNotNone(match, "query_tags line not found")
-            tags = json.loads(match.group(1))
+            tags = _query_tags(profiles)
             self.assertEqual(tags["env"], "prod")
             self.assertIn("project_name", tags)
+            # run_id is what makes the tag joinable back to a cost-ledger row.
+            # It must stay an env_var() -- profiles.yml is generated once and
+            # reused, so a literal would stamp the first run's id on every run.
+            self.assertEqual(tags["run_id"], "")
+            self.assertIn(RUN_ID_ENV, _query_tags_raw(profiles))
 
             # Dashboard registered as a formal dbt exposure (dbt+Airflow
             # plan section D4): dbt docs/lineage treats it as a real
@@ -151,9 +182,19 @@ class DbtProjectGeneratorLocalCsvTests(unittest.TestCase):
                 enterprise_id="acme_corp",
             ).generate()
             profiles = (root / result.dbt_project_dir / "profiles.yml").read_text(encoding="utf-8")
-            match = re.search(r"query_tags: '(.*)'", profiles)
-            tags = json.loads(match.group(1))
-            self.assertEqual(tags["project_name"], "acme_corp")
+            self.assertEqual(_query_tags(profiles)["project_name"], "acme_corp")
+
+    def test_query_tags_run_id_resolves_from_the_invocation_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_workspace(root)
+            WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+            KPIFeatureResolver(root, "workspaces/demo", domain="healthcare").run()
+            result = DbtProjectGenerator(
+                root, "workspaces/demo", catalog="main", schema="rcm",
+            ).generate()
+            profiles = (root / result.dbt_project_dir / "profiles.yml").read_text(encoding="utf-8")
+            self.assertEqual(_query_tags(profiles, run_id="sess-abc123")["run_id"], "sess-abc123")
 
     def test_no_feature_mapping_at_all_raises_clear_error(self):
         # Feature resolution never ran for this workspace -- no
