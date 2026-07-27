@@ -245,6 +245,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # disk. Covers the URI-vs-path split (Path() collapses s3://b/k to
     # s3:/b/k) and the T8 allowlist holding for URIs, prefix leak included.
     "tests.regressions.test_discovery_reads_any_storage",
+    # Phase B: the blueprint gate. Nothing is created before a HUMAN approval;
+    # tables vs volumes is a real UC securable split; zero copy is the default
+    # and copying is opt-in; any edit invalidates a prior approval.
+    "tests.regressions.test_solution_blueprint",
     # dbt+Airflow production-backend Phase D4: the dashboard's gold read
     # dispatches local-first between local Delta and a dbt-built Databricks
     # mart, gated by the same remote-execution approval as every other

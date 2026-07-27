@@ -4,6 +4,12 @@
   "evidence_policy": "Derived, not curated. Do not hand-edit. Regenerate: uv run build-tool-index",
   "tools": [
     {
+      "name": "apply-blueprint-answer",
+      "command": "uv run apply-blueprint-answer --workspace <workspace>",
+      "entry_point": "core.onboarding.blueprint:apply_main",
+      "summary": "The solution blueprint: what we will do, end to end, before we do any of it."
+    },
+    {
       "name": "apply-data-model-answer",
       "command": "uv run apply-data-model-answer --workspace <workspace>",
       "entry_point": "core.onboarding.data_model.generation_cli:apply_main",
@@ -1151,6 +1157,12 @@
         "data-engineering-pipeline-design",
         "domain-model"
       ]
+    },
+    {
+      "name": "prepare-solution-blueprint",
+      "command": "uv run prepare-solution-blueprint --workspace <workspace>",
+      "entry_point": "core.onboarding.blueprint:prepare_main",
+      "summary": "The solution blueprint: what we will do, end to end, before we do any of it."
     },
     {
       "name": "prepare-source-catalog",
