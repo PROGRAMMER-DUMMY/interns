@@ -143,6 +143,7 @@ prepare-pipeline-deployment-plan = "core.onboarding.pipeline_deployment_plan:mai
 generate-pipeline-sql = "core.onboarding.pipeline_sql_generator:main"
 prepare-solution-blueprint = "core.onboarding.blueprint:prepare_main"
 apply-blueprint-answer = "core.onboarding.blueprint:apply_main"
+apply-uc-intake = "core.onboarding.databricks.uc_intake:main"
 discover-external-sources = "core.onboarding.sources.external_discovery:main"
 prepare-external-source-intake = "core.onboarding.sources.external_intake_cli:prepare_main"
 apply-external-source-intake = "core.onboarding.sources.external_intake_cli:apply_main"

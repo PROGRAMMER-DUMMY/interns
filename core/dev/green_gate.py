@@ -249,6 +249,9 @@ CURATED_MODULES: tuple[str, ...] = (
     # tables vs volumes is a real UC securable split; zero copy is the default
     # and copying is opt-in; any edit invalidates a prior approval.
     "tests.regressions.test_solution_blueprint",
+    # Phase C: creating UC objects needs an APPROVED blueprint, the remote
+    # gate and an explicit role ARN. Governance objects only -- no bytes move.
+    "tests.regressions.test_uc_intake",
     # dbt+Airflow production-backend Phase D4: the dashboard's gold read
     # dispatches local-first between local Delta and a dbt-built Databricks
     # mart, gated by the same remote-execution approval as every other

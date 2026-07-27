@@ -238,6 +238,12 @@
       ]
     },
     {
+      "name": "apply-uc-intake",
+      "command": "uv run apply-uc-intake --workspace <workspace>",
+      "entry_point": "core.onboarding.databricks.uc_intake:main",
+      "summary": "Execute an approved solution blueprint against Unity Catalog."
+    },
+    {
       "name": "assess-workspace-phi",
       "command": "uv run assess-workspace-phi --workspace <workspace>",
       "entry_point": "core.governance.phi_gate:main",
