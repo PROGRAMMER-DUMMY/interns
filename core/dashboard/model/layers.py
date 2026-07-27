@@ -33,6 +33,10 @@ current real workspace.
 
 Every read returns an empty / None result on failure -- never raises -- to
 match the defensive style of `core.dashboard.profile.execute_result_view`.
+That is a RENDERING decision, not a reporting one: a REMOTE read failure is
+logged loudly to stderr before returning None, because a swallowed one made a
+permission denial indistinguishable from "no KPI built yet" and shipped an
+empty dashboard and a chartless deck in silence (TRAP 4).
 Silver/bronze reads stay local-only for now (deep-drill sources, not the
 KPI-facing gold layer this phase's verify bar covers); a Databricks read path
 for them would follow this same pattern if a workspace needs it.
@@ -40,6 +44,7 @@ for them would follow this same pattern if a workspace needs it.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -243,7 +248,22 @@ def _read_databricks_gold(layout: WorkspaceLayout, kpi_id: str) -> pl.DataFrame 
             f"SELECT * FROM `{catalog}`.`{gold_schema}`.`{_MART_PREFIX}{kpi_id}`"
         )
         return pl.DataFrame([list(r) for r in rows], schema=cols, orient="row")
-    except Exception:
+    except Exception as exc:
+        # Loud, not silent. A swallowed exception here made a permission denial
+        # indistinguishable from "no KPI built yet": the audited run shipped
+        # empty dashboards and a chartless deck and said nothing (TRAP 4). The
+        # return stays None because five callers type this as Optional and the
+        # aggregate-pushdown work (Phase 8) will rewrite the signature anyway --
+        # but a failure a human never sees is the actual defect.
+        from core.observability.log_redaction import redact
+
+        print(
+            f"[dashboard] gold read FAILED for {kpi_id} from "
+            f"`{catalog}`.`{gold_schema}`: {type(exc).__name__}: {redact(str(exc))}. "
+            "Rendering will treat this KPI as absent -- it is not.",
+            file=sys.stderr,
+            flush=True,
+        )
         return None
 
 
