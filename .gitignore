@@ -53,3 +53,4 @@ build/
 # Per-enterprise Databricks config (core.config.resolve_databricks_config) --
 # same "real values for this machine, not committed" treatment as config/lock.toml.
 config/enterprises/*/lock.toml
+docker/airflow/.env

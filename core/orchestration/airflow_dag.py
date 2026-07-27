@@ -90,6 +90,31 @@ def _notify_failure(context: dict) -> None:
         pass  # alerting must never break the DAG it's alerting about
 
 
+def stage_assets(stage: Any, workspace: str) -> list[Any]:
+    """`Stage.produces` globs as Airflow 3 Assets, or [] on Airflow 2.
+
+    `produces` has always been an artifact-glob list and was purely advisory.
+    Airflow 3 asset-aware scheduling is what makes it load-bearing: a task that
+    declares its outputs lets a DOWNSTREAM dag be triggered by data arriving
+    rather than by a cron guess, which is the whole point of moving off a
+    schedule-only pipeline.
+
+    Returns [] (not an error) when the installed Airflow predates Assets, so the
+    same topology still builds a schedule-driven DAG on Airflow 2.
+    """
+    try:
+        from airflow.sdk import Asset  # Airflow 3
+    except ImportError:
+        try:
+            from airflow.assets import Asset  # early Airflow 3 layout
+        except ImportError:
+            return []
+    return [
+        Asset(uri=f"file://{workspace}/{glob}")
+        for glob in (getattr(stage, "produces", ()) or ())
+    ]
+
+
 def build_dag(
     workspace: Optional[str] = None,
     *,
@@ -155,12 +180,20 @@ def build_dag(
                 )
                 tasks[stage.key] = build_task
             else:
+                operator_kwargs: dict[str, Any] = {}
+                # Declaring outlets is what turns `produces` from documentation
+                # into a scheduling signal. Passed only when the installed
+                # Airflow understands Assets.
+                assets = stage_assets(stage, ws) if ws else []
+                if assets:
+                    operator_kwargs["outlets"] = assets
                 tasks[stage.key] = BashOperator(
                     task_id=stage.key,
                     bash_command=(
                         f"cd {repo_root} && " + command_for(stage, ws or "${WORKSPACE}")
                     ),
                     doc_md=stage.description,
+                    **operator_kwargs,
                 )
         # Wire dependencies from the given topology.
         for stage in dag_stages:
@@ -179,4 +212,4 @@ except Exception:  # ImportError or build-time issue
     dag = None
 
 
-__all__ = ["build_dag", "dag"]
+__all__ = ["build_dag", "dag", "stage_assets"]

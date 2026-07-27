@@ -1,0 +1,108 @@
+# CI owns CHANGE; Airflow owns TIME. This workflow never schedules a pipeline --
+# it validates a change and publishes the one artifact the runtime depends on.
+#
+# The load-bearing job is `publish-manifest`. `run-dbt-backfill --defer` reads a
+# production manifest from $DBT_STATE_PATH to resolve unchanged `ref()`s instead
+# of rebuilding them -- and until this workflow existed that consumer had no
+# producer, so --defer correctly refused on a missing manifest.json forever.
+#
+# `uv run` is used here deliberately, unlike locally: a fresh CI runner has no
+# pinned venv to disturb, and `uv sync` is the intended install path. The local
+# guard against `uv run` exists because it resyncs pyspark in the dev venv.
+name: dbt CI
+
+on:
+  pull_request:
+    paths: ["core/**", "workspaces/**/dbt/**", "pyproject.toml"]
+  push:
+    branches: [main]
+
+env:
+  DBT_STATE_PATH: ${{ vars.DBT_STATE_PATH }}
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dbt --extra storage
+      # unittest, never pytest -- the repo blocks pytest by hook.
+      - run: uv run green-gate
+
+  blast-radius:
+    # Offline lineage: no warehouse, no credentials. Comments on the PR which
+    # models a change breaks -- the question review actually needs, and the
+    # thing nobody could answer when an agent deleted a safety check blind.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dbt
+      - name: dbt-index every generated project
+        run: |
+          for ws in workspaces/*/; do
+            [ -f "${ws}dbt/dbt_project.yml" ] || continue
+            uv run dbt-index --workspace "${ws%/}"
+            cat "${ws}interns/reports/dbt_index/current.md" >> radius.md
+          done
+      - uses: actions/github-script@v7
+        if: hashFiles('radius.md') != ''
+        with:
+          script: |
+            const fs = require('fs');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: fs.readFileSync('radius.md', 'utf8'),
+            });
+
+  slim-ci:
+    # Build only what changed, resolving everything else against prod. Skipped
+    # when DBT_STATE_PATH is unset rather than silently degrading to a full build.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: gate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dbt
+      - name: dbt build (state:modified+)
+        if: env.DBT_STATE_PATH != ''
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+        run: |
+          mkdir -p prod-state
+          aws s3 cp "$DBT_STATE_PATH/manifest.json" prod-state/manifest.json
+          for ws in workspaces/*/; do
+            [ -f "${ws}dbt/dbt_project.yml" ] || continue
+            uv run dbt build --project-dir "${ws}dbt" --profiles-dir "${ws}dbt" \
+              --select state:modified+ --defer --state prod-state
+          done
+
+  publish-manifest:
+    # THE PRODUCER for --defer. Without this, `run-dbt-backfill --defer` has
+    # nothing to compare against and refuses -- correctly, but permanently.
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: gate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dbt
+      - name: dbt build (full), then publish the manifest
+        if: env.DBT_STATE_PATH != ''
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+        run: |
+          for ws in workspaces/*/; do
+            [ -f "${ws}dbt/dbt_project.yml" ] || continue
+            uv run dbt build --project-dir "${ws}dbt" --profiles-dir "${ws}dbt"
+            aws s3 cp "${ws}dbt/target/manifest.json" "$DBT_STATE_PATH/manifest.json"
+          done

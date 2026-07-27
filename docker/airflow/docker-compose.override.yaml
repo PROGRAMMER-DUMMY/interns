@@ -1,0 +1,31 @@
+# Layered onto the official compose:
+#   docker compose -f docker-compose.yaml -f docker-compose.override.yaml up
+#
+# Builds the image from ./Dockerfile instead of pulling apache/airflow, mounts
+# the repo read-only so a code change needs no rebuild, and mounts workspaces
+# read-write because generated artifacts land there.
+x-airflow-common: &airflow-common-override
+  build: .
+  image: autoresearch/airflow:3.3.0
+  environment:
+    PYTHONPATH: /opt/autoresearch
+    AUTORESEARCH_PIPELINE_WORKSPACE: ${AUTORESEARCH_PIPELINE_WORKSPACE:-}
+    AUTORESEARCH_PIPELINE_SCHEDULE: ${AUTORESEARCH_PIPELINE_SCHEDULE:-}
+    DATABRICKS_HOST: ${DATABRICKS_HOST:-}
+    DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
+    DATABRICKS_HTTP_PATH: ${DATABRICKS_HTTP_PATH:-}
+    # Deliberately NOT set here. Remote execution must be approved by a human in
+    # the shell that runs the pipeline; baking it into a container image would
+    # make it permanent and defeat the gate.
+    # AUTORESEARCH_ALLOW_REMOTE_EXECUTION
+  volumes:
+    - ../../:/opt/autoresearch:ro
+    - ../../workspaces:/opt/autoresearch/workspaces:rw
+
+services:
+  airflow-apiserver:    { <<: *airflow-common-override }
+  airflow-scheduler:    { <<: *airflow-common-override }
+  airflow-dag-processor: { <<: *airflow-common-override }
+  airflow-worker:       { <<: *airflow-common-override }
+  airflow-triggerer:    { <<: *airflow-common-override }
+  airflow-init:         { <<: *airflow-common-override }

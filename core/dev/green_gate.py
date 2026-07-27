@@ -252,6 +252,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # Phase C: creating UC objects needs an APPROVED blueprint, the remote
     # gate and an explicit role ARN. Governance objects only -- no bytes move.
     "tests.regressions.test_uc_intake",
+    # Phase D: Stage.produces -> Airflow 3 Assets (event-driven triggers), the
+    # containerised Airflow install, and the CI job that PUBLISHES the dbt
+    # manifest --defer depends on. Deleting that job must fail visibly.
+    "tests.regressions.test_airflow_assets_and_ci",
     # dbt+Airflow production-backend Phase D4: the dashboard's gold read
     # dispatches local-first between local Delta and a dbt-built Databricks
     # mart, gated by the same remote-execution approval as every other
