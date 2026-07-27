@@ -241,6 +241,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # Labels are HUMAN answers only -- grading against proven_* would
     # measure self-consistency and score a confidently-wrong resolver high.
     "tests.test_resolver_accuracy",
+    # Phase A: source discovery reads any fsspec backend, not just local
+    # disk. Covers the URI-vs-path split (Path() collapses s3://b/k to
+    # s3:/b/k) and the T8 allowlist holding for URIs, prefix leak included.
+    "tests.regressions.test_discovery_reads_any_storage",
     # dbt+Airflow production-backend Phase D4: the dashboard's gold read
     # dispatches local-first between local Delta and a dbt-built Databricks
     # mart, gated by the same remote-execution approval as every other

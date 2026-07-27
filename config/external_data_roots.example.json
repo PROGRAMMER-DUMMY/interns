@@ -33,6 +33,21 @@
         "Do not recursively scan the external root by default.",
         "Use bounded listing first, then ask the user to approve a narrow folder or file allowlist with a business reason."
       ]
+    },
+    "cloud_object_storage": {
+      "description": "A remote source root on object storage (S3/GCS/ADLS). Discovery is a bounded, read-only LIST -- never a content read.",
+      "uri_root_env": "AUTORESEARCH_SOURCE_URI_ROOT",
+      "example_uri_root": "s3://<your-bucket>/<prefix>/",
+      "requires_extra": "pip install '.[storage]'  (s3fs / gcsfs / adlfs)",
+      "allowlist_entry_types": [
+        "storage_uri"
+      ],
+      "notes": [
+        "Add the bucket/prefix to `external_roots` in external_data_roots.local.json, or set the env var above.",
+        "URI roots are matched by NORMALISED PREFIX with a trailing slash, so `s3://bucket/` covers everything beneath it and `s3://bucket-other/` is refused.",
+        "Credentials are never read from this file -- fsspec uses the standard cloud credential chain.",
+        "Discovery needs only list permission (e.g. s3:ListBucket). It reads no object bodies."
+      ]
     }
   }
 }

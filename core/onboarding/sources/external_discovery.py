@@ -13,6 +13,7 @@ from typing import Any
 
 from core.storage.external_data import (
     bounded_external_files,
+    is_storage_uri,
     is_within_allowed_roots,
     load_external_data_policy,
 )
@@ -89,7 +90,17 @@ class ExternalSourceDiscoverer:
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
-        self.external_root = Path(external_root).expanduser().resolve()
+        # A storage URI must NOT go through `Path(...).resolve()` -- that
+        # collapses `s3://bucket/k` to `s3:/bucket/k` and the root is silently
+        # wrong. `UPath` keeps the protocol and still answers `.exists()`,
+        # `.is_dir()`, `.suffix` and `.relative_to()`, so everything downstream
+        # is unchanged.
+        if is_storage_uri(external_root):
+            from upath import UPath
+
+            self.external_root = UPath(str(external_root))
+        else:
+            self.external_root = Path(external_root).expanduser().resolve()
         self.max_files = max_files
         self.max_seconds = max_seconds
         self.layout = WorkspaceLayout(project_root=self.workspace)
@@ -297,7 +308,20 @@ class ExternalSourceDiscoverer:
         }
 
     def _validate(self) -> None:
-        if not self.external_root.exists() or not self.external_root.is_dir():
+        # Allowlist BEFORE existence: probing whether an arbitrary bucket exists
+        # is itself a (small) information leak, and for a remote root it costs a
+        # network round trip we should not spend on a path we would refuse.
+        policy = load_external_data_policy(self.repo_root)
+        if not is_within_allowed_roots(self.external_root, self.repo_root, policy):
+            raise PermissionError(_not_allowlisted_message(self.external_root))
+        try:
+            missing = not self.external_root.exists() or not self.external_root.is_dir()
+        except Exception as exc:
+            # A remote backend raises on missing credentials / no such bucket.
+            raise FileNotFoundError(
+                f"could not read external root {self.external_root}: {exc}"
+            ) from exc
+        if missing:
             raise FileNotFoundError(f"external root not found: {self.external_root}")
         if self.workspace == self.repo_root or not self.workspace.is_relative_to(self.repo_root):
             raise ValueError(f"workspace must be inside repo root: {self.workspace}")
@@ -306,13 +330,21 @@ class ExternalSourceDiscoverer:
         # enumerated and its full file tree written into workspace artifacts. The
         # root must be inside the repo or a configured external_data_root.
         # Ref: core-audit ob-sources.md.
-        policy = load_external_data_policy(self.repo_root)
-        if not is_within_allowed_roots(self.external_root, self.repo_root, policy):
-            raise PermissionError(
-                f"external root is not allow-listed: {self.external_root}. "
-                "Add it to config/external_data_roots.local.json (or set the "
-                "profile's local_root_env) before discovery."
-            )
+
+
+
+def _not_allowlisted_message(root: Any) -> str:
+    if is_storage_uri(root):
+        return (
+            f"external root is not allow-listed: {root}. Add the bucket/prefix to "
+            "`external_roots` in config/external_data_roots.local.json (URIs are "
+            "matched by prefix, so `s3://bucket/` covers everything beneath it)."
+        )
+    return (
+        f"external root is not allow-listed: {root}. "
+        "Add it to config/external_data_roots.local.json (or set the "
+        "profile's local_root_env) before discovery."
+    )
 
 
 def _strategy_for(items: list[ExternalFileClass]) -> tuple[str, str]:

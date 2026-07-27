@@ -208,6 +208,14 @@ ml = [
     "scikit-learn>=1.5",
     "shap>=0.46",
 ]
+# fsspec backends for reading a remote source root (discover-external-sources).
+# fsspec + universal_pathlib are already core deps; these are the per-cloud
+# drivers, optional because a local-file workspace needs none of them.
+storage = [
+    "s3fs>=2024.6",
+    "gcsfs>=2024.6",
+    "adlfs>=2024.7",
+]
 documents = [
     "pdfplumber>=0.11.9",
     "openpyxl>=3.1.5",
