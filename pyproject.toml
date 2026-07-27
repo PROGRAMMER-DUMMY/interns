@@ -49,6 +49,7 @@ dependencies = [
 
 [project.scripts]
 build-tool-index = "core.dev.tool_index:main"
+resolver-accuracy = "core.dev.resolver_accuracy:main"
 loop      = "core.orchestration.loop:main"
 retrieve-docs = "core.context.doc_retrieval_cli:main"
 onboard-workspace = "core.onboarding.workspace.onboarding:main"

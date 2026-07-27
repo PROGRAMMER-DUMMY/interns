@@ -1172,8 +1172,15 @@ def _physical_column_options(items: list[dict[str, Any]]) -> list[dict[str, Any]
                     or "Column matched the unresolved KPI term through configured business/schema aliases.",
                 }
             )
+    # See `_profile_candidate_options` below for the full story: a relation this
+    # platform wrote is never a better source of truth than a base table, and a
+    # score tie must not be broken ALPHABETICALLY -- that is how a KPI's own
+    # `*_results` view came to be the recommended definition of that KPI's cut.
+    from core.onboarding.workspace.onboarding import _is_platform_written_relation
+
     options.sort(
         key=lambda item: (
+            _is_platform_written_relation(str(item.get("dataset") or "")),
             -float(item.get("score") or 0),
             str(item.get("dataset") or ""),
             str(item.get("column") or ""),
@@ -1250,8 +1257,19 @@ def _profile_candidate_options(
                     "reason": reason,
                 }
             )
+    # A relation THIS PLATFORM wrote is never a better source of truth than a
+    # base table, at any score. Observed 2026-07-27: a KPI's own `*_results`
+    # view tied on score with the real dimension table and won the ALPHABETICAL
+    # tiebreak, so the panel recommended defining that KPI's cut from that same
+    # KPI's output. Profiling should no longer surface such relations at all
+    # (see `_is_platform_written_relation`), but a profile index written before
+    # that fix still carries them, and a ranking that can prefer a derived
+    # relation is wrong on its own terms.
+    from core.onboarding.workspace.onboarding import _is_platform_written_relation
+
     scored.sort(
         key=lambda item: (
+            _is_platform_written_relation(str(item.get("dataset") or "")),
             -float(item.get("score") or 0),
             str(item.get("dataset") or ""),
             str(item.get("column") or ""),

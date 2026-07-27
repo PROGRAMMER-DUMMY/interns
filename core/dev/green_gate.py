@@ -237,6 +237,10 @@ CURATED_MODULES: tuple[str, ...] = (
     # and attributed to one run. Warehouse dollars stay in their OWN
     # artifact -- AnchorEntry.cost_usd is agent-token cost, a different basis.
     "tests.test_warehouse_cost",
+    # Track A: the resolver grades itself against human-confirmed mappings.
+    # Labels are HUMAN answers only -- grading against proven_* would
+    # measure self-consistency and score a confidently-wrong resolver high.
+    "tests.test_resolver_accuracy",
     # dbt+Airflow production-backend Phase D4: the dashboard's gold read
     # dispatches local-first between local Delta and a dbt-built Databricks
     # mart, gated by the same remote-execution approval as every other

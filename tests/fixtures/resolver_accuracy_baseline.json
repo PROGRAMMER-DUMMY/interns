@@ -1,0 +1,11 @@
+{
+  "artifact_type": "resolver_accuracy_baseline",
+  "version": 1,
+  "note": "Recorded by `resolver-accuracy --write-baseline`. `wrong` must not increase and `correct` must not decrease; an abstention is not a miss. Small corpus -- enough to catch a regression, not enough to publish an accuracy figure from.",
+  "total": 3,
+  "correct": 3,
+  "wrong": 0,
+  "abstained": 0,
+  "precision": 1.0,
+  "answer_rate": 1.0
+}

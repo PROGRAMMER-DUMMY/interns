@@ -592,6 +592,9 @@ EXEMPTIONS: dict[str, str] = {
     "validate-git-hygiene": "repo-level git-hygiene check; no --workspace",
     "build-tool-index": "repo-level agent tool-index generation; no --workspace to key, "
     "and it reads pyproject/docstrings only -- no workspace pipeline work to account for",
+    "resolver-accuracy": "repo-level resolver grading; reads confirmed mappings across ALL "
+    "workspaces, so there is no single --workspace to key a row to, and it performs no "
+    "pipeline work -- it only scores decisions other commands already anchored",
     "check-remote-execution-gate": "repo-level env-var gate check, no --workspace to key; "
     "called synchronously inside shell `&&` chains (pipeline_stages.py's DBT_BUILD_STAGE), "
     "anchoring overhead there would be pure waste on a check that must fail fast",

@@ -1334,6 +1334,12 @@
       ]
     },
     {
+      "name": "resolver-accuracy",
+      "command": "uv run resolver-accuracy",
+      "entry_point": "core.dev.resolver_accuracy:main",
+      "summary": "Score the feature resolver against human-confirmed mappings."
+    },
+    {
       "name": "resource-preflight",
       "command": "uv run resource-preflight --workspace <workspace>",
       "entry_point": "core.resource.cli:main",
