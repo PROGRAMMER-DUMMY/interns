@@ -50,6 +50,7 @@ from core.onboarding.workspace.incremental import (
 from core.observability.events import time_command
 from core.resource.manager import ResourceManager
 from core.profiling.data_model_profiler import DataModelProfiler
+from core.profiling.dataset_identity import dataset_display_stem
 from core.storage.external_data import is_external_path, load_external_data_policy
 from core.storage.metadata_store import MetadataStore, build_metadata_store
 from core.storage.workspace_layout import WorkspaceLayout
@@ -149,15 +150,43 @@ _PLATFORM_RELATION_SUFFIXES = ("_results", "_features")
 
 
 def _is_platform_written_relation(name: str) -> bool:
-    """Whether a warehouse relation was written by this platform, not a source."""
-    lowered = str(name).strip().strip("`").lower()
-    if not lowered:
-        return False
-    if lowered.startswith(_PLATFORM_RELATION_PREFIXES):
-        return True
-    # Suffix rule is scoped to our own `kpi_*` outputs so a genuine source table
-    # called e.g. `lab_results` is NOT excluded.
-    return lowered.startswith("kpi_") and lowered.endswith(_PLATFORM_RELATION_SUFFIXES)
+    """Whether a warehouse relation was written by this platform, not a source.
+
+    Normalised through `dataset_display_stem` because a databricks_source
+    workspace's profile index stores relations FULLY QUALIFIED and backtick
+    quoted (`` `catalog`.`schema`.`table` ``). A bare `.strip("`")` leaves the
+    catalog and schema attached, so every rule below missed and the guard did
+    nothing at all for exactly the workspaces it exists to protect.
+
+    Found live 2026-07-27: a workspace's own `<catalog>.<schema>.kpi_*_results`
+    views were profiled as SOURCE tables, and the blocker panel then offered a
+    column of one as the RECOMMENDED source of truth for that same KPI's own cut
+    -- a KPI defining its input from its own output. Same UC-identifier-collapse
+    class as the four call sites fixed in Phase 0.
+    """
+    raw = str(name).strip()
+    # Two candidate short names, because the two real input shapes disagree
+    # about which dot-segment is the relation:
+    #   `c`.`s`.`kpi_1_results` / rows.csv -> dataset_display_stem
+    #   c.s.kpi_1_results (unquoted, hand-written) -> the LAST segment,
+    #     which `Path(...).stem` gets backwards (it strips `.kpi_1_results`
+    #     as if it were a file extension and returns `c.s`).
+    # Match on either. A false positive needs a source table literally named
+    # `kpi_*_results`; a false negative is a KPI ingesting its own output.
+    candidates = {
+        dataset_display_stem(raw).strip().strip("`").lower(),
+        raw.strip("`").rsplit(".", 1)[-1].strip("`").lower(),
+    }
+    for lowered in candidates:
+        if not lowered:
+            continue
+        if lowered.startswith(_PLATFORM_RELATION_PREFIXES):
+            return True
+        # Suffix rule is scoped to our own `kpi_*` outputs so a genuine source
+        # table called e.g. `lab_results` is NOT excluded.
+        if lowered.startswith("kpi_") and lowered.endswith(_PLATFORM_RELATION_SUFFIXES):
+            return True
+    return False
 
 
 class WorkspaceOnboarder:
