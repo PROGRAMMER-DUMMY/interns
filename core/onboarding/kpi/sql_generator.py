@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.dev.generator_stamp import stamp as _stamp_generator
 from core.onboarding.kpi.feature_resolver import READY_STATES
 from core.profiling.dataset_identity import dataset_display_stem
 from core.onboarding.kpi.sensitive_masking import (
@@ -259,6 +260,9 @@ class DuckDBKPISQLGenerator:
         output = self.layout.solutions_dir / f"{kpi_id}{suffix}.sql"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(sql, encoding="utf-8")
+        # See core.dev.generator_stamp: an unchanged dataset otherwise means
+        # "still current" no matter how far this generator has moved.
+        _stamp_generator(self.layout, "kpi_sql")
         self._ingest_bronze_delta(profile_map, required_sources)
         # The dated runs/<date>/ snapshot is written by WorkspaceFlow._write_result_preview,
         # which re-executes the on-disk SQL. Writing it here would freeze an "as-generated"

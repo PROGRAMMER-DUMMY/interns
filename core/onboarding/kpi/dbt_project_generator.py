@@ -55,6 +55,7 @@ from core.onboarding.kpi.sql_generator import (
     READY_STATES,
     _safe_name,
 )
+from core.dev.generator_stamp import stamp
 from core.paths import PROJECT_ROOT
 from core.profiling.dataset_identity import dataset_display_stem
 from core.storage.workspace_layout import WorkspaceLayout
@@ -242,6 +243,11 @@ class DbtProjectGenerator:
         self._write_exposures(dbt_dir, generated_kpi_ids)
         if self.enforce_contracts:
             self._write_contracts(marts_dir, generated_kpi_ids)
+
+        # Stamp the generator's own content hash so a later validator can tell
+        # this project apart from one written by older code. Without it a fixed
+        # generator silently never reaches an otherwise-unchanged workspace.
+        stamp(self.layout, "dbt_project")
 
         return DbtProjectResult(
             dbt_project_dir=_rel(dbt_dir, self.repo_root),
