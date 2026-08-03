@@ -46,18 +46,34 @@ BUSINESS_TEXT_STOPWORDS = {
     "a",
     "above",
     "across",
+    "actual",
+    "all",
     "an",
+    "at",
     "average",
+    "banded",
+    "benchmark",
     "but",
     "confirm",
+    "dev",
     "dimension",
     "dimensions",
     "divided",
+    "expected",
+    "expired",
+    "falls",
+    "filing",
+    "flag",
     "for",
     "grain",
+    "high",
     "highest",
+    "if",
     "it",
     "last",
+    "low",
+    "mean",
+    "medium",
     "metric",
     "minus",
     "multiplied",
@@ -65,19 +81,31 @@ BUSINESS_TEXT_STOPWORDS = {
     "no",
     "number",
     "of",
+    "on",
+    "outside",
+    "past",
+    "per",
     "percentage",
     "plus",
+    "score",
     "share",
+    "std",
     "that",
     "the",
     "this",
     "times",
     "top",
     "total",
-    "using",
+    "touching",
+    "track",
     "trend",
+    "unplanned",
     "unique",
+    "using",
+    "weight",
+    "weighted",
     "with",
+    "within",
 }
 COMMON_FUNCTIONS = {
     "avg",
@@ -97,6 +125,11 @@ COMMON_FUNCTIONS = {
     "sum",
     "upper",
 }
+# A bare "P95"-style percentile-literal reference in formula prose ("ChargeAmount
+# > P95 within ICD group") is not a column -- it names a statistical rank. It
+# survives strip_literals() (a letter+digit token, not a pure-digit one) and the
+# identifier regex (a valid Python-identifier shape), so it needs its own filter.
+_PERCENTILE_LITERAL_RE = re.compile(r"^p\d{1,3}$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -135,6 +168,7 @@ def extract_expression(
             or token_norm in BUSINESS_TEXT_STOPWORDS
             or token_norm in extra_stopwords
             or token in function_names
+            or _PERCENTILE_LITERAL_RE.match(token_norm)
         ):
             continue
         if token_norm not in seen:
