@@ -635,10 +635,21 @@ def _question_for_cluster(
             ),
             "question": f"Which physical column should define `{feature}` as a workspace-level mapping?",
             "answer_type": "select_physical_column_or_custom_rule",
-            "recommended_option_id": "option_a",
+            # recommended_option_id drives the "accept recommended"/"yes" shorthand in
+            # apply_kpi_panel_answer (blocker_workflow.py _resolve_answer) -- it must
+            # never point at Option A unless recommend_top actually cleared the bar,
+            # or that shorthand auto-applies a garbage mapping (the bug this whole
+            # task exists to close). Mirrors the "custom" fallback used above when
+            # derived_options has no confident pick.
+            "recommended_option_id": "option_a" if recommend_top else "custom",
             "recommended_answer": (
                 f"Accept Option A — `{_sql_column_label(str(top_choice.get('dataset') or ''), str(top_choice.get('column') or ''))}` — "
                 f"because: {top_reason}."
+                if recommend_top
+                else (
+                    "No candidate cleared the confidence bar for an automatic recommendation; "
+                    "review the options directly and accept one explicitly or provide a custom rule."
+                )
             ),
             "why": (
                 "These options come from schema/profile alias evidence. They are candidate mappings, "

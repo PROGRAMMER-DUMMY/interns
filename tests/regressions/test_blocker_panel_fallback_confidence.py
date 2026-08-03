@@ -22,10 +22,12 @@ the genuine-match bar (100 exact / 60 partial) and must not be labeled
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from core.onboarding.kpi.blocker_question_panel import (
     _physical_option_payload,
     _profile_candidate_score,
+    _question_for_cluster,
 )
 
 
@@ -56,6 +58,53 @@ class FallbackScorerCalibrationTests(unittest.TestCase):
         self.assertGreaterEqual(score, 60)
         payload = _physical_option_payload({"score": score, "column": "ChargeAmount", "dataset": "claims.csv"}, 1)
         self.assertEqual(payload["confidence"], "high")
+
+
+def _cluster_item(feature_name: str, kpi_id: str, dataset: str, column: str, score: float) -> dict:
+    return {
+        "kpi": {"kpi_id": kpi_id, "name": "", "description": "", "cuts": "", "metric": ""},
+        "feature": {
+            "feature": feature_name,
+            "state": "blocked_ambiguous",
+            "resolution_type": "ambiguous_direct_columns",
+            "source_columns": [{"dataset": dataset, "column": column, "score": score}],
+        },
+    }
+
+
+class RecommendedOptionIdCalibrationTests(unittest.TestCase):
+    """apply_kpi_panel_answer's "accept recommended"/"yes" shorthand
+    (blocker_workflow.py _resolve_answer) reads panel["recommended_option_id"]
+    directly -- it does NOT consult each option's own is_recommended flag.
+    recommended_option_id must therefore be gated on the same score-and-margin
+    bar as is_recommended, or a human typing "recommended" still auto-applies
+    a garbage mapping even though no option in the list itself claims to be
+    recommended.
+    """
+
+    # No real workspace/repo_root is touched: physical_options here comes
+    # from the resolver path (feature.source_columns), not the profile-scan
+    # fallback, so _question_for_cluster never reads from disk.
+    _workspace = Path("no_such_workspace_fixture_dir")
+    _repo_root = Path(".")
+
+    def test_below_bar_top_candidate_falls_back_to_custom(self):
+        # Same scenario as test_generic_text_containment_alone_is_not_high_confidence:
+        # a lone candidate scoring 40 (below the 60 recommend_top bar).
+        items = [_cluster_item("High", "kpi_099", "departments.csv", "Name", 40.0)]
+        cluster = {"feature": "High", "count": 1, "risk": "unknown", "examples": ["kpi_099"]}
+        panel = _question_for_cluster({}, self._workspace, self._repo_root, cluster, items)
+        self.assertEqual(panel["recommended_option_id"], "custom")
+        self.assertNotIn("Accept Option A", panel["recommended_answer"])
+
+    def test_above_bar_top_candidate_is_recommended(self):
+        # Same scenario as test_partial_name_match_can_still_reach_high: a
+        # lone candidate scoring 60 (clears the bar) must still recommend
+        # option_a -- this is a calibration fix, not a ban on recommending.
+        items = [_cluster_item("totalchargeamount", "kpi_100", "claims.csv", "ChargeAmount", 60.0)]
+        cluster = {"feature": "totalchargeamount", "count": 1, "risk": "unknown", "examples": ["kpi_100"]}
+        panel = _question_for_cluster({}, self._workspace, self._repo_root, cluster, items)
+        self.assertEqual(panel["recommended_option_id"], "option_a")
 
 
 if __name__ == "__main__":

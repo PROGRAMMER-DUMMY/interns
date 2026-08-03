@@ -1591,7 +1591,12 @@ diff --git a/model.sql b/model.sql
             result = BlockerQuestionPanelBuilder(root, "workspaces/demo").run()
             current = json.loads((root / result.current_json).read_text(encoding="utf-8"))
 
-            self.assertEqual(current["recommended_option_id"], "option_a")
+            # "Name" only scores 40 here (generic KPI-text containment on both
+            # "department" and "name" -- nothing ties "departement" itself to a
+            # "Name" column), below the 60 recommend_top bar, so it must be
+            # listed as a candidate but not auto-recommended (2026-08-03
+            # recalibration; see test_blocker_panel_fallback_confidence.py).
+            self.assertEqual(current["recommended_option_id"], "custom")
             self.assertEqual(current["options"][0]["option_id"], "option_a")
             self.assertEqual(current["options"][0]["physical_column_option"]["column"], "Name")
             samples = current["options"][0]["proof_packet"]["required_columns"][0]["sample_values"]
