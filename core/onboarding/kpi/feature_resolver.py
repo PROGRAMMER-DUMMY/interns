@@ -1376,16 +1376,26 @@ def _contextual_score(
             cardinality_ratio >= 0.98
             and len(column_norm) > 2
             and (column_norm.endswith("id") or column_norm.endswith("code"))
+            # Corroboration only, never a standalone match. Business-key
+            # columns are unique by construction, so without this the bonus
+            # hands ANY near-unique `*id`/`*code` column (`Code`, `DeptCode`)
+            # to an unrelated feature on generic dataset-vocabulary overlap
+            # alone. Only an already name-plausible match may be corroborated.
+            and feature_norm
+            and feature_norm in column_norm
         ):
             score += 4.0
             reasons.append(
-                f"column is near-unique (cardinality={cardinality_ratio:.2f}), "
+                f"column is near-unique (cardinality_ratio={cardinality_ratio:.2f}), "
                 "consistent with an identifier role"
             )
-        elif cardinality_ratio < 0.05 and not column_norm.endswith("id"):
+        # Exactly 0.0 means the distinct count saw no non-null values at all
+        # (COUNT(DISTINCT) skips NULLs, row_count doesn't) -- an empty column
+        # is not a categorical dimension, so it earns no dimension bonus.
+        elif 0 < cardinality_ratio < 0.05 and not column_norm.endswith("id"):
             score += 1.0
             reasons.append(
-                f"column is low-cardinality (cardinality={cardinality_ratio:.2f}), "
+                f"column is low-cardinality (cardinality_ratio={cardinality_ratio:.2f}), "
                 "consistent with a categorical dimension"
             )
     value_pattern = str(entry.get("value_pattern") or "")
