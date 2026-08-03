@@ -302,6 +302,8 @@ def column_profile_summary(profile: dict[str, Any], column: str) -> dict[str, An
                 "null_count": item.get("null_count"),
                 "sample_values": item.get("sample_values") or [],
                 "profile_source": item.get("source"),
+                "cardinality_ratio": item.get("cardinality_ratio"),
+                "value_pattern": item.get("value_pattern"),
             }
     return {}
 
