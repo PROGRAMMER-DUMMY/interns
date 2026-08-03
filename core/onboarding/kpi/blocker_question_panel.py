@@ -612,6 +612,13 @@ def _question_for_cluster(
         overflow_count = max(0, len(physical_options) - len(top_options))
         top_choice = top_options[0]
         top_reason = str(top_choice.get("reason") or "highest profile-evidence score")
+        top_score = float(top_options[0].get("score") or 0) if top_options else 0.0
+        second_score = float(top_options[1].get("score") or 0) if len(top_options) > 1 else 0.0
+        # A "recommended" label must survive the same discipline as an auto-proven
+        # resolver match: a real bar (not merely being first in a list) and a real
+        # margin over the runner-up. Mirrors feature_resolver.py's own auto-proven
+        # check in spirit, scaled to this function's own score range.
+        recommend_top = top_score >= 60 and (len(top_options) == 1 or top_score - second_score >= 20)
         kpi_list = ", ".join(str(k) for k in applies_to[:3])
         kpi_suffix = f" (+{len(applies_to)-3} more)" if len(applies_to) > 3 else ""
         return {
@@ -644,7 +651,7 @@ def _question_for_cluster(
                 if overflow_count else ""
             ),
             "options": [
-                _physical_option_payload(option, idx, source_truth, is_recommended=(idx == 1))
+                _physical_option_payload(option, idx, source_truth, is_recommended=(idx == 1 and recommend_top))
                 for idx, option in enumerate(top_options, start=1)
             ]
             + [_custom_rule_option(feature)],
@@ -1356,7 +1363,14 @@ def _physical_option_payload(
     proof = _physical_option_proof(option, source_truth or [])
     score = float(option.get("score") or 0)
     reason_text = str(option.get("reason") or "profile column candidate")
-    confidence = "high" if score >= 6 else ("medium" if score >= 3 else "low")
+    # Recalibrated to THIS function's own weight scale (see
+    # _profile_candidate_score: exact match +100, partial match +60, dataset
+    # alignment +30, generic KPI-text containment +20, ID/generic-column
+    # penalty -30) -- the previous 6/3 bar was tuned for a different scorer
+    # entirely and let a single generic containment hit (+20) pass as "high".
+    # A bare generic-containment-only score must cap at medium: name
+    # similarity/context overlap alone is never sufficient evidence on its own.
+    confidence = "high" if score >= 60 else ("medium" if score >= 20 else "low")
     samples = list(option.get("observed_values") or [])[:3]
     sample_phrase = (
         f"Sample values: {', '.join(repr(s) for s in samples)}."
