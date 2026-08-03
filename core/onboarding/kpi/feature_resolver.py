@@ -20,6 +20,7 @@ from core.onboarding.features.blockers import (
     infer_join_candidates as infer_feature_join_candidates,
     normalize as normalize_blocker,
     prioritize_blockers as prioritize_feature_blockers,
+    risk_class as _feature_risk_class,
 )
 from core.profiling.dataset_identity import dataset_display_name, dataset_display_stem
 from core.onboarding.features.derived_evidence import (
@@ -1212,6 +1213,13 @@ def contextual_column_candidates(
         and top_score >= 14
         and (len(scored) == 1 or top_score - second >= 4)
     )
+    if auto_proven and _feature_risk_class(feature) == "financial_correctness":
+        # Highest-stakes risk category (blockers.risk_score ranks it first).
+        # A bare score/margin pass is corroborated evidence for most
+        # features, but a silently wrong MONEY mapping is the one failure
+        # mode that must never slip through on score alone -- require the
+        # top candidate to also carry independent dictionary corroboration.
+        auto_proven = bool(top.get("dictionary_description"))
     limit = 1 if auto_proven else 10
     candidates = scored[:limit]
     if auto_proven:
