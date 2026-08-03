@@ -129,6 +129,8 @@ COMMON_FUNCTIONS = {
 # > P95 within ICD group") is not a column -- it names a statistical rank. It
 # survives strip_literals() (a letter+digit token, not a pure-digit one) and the
 # identifier regex (a valid Python-identifier shape), so it needs its own filter.
+# ponytail: P1-P999 range covers standard percentile notation (P0, P25, P50, P75, P99);
+# expand to P\d+ if decimal percentiles (P99.5) appear in formula text.
 _PERCENTILE_LITERAL_RE = re.compile(r"^p\d{1,3}$", re.IGNORECASE)
 
 
