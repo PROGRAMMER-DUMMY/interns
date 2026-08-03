@@ -9,6 +9,7 @@ paths and is deliberately safe when optional dependencies are unavailable.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -90,6 +91,23 @@ class ColumnProfile:
     metadata_max: Any = None
     null_count: int | None = None
     source: str = "schema"
+    # Fraction of distinct values over row count (unique_count / row_count).
+    # None where not computed (parquet-metadata and polars-fallback paths
+    # do not populate it yet -- see Task 3 notes in the implementation plan).
+    # Named cardinality_ratio, NOT cardinality: contracts.py/_ratio_from_stats
+    # and data_understanding.py/_DISTINCT_KEYS both already treat a literal
+    # "cardinality" key as an ABSOLUTE distinct count -- this field is a 0-1
+    # ratio, so it must not collide with that pre-existing, unrelated key name.
+    cardinality_ratio: float | None = None
+    # Named structural pattern shared by >=80% of observed sample values
+    # (see _infer_value_pattern), or None when no pattern clears that bar.
+    value_pattern: str | None = None
+    # Every profile is stamped "raw": profiling runs pre-medallion, against
+    # bronze-shaped (pre-dedup -- bronze_silver_standards.py explicitly
+    # forbids deduplication_application in bronze) source data, never
+    # silver. A future silver re-profile can stamp "silver" and upgrade a
+    # mapping's confidence cap; nothing does that yet.
+    profile_tier: str = "raw"
 
     def authoritative_min(self) -> Any:
         return self.exact_min if self.exact_min is not None else self.metadata_min
@@ -448,6 +466,13 @@ class DataModelProfiler:
                 else {}
             )
 
+            distinct_selects = ", ".join(
+                f"COUNT(DISTINCT {_quote_ident(name)}) AS {_quote_ident(name + '__distinct')}"
+                for name in schema
+            )
+            distinct_row = conn.execute(f"SELECT {distinct_selects} FROM {source}").fetchone()
+            distinct_counts = dict(zip([f"{name}__distinct" for name in schema], distinct_row))
+
             columns: dict[str, ColumnProfile] = {}
             for name, dtype_str in schema.items():
                 quoted = _quote_ident(name)
@@ -458,6 +483,10 @@ class DataModelProfiler:
                 sample_values = [_json_safe_value(row[0]) for row in value_rows]
                 col_stats = stats.get(name) or {}
                 col_exact = exact_stats.get(name) or {}
+                unique_count = distinct_counts.get(f"{name}__distinct")
+                cardinality_ratio = (
+                    (unique_count / row_count) if unique_count is not None and row_count else None
+                )
                 columns[name] = ColumnProfile(
                     name=name,
                     dtype=dtype_str,
@@ -472,6 +501,9 @@ class DataModelProfiler:
                     exact_min=col_exact.get("min"),
                     exact_max=col_exact.get("max"),
                     source="exact_scan" if exact else "sample_profile",
+                    cardinality_ratio=cardinality_ratio,
+                    value_pattern=_infer_value_pattern(sample_values),
+                    profile_tier="raw",
                 )
         finally:
             conn.close()
@@ -515,6 +547,32 @@ class DataModelProfiler:
 
 def _quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
+
+
+_VALUE_PATTERN_CHECKS: list[tuple[str, "re.Pattern[str]"]] = [
+    ("currency_2dp", re.compile(r"^\d+\.\d{2}$")),
+    ("iso_date", re.compile(r"^\d{4}-\d{2}-\d{2}$")),
+    ("prefixed_numeric_code", re.compile(r"^[A-Za-z]+[-_]?\d+$")),
+    ("fixed_length_alnum", re.compile(r"^[A-Za-z0-9]{6,12}$")),
+]
+
+
+def _infer_value_pattern(sample_values: list[Any]) -> str | None:
+    """Named structural pattern shared by >=80% of non-null sample values.
+
+    Evidence-driven, no domain vocabulary: matches shape (digits/letters/
+    separators), never a specific business term. Returns None when no
+    pattern clears the 80% bar -- a mixed-shape column reports no pattern
+    rather than a misleading weak one.
+    """
+    values = [str(v) for v in sample_values if v is not None and str(v).strip()]
+    if not values:
+        return None
+    for pattern_name, pattern in _VALUE_PATTERN_CHECKS:
+        matches = sum(1 for v in values if pattern.match(v))
+        if matches / len(values) >= 0.8:
+            return pattern_name
+    return None
 
 
 def _merge_columns(

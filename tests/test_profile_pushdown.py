@@ -132,6 +132,9 @@ class PushdownEquivalenceTests(unittest.TestCase):
                     "metadata_max",
                     "null_count",
                     "source",
+                    "cardinality_ratio",
+                    "value_pattern",
+                    "profile_tier",
                 },
             )
 
