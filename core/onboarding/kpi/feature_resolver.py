@@ -1362,6 +1362,26 @@ def _contextual_score(
     ):
         score += 2.0
         reasons.append("profile dtype is numeric")
+    cardinality_ratio = entry.get("cardinality_ratio")
+    if cardinality_ratio is not None:
+        if cardinality_ratio >= 0.98 and (column_norm.endswith("id") or column_norm.endswith("code")):
+            score += 4.0
+            reasons.append(
+                f"column is near-unique (cardinality={cardinality_ratio:.2f}), "
+                "consistent with an identifier role"
+            )
+        elif cardinality_ratio < 0.05 and not column_norm.endswith("id"):
+            score += 1.0
+            reasons.append(
+                f"column is low-cardinality (cardinality={cardinality_ratio:.2f}), "
+                "consistent with a categorical dimension"
+            )
+    value_pattern = str(entry.get("value_pattern") or "")
+    if value_pattern == "currency_2dp" and any(
+        seed in feature_norm for seed in GENERIC_FINANCIAL_SEED
+    ):
+        score += 3.0
+        reasons.append("column's observed value pattern matches a currency shape")
     return score, reasons, name_matched
 
 
