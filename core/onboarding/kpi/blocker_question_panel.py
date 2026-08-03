@@ -618,6 +618,17 @@ def _question_for_cluster(
         # resolver match: a real bar (not merely being first in a list) and a real
         # margin over the runner-up. Mirrors feature_resolver.py's own auto-proven
         # check in spirit, scaled to this function's own score range.
+        #
+        # That "own score range" is _profile_candidate_score's 100/60/30/20/-30
+        # scale specifically. `top_options` here can also hold candidates from
+        # _physical_column_options, scored by feature_resolver.py's
+        # _contextual_score (~8-30, auto-proven at >=14/margin>=4) -- a
+        # different scale this 60/20 bar was not tuned for. Known gap (2026-08-03
+        # Task 2 review): resolver-origin candidates will essentially never
+        # clear 60, so recommend_top stays False for them even on a good match.
+        # Fails safe (never over-recommends); reconciling the two scales is
+        # later-task territory (see feature_resolver.py's own re-tuning), not
+        # this one.
         recommend_top = top_score >= 60 and (len(top_options) == 1 or top_score - second_score >= 20)
         kpi_list = ", ".join(str(k) for k in applies_to[:3])
         kpi_suffix = f" (+{len(applies_to)-3} more)" if len(applies_to) > 3 else ""
@@ -1381,6 +1392,24 @@ def _physical_option_payload(
     # entirely and let a single generic containment hit (+20) pass as "high".
     # A bare generic-containment-only score must cap at medium: name
     # similarity/context overlap alone is never sufficient evidence on its own.
+    #
+    # KNOWN SCALE GAP (2026-08-03, flagged in Task 2 review, deferred to
+    # whichever later task reconciles the two scorers -- do not fix here):
+    # this function also renders options whose `score` came from
+    # feature_resolver.py's `_contextual_score` (reached via
+    # _physical_column_options / feature["source_columns"], e.g. states like
+    # candidate_unconfirmed), NOT from _profile_candidate_score. That scorer's
+    # values run roughly 8-30 (candidates below 8 are filtered out entirely at
+    # feature_resolver.py:~1209; its own auto-proven bar is >=14 with a >=4
+    # margin, around feature_resolver.py:~1236-1240) -- a much smaller scale
+    # than the 100/60/30/20/-30 these thresholds are tuned for. Practically,
+    # almost no resolver-origin candidate can reach 60 post-recalibration, so
+    # this whole class of candidates now always renders confidence: "low" and
+    # never sets recommend_top, even a genuinely good resolver match (e.g. a
+    # name-matched, dataset-aligned hit scoring 24 on that scale). This fails
+    # SAFE (under-recommends, never over-recommends) so it does not reopen the
+    # auto-apply-bad-match hole this task closes, but it is a real, undisclosed
+    # cross-scorer mismatch, not a considered decision.
     confidence = "high" if score >= 60 else ("medium" if score >= 20 else "low")
     samples = list(option.get("observed_values") or [])[:3]
     sample_phrase = (
