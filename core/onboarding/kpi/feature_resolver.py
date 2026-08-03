@@ -1364,7 +1364,11 @@ def _contextual_score(
         reasons.append("profile dtype is numeric")
     cardinality_ratio = entry.get("cardinality_ratio")
     if cardinality_ratio is not None:
-        if cardinality_ratio >= 0.98 and (column_norm.endswith("id") or column_norm.endswith("code")):
+        if (
+            cardinality_ratio >= 0.98
+            and len(column_norm) > 2
+            and (column_norm.endswith("id") or column_norm.endswith("code"))
+        ):
             score += 4.0
             reasons.append(
                 f"column is near-unique (cardinality={cardinality_ratio:.2f}), "

@@ -33,3 +33,17 @@ class ContextualScoreNewSignalsTests(unittest.TestCase):
         entry = {"column": "Name", "dataset": "departments", "dtype": "String"}
         score, reasons, matched = _contextual_score("department", set(), "", entry)
         self.assertIsInstance(score, float)
+
+    def test_bare_two_character_id_column_does_not_get_the_identifier_bonus(self):
+        # Mirrors the sibling ID-penalty's own len(column_norm) > 2 exemption
+        # (feature_resolver.py:1359) -- a bare "Id" column must not collect
+        # the cardinality bonus either, or it wins unrelated features purely
+        # on generic dataset-vocabulary overlap once cardinality_ratio is
+        # reachable (2026-08-03 regression, found wiring Task 4b).
+        entry = {
+            "column": "Id", "dataset": "encounters", "dtype": "String",
+            "cardinality_ratio": 1.0, "value_pattern": None,
+        }
+        score, reasons, _ = _contextual_score("encounterdurationbucket", {"encounters"}, "encounters", entry)
+        self.assertLess(score, 8.0)
+        self.assertFalse(any("identifier role" in reason for reason in reasons))
