@@ -114,6 +114,7 @@ class PushdownEquivalenceTests(unittest.TestCase):
                 "warnings",
                 "columns",
                 "downcast_recommendations",
+                "nested_leaf_columns",
             },
         )
         for column in summary["columns"]:
@@ -132,6 +133,9 @@ class PushdownEquivalenceTests(unittest.TestCase):
                     "metadata_max",
                     "null_count",
                     "source",
+                    "cardinality",
+                    "value_pattern",
+                    "profile_tier",
                 },
             )
 
