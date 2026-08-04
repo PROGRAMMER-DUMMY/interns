@@ -216,6 +216,51 @@ class ProfileUcTableTests(unittest.TestCase):
         self.assertEqual(by_name["ChargeAmount"].value_pattern, "currency_2dp")
         self.assertEqual(by_name["ChargeAmount"].profile_tier, "raw")
 
+    def test_aggregate_min_max_offsets_stay_aligned_across_multiple_numeric_columns(self):
+        # Column order: a plain (non-numeric) column first, then TWO
+        # min/max-eligible columns back to back. _aggregate_column_stats's
+        # `pos` accumulator must advance by 1 slot for a plain column
+        # (null_count only) and by 3 for a numeric/temporal one (null_count,
+        # min, max) -- every other fixture in this file has at most one
+        # min/max-eligible column and never asserts on exact_min/exact_max,
+        # so none of them would notice `pos` drifting. Putting the
+        # non-numeric column first means a wrong offset misaligns the very
+        # first numeric column's stats, not just a later one.
+        client = FakeClient(
+            {
+                "DESCRIBE TABLE `": (
+                    ["col_name", "data_type", "comment"],
+                    [
+                        ["DeptName", "string", ""],
+                        ["Amount", "double", ""],
+                        ["VisitDate", "date", ""],
+                    ],
+                ),
+                "SELECT count(*) FROM": (["count(1)"], [["5"]]),
+                # Slots: DeptName=[null_count], Amount=[null_count,min,max],
+                # VisitDate=[null_count,min,max] -- 7 values total.
+                "count(*) - count(": (
+                    ["c0", "c1", "c2", "c3", "c4", "c5", "c6"],
+                    [["2", "1", "10.50", "999.99", "0", "2024-01-01", "2024-12-31"]],
+                ),
+                "SELECT * FROM": (
+                    ["DeptName", "Amount", "VisitDate"],
+                    [["Cardiology", "10.50", "2024-01-01"]],
+                ),
+            }
+        )
+
+        profile = profile_uc_table(client, "healthcare_rcm", "bronze", "hospital_a_encounters")
+
+        by_name = {c.name: c for c in profile.columns}
+        self.assertEqual(by_name["DeptName"].null_count, 2)
+        self.assertEqual(by_name["Amount"].null_count, 1)
+        self.assertEqual(by_name["Amount"].exact_min, "10.50")
+        self.assertEqual(by_name["Amount"].exact_max, "999.99")
+        self.assertEqual(by_name["VisitDate"].null_count, 0)
+        self.assertEqual(by_name["VisitDate"].exact_min, "2024-01-01")
+        self.assertEqual(by_name["VisitDate"].exact_max, "2024-12-31")
+
 
 if __name__ == "__main__":
     unittest.main()
