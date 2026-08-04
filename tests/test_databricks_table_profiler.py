@@ -97,6 +97,125 @@ class ProfileUcTableTests(unittest.TestCase):
         profile = profile_uc_table(client, "c", "s", "t")
         self.assertTrue(any("mismatch" in w for w in profile.warnings))
 
+    def test_cardinality_ratio_computed_from_cached_distinct_count(self):
+        client = FakeClient(
+            {
+                # More specific than "DESCRIBE TABLE" below -- must be checked
+                # first, since "DESCRIBE TABLE EXTENDED ..." contains the
+                # substring "DESCRIBE TABLE" too and FakeClient matches by
+                # first-inserted-key-wins. Insertion order in this dict is
+                # the match order.
+                "EXTENDED `healthcare_rcm`.`bronze`.`hospital_a_departments` `DeptID`": (
+                    ["info_name", "info_value"],
+                    [
+                        ["col_name", "DeptID"],
+                        ["data_type", "string"],
+                        ["num_nulls", "0"],
+                        ["distinct_count", "20"],
+                    ],
+                ),
+                "EXTENDED `healthcare_rcm`.`bronze`.`hospital_a_departments` `Name`": (
+                    ["info_name", "info_value"],
+                    [
+                        ["col_name", "Name"],
+                        ["data_type", "string"],
+                        ["num_nulls", "0"],
+                        ["distinct_count", "5"],
+                    ],
+                ),
+                "DESCRIBE TABLE": (
+                    ["col_name", "data_type", "comment"],
+                    [
+                        ["DeptID", "string", ""],
+                        ["Name", "string", ""],
+                        ["# Detailed Table Information", "", ""],
+                        ["Catalog", "healthcare_rcm", ""],
+                    ],
+                ),
+                "SELECT count(*) FROM": (["count(1)"], [["20"]]),
+                "count(*) - count(": (["c0", "c1"], [["1", "0"]]),
+                "SELECT * FROM": (
+                    ["DeptID", "Name"],
+                    [["1", "Cardiology"], ["2", "Radiology"], ["3", None]],
+                ),
+            }
+        )
+
+        profile = profile_uc_table(client, "healthcare_rcm", "bronze", "hospital_a_departments")
+
+        by_name = {c.name: c for c in profile.columns}
+        # row_count is 20 (from "SELECT count(*) FROM" above).
+        self.assertAlmostEqual(by_name["DeptID"].cardinality_ratio, 20 / 20)
+        self.assertAlmostEqual(by_name["Name"].cardinality_ratio, 5 / 20)
+        self.assertEqual(profile.warnings, [])
+
+    def test_cardinality_ratio_is_none_when_stats_are_absent(self):
+        # No "EXTENDED ..." key registered at all -- FakeClient raises
+        # AssertionError("unexpected query") for that call, which the
+        # helper must catch and degrade to None + a warning, not propagate.
+        # Key is "DESCRIBE TABLE `" (trailing backtick), not bare
+        # "DESCRIBE TABLE": a bare key would itself match "DESCRIBE TABLE
+        # EXTENDED ..." too (same substring-collision the EXTENDED-specific
+        # keys above guard against), which would silently return the schema
+        # rows for the cardinality call instead of failing to match --
+        # defeating this test's whole premise without ever raising.
+        client = FakeClient(
+            {
+                "DESCRIBE TABLE `": (
+                    ["col_name", "data_type", "comment"],
+                    [
+                        ["DeptID", "string", ""],
+                        ["Name", "string", ""],
+                    ],
+                ),
+                "SELECT count(*) FROM": (["count(1)"], [["20"]]),
+                "count(*) - count(": (["c0", "c1"], [["1", "0"]]),
+                "SELECT * FROM": (
+                    ["DeptID", "Name"],
+                    [["1", "Cardiology"], ["2", "Radiology"], ["3", None]],
+                ),
+            }
+        )
+
+        profile = profile_uc_table(client, "healthcare_rcm", "bronze", "hospital_a_departments")
+
+        by_name = {c.name: c for c in profile.columns}
+        self.assertIsNone(by_name["DeptID"].cardinality_ratio)
+        self.assertIsNone(by_name["Name"].cardinality_ratio)
+        self.assertTrue(
+            any("cardinality_stats_failed" in w for w in profile.warnings),
+            f"expected a cardinality_stats_failed warning, got: {profile.warnings}",
+        )
+        # A stats-read failure must not affect anything else already working.
+        self.assertEqual(by_name["DeptID"].null_count, 1)
+        self.assertIn("Cardiology", by_name["Name"].sample_values)
+
+    def test_value_pattern_and_profile_tier_are_populated(self):
+        client = FakeClient(
+            {
+                "EXTENDED `healthcare_rcm`.`bronze`.`hospital_a_claims` `ChargeAmount`": (
+                    ["info_name", "info_value"],
+                    [["distinct_count", "3"]],
+                ),
+                "DESCRIBE TABLE": (
+                    ["col_name", "data_type", "comment"],
+                    [["ChargeAmount", "double", ""]],
+                ),
+                "SELECT count(*) FROM": (["count(1)"], [["3"]]),
+                "count(*) - count(": (["c0", "c1", "c2"], [["0", "100.50", "102.50"]]),
+                "SELECT * FROM": (
+                    ["ChargeAmount"],
+                    [["100.50"], ["101.50"], ["102.50"]],
+                ),
+            }
+        )
+
+        profile = profile_uc_table(client, "healthcare_rcm", "bronze", "hospital_a_claims")
+
+        by_name = {c.name: c for c in profile.columns}
+        self.assertEqual(by_name["ChargeAmount"].value_pattern, "currency_2dp")
+        self.assertEqual(by_name["ChargeAmount"].profile_tier, "raw")
+
 
 if __name__ == "__main__":
     unittest.main()

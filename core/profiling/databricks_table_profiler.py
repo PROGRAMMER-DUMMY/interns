@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from core.profiling.data_model_profiler import (
     ColumnProfile,
     DatasetProfile,
+    _infer_value_pattern,
     _is_numeric_dtype,
     _is_temporal_dtype,
 )
@@ -81,6 +82,7 @@ def profile_uc_table(
     row_count = int(count_rows[0][0]) if count_rows else 0
 
     agg_stats = _aggregate_column_stats(client, fqn, schema_map, row_count, warnings)
+    cardinality_stats = _read_cardinality_stats(client, fqn, schema_map, warnings)
 
     sample_cols, sample_rows_data = client.execute_query(
         f"SELECT * FROM {fqn} LIMIT {int(sample_rows)}"
@@ -95,6 +97,10 @@ def profile_uc_table(
         non_null = [v for v in values if v is not None]
         distinct_sorted = sorted(dict.fromkeys(non_null))[:8]
         stats = agg_stats.get(name)
+        distinct_count = cardinality_stats.get(name)
+        cardinality_ratio = (
+            (distinct_count / row_count) if distinct_count is not None and row_count else None
+        )
         columns.append(
             ColumnProfile(
                 name=name,
@@ -107,6 +113,9 @@ def profile_uc_table(
                 exact_max=stats["max"] if stats else None,
                 null_count=stats["null_count"] if stats else None,
                 source="exact_scan" if stats else "sample_profile",
+                cardinality_ratio=cardinality_ratio,
+                value_pattern=_infer_value_pattern(distinct_sorted),
+                profile_tier="raw",
             )
         )
 
@@ -175,4 +184,45 @@ def _aggregate_column_stats(
             col_max = row[pos] if pos < len(row) else None
             pos += 1
         stats[name] = {"null_count": null_count, "min": col_min, "max": col_max}
+    return stats
+
+
+def _read_cardinality_stats(
+    client: "DatabricksClient",
+    fqn: str,
+    schema_map: dict[str, str],
+    warnings: list[str],
+) -> dict[str, int | None]:
+    """Read each column's ``distinct_count`` from Unity Catalog's own cached
+    column statistics (``ANALYZE TABLE ... COMPUTE STATISTICS``, run
+    automatically by Databricks predictive optimization on managed tables,
+    or manually on others) via ``DESCRIBE TABLE EXTENDED``. A metastore
+    read, not a data scan.
+
+    Deliberately NOT an approximate or freshly-computed count: this platform
+    profiles customer-owned source tables it cannot write to, so there is no
+    lever to guarantee or refresh statistics freshness here (see
+    docs/superpowers/specs/2026-08-04-databricks-cardinality-profiling-design.md).
+    Per-column failure (stats never computed, unsupported table type,
+    permissions, a table with no ANALYZE history) degrades that column to
+    ``None`` and is recorded in ``warnings`` -- never raised. ``None`` here
+    means "signal absent," the same contract the local DuckDB profiler's
+    missing-signal paths already use; never treat it as zero.
+    """
+    stats: dict[str, int | None] = {}
+    for name in schema_map:
+        quoted_col = quote_ident_backtick(assert_safe_identifier(name, context="uc column"))
+        stats[name] = None
+        try:
+            _, rows = client.execute_query(f"DESCRIBE TABLE EXTENDED {fqn} {quoted_col}")
+        except Exception as exc:  # pragma: no cover - warehouse/network dependent
+            warnings.append(f"cardinality_stats_failed:{name}:{type(exc).__name__}:{exc}")
+            continue
+        for row in rows:
+            if len(row) >= 2 and str(row[0]).strip().lower() == "distinct_count":
+                try:
+                    stats[name] = int(row[1])
+                except (TypeError, ValueError):
+                    warnings.append(f"cardinality_stats_unparseable:{name}:{row[1]!r}")
+                break
     return stats
