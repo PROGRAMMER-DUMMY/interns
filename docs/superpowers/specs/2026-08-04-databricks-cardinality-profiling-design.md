@@ -63,14 +63,16 @@ Out of Scope.)
 No new files. Extends `core/profiling/databricks_table_profiler.py` only, following the shape of the
 existing `_aggregate_column_stats` helper (same file):
 
-- **New helper `_read_cardinality_stats(client, fqn, schema_map) -> dict[str, int | None]`** — issues
-  `DESCRIBE TABLE EXTENDED {fqn} {column}` per column (the confirmed-working syntax), parses
+- **New helper `_read_cardinality_stats(client, fqn, schema_map, row_count) -> dict[str, int | None]`**
+  — issues `DESCRIBE TABLE EXTENDED {fqn} {column}` per column (the confirmed-working syntax), parses
   `distinct_count` out of the row output, returns `{column_name: distinct_count_or_None}`.
-  **Implementation-time check (do this first, before writing the rest):** verify against a real
-  warehouse connection whether `DESCRIBE TABLE EXTENDED {fqn}` with no column name returns per-column
-  `distinct_count` for every column in one query. If it does, that is a strictly better version of
-  this same design -- swap the per-column loop for one query; nothing else in this design changes.
-  If it does not (only table-level metadata comes back), the per-column loop is required as designed.
+  **Implementation-time check status: NOT resolved.** This sandbox has no live Databricks warehouse
+  connection (see Context), so whether `DESCRIBE TABLE EXTENDED {fqn}` with no column name returns
+  per-column `distinct_count` for every column in one query could not be verified empirically. The
+  shipped implementation deliberately keeps the per-column-query form (N queries per profiled table)
+  as the safe, documented default. Confirming the single-query form against a real warehouse and
+  switching to it if it works is flagged as a follow-up item for whoever next has warehouse access,
+  not assumed done here.
 - **`profile_uc_table`** calls this alongside its existing schema/row-count/aggregate/sample queries,
   and computes `cardinality_ratio = distinct_count / row_count` per column when available.
 - **`value_pattern`** requires no new cloud-specific logic. `_infer_value_pattern` already exists in
