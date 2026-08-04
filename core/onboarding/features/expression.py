@@ -144,6 +144,7 @@ def extract_expression(
     expression: str,
     *,
     workspace_filter_terms: list[str] | set[str] | None = None,
+    known_columns: list[str] | set[str] | None = None,
 ) -> ExtractedExpression:
     """Extract identifiers from a metric/cut expression.
 
@@ -153,16 +154,37 @@ def extract_expression(
     `core.onboarding.lexicon.vocabulary.terms_for(layout, "filter_terms")`.
     None or empty means no workspace research has been done yet — the
     extractor still works, it just won't filter out filter-value tokens.
+
+    `known_columns` is the workspace's REAL physical column names (callers
+    pass the resolver's `available_columns`, built from the schema index).
+    A token matching one of them case-insensitively survives extraction
+    even when it is also formula/stopword vocabulary. The stopword lists
+    are workspace-agnostic by design, which is exactly why they over-reach:
+    "High"/"Low" are banding words in one workspace and the canonical OHLC
+    columns in the next; "Score"/"Weight"/"Flag" are ordinary column names
+    somewhere. Only the workspace's own schema can tell a generic word
+    apart from a legitimate business column, so schema evidence wins.
+    None or empty keeps the pre-existing behaviour exactly.
     """
     cleaned = strip_literals(expression)
     function_names = _function_names(cleaned)
     extra_stopwords: set[str] = set()
     if workspace_filter_terms:
         extra_stopwords = {str(term).lower() for term in workspace_filter_terms if term}
+    real_columns = {str(col).lower() for col in known_columns or () if col}
     identifiers = []
     seen = set()
     for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", cleaned):
         token_norm = token.lower()
+        # Checked before every skip: a real column always survives. That
+        # includes the `token in function_names` check, because KPI prose
+        # puts units in parens right after the column name ("Weight (kg)
+        # per department"), which reads as a call to `Weight` to the regex.
+        if token_norm in real_columns:
+            if token_norm not in seen:
+                identifiers.append(token)
+                seen.add(token_norm)
+            continue
         if (
             len(token) <= 1
             or token_norm in SQL_KEYWORDS

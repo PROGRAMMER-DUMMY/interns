@@ -243,6 +243,10 @@ class KPIFeatureResolver:
         extracted = extract_expression(
             expression_context,
             workspace_filter_terms=_vocab_terms_for(self.layout, "filter_terms"),
+            # The workspace's real column names outrank the generic stopword
+            # list: a KPI over a column actually named `High`/`Score`/`Weight`
+            # must keep that feature instead of silently dropping it.
+            known_columns=available_columns,
         )
         if _requires_kpi_definition(kpi, expression_context, extracted):
             feature = _kpi_definition_feature(kpi, schema_index, placeholder=True)
@@ -1087,8 +1091,13 @@ def extract_expression(
     expression: str,
     *,
     workspace_filter_terms: list[str] | set[str] | None = None,
+    known_columns: list[str] | set[str] | None = None,
 ) -> ExtractedExpression:
-    return parse_feature_expression(expression, workspace_filter_terms=workspace_filter_terms)
+    return parse_feature_expression(
+        expression,
+        workspace_filter_terms=workspace_filter_terms,
+        known_columns=known_columns,
+    )
 
 
 def prioritize_blockers(mapping: dict[str, Any]) -> list[dict[str, Any]]:
