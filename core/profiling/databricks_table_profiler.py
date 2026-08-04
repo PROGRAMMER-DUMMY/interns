@@ -82,7 +82,7 @@ def profile_uc_table(
     row_count = int(count_rows[0][0]) if count_rows else 0
 
     agg_stats = _aggregate_column_stats(client, fqn, schema_map, row_count, warnings)
-    cardinality_stats = _read_cardinality_stats(client, fqn, schema_map, warnings)
+    cardinality_stats = _read_cardinality_stats(client, fqn, schema_map, row_count, warnings)
 
     sample_cols, sample_rows_data = client.execute_query(
         f"SELECT * FROM {fqn} LIMIT {int(sample_rows)}"
@@ -98,6 +98,9 @@ def profile_uc_table(
         distinct_sorted = sorted(dict.fromkeys(non_null))[:8]
         stats = agg_stats.get(name)
         distinct_count = cardinality_stats.get(name)
+        # Cached stats can be stale relative to the live table; a ratio > 1.0
+        # is possible in principle (distinct_count > row_count) and is
+        # harmless for the >=0.98 near-unique-identifier check downstream.
         cardinality_ratio = (
             (distinct_count / row_count) if distinct_count is not None and row_count else None
         )
@@ -122,6 +125,8 @@ def profile_uc_table(
     sources_used = ["sql_warehouse_sample"]
     if agg_stats:
         sources_used.append("sql_warehouse_aggregate")
+    if any(v is not None for v in cardinality_stats.values()):
+        sources_used.append("unity_catalog_statistics")
 
     return DatasetProfile(
         path=fqn,
@@ -157,13 +162,20 @@ def _aggregate_column_stats(
     exprs: list[str] = []
     plan: list[tuple[str, bool]] = []
     for name in col_names:
-        quoted = quote_ident_backtick(assert_safe_identifier(name, context="uc column"))
+        try:
+            quoted = quote_ident_backtick(assert_safe_identifier(name, context="uc column"))
+        except Exception as exc:
+            warnings.append(f"aggregate_stats_unsafe_identifier:{name}:{type(exc).__name__}:{exc}")
+            continue
         has_min_max = _is_numeric_dtype(schema_map[name]) or _is_temporal_dtype(schema_map[name])
         exprs.append(f"count(*) - count({quoted})")
         if has_min_max:
             exprs.append(f"min({quoted})")
             exprs.append(f"max({quoted})")
         plan.append((name, has_min_max))
+
+    if not exprs:
+        return {}
 
     try:
         _, agg_rows = client.execute_query(f"SELECT {', '.join(exprs)} FROM {fqn}")
@@ -191,6 +203,7 @@ def _read_cardinality_stats(
     client: "DatabricksClient",
     fqn: str,
     schema_map: dict[str, str],
+    row_count: int,
     warnings: list[str],
 ) -> dict[str, int | None]:
     """Read each column's ``distinct_count`` from Unity Catalog's own cached
@@ -203,26 +216,38 @@ def _read_cardinality_stats(
     profiles customer-owned source tables it cannot write to, so there is no
     lever to guarantee or refresh statistics freshness here (see
     docs/superpowers/specs/2026-08-04-databricks-cardinality-profiling-design.md).
-    Per-column failure (stats never computed, unsupported table type,
-    permissions, a table with no ANALYZE history) degrades that column to
-    ``None`` and is recorded in ``warnings`` -- never raised. ``None`` here
-    means "signal absent," the same contract the local DuckDB profiler's
-    missing-signal paths already use; never treat it as zero.
+    Every degradation path -- an unsafe/unusual column name, a query
+    failure, an unparseable value, or a response with no ``distinct_count``
+    row at all -- leaves that column's entry ``None`` and records exactly
+    one ``warnings`` entry naming which path fired; never raises. ``None``
+    here means "signal absent," the same contract the local DuckDB
+    profiler's missing-signal paths already use; never treat it as zero.
     """
+    if not schema_map or not row_count:
+        return {}
+
     stats: dict[str, int | None] = {}
     for name in schema_map:
-        quoted_col = quote_ident_backtick(assert_safe_identifier(name, context="uc column"))
         stats[name] = None
+        try:
+            quoted_col = quote_ident_backtick(assert_safe_identifier(name, context="uc column"))
+        except Exception as exc:
+            warnings.append(f"cardinality_stats_unsafe_identifier:{name}:{type(exc).__name__}:{exc}")
+            continue
         try:
             _, rows = client.execute_query(f"DESCRIBE TABLE EXTENDED {fqn} {quoted_col}")
         except Exception as exc:  # pragma: no cover - warehouse/network dependent
             warnings.append(f"cardinality_stats_failed:{name}:{type(exc).__name__}:{exc}")
             continue
+        found = False
         for row in rows:
             if len(row) >= 2 and str(row[0]).strip().lower() == "distinct_count":
+                found = True
                 try:
                     stats[name] = int(row[1])
                 except (TypeError, ValueError):
                     warnings.append(f"cardinality_stats_unparseable:{name}:{row[1]!r}")
                 break
+        if not found:
+            warnings.append(f"cardinality_stats_missing:{name}")
     return stats

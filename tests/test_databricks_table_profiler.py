@@ -41,7 +41,24 @@ class ProfileUcTableTests(unittest.TestCase):
     def test_profiles_table_via_warehouse_queries_only(self):
         client = FakeClient(
             {
-                "DESCRIBE TABLE": (
+                # EXTENDED-specific keys must be registered (and, since
+                # FakeClient matches first-inserted-key-wins, checked before
+                # the bare "DESCRIBE TABLE `" key below) so the cardinality
+                # queries Fix 2 issues for each column resolve to a real
+                # distinct_count row instead of falling through to "no key
+                # matched" (AssertionError -> cardinality_stats_failed) or to
+                # the schema-description rows (no distinct_count row ->
+                # cardinality_stats_missing) -- either of which would break
+                # this test's warnings == [] assertion below.
+                "EXTENDED `healthcare_rcm`.`bronze`.`hospital_a_departments` `DeptID`": (
+                    ["info_name", "info_value"],
+                    [["distinct_count", "20"]],
+                ),
+                "EXTENDED `healthcare_rcm`.`bronze`.`hospital_a_departments` `Name`": (
+                    ["info_name", "info_value"],
+                    [["distinct_count", "2"]],
+                ),
+                "DESCRIBE TABLE `": (
                     ["col_name", "data_type", "comment"],
                     [
                         ["DeptID", "string", ""],
@@ -66,7 +83,10 @@ class ProfileUcTableTests(unittest.TestCase):
         self.assertEqual(profile.path, "`healthcare_rcm`.`bronze`.`hospital_a_departments`")
         self.assertEqual(profile.format, "delta")
         self.assertEqual(profile.row_count, 20)
-        self.assertEqual(profile.sources_used, ["sql_warehouse_sample", "sql_warehouse_aggregate"])
+        self.assertEqual(
+            profile.sources_used,
+            ["sql_warehouse_sample", "sql_warehouse_aggregate", "unity_catalog_statistics"],
+        )
         self.assertEqual(profile.warnings, [])
 
         by_name = {c.name: c for c in profile.columns}
@@ -148,6 +168,7 @@ class ProfileUcTableTests(unittest.TestCase):
         self.assertAlmostEqual(by_name["DeptID"].cardinality_ratio, 20 / 20)
         self.assertAlmostEqual(by_name["Name"].cardinality_ratio, 5 / 20)
         self.assertEqual(profile.warnings, [])
+        self.assertIn("unity_catalog_statistics", profile.sources_used)
 
     def test_cardinality_ratio_is_none_when_stats_are_absent(self):
         # No "EXTENDED ..." key registered at all -- FakeClient raises
@@ -260,6 +281,96 @@ class ProfileUcTableTests(unittest.TestCase):
         self.assertEqual(by_name["VisitDate"].null_count, 0)
         self.assertEqual(by_name["VisitDate"].exact_min, "2024-01-01")
         self.assertEqual(by_name["VisitDate"].exact_max, "2024-12-31")
+
+    def test_never_issues_an_analyze_query(self):
+        client = FakeClient(
+            {
+                "EXTENDED `healthcare_rcm`.`bronze`.`hospital_a_departments` `DeptID`": (
+                    ["info_name", "info_value"],
+                    [["distinct_count", "20"]],
+                ),
+                "DESCRIBE TABLE `": (
+                    ["col_name", "data_type", "comment"],
+                    [["DeptID", "string", ""]],
+                ),
+                "SELECT count(*) FROM": (["count(1)"], [["20"]]),
+                "count(*) - count(": (["c0"], [["0"]]),
+                "SELECT * FROM": (["DeptID"], [["1"], ["2"]]),
+            }
+        )
+        profile_uc_table(client, "healthcare_rcm", "bronze", "hospital_a_departments")
+        self.assertTrue(client.queries)
+        self.assertFalse(
+            any("analyze" in q.lower() for q in client.queries),
+            f"profiling must never trigger ANALYZE TABLE, got queries: {client.queries}",
+        )
+
+    def test_unsafe_column_name_degrades_that_column_not_the_whole_profile(self):
+        # DESCRIBE TABLE can return a column name that is not a bare SQL
+        # identifier (space, punctuation) -- assert_safe_identifier rejects
+        # it. Before this fix, that raised UnsafeIdentifierError uncaught out
+        # of both _aggregate_column_stats and _read_cardinality_stats,
+        # killing the WHOLE table's profile over one odd column name. Now it
+        # must degrade only "Bad Col"'s own stats to None + a warning, and
+        # "DeptID" must still profile normally.
+        client = FakeClient(
+            {
+                "EXTENDED `healthcare_rcm`.`bronze`.`hospital_a_departments` `DeptID`": (
+                    ["info_name", "info_value"],
+                    [["distinct_count", "20"]],
+                ),
+                "DESCRIBE TABLE `": (
+                    ["col_name", "data_type", "comment"],
+                    [
+                        ["DeptID", "string", ""],
+                        ["Bad Col", "string", ""],
+                    ],
+                ),
+                "SELECT count(*) FROM": (["count(1)"], [["20"]]),
+                "count(*) - count(": (["c0"], [["0"]]),
+                "SELECT * FROM": (
+                    ["DeptID", "Bad Col"],
+                    [["1", "x"], ["2", "y"]],
+                ),
+            }
+        )
+
+        profile = profile_uc_table(client, "healthcare_rcm", "bronze", "hospital_a_departments")
+
+        by_name = {c.name: c for c in profile.columns}
+        self.assertAlmostEqual(by_name["DeptID"].cardinality_ratio, 20 / 20)
+        self.assertIsNone(by_name["Bad Col"].cardinality_ratio)
+        self.assertIsNone(by_name["Bad Col"].null_count)
+        self.assertTrue(
+            any("unsafe_identifier" in w and "Bad Col" in w for w in profile.warnings),
+            f"expected an unsafe-identifier warning naming 'Bad Col', got: {profile.warnings}",
+        )
+
+    def test_cardinality_stats_missing_row_is_warned(self):
+        # The EXTENDED query succeeds but the returned rows contain no
+        # "distinct_count" row at all (stats were never computed for this
+        # column) -- distinct from the query itself failing/raising, which
+        # test_cardinality_ratio_is_none_when_stats_are_absent already
+        # covers. Must be distinguishable in warnings.
+        client = FakeClient(
+            {
+                "EXTENDED `healthcare_rcm`.`bronze`.`hospital_a_departments` `DeptID`": (
+                    ["info_name", "info_value"],
+                    [["col_name", "DeptID"], ["data_type", "string"]],
+                ),
+                "DESCRIBE TABLE `": (
+                    ["col_name", "data_type", "comment"],
+                    [["DeptID", "string", ""]],
+                ),
+                "SELECT count(*) FROM": (["count(1)"], [["20"]]),
+                "count(*) - count(": (["c0"], [["0"]]),
+                "SELECT * FROM": (["DeptID"], [["1"], ["2"]]),
+            }
+        )
+        profile = profile_uc_table(client, "healthcare_rcm", "bronze", "hospital_a_departments")
+        by_name = {c.name: c for c in profile.columns}
+        self.assertIsNone(by_name["DeptID"].cardinality_ratio)
+        self.assertIn("cardinality_stats_missing:DeptID", profile.warnings)
 
 
 if __name__ == "__main__":
