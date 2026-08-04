@@ -145,5 +145,6 @@ Follows the existing `tests/test_databricks_table_profiler.py` `FakeClient` patt
 - Unit tests (above) pass under `unittest`.
 - `.venv\Scripts\green-gate.exe` shows no new failures beyond this repo's existing 2 known
   pre-existing, unrelated baseline failures.
-- The implementation-time check (single-query vs per-column `DESCRIBE TABLE EXTENDED`) is resolved
-  and documented in the implementation's own commit/report, not left as an open assumption.
+- The implementation-time check (single-query vs per-column `DESCRIBE TABLE EXTENDED`) could not be
+  verified in this sandbox; that outcome is explicitly documented above and in the implementation's
+  own commit/report as a deliberate, disclosed follow-up item, not left as a silent open assumption.
