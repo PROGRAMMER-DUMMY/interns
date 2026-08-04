@@ -549,11 +549,36 @@ def _quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-_VALUE_PATTERN_CHECKS: list[tuple[str, "re.Pattern[str]"]] = [
-    ("currency_2dp", re.compile(r"^\d+\.\d{2}$")),
-    ("iso_date", re.compile(r"^\d{4}-\d{2}-\d{2}$")),
-    ("prefixed_numeric_code", re.compile(r"^[A-Za-z]+[-_]?\d+$")),
-    ("fixed_length_alnum", re.compile(r"^[A-Za-z0-9]{6,12}$")),
+_CURRENCY_2DP_RE = re.compile(r"^\d+\.\d{2}$")
+
+
+def _is_currency_2dp(value: Any) -> bool:
+    """Money-shaped: a value carrying at most 2 decimal places.
+
+    A `Float64` money column reaches here as a Python float, and
+    `str(100.50) == "100.5"` -- the repr drops the trailing zero, so a
+    regex demanding exactly two decimal digits never matches real profiled
+    currency data. Floats are therefore judged on precision instead:
+    100.50/25.00/9.99 round-trip through 2dp, 3.14159/100.567 do not.
+    Integers are excluded -- they round-trip trivially, but a count or key
+    column is not 2-decimal-place money. Strings keep the regex, since some
+    sources deliver pre-formatted currency text.
+    """
+    if isinstance(value, float):
+        return abs(round(value, 2) - value) < 1e-9
+    if isinstance(value, (int, bool)):
+        return False
+    return bool(_CURRENCY_2DP_RE.match(str(value)))
+
+
+# Shape checks only -- digits/letters/separators, never a business term.
+# currency_2dp needs the value's real type (see above); the rest are
+# string-shape by nature and match against str(value).
+_VALUE_PATTERN_CHECKS: list[tuple[str, "Callable[[Any], bool]"]] = [
+    ("currency_2dp", _is_currency_2dp),
+    ("iso_date", lambda v: bool(re.match(r"^\d{4}-\d{2}-\d{2}$", str(v)))),
+    ("prefixed_numeric_code", lambda v: bool(re.match(r"^[A-Za-z]+[-_]?\d+$", str(v)))),
+    ("fixed_length_alnum", lambda v: bool(re.match(r"^[A-Za-z0-9]{6,12}$", str(v)))),
 ]
 
 
@@ -565,11 +590,11 @@ def _infer_value_pattern(sample_values: list[Any]) -> str | None:
     pattern clears the 80% bar -- a mixed-shape column reports no pattern
     rather than a misleading weak one.
     """
-    values = [str(v) for v in sample_values if v is not None and str(v).strip()]
+    values = [v for v in sample_values if v is not None and str(v).strip()]
     if not values:
         return None
-    for pattern_name, pattern in _VALUE_PATTERN_CHECKS:
-        matches = sum(1 for v in values if pattern.match(v))
+    for pattern_name, matches_pattern in _VALUE_PATTERN_CHECKS:
+        matches = sum(1 for v in values if matches_pattern(v))
         if matches / len(values) >= 0.8:
             return pattern_name
     return None
