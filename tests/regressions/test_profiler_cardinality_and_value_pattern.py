@@ -11,7 +11,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.profiling.data_model_profiler import DataModelProfiler, _infer_value_pattern
+from core.profiling.data_model_profiler import (
+    ColumnProfile,
+    DataModelProfiler,
+    _infer_value_pattern,
+    _merge_columns,
+)
 
 
 class ProfilerNewSignalsTests(unittest.TestCase):
@@ -80,3 +85,49 @@ class ProfilerNewSignalsTests(unittest.TestCase):
         profile = DataModelProfiler().profile_path(path)
         by_name = {col.name: col for col in profile.columns}
         self.assertIsNone(by_name["VisitCount"].value_pattern)
+
+
+class MergeColumnsCarriesNewSignalsTests(unittest.TestCase):
+    """_merge_columns rebuilds a ColumnProfile field by field, so any field it
+    forgets is silently dropped. The DuckDB pushdown path bypasses it today,
+    but the documented follow-up is extending the polars/parquet paths, which
+    do go through it -- and would then lose exactly the three signals this
+    plan added.
+    """
+
+    def test_merge_keeps_the_incoming_cardinality_pattern_and_tier(self):
+        old = ColumnProfile(
+            name="ChargeAmount",
+            dtype="Float64",
+            cardinality_ratio=0.10,
+            value_pattern="iso_date",
+            profile_tier="raw",
+        )
+        new = ColumnProfile(
+            name="ChargeAmount",
+            dtype="Float64",
+            cardinality_ratio=0.99,
+            value_pattern="currency_2dp",
+            profile_tier="exact",
+        )
+        merged = _merge_columns({"ChargeAmount": old}, {"ChargeAmount": new})["ChargeAmount"]
+        self.assertEqual(merged.cardinality_ratio, 0.99)
+        self.assertEqual(merged.value_pattern, "currency_2dp")
+        self.assertEqual(merged.profile_tier, "exact")
+
+    def test_merge_falls_back_to_the_existing_values(self):
+        old = ColumnProfile(
+            name="PayorType",
+            dtype="Utf8",
+            cardinality_ratio=0.02,
+            value_pattern="fixed_length_alnum",
+            profile_tier="exact",
+        )
+        new = ColumnProfile(name="PayorType", dtype="Utf8", profile_tier="")
+        merged = _merge_columns({"PayorType": old}, {"PayorType": new})["PayorType"]
+        self.assertEqual(merged.cardinality_ratio, 0.02)
+        self.assertEqual(merged.value_pattern, "fixed_length_alnum")
+        # profile_tier is provenance, like `source`: the incoming profile wins
+        # unless it says nothing at all. It is not nullable (it defaults to
+        # "raw"), so a merge cannot tell "unset" from an explicit "raw".
+        self.assertEqual(merged.profile_tier, "exact")

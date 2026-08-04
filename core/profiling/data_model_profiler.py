@@ -623,6 +623,13 @@ def _merge_columns(
             metadata_max=old.metadata_max,
             null_count=new.null_count if new.null_count is not None else old.null_count,
             source=new.source,
+            cardinality_ratio=(
+                new.cardinality_ratio
+                if new.cardinality_ratio is not None
+                else old.cardinality_ratio
+            ),
+            value_pattern=new.value_pattern if new.value_pattern is not None else old.value_pattern,
+            profile_tier=new.profile_tier or old.profile_tier,
         )
     return merged
 
