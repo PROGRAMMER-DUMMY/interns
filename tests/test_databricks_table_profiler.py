@@ -12,7 +12,18 @@ from core.profiling.databricks_table_profiler import profile_uc_table
 
 
 class FakeClient:
-    """Stands in for DatabricksClient -- only execute_query is called."""
+    """Stands in for DatabricksClient -- only execute_query is called.
+
+    Response keys are matched by substring against the issued SQL, in
+    insertion order -- first match wins. Keys must be specific enough not to
+    collide: the real exact-row-count query is ``SELECT count(*) FROM
+    {fqn}``, while the real per-column aggregate query is ``SELECT count(*)
+    - count(...), ... FROM {fqn}`` -- both contain the literal substring
+    "count(*)", so a bare "count(*)" key would ambiguously match either.
+    Use "SELECT count(*) FROM" (with the trailing FROM, right after the
+    stars) for the row-count query specifically, and "count(*) - count("
+    for the aggregate query specifically.
+    """
 
     def __init__(self, responses: dict) -> None:
         self._responses = responses
@@ -39,7 +50,10 @@ class ProfileUcTableTests(unittest.TestCase):
                         ["Catalog", "healthcare_rcm", ""],
                     ],
                 ),
-                "count(*)": (["count(1)"], [["20"]]),
+                "SELECT count(*) FROM": (["count(1)"], [["20"]]),
+                # Neither column is numeric/temporal ("string") -- the
+                # aggregate only requests null_count per column, no min/max.
+                "count(*) - count(": (["c0", "c1"], [["1", "0"]]),
                 "SELECT * FROM": (
                     ["DeptID", "Name"],
                     [["1", "Cardiology"], ["2", "Radiology"], ["3", None]],
@@ -52,7 +66,7 @@ class ProfileUcTableTests(unittest.TestCase):
         self.assertEqual(profile.path, "`healthcare_rcm`.`bronze`.`hospital_a_departments`")
         self.assertEqual(profile.format, "delta")
         self.assertEqual(profile.row_count, 20)
-        self.assertEqual(profile.sources_used, ["sql_warehouse_sample"])
+        self.assertEqual(profile.sources_used, ["sql_warehouse_sample", "sql_warehouse_aggregate"])
         self.assertEqual(profile.warnings, [])
 
         by_name = {c.name: c for c in profile.columns}
@@ -60,7 +74,10 @@ class ProfileUcTableTests(unittest.TestCase):
         # The '#' separator row and everything after it must not become a column.
         self.assertNotIn("# Detailed Table Information", by_name)
         self.assertNotIn("Catalog", by_name)
-        self.assertEqual(by_name["Name"].null_count, 1)  # one None in the sample
+        # null_count now comes from the real aggregate (1 for DeptID, 0 for
+        # Name), NOT from counting Nones in the 3-row sample.
+        self.assertEqual(by_name["DeptID"].null_count, 1)
+        self.assertEqual(by_name["Name"].null_count, 0)
         self.assertIn("Cardiology", by_name["Name"].sample_values)
 
     def test_identifier_parts_are_safety_checked(self):
@@ -72,7 +89,8 @@ class ProfileUcTableTests(unittest.TestCase):
         client = FakeClient(
             {
                 "DESCRIBE TABLE": (["col_name", "data_type"], [["A", "string"]]),
-                "count(*)": (["count(1)"], [["1"]]),
+                "SELECT count(*) FROM": (["count(1)"], [["1"]]),
+                "count(*) - count(": (["c0"], [["0"]]),
                 "SELECT * FROM": (["A", "UnexpectedExtraCol"], [["v", "x"]]),
             }
         )

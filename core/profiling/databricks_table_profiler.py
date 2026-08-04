@@ -19,7 +19,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from core.profiling.data_model_profiler import ColumnProfile, DatasetProfile
+from core.profiling.data_model_profiler import (
+    ColumnProfile,
+    DatasetProfile,
+    _is_numeric_dtype,
+    _is_temporal_dtype,
+)
 from core.sql_safety import assert_safe_identifier, quote_ident_backtick
 
 if TYPE_CHECKING:
@@ -43,14 +48,16 @@ def profile_uc_table(
 ) -> DatasetProfile:
     """Profile one Unity Catalog table via the SQL warehouse.
 
-    Three queries: DESCRIBE (schema), COUNT(*) (exact row count), and a
-    bounded SELECT (sample, used to compute per-column null_count/sample
-    values/min-max in Python). At this platform's current data scale
-    (thousands of rows per table) fetching a sample and computing stats
-    client-side is simple and correct; at real production scale this should
-    push the aggregation into SQL the way the local CSV profiler's DuckDB
-    pushdown path already does, rather than fetching rows to summarize them
-    -- noted here as a known scaling limit, not addressed in this pass.
+    Four queries: DESCRIBE (schema), COUNT(*) (exact row count), one combined
+    aggregate query (exact null_count for every column, exact min/max for
+    numeric/temporal columns -- computed server-side by the warehouse, the
+    same pushdown technique already used by the local CSV profiler's
+    ``_duckdb_column_stats``), and a bounded SELECT used ONLY for
+    illustrative ``sample_values`` -- never for a statistic. Row count was
+    already exact; null_count/min/max previously came from summarizing
+    whatever ``sample_rows`` rows the warehouse happened to return first,
+    which is silently biased on any large table where nulls or extreme
+    values aren't uniformly distributed across physical/partition order.
     """
     fqn = _qualified_name(catalog, schema, table)
     warnings: list[str] = []
@@ -73,6 +80,8 @@ def profile_uc_table(
     _, count_rows = client.execute_query(f"SELECT count(*) FROM {fqn}")
     row_count = int(count_rows[0][0]) if count_rows else 0
 
+    agg_stats = _aggregate_column_stats(client, fqn, schema_map, row_count, warnings)
+
     sample_cols, sample_rows_data = client.execute_query(
         f"SELECT * FROM {fqn} LIMIT {int(sample_rows)}"
     )
@@ -85,6 +94,7 @@ def profile_uc_table(
         values = [row[idx] for row in sample_rows_data] if idx is not None else []
         non_null = [v for v in values if v is not None]
         distinct_sorted = sorted(dict.fromkeys(non_null))[:8]
+        stats = agg_stats.get(name)
         columns.append(
             ColumnProfile(
                 name=name,
@@ -93,10 +103,16 @@ def profile_uc_table(
                 sample_values=distinct_sorted,
                 sample_min=distinct_sorted[0] if distinct_sorted else None,
                 sample_max=distinct_sorted[-1] if distinct_sorted else None,
-                null_count=(len(values) - len(non_null)) if values else None,
-                source="sample_profile",
+                exact_min=stats["min"] if stats else None,
+                exact_max=stats["max"] if stats else None,
+                null_count=stats["null_count"] if stats else None,
+                source="exact_scan" if stats else "sample_profile",
             )
         )
+
+    sources_used = ["sql_warehouse_sample"]
+    if agg_stats:
+        sources_used.append("sql_warehouse_aggregate")
 
     return DatasetProfile(
         path=fqn,
@@ -107,6 +123,56 @@ def profile_uc_table(
         schema=schema_map,
         columns=columns,
         downcast_recommendations=[],
-        sources_used=["sql_warehouse_sample"],
+        sources_used=sources_used,
         warnings=warnings,
     )
+
+
+def _aggregate_column_stats(
+    client: "DatabricksClient",
+    fqn: str,
+    schema_map: dict[str, str],
+    row_count: int,
+    warnings: list[str],
+) -> dict[str, dict[str, Any]]:
+    """One real aggregate query over the FULL table: exact null_count for
+    every column, exact min/max for numeric/temporal columns. Server-side,
+    via the warehouse -- not fetched and summarized client-side. Returns
+    ``{}`` (not raised) on any query failure so a warehouse hiccup degrades
+    to the pre-existing sample-based columns rather than failing profiling
+    outright; the failure is still recorded in ``warnings``."""
+    col_names = list(schema_map)
+    if not col_names or not row_count:
+        return {}
+
+    exprs: list[str] = []
+    plan: list[tuple[str, bool]] = []
+    for name in col_names:
+        quoted = quote_ident_backtick(assert_safe_identifier(name, context="uc column"))
+        has_min_max = _is_numeric_dtype(schema_map[name]) or _is_temporal_dtype(schema_map[name])
+        exprs.append(f"count(*) - count({quoted})")
+        if has_min_max:
+            exprs.append(f"min({quoted})")
+            exprs.append(f"max({quoted})")
+        plan.append((name, has_min_max))
+
+    try:
+        _, agg_rows = client.execute_query(f"SELECT {', '.join(exprs)} FROM {fqn}")
+    except Exception as exc:  # pragma: no cover - warehouse/network dependent
+        warnings.append(f"aggregate_stats_failed:{type(exc).__name__}:{exc}")
+        return {}
+
+    row = agg_rows[0] if agg_rows else ()
+    stats: dict[str, dict[str, Any]] = {}
+    pos = 0
+    for name, has_min_max in plan:
+        null_count = int(row[pos]) if pos < len(row) and row[pos] is not None else None
+        pos += 1
+        col_min = col_max = None
+        if has_min_max:
+            col_min = row[pos] if pos < len(row) else None
+            pos += 1
+            col_max = row[pos] if pos < len(row) else None
+            pos += 1
+        stats[name] = {"null_count": null_count, "min": col_min, "max": col_max}
+    return stats
