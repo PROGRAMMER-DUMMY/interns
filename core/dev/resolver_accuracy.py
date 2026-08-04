@@ -207,8 +207,15 @@ def write_baseline(report: AccuracyReport) -> Path:
 
 
 def regressions(report: AccuracyReport, baseline: dict[str, Any]) -> list[str]:
-    """What got worse. Empty when nothing did (including an empty baseline)."""
-    if not baseline:
+    """What got worse. Empty when nothing did (including an empty baseline).
+
+    An empty REPORT is likewise not a regression. The corpus is harvested
+    from `workspaces/`, which is untracked -- on a fresh checkout, in CI, or
+    on any machine but the one that wrote the baseline, there are zero
+    labels, and comparing 0 correct against a recorded 5 would flag a
+    regression everywhere. A measurement that never ran is not a loss.
+    """
+    if not baseline or report.total == 0:
         return []
     out: list[str] = []
     if report.wrong > int(baseline.get("wrong", 0)):

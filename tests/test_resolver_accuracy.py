@@ -168,6 +168,16 @@ class RegressionGateTests(unittest.TestCase):
     def test_no_baseline_never_reports_a_regression(self):
         self.assertEqual(regressions(AccuracyReport(), {}), [])
 
+    def test_an_empty_corpus_never_reports_a_regression(self):
+        # The corpus is harvested from `workspaces/`, which is untracked. On a
+        # fresh checkout (or any machine but the one that wrote the baseline)
+        # there are zero labels, so `correct` is 0 against a baseline of 5 --
+        # a measurement that never ran must not be reported as a loss.
+        self.assertEqual(
+            regressions(AccuracyReport(), {"correct": 5, "wrong": 0, "total": 5}),
+            [],
+        )
+
 
 class GradingTests(unittest.TestCase):
     def test_it_grades_against_the_real_resolver_and_matches_on_short_names(self):
