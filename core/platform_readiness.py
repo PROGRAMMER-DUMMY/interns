@@ -16,11 +16,88 @@ from __future__ import annotations
 from core.observability.cost_ledger import anchored
 
 import argparse
+import configparser
 import importlib.util
 import json
+import os
 from pathlib import Path
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+
+def _cfg_file(cfg_path: str | None = None) -> Path:
+    return Path(cfg_path or os.environ.get("DATABRICKS_CONFIG_FILE") or
+                Path.home() / ".databrickscfg")
+
+
+def _profile_hosts(cfg_path: str | None = None) -> dict[str, str]:
+    """{section name -> normalised host} from the CLI config. Never raises."""
+    # `[DEFAULT]` is a real Databricks profile, not configparser's magic
+    # defaults section -- without this it vanishes from sections() and its keys
+    # leak into every other profile.
+    parser = configparser.ConfigParser(default_section="__databricks_no_default__")
+    try:
+        parser.read(_cfg_file(cfg_path), encoding="utf-8")
+    except (OSError, configparser.Error):
+        return {}
+    hosts = {}
+    for section in parser.sections():
+        host = parser[section].get("host", "").strip().rstrip("/").lower()
+        # [__settings__] and any hostless block can't collide with anything.
+        if host:
+            hosts[section] = host.split("://", 1)[-1]
+    return hosts
+
+
+def find_profile_conflicts(cfg_path: str | None = None) -> list[list[str]]:
+    """Profile NAMES grouped by shared host, groups of 2+ only, sorted.
+
+    Two profiles for one host is the state `databricks auth profiles` shows as
+    one Valid: YES and one Valid: NO -- harmless to the SDK (which is told a
+    profile) and fatal to every `databricks bundle` command (which resolves by
+    host and refuses to guess).
+    """
+    by_host: dict[str, list[str]] = {}
+    for section, host in _profile_hosts(cfg_path).items():
+        by_host.setdefault(host, []).append(section)
+    return sorted(sorted(names) for names in by_host.values() if len(names) > 1)
+
+
+def profile_conflict_note(conflicts: list[list[str]]) -> str:
+    """Names only. Never emits a host, token, or any other config value."""
+    if not conflicts:
+        return ""
+    groups = "; ".join(", ".join(names) for names in conflicts)
+    return (
+        f"[~] profiles sharing one host ({groups}): every `databricks bundle` command fails with "
+        "'multiple profiles matched' while SDK calls still work. Fix: delete the stale profile "
+        "block from the CLI config, or pin one with DATABRICKS_CONFIG_PROFILE=<name>."
+    )
+
+
+def detect_auth_source(cfg_path: str | None = None) -> str:
+    """WHICH credential source is in play -- the answer to 'why do two tools disagree'."""
+    if os.environ.get("DATABRICKS_HOST"):
+        return "env:DATABRICKS_HOST"
+    pinned = os.environ.get("DATABRICKS_CONFIG_PROFILE")
+    if pinned:
+        return f"env:DATABRICKS_CONFIG_PROFILE:{pinned}"
+    if find_profile_conflicts(cfg_path):
+        return "profile:ambiguous"
+    sections = _profile_hosts(cfg_path)
+    if not sections:
+        return "none"
+    return f"profile:{'DEFAULT' if 'DEFAULT' in sections else sorted(sections)[0]}"
+
+
+def _warehouse_state(client: Any) -> str | None:
+    """First warehouse's state, None when unreachable. STOPPED is a cold start, not an error."""
+    try:
+        first = next(iter(client.get_client().warehouses.list()), None)
+    except Exception:
+        return None
+    state = getattr(first, "state", None)
+    return getattr(state, "value", None) or (str(state) if state else None)
 
 
 def _check_databricks(cfg: Any) -> dict[str, Any]:
@@ -34,11 +111,22 @@ def _check_databricks(cfg: Any) -> dict[str, Any]:
         }
     client = DatabricksClient(cfg)
     ok, detail = client.health_check()
+    conflicts = find_profile_conflicts()
+    state = _warehouse_state(client) if ok else None
+    notes = [note for note in (
+        profile_conflict_note(conflicts),
+        f"[~] warehouse {state}: the first query pays a cold start"
+        if state and state.upper() != "RUNNING" else "",
+    ) if note]
     return {
         "status": "ready" if ok else "blocked",
         "detail": detail,
         "catalog": cfg.catalog,
         "execution_mode": cfg.execution,
+        "auth_source": detect_auth_source(),
+        "profile_conflicts": conflicts,
+        "warehouse_state": state,
+        "notes": notes,
     }
 
 
@@ -186,6 +274,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         for name, result in report.summary().items():
             print(f"{name}: {result['status']} -- {result['detail']}")
+            for note in result.get("notes", []):
+                print(f"  {note}")
         if report.blockers():
             print(f"\nBlockers: {len(report.blockers())}")
     return 1 if report.blockers() else 0

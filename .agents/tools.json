@@ -1513,6 +1513,12 @@
       "summary": "Per-KPI improvement suggestions, emitted ONLY when the readings warrant one."
     },
     {
+      "name": "sync-workspace-code",
+      "command": "uv run sync-workspace-code --workspace <workspace>",
+      "entry_point": "core.provisioning.cli:sync_workspace_code_main",
+      "summary": "Governed CLI entry points for provisioning + ingestion generation."
+    },
+    {
       "name": "token-report",
       "command": "uv run token-report --workspace <workspace>",
       "entry_point": "tools.token_report:main",

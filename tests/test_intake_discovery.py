@@ -5,7 +5,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
+from core.intake import discovery as discovery_module
 from core.intake.declaration import SourceDeclaration, save_source_declaration
 from core.intake.discovery import (
     ARRIVAL_CONTINUOUS,
@@ -13,11 +16,14 @@ from core.intake.discovery import (
     ARRIVAL_PERIODIC,
     ARRIVAL_UNKNOWN,
     SCANNERS,
+    UC_NEED,
     ScanOutcome,
     DiscoveredTable,
+    UnityCatalogGateway,
     classify_arrival,
     implied_lane,
     run_discovery,
+    scan_object_store,
 )
 from core.onboarding.workspace.delegation import routing_for
 from core.storage.workspace_layout import WorkspaceLayout
@@ -31,6 +37,21 @@ class _TempWorkspace(unittest.TestCase):
         self.workspace.mkdir(parents=True)
         self.layout = WorkspaceLayout(project_root=self.workspace)
         self.addCleanup(self._tmp.cleanup)
+        # No test reaches a real Databricks account. Tests that exercise the
+        # Unity Catalog path re-patch this with a fake gateway.
+        self.use_unity_catalog(None)
+
+    def use_unity_catalog(self, gateway, note: str = "") -> None:
+        patcher = mock.patch.object(
+            discovery_module,
+            "_open_unity_catalog_gateway",
+            lambda workspace: (
+                gateway,
+                note or ("" if gateway is not None else "Databricks is not configured"),
+            ),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def declare(self, **kwargs) -> None:
         save_source_declaration(self.layout, SourceDeclaration(**kwargs))
@@ -233,6 +254,232 @@ class TestS3Scanner(_TempWorkspace):
         self.declare(type="s3", location="https://example.invalid/bucket")
         result = run_discovery(self.repo_root, "workspaces/sample_ws")
         self.assertIn(result.status, {"blocked", "credential_or_tool_missing"})
+
+
+def _statement_response(rows, state="SUCCEEDED"):
+    return SimpleNamespace(
+        statement_id="statement-1",
+        status=SimpleNamespace(state=state, error=None),
+        result=SimpleNamespace(data_array=rows),
+    )
+
+
+class _FakeStatementExecution:
+    """Stands in for WorkspaceClient.statement_execution -- no network."""
+
+    def __init__(self, listings: dict[str, list[list[str]]]):
+        self.listings = listings
+        self.statements: list[tuple[str, str]] = []
+
+    def execute_statement(self, *, warehouse_id, statement, wait_timeout):
+        self.statements.append((warehouse_id, statement))
+        uri = statement.split("'", 1)[1].rsplit("'", 1)[0]
+        return _statement_response(self.listings.get(uri, []))
+
+
+class _FakeWorkspaceClient:
+    def __init__(self, *, listings=None, locations=(), warehouses=()):
+        self.statement_execution = _FakeStatementExecution(listings or {})
+        self.external_locations = SimpleNamespace(list=lambda: list(locations))
+        self.warehouses = SimpleNamespace(list=lambda: list(warehouses))
+
+
+def _gateway(*, listings=None, locations=(("estate", "s3://bucket/data"),),
+             warehouses=(("wh-1", "RUNNING"),), preferred=""):
+    client = _FakeWorkspaceClient(
+        listings=listings,
+        locations=[SimpleNamespace(name=name, url=url) for name, url in locations],
+        warehouses=[SimpleNamespace(id=wid, state=state) for wid, state in warehouses],
+    )
+    return UnityCatalogGateway(client, preferred_warehouse_id=preferred)
+
+
+# `s3://bucket/data` holding one flat file, one part-file directory, and a
+# directory whose NAME carries a data suffix (the trap: it is not a file).
+_LISTINGS = {
+    "s3://bucket/data/": [
+        ["s3://bucket/data/snapshot.csv", "snapshot.csv", "120", "1700000000000"],
+        ["s3://bucket/data/orders/", "orders/", "0", "0"],
+        ["s3://bucket/data/archive.parquet/", "archive.parquet/", "0", "0"],
+    ],
+    "s3://bucket/data/orders/": [
+        ["s3://bucket/data/orders/part-0.parquet", "part-0.parquet", "10", "1700000000000"],
+        ["s3://bucket/data/orders/part-1.parquet", "part-1.parquet", "15", "1700000060000"],
+    ],
+    "s3://bucket/data/archive.parquet/": [],
+}
+
+
+class TestUnityCatalogScanner(_TempWorkspace):
+    """The bucket is already a UC external location, so Databricks holds the
+    credential -- discovery must not demand a second local credential set."""
+
+    def test_list_rows_become_tables_with_measured_sizes_and_arrival(self):
+        self.declare(type="s3", location="s3://bucket/data")
+        self.use_unity_catalog(_gateway(listings=_LISTINGS))
+
+        result = run_discovery(self.repo_root, "workspaces/sample_ws")
+        payload = self.discovery_payload()
+        tables = {table["name"]: table for table in payload["tables"]}
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual({"snapshot", "orders"}, set(tables))
+        self.assertEqual(120, tables["snapshot"]["size_bytes"])
+        self.assertEqual(25, tables["orders"]["size_bytes"])
+        self.assertEqual("parquet", tables["orders"]["format"])
+        self.assertEqual("s3://bucket/data/orders", tables["orders"]["path"])
+        self.assertEqual(145, payload["working_set_estimate_bytes"])
+        # arrival measured from modification_time_ms, never fabricated
+        self.assertEqual(ARRIVAL_CONTINUOUS, tables["orders"]["arrival_pattern"])
+        self.assertEqual(ARRIVAL_ONE_SHOT, tables["snapshot"]["arrival_pattern"])
+
+    def test_directory_rows_are_recursed_not_counted_as_files(self):
+        self.declare(type="s3", location="s3://bucket/data")
+        self.use_unity_catalog(_gateway(listings=_LISTINGS))
+
+        run_discovery(self.repo_root, "workspaces/sample_ws")
+        names = {table["name"] for table in self.discovery_payload()["tables"]}
+        self.assertNotIn("archive", names, "a trailing-slash directory is not a file")
+        self.assertNotIn("orders/", names)
+
+    def test_the_path_used_is_recorded_in_the_notes(self):
+        self.declare(type="s3", location="s3://bucket/data")
+        self.use_unity_catalog(_gateway(listings=_LISTINGS))
+
+        run_discovery(self.repo_root, "workspaces/sample_ws")
+        notes = " ".join(self.discovery_payload()["notes"])
+        self.assertIn("listed via Unity Catalog external location estate on warehouse wh-1", notes)
+
+    def test_a_stopped_warehouse_is_reported_because_the_list_cold_starts_it(self):
+        self.declare(type="s3", location="s3://bucket/data")
+        self.use_unity_catalog(_gateway(listings=_LISTINGS, warehouses=(("wh-1", "STOPPED"),)))
+
+        run_discovery(self.repo_root, "workspaces/sample_ws")
+        notes = " ".join(self.discovery_payload()["notes"])
+        self.assertIn("STOPPED", notes)
+        self.assertIn("cold start", notes)
+
+    def test_the_configured_warehouse_wins_over_the_first_available(self):
+        gateway = _gateway(
+            listings=_LISTINGS,
+            warehouses=(("wh-first", "RUNNING"), ("wh-configured", "RUNNING")),
+            preferred="wh-configured",
+        )
+        self.assertEqual(("wh-configured", "RUNNING"), gateway.warehouse())
+        unconfigured = _gateway(
+            listings=_LISTINGS, warehouses=(("wh-first", "RUNNING"), ("wh-second", "RUNNING"))
+        )
+        self.assertEqual(("wh-first", "RUNNING"), unconfigured.warehouse())
+
+    def test_truncation_is_honored_and_leaves_the_working_set_unknown(self):
+        self.declare(type="s3", location="s3://bucket/data")
+        self.use_unity_catalog(_gateway(listings=_LISTINGS))
+
+        result = run_discovery(self.repo_root, "workspaces/sample_ws", max_items=1)
+        payload = self.discovery_payload()
+
+        self.assertIs(True, payload["scan_policy"]["truncated"])
+        self.assertIsNone(result.working_set_estimate_bytes)
+        self.assertTrue(any("truncated" in note for note in payload["notes"]))
+
+    def test_adls_and_gcs_list_through_the_same_path(self):
+        cases = {
+            "adls": (
+                "abfss://raw@account.dfs.core.windows.net/landing",
+                "abfss://raw@account.dfs.core.windows.net/landing/",
+            ),
+            "gcs": ("gs://bucket/landing", "gs://bucket/landing/"),
+        }
+        for connector, (location, listed_uri) in cases.items():
+            with self.subTest(connector=connector):
+                self.declare(type=connector, location=location)
+                self.use_unity_catalog(
+                    _gateway(
+                        listings={listed_uri: [[f"{listed_uri}events.json", "events.json", "42", "1700000000000"]]},
+                        locations=(("landing_zone", location),),
+                    )
+                )
+                result = run_discovery(self.repo_root, "workspaces/sample_ws")
+                payload = self.discovery_payload()
+                self.assertEqual("ok", result.status)
+                self.assertEqual(42, payload["tables"][0]["size_bytes"])
+
+    def test_a_failed_list_falls_back_instead_of_raising(self):
+        client = _FakeWorkspaceClient(
+            locations=[SimpleNamespace(name="estate", url="s3://bucket/data")],
+            warehouses=[SimpleNamespace(id="wh-1", state="RUNNING")],
+        )
+        client.statement_execution.execute_statement = mock.Mock(side_effect=RuntimeError("denied"))
+        self.declare(type="s3", location="s3://bucket/data")
+        self.use_unity_catalog(UnityCatalogGateway(client))
+
+        result = run_discovery(self.repo_root, "workspaces/sample_ws")
+        self.assertIn(result.status, {"credential_or_tool_missing", "ok"})
+        self.assertTrue(any("LIST on" in note for note in self.discovery_payload()["notes"]))
+
+
+class TestExternalLocationMatching(unittest.TestCase):
+    def test_prefix_matching_respects_segment_boundaries(self):
+        locations = [("estate", "s3://bucket/data")]
+        match = discovery_module._matching_external_location
+        self.assertEqual("estate", match("s3://bucket/data/orders", locations))
+        self.assertEqual("estate", match("s3://bucket/data", locations))
+        self.assertEqual("estate", match("s3://bucket/data/", locations))
+        self.assertEqual("", match("s3://bucket/database/orders", locations))
+        self.assertEqual("", match("s3://bucket-2/data", locations))
+        self.assertEqual("", match("s3://bucket/data", []))
+
+
+class TestScannerSelection(_TempWorkspace):
+    """Unity Catalog -> boto3 -> honest refusal, and the refusal names both."""
+
+    def test_unity_catalog_is_preferred_over_the_local_sdk(self):
+        self.declare(type="s3", location="s3://bucket/data")
+        self.use_unity_catalog(_gateway(listings=_LISTINGS))
+        with mock.patch.object(discovery_module, "scan_s3") as local:
+            result = run_discovery(self.repo_root, "workspaces/sample_ws")
+        local.assert_not_called()
+        self.assertEqual("ok", result.status)
+
+    def test_boto3_is_used_when_no_external_location_covers_the_bucket(self):
+        self.declare(type="s3", location="s3://other-bucket/data")
+        self.use_unity_catalog(_gateway(listings=_LISTINGS))
+        sentinel = ScanOutcome(
+            status="ok",
+            tables=[DiscoveredTable("via_boto3", "s3://other-bucket/data", "csv", 7, None)],
+            notes=["local sdk note"],
+        )
+        with mock.patch.object(discovery_module, "scan_s3", return_value=sentinel), \
+                mock.patch("importlib.util.find_spec", return_value=object()):
+            result = run_discovery(self.repo_root, "workspaces/sample_ws")
+
+        payload = self.discovery_payload()
+        self.assertEqual("ok", result.status)
+        self.assertEqual("via_boto3", payload["tables"][0]["name"])
+        # the UC reason survives into the evidence, then the local note
+        self.assertTrue(any("not under any Unity Catalog external location" in n for n in payload["notes"]))
+        self.assertIn("local sdk note", payload["notes"])
+
+    def test_neither_path_available_names_both_options(self):
+        self.declare(type="s3", location="s3://other-bucket/data")
+        with mock.patch("importlib.util.find_spec", return_value=None):
+            result = run_discovery(self.repo_root, "workspaces/sample_ws")
+
+        payload = self.discovery_payload()
+        self.assertEqual("credential_or_tool_missing", result.status)
+        self.assertIn(UC_NEED, payload["needs"])
+        self.assertTrue(any("boto3" in need for need in payload["needs"]))
+        self.assertIn("volume_and_growth", payload["open_questions"])
+
+    def test_a_non_uri_location_never_reaches_the_warehouse(self):
+        gateway = _gateway(listings=_LISTINGS)
+        declaration = SourceDeclaration(type="s3", location="not a uri'; DROP")
+        outcome = scan_object_store(
+            declaration, workspace=self.workspace, repo_root=self.repo_root,
+            max_items=10, max_seconds=5.0, gateway=gateway,
+        )
+        self.assertEqual([], gateway.client.statement_execution.statements)
+        self.assertTrue(any("not an object-store URI" in note for note in outcome.notes))
 
 
 class StageRoutingTests(_TempWorkspace):

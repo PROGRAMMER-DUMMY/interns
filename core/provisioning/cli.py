@@ -10,6 +10,7 @@ from core.paths import PROJECT_ROOT
 from core.provisioning.apply import apply_provision_plan
 from core.provisioning.ingestion import generate_ingestion
 from core.provisioning.plan import DEFAULT_SCHEMAS, build_provision_plan
+from core.provisioning.sync_code import sync_workspace_code
 
 
 @anchored("plan-provisioning")
@@ -113,8 +114,66 @@ def generate_ingestion_main(argv: list[str] | None = None) -> int:
     )
 
 
+@anchored("sync-workspace-code")
+def sync_workspace_code_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Ship generated ingestion/ and dbt/ code to the Databricks workspace "
+            "with `databricks sync`. Requires the confirmed solution blueprint; "
+            "without it this is a dry run."
+        )
+    )
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
+    parser.add_argument(
+        "--remote-root", default="",
+        help="remote target dir (default /Workspace/Shared/<workspace-name>)",
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--dry-run", dest="dry_run", action="store_true", default=None,
+        help="push nothing; default is OFF once the blueprint is confirmed, ON otherwise",
+    )
+    group.add_argument("--no-dry-run", dest="dry_run", action="store_false")
+    parser.add_argument("--allow-replay", action="store_true")
+    args = parser.parse_args(argv)
+
+    holder: dict[str, Any] = {}
+
+    def _run() -> Any:
+        holder["result"] = sync_workspace_code(
+            args.repo_root,
+            args.workspace,
+            dry_run=args.dry_run,
+            remote_root=args.remote_root or None,
+        )
+        return holder["result"]
+
+    code = run_workspace_command(
+        command="sync-workspace-code",
+        workspace=args.workspace,
+        repo_root=args.repo_root,
+        fn=_run,
+        op_args={
+            "workspace": args.workspace,
+            "dry_run": args.dry_run,
+            "remote_root": args.remote_root,
+        },
+        allow_replay=args.allow_replay,
+        metadata={"dry_run": args.dry_run},
+        record_idempotent=True,
+    )
+    if code != 0:
+        return code
+    result = holder.get("result")
+    # A refusal (no confirmation / kill-switch / non-zero sync) is a clean
+    # structured payload, not a traceback -- but it must not exit 0.
+    return 0 if result is None or result.get("ok") else 1
+
+
 __all__ = [
     "apply_provisioning_main",
     "generate_ingestion_main",
     "plan_provisioning_main",
+    "sync_workspace_code_main",
 ]

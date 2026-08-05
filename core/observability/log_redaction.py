@@ -96,6 +96,18 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"(?i)--(?:api[_\-]?key|token|password|secret)\s+['\"]?[A-Za-z0-9\-._~+/!@#$%^&*]{6,}['\"]?"
         ),
     ),
+    # Private workspace endpoints. A Databricks workspace URL identifies the
+    # tenant and is a private endpoint under the secret-display guardrail, so a
+    # CLI failure that echoes the resolved host must not land in an artifact.
+    # Covers AWS (dbc-*.cloud.databricks.com), Azure (*.azuredatabricks.net)
+    # and GCP (*.gcp.databricks.com), with or without a scheme.
+    (
+        "HOST",
+        re.compile(
+            r"(?i)\b(?:https?://)?[A-Za-z0-9\-.]+\."
+            r"(?:cloud\.databricks\.com|azuredatabricks\.net|gcp\.databricks\.com)\b"
+        ),
+    ),
     # -- PII / PHI patterns --------------------------------------------
     # Email addresses (RFC 5321-ish, conservative)
     (
@@ -204,6 +216,37 @@ def install_log_redaction(logger: logging.Logger | None = None) -> None:
     target.addFilter(RedactionFilter())
 
 
+# Third-party loggers this platform's dependencies are known to use that may
+# attach their own handler directly (bypassing the root-logger filter -- see
+# install_log_redaction's docstring note) and may log request/response
+# bodies, URLs, or exception text containing PHI/PII values from workspace
+# data (docs/core_audit/PROD_SECURITY_GAPS.md Gap 7 residual risk 1).
+THIRD_PARTY_LOGGER_PREFIXES: tuple[str, ...] = (
+    "aiohttp",
+    "databricks",
+    "pyspark",
+    "urllib3",
+)
+
+
+def install_log_redaction_everywhere() -> None:
+    """Install the redaction filter on root AND every currently-registered
+    logger whose name starts with a known third-party prefix
+    (``THIRD_PARTY_LOGGER_PREFIXES``).
+
+    A ``Filter`` only fires for handlers attached to the SAME logger it's
+    installed on -- attaching it to root does not retroactively cover a
+    third-party library logger that has its own directly-attached handler.
+    Idempotent (reuses ``install_log_redaction``'s own idempotency guard);
+    safe to call repeatedly, e.g. once more after a library that creates its
+    logger lazily has been imported.
+    """
+    install_log_redaction()
+    for name in list(logging.Logger.manager.loggerDict.keys()):
+        if name.startswith(THIRD_PARTY_LOGGER_PREFIXES):
+            install_log_redaction(logging.getLogger(name))
+
+
 def assert_installed(logger: logging.Logger | None = None) -> None:
     """Raise ``RuntimeError`` if no :class:`RedactionFilter` is attached to
     ``logger`` (default: root logger).
@@ -227,5 +270,7 @@ __all__ = [
     "RedactionFilter",
     "assert_installed",
     "install_log_redaction",
+    "install_log_redaction_everywhere",
+    "THIRD_PARTY_LOGGER_PREFIXES",
     "redact",
 ]

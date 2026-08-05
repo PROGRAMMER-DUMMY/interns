@@ -18,10 +18,12 @@ and registering it in :data:`SCANNERS`.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import statistics
+import time
 from collections import defaultdict
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -239,11 +241,338 @@ def scan_s3(
         for key, size, modified in sizes
         if Path(key).suffix.lower() in DATA_SUFFIXES or "_delta_log" in Path(key).parts
     ]
-    tables = _group_paths(Path(prefix or ""), entries, uri_prefix=f"s3://{bucket}/")
+    # The uri_prefix must carry the scanned prefix too, or the emitted path drops
+    # it (`s3://bucket/orders` for an object that actually lives under
+    # `s3://bucket/data/orders`) -- the local branch of _group_paths keeps the
+    # root, so this one has to as well.
+    tables = _group_paths(
+        Path(prefix or ""), entries, uri_prefix=f"s3://{bucket}/" + (f"{prefix}/" if prefix else "")
+    )
     notes = [f"listed {len(sizes)} object(s) under s3://{bucket}/{prefix}"]
     if truncated:
         notes.append(f"listing truncated at max_items={max_items}")
     return ScanOutcome(status=STATUS_OK, tables=tables, notes=notes, truncated=truncated)
+
+
+# -------------------------------------------------- object store via Unity Catalog
+
+# In a cloud-first deployment the bucket/container is already registered as a UC
+# EXTERNAL LOCATION, so Databricks already holds the credential. Requiring a
+# SECOND credential set (boto3 + local AWS config) on the operator's machine is
+# the wrong architecture and is what made discovery unusable on a clean box.
+# `LIST '<uri>'` on a SQL warehouse enumerates any object store UC can reach,
+# which is also the only discovery path adls/gcs have ever had.
+
+_OBJECT_STORE_SCHEMES = {"s3": "s3", "adls": "abfss", "gcs": "gs"}
+
+# ponytail: fixed depth cap, not a tunable. A deeper estate hits max_items first
+# and reports `truncated` either way; raise it when a real layout needs it.
+_MAX_LIST_DEPTH = 8
+
+UC_NEED = (
+    "register the location as a Unity Catalog external location with a storage "
+    "credential (Databricks then holds the credential; no local cloud credential "
+    "is needed) -- verify with "
+    "`databricks storage-credentials validate --storage-credential-name <name> "
+    "--external-location-name <location>`"
+)
+
+# What the LOCAL (non-UC) path would need per connector. Same text the stub
+# scanners used, kept as the second half of an honest refusal.
+_LOCAL_TOOL_NEEDS: dict[str, list[str]] = {
+    "s3": [
+        "or install boto3 (`uv add boto3`) and configure an AWS credential "
+        "reference (named profile or instance role) with s3:ListBucket on the bucket"
+    ],
+    "adls": [
+        "or install an azure-storage-file-datalake (or adlfs) client plus an Azure "
+        "service-principal secret scope/key",
+    ],
+    "gcs": [
+        "or install a google-cloud-storage (or gcsfs) client plus a service-account "
+        "key file path or workload-identity binding name",
+    ],
+}
+
+# s3 has a local scanner that could work, so a failure there is a missing tool /
+# credential. adls/gcs have no local scanner at all, so `unsupported_yet` stays
+# the accurate answer for the non-UC path.
+_NO_PATH_STATUS = {"s3": STATUS_MISSING_TOOLING, "adls": STATUS_UNSUPPORTED, "gcs": STATUS_UNSUPPORTED}
+
+
+class UnityCatalogGateway:
+    """The three Unity Catalog reads discovery needs, on one duck-typed client.
+
+    ``client`` is a ``databricks.sdk.WorkspaceClient``; tests pass a stand-in
+    exposing ``external_locations.list()``, ``warehouses.list()`` and
+    ``statement_execution.execute_statement()``.
+    """
+
+    def __init__(self, client: Any, *, preferred_warehouse_id: str = "") -> None:
+        self.client = client
+        self.preferred_warehouse_id = str(preferred_warehouse_id or "")
+        self._warehouse: tuple[str, str] | None = None
+
+    def external_locations(self) -> list[tuple[str, str]]:
+        """``[(name, url)]`` -- names and urls only, never credential values."""
+        found: list[tuple[str, str]] = []
+        for location in self.client.external_locations.list():
+            name = str(getattr(location, "name", "") or "")
+            url = str(getattr(location, "url", "") or "")
+            if name and url:
+                found.append((name, url))
+        return found
+
+    def warehouse(self) -> tuple[str, str]:
+        """``(warehouse_id, state)``. The configured warehouse wins; otherwise the
+        first one the account exposes. State is "" when it could not be read."""
+        if self._warehouse is None:
+            chosen, state = self.preferred_warehouse_id, ""
+            try:
+                warehouses = list(self.client.warehouses.list())
+            except Exception:
+                warehouses = []
+            match = next(
+                (item for item in warehouses if str(getattr(item, "id", "") or "") == chosen), None
+            )
+            if match is None and not chosen and warehouses:
+                match = warehouses[0]
+            if match is not None:
+                chosen = str(getattr(match, "id", "") or "")
+                raw_state = getattr(match, "state", None)
+                state = str(getattr(raw_state, "value", raw_state) or "")
+            self._warehouse = (chosen, state)
+        return self._warehouse
+
+    def list_uri(self, uri: str) -> list[list[Any]]:
+        """Rows of ``[path, name, size_bytes, modification_time_ms]``."""
+        warehouse_id, _ = self.warehouse()
+        response = self.client.statement_execution.execute_statement(
+            warehouse_id=warehouse_id,
+            statement=f"LIST '{uri}'",
+            wait_timeout="50s",
+        )
+        while _statement_state(response) in {"PENDING", "RUNNING"}:
+            time.sleep(2)
+            response = self.client.statement_execution.get_statement(response.statement_id)
+        state = _statement_state(response)
+        if state != "SUCCEEDED":
+            error = getattr(getattr(response, "status", None), "error", None)
+            message = getattr(error, "message", "") or state
+            raise RuntimeError(f"LIST failed ({state}): {redact(str(message))}")
+        result = getattr(response, "result", None)
+        return list(getattr(result, "data_array", None) or []) if result else []
+
+
+def scan_via_unity_catalog(
+    declaration: SourceDeclaration, *, workspace: Path, repo_root: Path,
+    max_items: int, max_seconds: float, gateway: UnityCatalogGateway | None = None,
+) -> ScanOutcome:
+    """List an object store through Unity Catalog -- no local cloud credential."""
+    outcome, notes = _unity_catalog_attempt(
+        declaration, workspace=workspace, max_items=max_items,
+        max_seconds=max_seconds, gateway=gateway,
+    )
+    if outcome is not None:
+        return outcome
+    return ScanOutcome(
+        status=_NO_PATH_STATUS.get(declaration.type, STATUS_MISSING_TOOLING),
+        notes=notes,
+        needs=[UC_NEED],
+    )
+
+
+def scan_object_store(
+    declaration: SourceDeclaration, *, workspace: Path, repo_root: Path,
+    max_items: int, max_seconds: float, gateway: UnityCatalogGateway | None = None,
+) -> ScanOutcome:
+    """Unity Catalog first, then the local SDK path, then an honest refusal."""
+    outcome, notes = _unity_catalog_attempt(
+        declaration, workspace=workspace, max_items=max_items,
+        max_seconds=max_seconds, gateway=gateway,
+    )
+    if outcome is not None:
+        return outcome
+    if declaration.type == "s3" and importlib.util.find_spec("boto3") is not None:
+        local = scan_s3(
+            declaration, workspace=workspace, repo_root=repo_root,
+            max_items=max_items, max_seconds=max_seconds,
+        )
+        return replace(local, notes=notes + list(local.notes))
+    return ScanOutcome(
+        status=_NO_PATH_STATUS.get(declaration.type, STATUS_MISSING_TOOLING),
+        notes=notes,
+        needs=[UC_NEED, *_LOCAL_TOOL_NEEDS.get(declaration.type, [])],
+    )
+
+
+def _unity_catalog_attempt(
+    declaration: SourceDeclaration, *, workspace: Path, max_items: int,
+    max_seconds: float, gateway: UnityCatalogGateway | None,
+) -> tuple[ScanOutcome | None, list[str]]:
+    """``(outcome, notes)``. ``None`` means UC could not be used and the caller
+    should fall back -- the notes say why, so the refusal stays auditable."""
+    notes: list[str] = []
+    uri = _object_store_uri(declaration.type, declaration.location)
+    if not uri:
+        return None, [f"location {declaration.location!r} is not an object-store URI"]
+
+    if gateway is None:
+        gateway, note = _open_unity_catalog_gateway(workspace)
+        if note:
+            notes.append(note)
+        if gateway is None:
+            return None, notes
+
+    try:
+        locations = gateway.external_locations()
+    except Exception as exc:
+        notes.append(f"could not list Unity Catalog external locations: {redact(str(exc))}")
+        return None, notes
+    location_name = _matching_external_location(uri, locations)
+    if not location_name:
+        notes.append(f"{uri} is not under any Unity Catalog external location this account can list")
+        return None, notes
+
+    try:
+        warehouse_id, state = gateway.warehouse()
+    except Exception as exc:
+        notes.append(f"could not resolve a SQL warehouse: {redact(str(exc))}")
+        return None, notes
+    if not warehouse_id:
+        notes.append("no SQL warehouse is available to run the LIST")
+        return None, notes
+    if state and state.upper() != "RUNNING":
+        notes.append(
+            f"SQL warehouse {warehouse_id} is {state.upper()}; running the LIST starts it, "
+            "so this scan pays a cold start"
+        )
+
+    try:
+        rows, truncated = _list_tree(gateway, uri, max_items=max_items, max_seconds=max_seconds)
+    except Exception as exc:
+        notes.append(f"LIST on {uri} failed: {redact(str(exc))}")
+        return None, notes
+
+    base, prefix = _split_uri_base(uri)
+    entries = [
+        (Path(path[len(base):] if path.startswith(base) else path), size, mtime)
+        for path, size, mtime in rows
+    ]
+    entries = [
+        entry for entry in entries
+        if entry[0].suffix.lower() in DATA_SUFFIXES or "_delta_log" in entry[0].parts
+    ]
+    tables = _group_paths(
+        Path(prefix), entries, uri_prefix=base + (f"{prefix}/" if prefix else "")
+    )
+    notes.append(f"listed {len(rows)} object(s) under {uri}")
+    notes.append(
+        f"listed via Unity Catalog external location {location_name} on warehouse {warehouse_id}"
+    )
+    if truncated:
+        notes.append(f"listing truncated at max_items={max_items} / max_seconds={max_seconds}")
+    return ScanOutcome(status=STATUS_OK, tables=tables, notes=notes, truncated=truncated), notes
+
+
+def _open_unity_catalog_gateway(workspace: Path) -> tuple[UnityCatalogGateway | None, str]:
+    try:
+        from core.config import resolve_databricks_config
+        from core.execution.databricks_client import DatabricksClient
+
+        layout = WorkspaceLayout(project_root=workspace)
+        config = resolve_databricks_config(layout.enterprise_id())
+        client = DatabricksClient(config)
+        if not client.is_configured():
+            return None, "Databricks is not configured, so Unity Catalog discovery was not attempted"
+        return (
+            UnityCatalogGateway(
+                client.get_client(),
+                # The configured warehouse wins; http_path is a path, not a secret.
+                preferred_warehouse_id=str(config.http_path or "").rstrip("/").rsplit("/", 1)[-1],
+            ),
+            "",
+        )
+    except Exception as exc:
+        return None, f"Unity Catalog discovery unavailable: {redact(str(exc))}"
+
+
+def _list_tree(
+    gateway: UnityCatalogGateway, base_uri: str, *, max_items: int, max_seconds: float,
+) -> tuple[list[tuple[str, int, float | None]], bool]:
+    """Breadth-first LIST under `base_uri`, bounded by the scan policy caps."""
+    files: list[tuple[str, int, float | None]] = []
+    queue: list[tuple[str, int]] = [(base_uri.rstrip("/") + "/", 0)]
+    deadline = time.monotonic() + float(max_seconds)
+    truncated = False
+    while queue and not truncated:
+        uri, depth = queue.pop(0)
+        if time.monotonic() > deadline:
+            truncated = True
+            break
+        for row in gateway.list_uri(uri):
+            path, name, size, mtime = _parse_list_row(row)
+            if not path:
+                continue
+            if name.endswith("/") or path.endswith("/"):  # a directory, not a file
+                if depth + 1 <= _MAX_LIST_DEPTH:
+                    queue.append((path.rstrip("/") + "/", depth + 1))
+                else:
+                    truncated = True
+                continue
+            files.append((path, size, mtime))
+            if len(files) >= max_items:
+                truncated = True
+                break
+    return files, truncated
+
+
+def _parse_list_row(row: Any) -> tuple[str, str, int, float | None]:
+    """``[path, name, size_bytes, modification_time_ms]`` -> typed values.
+
+    The Statement Execution API returns JSON_ARRAY rows, i.e. strings.
+    """
+    values = list(row or [])
+    path = str(values[0]) if len(values) > 0 and values[0] is not None else ""
+    name = str(values[1]) if len(values) > 1 and values[1] is not None else ""
+    size = _as_int(values[2]) if len(values) > 2 else None
+    millis = _as_int(values[3]) if len(values) > 3 else None
+    return path, name, int(size or 0), (millis / 1000.0 if millis else None)
+
+
+def _matching_external_location(uri: str, locations: list[tuple[str, str]]) -> str:
+    """The external location `uri` sits under, matched on SEGMENT boundaries so
+    ``s3://b/data`` never claims ``s3://b/database``."""
+    target = uri.rstrip("/") + "/"
+    for name, url in locations:
+        root = str(url).rstrip("/") + "/"
+        if target.startswith(root):
+            return name
+    return ""
+
+
+def _object_store_uri(connector: str, location: str) -> str:
+    """The declared location as a full object-store URI, or "" when it is not one."""
+    text = str(location or "").strip()
+    if not text or "'" in text or any(char in text for char in "\r\n"):
+        return ""
+    scheme, separator, rest = text.partition("://")
+    if separator:
+        return text if scheme and rest.strip("/") else ""
+    default = _OBJECT_STORE_SCHEMES.get(connector, "")
+    return f"{default}://{text.lstrip('/')}" if default else ""
+
+
+def _split_uri_base(uri: str) -> tuple[str, str]:
+    """``s3://bucket/a/b`` -> ``("s3://bucket/", "a/b")``."""
+    scheme, _, rest = uri.partition("://")
+    authority, _, key = rest.partition("/")
+    return f"{scheme}://{authority}/", key.strip("/")
+
+
+def _statement_state(response: Any) -> str:
+    state = getattr(getattr(response, "status", None), "state", None)
+    return str(getattr(state, "value", state) or "").upper().rsplit(".", 1)[-1]
 
 
 # ----------------------------------------------------------------- uc_existing
@@ -342,23 +671,12 @@ def _unsupported_scanner(connector: str, needs: list[str]) -> Scanner:
 
 SCANNERS: dict[str, Scanner] = {
     "local_files": scan_local,
-    "s3": scan_s3,
+    # Object stores share one selector: Unity Catalog first (the credential is
+    # already registered there), local SDK second, honest refusal last.
+    "s3": scan_object_store,
+    "adls": scan_object_store,
+    "gcs": scan_object_store,
     "uc_existing": scan_uc_existing,
-    "adls": _unsupported_scanner(
-        "adls",
-        [
-            "an azure-storage-file-datalake (or adlfs) client",
-            "a credential reference: a UC storage credential name or an Azure "
-            "service-principal secret scope/key",
-        ],
-    ),
-    "gcs": _unsupported_scanner(
-        "gcs",
-        [
-            "a google-cloud-storage (or gcsfs) client",
-            "a credential reference: a service-account key file path or workload-identity binding name",
-        ],
-    ),
     "jdbc": _unsupported_scanner(
         "jdbc",
         [
@@ -628,8 +946,12 @@ __all__ = [
     "SCANNERS",
     "ScanOutcome",
     "Scanner",
+    "UC_NEED",
+    "UnityCatalogGateway",
     "classify_arrival",
     "implied_lane",
     "load_discovery",
     "run_discovery",
+    "scan_object_store",
+    "scan_via_unity_catalog",
 ]

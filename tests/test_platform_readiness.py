@@ -9,10 +9,170 @@ during this session.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from core.platform_readiness import ReadinessReport, check, main
+from core.platform_readiness import (
+    ReadinessReport,
+    check,
+    detect_auth_source,
+    find_profile_conflicts,
+    main,
+    profile_conflict_note,
+)
+
+HOST = "https://dbc-a2362023-5116.cloud.databricks.com"
+
+
+def _write_cfg(tmp: str, body: str) -> str:
+    path = Path(tmp) / ".databrickscfg"
+    path.write_text(body, encoding="utf-8")
+    return str(path)
+
+
+class ProfileConflictTests(unittest.TestCase):
+    """The real state on this machine: DEFAULT (Valid: YES) and
+    dbc-a2362023-5116 (Valid: NO) both point at one host, so every
+    `databricks bundle` command dies with 'multiple profiles matched' while
+    WorkspaceClient(profile=...) works -- readiness said 'ready' anyway."""
+
+    def test_two_profiles_one_host_is_one_conflict_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = _write_cfg(tmp, f"""
+[DEFAULT]
+host = {HOST}
+token = dapi-fake
+
+[dbc-a2362023-5116]
+host = {HOST}/
+auth_type = databricks-cli
+""")
+            self.assertEqual(
+                find_profile_conflicts(cfg), [["DEFAULT", "dbc-a2362023-5116"]]
+            )
+
+    def test_different_hosts_do_not_conflict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = _write_cfg(tmp, f"""
+[DEFAULT]
+host = {HOST}
+
+[other]
+host = https://adb-999.azuredatabricks.net
+""")
+            self.assertEqual(find_profile_conflicts(cfg), [])
+
+    def test_missing_file_is_empty_not_an_exception(self):
+        self.assertEqual(find_profile_conflicts("no/such/.databrickscfg"), [])
+
+    def test_note_names_profiles_and_never_leaks_the_host(self):
+        note = profile_conflict_note([["DEFAULT", "dbc-a2362023-5116"]])
+        self.assertIn("multiple profiles matched", note)
+        self.assertIn("DEFAULT", note)
+        self.assertIn("DATABRICKS_CONFIG_PROFILE", note)
+        self.assertNotIn(HOST, note)
+        self.assertNotIn("cloud.databricks.com", note)
+        self.assertNotIn("dapi", note)
+
+    def test_no_conflicts_means_no_note(self):
+        self.assertEqual(profile_conflict_note([]), "")
+
+
+class AuthSourceTests(unittest.TestCase):
+    """Report WHICH credential was used, so an operator can tell why the CLI
+    and the SDK disagree."""
+
+    def setUp(self):
+        patcher = patch.dict(os.environ, {}, clear=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for var in ("DATABRICKS_HOST", "DATABRICKS_CONFIG_PROFILE", "DATABRICKS_CONFIG_FILE"):
+            os.environ.pop(var, None)
+
+    def test_env_host_wins(self):
+        os.environ["DATABRICKS_HOST"] = HOST
+        os.environ["DATABRICKS_CONFIG_PROFILE"] = "DEFAULT"
+        self.assertEqual(detect_auth_source(), "env:DATABRICKS_HOST")
+
+    def test_pinned_profile_env_beats_the_config_file(self):
+        os.environ["DATABRICKS_CONFIG_PROFILE"] = "DEFAULT"
+        self.assertEqual(detect_auth_source(), "env:DATABRICKS_CONFIG_PROFILE:DEFAULT")
+
+    def test_single_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = _write_cfg(tmp, f"[DEFAULT]\nhost = {HOST}\n")
+            self.assertEqual(detect_auth_source(cfg), "profile:DEFAULT")
+
+    def test_conflicting_profiles_are_ambiguous(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = _write_cfg(tmp, f"[DEFAULT]\nhost = {HOST}\n\n[dupe]\nhost = {HOST}\n")
+            self.assertEqual(detect_auth_source(cfg), "profile:ambiguous")
+
+    def test_no_credentials_anywhere(self):
+        self.assertEqual(detect_auth_source("no/such/.databrickscfg"), "none")
+
+    def test_config_file_env_var_is_honoured(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["DATABRICKS_CONFIG_FILE"] = _write_cfg(
+                tmp, f"[DEFAULT]\nhost = {HOST}\n\n[dupe]\nhost = {HOST}\n"
+            )
+            self.assertEqual(detect_auth_source(), "profile:ambiguous")
+
+
+class WarehouseStateTests(unittest.TestCase):
+    """The account's only warehouse is STOPPED at rest (serverless PRO). A cold
+    start is a note, never a failure -- status must stay `ready`."""
+
+    def _report(self, warehouses, conflicts):
+        mock_cfg = MagicMock(enabled=True, catalog="c", execution="warehouse")
+        client = MagicMock()
+        client.warehouses.list.return_value = warehouses
+        with patch("core.config.resolve_databricks_config", return_value=mock_cfg), patch(
+            "core.execution.databricks_client.DatabricksClient.health_check",
+            return_value=(True, "Connected as a@b.com"),
+        ), patch(
+            "core.execution.databricks_client.DatabricksClient.get_client", return_value=client
+        ), patch(
+            "core.platform_readiness.find_profile_conflicts", return_value=conflicts
+        ), patch(
+            "core.platform_readiness.detect_auth_source", return_value="profile:ambiguous"
+        ):
+            return check("")
+
+    def test_stopped_warehouse_and_conflicts_are_notes_not_failures(self):
+        stopped = MagicMock(state=MagicMock(value="STOPPED"))
+        report = self._report([stopped], [["DEFAULT", "dbc-a2362023-5116"]])
+        db = report.databricks
+        self.assertEqual(db["status"], "ready")
+        self.assertEqual(report.blockers(), [])
+        self.assertEqual(db["warehouse_state"], "STOPPED")
+        self.assertEqual(db["auth_source"], "profile:ambiguous")
+        self.assertEqual(db["profile_conflicts"], [["DEFAULT", "dbc-a2362023-5116"]])
+        self.assertIn("[~] warehouse STOPPED: the first query pays a cold start", db["notes"])
+        self.assertTrue(any("multiple profiles matched" in n for n in db["notes"]))
+
+    def test_running_warehouse_gets_no_cold_start_note(self):
+        running = MagicMock(state=MagicMock(value="RUNNING"))
+        db = self._report([running], []).databricks
+        self.assertEqual(db["warehouse_state"], "RUNNING")
+        self.assertEqual(db["notes"], [])
+
+    def test_unreachable_warehouse_list_is_none_not_a_crash(self):
+        mock_cfg = MagicMock(enabled=True, catalog="c", execution="warehouse")
+        client = MagicMock()
+        client.warehouses.list.side_effect = RuntimeError("PERMISSION_DENIED")
+        with patch("core.config.resolve_databricks_config", return_value=mock_cfg), patch(
+            "core.execution.databricks_client.DatabricksClient.health_check",
+            return_value=(True, "ok"),
+        ), patch(
+            "core.execution.databricks_client.DatabricksClient.get_client", return_value=client
+        ), patch("core.platform_readiness.find_profile_conflicts", return_value=[]):
+            db = check("").databricks
+        self.assertEqual(db["status"], "ready")
+        self.assertIsNone(db["warehouse_state"])
 
 
 class DatabricksCheckTests(unittest.TestCase):
@@ -26,6 +186,8 @@ class DatabricksCheckTests(unittest.TestCase):
     def test_enabled_and_healthy_is_ready(self):
         mock_cfg = MagicMock(enabled=True, catalog="healthcare_rcm", execution="warehouse")
         with patch("core.config.resolve_databricks_config", return_value=mock_cfg), patch(
+            "core.platform_readiness._warehouse_state", return_value=None
+        ), patch(
             "core.execution.databricks_client.DatabricksClient.health_check",
             return_value=(True, "Connected as a@b.com"),
         ):
@@ -124,6 +286,13 @@ class MainCliTests(unittest.TestCase):
 class CostTelemetryCheckTests(unittest.TestCase):
     """3.1: system.billing/system.query are NOT on by default. A warehouse that
     works perfectly and a cost query that returns nothing is the failure mode."""
+
+    def setUp(self):
+        # These all take the authenticated path, which now also lists warehouses;
+        # no test may touch the network.
+        patcher = patch("core.platform_readiness._warehouse_state", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_not_probed_without_the_remote_gate_and_never_claimed_ready(self):
         import os
