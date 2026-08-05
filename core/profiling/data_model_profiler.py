@@ -63,6 +63,13 @@ def _duckdb_type_for_polars(dtype: str) -> str | None:
     return None
 
 
+# Recursion cap for Struct/List leaf discovery. A JSON payload column is
+# untrusted input: a pathological (or hostile) document can nest arbitrarily
+# deep, so the walk stops here, records a warning, and emits the truncated
+# node as a leaf rather than silently dropping it or recursing forever.
+_MAX_NESTED_DEPTH = 8
+
+
 INTEGER_BOUNDS = [
     ("Int8", -(2**7), 2**7 - 1),
     ("Int16", -(2**15), 2**15 - 1),
@@ -139,6 +146,10 @@ class DatasetProfile:
     downcast_recommendations: list[DowncastRecommendation] = field(default_factory=list)
     sources_used: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # Fields nested inside a Struct/List column, as dot-paths
+    # (`metadata.patient.ssn`, `visits[].date`). Additive and separate from
+    # `schema`/`columns`, which stay the flat, physical top-level view.
+    nested_leaf_columns: list[ColumnProfile] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -151,6 +162,7 @@ class DatasetProfile:
             "sources_used": self.sources_used,
             "warnings": self.warnings,
             "columns": [asdict(col) for col in self.columns],
+            "nested_leaf_columns": [asdict(col) for col in self.nested_leaf_columns],
             "downcast_recommendations": [
                 asdict(rec) for rec in self.downcast_recommendations
             ],
@@ -190,6 +202,7 @@ class DataModelProfiler:
         schema: dict[str, str] = {}
         row_count: int | None = None
         columns: dict[str, ColumnProfile] = {}
+        nested_leaves: list[ColumnProfile] = []
 
         if fmt == "parquet" and pq:
             parquet_profile = self._profile_parquet_metadata(files)
@@ -240,6 +253,9 @@ class DataModelProfiler:
                 sample_columns = self._profile_polars(lf.head(sample_rows), source="sample_profile")
                 columns.update(_merge_columns(columns, sample_columns))
                 sources_used.append("sample_profile")
+                nested_leaves = self._profile_nested_leaves(
+                    lf, sample_rows=sample_rows, warnings=warnings
+                )
                 if exact:
                     exact_columns = self._profile_polars(lf, source="exact_scan")
                     columns.update(_merge_columns(columns, exact_columns))
@@ -269,6 +285,7 @@ class DataModelProfiler:
             downcast_recommendations=recommendations,
             sources_used=list(dict.fromkeys(sources_used)),
             warnings=warnings,
+            nested_leaf_columns=nested_leaves,
         )
 
     def recommend_downcast(self, column: ColumnProfile) -> DowncastRecommendation:
@@ -399,6 +416,83 @@ class DataModelProfiler:
             columns[name] = ColumnProfile(**kwargs)
         return columns
 
+    def _profile_nested_leaves(
+        self,
+        lf: Any,
+        *,
+        sample_rows: int,
+        warnings: list[str],
+    ) -> list[ColumnProfile]:
+        """Enumerate the leaves of every Struct/List column as dot-paths.
+
+        Struct leaves are addressable with a plain `.struct.field()` chain, so
+        they get real null_count (plus min/max for numeric/temporal leaves)
+        from ONE batched aggregate over the full lazy frame -- streaming
+        aggregates, no row materialization -- and sample values from the
+        sample window.
+
+        Leaves under a List are discovery-only (name + dtype, `null_count`
+        None, no sample values): reaching them needs `.explode()`, which fans
+        rows out by the array length of an untrusted payload. Promoting one to
+        full stats is an explicit, human-confirmed step, not a profiling
+        side effect.
+        """
+        leaves: list[tuple[str, list[str], str, str]] = []
+        for name, dtype in lf.collect_schema().items():
+            if _nested_children(dtype) is None:
+                continue
+            _walk_nested_dtype(dtype, name, [name], 1, False, leaves, warnings)
+        if not leaves:
+            return []
+
+        struct_index = {
+            pos: idx
+            for idx, pos in enumerate(p for p, leaf in enumerate(leaves) if leaf[3] == "struct")
+        }
+        struct_leaves = [leaves[pos] for pos in struct_index]
+        exprs = []
+        for idx, (_, parts, dtype_str, _kind) in enumerate(struct_leaves):
+            expr = _struct_path_expr(parts)
+            exprs.append(expr.null_count().alias(f"{idx}__null_count"))
+            if _is_numeric_dtype(dtype_str) or _is_temporal_dtype(dtype_str):
+                exprs.extend(
+                    [expr.min().alias(f"{idx}__min"), expr.max().alias(f"{idx}__max")]
+                )
+        try:
+            stats = lf.select(exprs).collect().row(0, named=True) if exprs else {}
+        except Exception as exc:
+            warnings.append(f"nested_leaf_stats_failed:{type(exc).__name__}:{exc}")
+            stats = {}
+
+        sample_lf = lf.head(sample_rows)
+        profiles: list[ColumnProfile] = []
+        for pos, (path, parts, dtype_str, kind) in enumerate(leaves):
+            if kind != "struct":
+                profiles.append(
+                    ColumnProfile(
+                        name=path,
+                        dtype=dtype_str,
+                        source=(
+                            "nested_leaf_list_element"
+                            if kind == "list_element"
+                            else "nested_leaf_truncated"
+                        ),
+                    )
+                )
+                continue
+            idx = struct_index[pos]
+            profiles.append(
+                ColumnProfile(
+                    name=path,
+                    dtype=dtype_str,
+                    null_count=stats.get(f"{idx}__null_count"),
+                    sample_values=_sample_values(sample_lf, _struct_path_expr(parts)),
+                    sample_min=stats.get(f"{idx}__min"),
+                    sample_max=stats.get(f"{idx}__max"),
+                    source="nested_leaf_struct",
+                )
+            )
+        return profiles
 
     def _profile_csv_duckdb(
         self,
@@ -466,12 +560,22 @@ class DataModelProfiler:
                 else {}
             )
 
-            distinct_selects = ", ".join(
-                f"COUNT(DISTINCT {_quote_ident(name)}) AS {_quote_ident(name + '__distinct')}"
-                for name in schema
+            # One full-file aggregate pass: distinct counts for every column
+            # plus null counts for the stat columns. null_count rides along
+            # here rather than coming off the LIMIT-ed sample table, so a null
+            # sitting past the sample window is still counted -- an aggregate
+            # pushdown scans no rows into Python and stays cheap at any file
+            # size. min/max keep their deliberate sample-vs-exact split.
+            full_selects = [f"COUNT(DISTINCT {_quote_ident(name)})" for name in schema]
+            full_selects.extend(
+                f"count(*) - count({_quote_ident(name)})" for name in stat_names
             )
-            distinct_row = conn.execute(f"SELECT {distinct_selects} FROM {source}").fetchone()
-            distinct_counts = dict(zip([f"{name}__distinct" for name in schema], distinct_row))
+            full_row = conn.execute(f"SELECT {', '.join(full_selects)} FROM {source}").fetchone()
+            distinct_counts = dict(zip(schema, full_row))
+            full_null_counts = {
+                name: int(full_row[len(schema) + idx])
+                for idx, name in enumerate(stat_names)
+            }
 
             columns: dict[str, ColumnProfile] = {}
             for name, dtype_str in schema.items():
@@ -483,18 +587,14 @@ class DataModelProfiler:
                 sample_values = [_json_safe_value(row[0]) for row in value_rows]
                 col_stats = stats.get(name) or {}
                 col_exact = exact_stats.get(name) or {}
-                unique_count = distinct_counts.get(f"{name}__distinct")
+                unique_count = distinct_counts.get(name)
                 cardinality_ratio = (
                     (unique_count / row_count) if unique_count is not None and row_count else None
                 )
                 columns[name] = ColumnProfile(
                     name=name,
                     dtype=dtype_str,
-                    null_count=(
-                        col_exact.get("null_count")
-                        if exact and name in exact_stats
-                        else col_stats.get("null_count")
-                    ),
+                    null_count=full_null_counts.get(name),
                     sample_values=sample_values,
                     sample_min=col_stats.get("min"),
                     sample_max=col_stats.get("max"),
@@ -634,12 +734,67 @@ def _merge_columns(
     return merged
 
 
-def _sample_values(lf: Any, column: str, limit: int = 8) -> list[Any]:
+def _nested_children(dtype: Any) -> tuple[str, Any] | None:
+    """("struct", fields) / ("list", inner) for a nested dtype, else None."""
+    fields = getattr(dtype, "fields", None)
+    if fields is not None:
+        return ("struct", fields)
+    inner = getattr(dtype, "inner", None)
+    if inner is not None:
+        return ("list", inner)
+    return None
+
+
+def _walk_nested_dtype(
+    dtype: Any,
+    path: str,
+    parts: list[str],
+    depth: int,
+    in_list: bool,
+    out: list[tuple[str, list[str], str, str]],
+    warnings: list[str],
+) -> None:
+    """Collect (dot-path, struct-field parts, dtype, kind) leaves under `dtype`."""
+    children = _nested_children(dtype)
+    if children is None:
+        out.append((path, parts, str(dtype), "list_element" if in_list else "struct"))
+        return
+    if depth >= _MAX_NESTED_DEPTH:
+        warning = f"nested_leaf_discovery_capped_at_depth:{_MAX_NESTED_DEPTH}:{path}"
+        if warning not in warnings:
+            warnings.append(warning)
+        out.append((path, parts, str(dtype), "truncated"))
+        return
+    kind, child = children
+    if kind == "struct":
+        for nested_field in child:
+            _walk_nested_dtype(
+                nested_field.dtype,
+                f"{path}.{nested_field.name}",
+                parts + [nested_field.name],
+                depth + 1,
+                in_list,
+                out,
+                warnings,
+            )
+    else:
+        _walk_nested_dtype(child, f"{path}[]", parts, depth + 1, True, out, warnings)
+
+
+def _struct_path_expr(parts: list[str]) -> Any:
+    expr = pl.col(parts[0])
+    for part in parts[1:]:
+        expr = expr.struct.field(part)
+    return expr
+
+
+def _sample_values(lf: Any, column: str | Any, limit: int = 8) -> list[Any]:
+    expr = pl.col(column) if isinstance(column, str) else column
     try:
         values = (
-            lf.select(pl.col(column).drop_nulls().unique().head(limit).alias(column))
+            lf.select(expr.drop_nulls().unique().head(limit).alias("__sample"))
             .collect()
-            .get_column(column)
+            .get_column("__sample")
             .to_list()
         )
     except Exception:
@@ -709,7 +864,23 @@ def _smallest_integer_dtype(lo: Any, hi: Any, unsigned: bool = False) -> str | N
     return bounds[-1][0]
 
 
+def _is_nested_dtype(dtype: str) -> bool:
+    """A container dtype (Struct/List/Array/Map), by its dtype string.
+
+    The scalar predicates below match on substrings, and a nested dtype's
+    repr embeds its children -- `Struct({'x': Int64})` contains "int",
+    `List(Struct({'date': String}))` contains "date". Without this guard a
+    payload column reads as numeric/temporal and `min()`/`max()` is pushed
+    onto a struct, which Polars rejects and which used to abort the whole
+    sample profile for the dataset.
+    """
+    value = dtype.lower()
+    return value.startswith(("struct", "list", "array", "large_list", "map"))
+
+
 def _is_numeric_dtype(dtype: str) -> bool:
+    if _is_nested_dtype(dtype):
+        return False
     value = dtype.lower()
     return any(token in value for token in ("int", "uint", "float", "decimal", "double"))
 
@@ -729,6 +900,8 @@ def _is_float_or_decimal_dtype(dtype: str) -> bool:
 
 
 def _is_temporal_dtype(dtype: str) -> bool:
+    if _is_nested_dtype(dtype):
+        return False
     value = dtype.lower()
     return "date" in value or "time" in value
 

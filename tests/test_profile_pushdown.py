@@ -113,6 +113,7 @@ class PushdownEquivalenceTests(unittest.TestCase):
                 "sources_used",
                 "warnings",
                 "columns",
+                "nested_leaf_columns",
                 "downcast_recommendations",
             },
         )
