@@ -17,6 +17,7 @@ but not yet created.
 | `databricks_scopes.json` | Reference: all Databricks OAuth scopes (`_meta` + `scopes`) with relevance notes. | docs / scope planning | `[active]` (reference) |
 | `external_data_roots.example.json` | Policy for huge external data roots (bounded listing, allowlist required before reads/profiling). Root path from `CMS_COLD_STORAGE_ROOT`. | external-source intake | `[template]` |
 | `source_catalogs/cms_public.json` | A source catalog definition (CMS public data). | source-catalog commands | `[active]` |
+| `optimization_playbook.yaml` | Symptom -> detect -> cheapest-first remedies rules (Spark/AQE, Delta clustering, Photon, dbt/warehouse, Polars) + Q5 revisit triggers, every threshold cited to a vendor doc. | `core/blueprint/playbook.py` | `[active]` |
 | `domain_packs/` | Curated domain-inference packs. **[deprecated]** — never wired (no loader); superseded by the derived workspace lexicon in `text_parser.py`. Do not add packs. See `domain_packs/_README.md`. | nothing | `[deprecated]` |
 | `ai_cli_harness.example.json` | AI-CLI eval harness config (which CLI, args, system-prompt file, pass threshold). | `run-ai-cli-harness` | `[template]` |
 | `ai_cli_system_prompt.example.txt` | System prompt used by the AI-CLI harness. | `run-ai-cli-harness` | `[template]` |
