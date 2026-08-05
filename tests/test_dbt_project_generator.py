@@ -16,7 +16,6 @@ import yaml
 
 from core.observability.cost_ledger import RUN_ID_ENV
 
-from core.onboarding.data_source_panel import DataSourceAnswerRecorder
 from core.onboarding.kpi.dbt_project_generator import DbtProjectGenerator
 from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
 from core.onboarding.workspace.onboarding import WorkspaceOnboarder
@@ -255,6 +254,136 @@ class DbtProjectGeneratorUcSourcedTests(unittest.TestCase):
             written = (layout.contracts_dir.parent / "stg_cptcodes.sql").read_text(encoding="utf-8")
             self.assertIn("{{ source('raw', 'cptcodes') }}", written)
             self.assertNotIn("healthcare_rcm", written)
+
+
+class SchemaExclusionTests(unittest.TestCase):
+    """S2's schema-drift decision (`schema_exclusions.json`) quarantines a
+    column: silver stops selecting it, and the emitted model names the
+    decision that dropped it. Absent contract = unchanged behaviour."""
+
+    def test_excluded_column_is_dropped_from_the_staging_select(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = _create_kpi001_workspace(root)
+            layout = WorkspaceLayout(project_root=workspace)
+            (layout.contracts_dir / "schema_exclusions.json").write_text(
+                json.dumps(
+                    {
+                        "transactions": {
+                            "excluded_columns": ["LineOfBusiness"],
+                            "decided_by": "reviewer",
+                            "at": "2026-08-05T00:00:00Z",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = DbtProjectGenerator(
+                root, "workspaces/demo", catalog="main", schema="rcm"
+            ).generate()
+            staging = (
+                root / result.dbt_project_dir / "models" / "staging" / "stg_transactions.sql"
+            ).read_text(encoding="utf-8")
+            self.assertNotIn("`LineOfBusiness`", staging)
+            self.assertIn("schema_exclusions.json", staging)
+            self.assertIn("LineOfBusiness", staging)  # named in the drop comment
+
+    def test_absent_exclusions_contract_changes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _create_kpi001_workspace(root)
+            result = DbtProjectGenerator(
+                root, "workspaces/demo", catalog="main", schema="rcm"
+            ).generate()
+            staging = (
+                root / result.dbt_project_dir / "models" / "staging" / "stg_transactions.sql"
+            ).read_text(encoding="utf-8")
+            self.assertIn("`LineOfBusiness`", staging)
+            self.assertNotIn("schema_exclusions", staging)
+
+
+class LateArrivingDimensionTests(unittest.TestCase):
+    """Audit missing #1: an early-arriving fact whose dimension row has not
+    landed yet must not lose its measure. The join is already LEFT; the
+    missing halves were the inferred-member macro and the COALESCE."""
+
+    def _generate(self, root: Path, *, late_dims: bool):
+        _create_kpi001_workspace(root)
+        if late_dims:
+            layout = WorkspaceLayout(project_root=root / "workspaces" / "demo")
+            (layout.contracts_dir / "blueprint_decisions.json").write_text(
+                json.dumps(
+                    {
+                        "decisions": [
+                            {
+                                "decision": "modeling",
+                                "choice": "inferred_member_dimensions",
+                                "rule_id": "R10",
+                                "status": "decided",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+        return DbtProjectGenerator(root, "workspaces/demo", catalog="main", schema="rcm")
+
+    def test_macro_emitted_only_when_the_modeling_decision_fires(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = self._generate(root, late_dims=False).generate()
+            self.assertFalse(
+                (root / result.dbt_project_dir / "macros" / "inferred_member.sql").exists()
+            )
+
+    def test_inferred_member_macro_inserts_an_unknown_member_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = self._generate(root, late_dims=True).generate()
+            macro = (
+                root / result.dbt_project_dir / "macros" / "inferred_member.sql"
+            ).read_text(encoding="utf-8")
+            self.assertIn("macro inferred_member(", macro)
+            self.assertIn("when not matched then insert", macro)
+            self.assertIn("{{ surrogate_key(", macro)  # deterministic hash key
+            self.assertIn("is_inferred", macro)
+            self.assertIn("true", macro)
+            # Type-1 overwrite when the real dimension row finally arrives.
+            self.assertIn("macro resolve_inferred_member(", macro)
+            self.assertIn("is_inferred = false", macro)
+
+    def test_dimension_side_feature_is_coalesced_to_the_unknown_member(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gen = self._generate(root, late_dims=True)
+            profile_map = {
+                "facts.csv": {"format": "csv", "schema": {"PaidAmount": "Float64"}},
+                "dim_payer.csv": {"format": "csv", "schema": {"PayerName": "String"}},
+            }
+            kpi = {
+                "kpi_id": "kpi_x",
+                "metric": "sum(PaidAmount)",
+                "features": [
+                    {
+                        "feature": "PaidAmount",
+                        "state": "proven_direct",
+                        "source_columns": [{"dataset": "facts.csv", "column": "PaidAmount"}],
+                    },
+                    {
+                        "feature": "PayerName",
+                        "state": "proven_direct",
+                        "source_columns": [{"dataset": "dim_payer.csv", "column": "PayerName"}],
+                    },
+                ],
+            }
+            items = gen._feature_select_items(
+                kpi, {"facts.csv": "s0", "dim_payer.csv": "s1"}, profile_map
+            )
+            joined = "\n".join(items)
+            self.assertIn("coalesce", joined)
+            self.assertIn("__unknown_member__", joined)
+            # The base (fact) side is never coalesced -- it is the grain.
+            self.assertNotIn("coalesce(cast(s0.", joined)
 
 
 class ContractEnforcementTests(unittest.TestCase):

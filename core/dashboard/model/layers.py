@@ -167,9 +167,15 @@ def _dbt_dir(layout: WorkspaceLayout) -> Path:
 
 
 def _read_dbt_gold_schema(layout: WorkspaceLayout) -> str | None:
-    """The marts `+schema:` dbt_project_generator.py actually wrote, read
+    """The LIVE (published) gold schema dbt_project_generator.py wrote, read
     from the generated dbt_project.yml rather than assumed -- `--gold-schema`
     is a CLI override (default "gold"), so a workspace may have customized it.
+
+    `vars.gold_schema` wins over the marts `+schema:`: under Write-Audit-
+    Publish the marts config points at the STAGING schema (built, not yet
+    published), and a dashboard must read the served tables, never the staging
+    half of the pair. The marts `+schema:` fallback keeps projects generated
+    before WAP readable.
     """
     project_yml = _dbt_dir(layout) / "dbt_project.yml"
     if not project_yml.exists():
@@ -178,6 +184,9 @@ def _read_dbt_gold_schema(layout: WorkspaceLayout) -> str | None:
         import yaml
 
         data = yaml.safe_load(project_yml.read_text(encoding="utf-8")) or {}
+        live = (data.get("vars") or {}).get("gold_schema")
+        if live:
+            return str(live)
         models = data.get("models") or {}
         for project_cfg in models.values():
             if not isinstance(project_cfg, dict):
