@@ -51,6 +51,10 @@ it reads and the tables it builds are remote.
 | Generated artifacts | `workspaces/<project>/interns/` | same path, unchanged |
 | Credentials needed | None | Databricks CLI auth (see readiness check, below) |
 
+A newer cloud-native chain (`declare-source` -> ... -> `generate-ingestion`) is built and runnable
+today for workspaces whose data already lives in a real source; it does not change the default
+above. See "New spine (built, not yet default)" under `Tool And Evidence Discovery`.
+
 ## Step 0: Active Workflow Setup
 
 Before onboarding, optimizing, refactoring, or writing outputs, establish the active workflow.
@@ -639,28 +643,34 @@ outputs.
 
 ### Stage index (registry summary)
 
-This index satisfies the registry-read gate. `TOOLS.md` (~16k tokens) and `.agents/tools.json`
-(~23k tokens) must NOT be read whole as session preamble — find the stage below, then read only
+This index satisfies the registry-read gate. `TOOLS.md` (~25k tokens) and `.agents/tools.json`
+(~18k tokens) must NOT be read whole as session preamble — find the stage below, then read only
 the matching `### <command>` section of `TOOLS.md` for the one command you are about to run.
 `tools.json` is machine-only (programmatic routing); never page through it.
 
 | Stage | Commands (each is a `###` section in TOOLS.md) |
 | --- | --- |
 | Workspace selection | `list-workspace-files`, `prepare-workspace-selection`, `session-snapshot`, `prepare-data-source-panel`, `apply-data-source-answer` |
-| Onboarding | `onboard-workspace`, `kickstart-workspace`, `understand-data` |
+| Source intake (declare/discover/interview) | `declare-source`, `discover-source`, `prepare-intake-panel`, `apply-intake-answer` -- the new-spine Phase 0/1 chain; see "New spine (built, not yet default)" below |
+| Onboarding | `onboard-workspace`, `kickstart-workspace`, `understand-data`, `scan-document`, `prepare-document-candidate-review`, `apply-document-candidate` |
 | Cloud-native (dbt/Airflow) | `check-platform-readiness`, `generate-dbt-project`, `prepare-data-quality-panel`, `apply-data-quality-answer`, `verify-dbt-project`, `dbt-index`, `run-dbt-backfill`, `reconcile-warehouse-cost` |
-| KPI definition + blockers | `prepare-kpi-blocker-panel`, `apply-kpi-panel-answer`, `apply-kpi-definition`, `confirm-cli-agent-proposal`, `prepare-kpi-generation`, `apply-kpi-generation-answer`, `finalize-kpi-generation` (deprecated redirects: `resolve-kpi-features`, `blocker-question-panel`, `derived-feature-markdown`) |
-| Data model | `prepare-data-model-generation`, `apply-data-model-answer`, `finalize-data-model-generation`, `prepare-data-model-blocker-panel`, `apply-data-model-blocker-answer`, `parse-data-model-images`, `export-data-model-diagram` |
+| KPI definition + blockers | `prepare-kpi-blocker-panel`, `apply-kpi-panel-answer`, `apply-kpi-definition`, `confirm-cli-agent-proposal`, `prepare-kpi-generation`, `apply-kpi-generation-answer`, `finalize-kpi-generation`, `build-intent-contract`, `plan-kpi-completion` (deprecated redirects: `resolve-kpi-features`, `blocker-question-panel`, `derived-feature-markdown`) |
+| Data model | `prepare-data-model-generation`, `apply-data-model-answer`, `finalize-data-model-generation`, `prepare-data-model-blocker-panel`, `apply-data-model-blocker-answer`, `parse-data-model-images`, `export-data-model-diagram`, `apply-design-panel-answer` (ratify one proposed star-schema fact/dimension/relationship) |
 | Relationships + source-to-target | `build-relationship-contracts`, `apply-relationship-answer`, `plan-source-to-target` |
 | **Solution blueprint (FIRST for a new source)** | `discover-external-sources`, `prepare-solution-blueprint`, `apply-blueprint-answer`, `apply-uc-intake` |
-| Source catalog + external intake | `prepare-source-catalog`, `build-catalog-contract`, `build-source-family-contracts`, `discover-external-sources`, `prepare-external-source-intake`, `ingest-source-catalog` |
-| Engineering route + pipeline | `prepare-data-engineering-route`, `prepare-pipeline-plan`, `prepare-pipeline-format-panel`, `prepare-pipeline-deployment-plan`, `apply-pipeline-decision`, `generate-pipeline-sql` |
-| Generation + execution | `run-kpi-pipeline`, `workspace-flow`, `generate-kpi-sql`, `generate-kpi-engines`, `kpi-proof-packet` |
-| Validation + QA | `validate-workspace-artifacts`, `validate-project-harness`, `harness reliability`, `harness workflow-guardrails`, `harness data-quality`, `prepare-duplicate-review-panel`, `apply-duplicate-review-answer`, `harness layered-pipeline`, `harness pipeline-execution`, `validate-git-hygiene`, `validate-memory-health` |
-| Evidence + reporting | `record-workspace-trajectory`, `build-workspace-evidence-graph`, `export-kpi-registry-excel`, `export-workspace-presentation`, `prepare-wiki-memory`, `prepare-workspace-bug-report`, `record-engine-evolution` |
-| Dashboard | `workspace-dashboard` (start `--live` / `--stop` / `--refresh` / `--refresh-seconds` / `--screen`), `dashboard-verify` (single-page DOM/color gate) — see "Dashboard server lifecycle" below |
-| Context + budget | `context-router`, `resource-preflight`, `cleanup-workspace-references` |
-| Dev + harness | `prepare-agent-benchmark`, `harness ai-app`, `harness ai-cli`, `prepare-workspace-workflow`, `profiler.py`, `optimizer_finder.py`, `methodology_parser.py`, `generate-skill-adapters`, Databricks tools |
+| Blueprint + decisions (new spine) | `prepare-blueprint`, `confirm-blueprint` -- decision-table blueprint plus the ONE human gate; `prepare-blueprint` refuses until the intake playback is confirmed (see below) |
+| Provisioning + ingestion | `plan-provisioning`, `apply-provisioning`, `generate-ingestion` -- additive-only Unity Catalog provisioning and generated Databricks-native ingestion code |
+| Schema evolution | `prepare-drift-panel`, `apply-drift-answer` -- snapshot/diff discovery, then record `propagate` / `quarantine_column` / `block_pipeline` |
+| Databricks deployment | `prepare-databricks-assets`, `prepare-genie-workspace`, `deploy-databricks-workspace`, `check-remote-execution-gate` |
+| Source catalog + external intake | `prepare-source-catalog`, `source-catalog` (one control surface for the whole catalog chain: `plan`, `preflight`, `api-fetch`, `local-stage`, `uc-inspect`, `discover-docs`, `index-catalog`, `match-catalog`, `draft-selection`, `finalize-selection`, `process`, `validate`, `run`), `build-catalog-contract`, `build-source-family-contracts`, `discover-external-sources`, `prepare-external-source-intake`, `apply-external-source-intake`, `ingest-source-catalog` |
+| Engineering route + pipeline | `prepare-data-engineering-route`, `prepare-pipeline-plan`, `prepare-pipeline-format-panel`, `apply-pipeline-format-answer`, `prepare-pipeline-deployment-plan`, `apply-pipeline-decision`, `generate-pipeline-sql`, `prepare-bronze-silver-standards` |
+| Generation + execution | `run-kpi-pipeline`, `workspace-flow`, `generate-kpi-sql`, `generate-kpi-engines`, `kpi-proof-packet`, `recommend-kpi-engine`, `kpi-local-warehouse`, `pipeline-run` (dependency-ordered whole-pipeline run), `loop` (governed optimization loop over `config/tasks.json`'s active task; dry-run unless `--live --confirm-live-mutation` plus `AUTORESEARCH_ALLOW_LOCAL_MUTATION=1`) |
+| Governance + audit | `assess-workspace-phi`, `prepare-phi-review-panel`, `apply-phi-review-answer`, `verify-audit-chain` |
+| Validation + QA | `validate-workspace-artifacts`, `validate-project-harness`, `harness reliability`, `harness workflow-guardrails`, `harness data-quality`, `prepare-duplicate-review-panel`, `apply-duplicate-review-answer`, `harness layered-pipeline`, `harness pipeline-execution`, `validate-git-hygiene`, `validate-memory-health`, `verify-kpi-output`, `validate-kpi-intent-coverage`, `validate-engine-generation`, `check-kpi-anomalies`, `workspace-state-health` |
+| Evidence + reporting | `record-workspace-trajectory`, `build-workspace-evidence-graph`, `query-workspace-evidence-graph`, `export-kpi-registry-excel`, `export-workspace-presentation`, `prepare-wiki-memory`, `prepare-workspace-bug-report`, `record-engine-evolution` |
+| Dashboard | `workspace-dashboard` (start `--live` / `--stop` / `--refresh` / `--refresh-seconds` / `--screen`), `dashboard-verify` (single-page DOM/color gate), `workspace-dashboard-deck` (interactive PPTX export), `workspace-dashboard-pdf` (rich PDF export), `suggest-kpi-improvements` — see "Dashboard server lifecycle" below |
+| Context + budget | `context-router`, `resource-preflight`, `cleanup-workspace-references`, `retrieve-docs` (bounded internal-doc retrieval over `docs/`), `token-report`, `cost-ledger-ingest` |
+| Dev + harness | `doctor` (read-only local-setup pass: Python/uv, PySpark's Java requirement, Databricks/dbt/Airflow, git hygiene), `prepare-agent-benchmark`, `harness ai-app`, `harness ai-cli`, `prepare-workspace-workflow`, `build-tool-index` (regenerate `.agents/tools.json` from the CLI registry), `resolver-accuracy`, `dataops`, `profiler.py`, `optimizer_finder.py`, `methodology_parser.py`, `generate-skill-adapters`, Databricks tools |
 
 Dashboard server lifecycle:
 
@@ -724,6 +734,56 @@ https://docs.getdbt.com/llms-full.txt      # the whole corpus, for searching whe
 
 Search `llms-full.txt` for the concept, take the path it names, then fetch that one page's `.md`.
 Do not fetch `llms-full.txt` to answer a question you already have a URL for.
+
+### New spine (built, not yet default)
+
+These commands exist and run today. They are the cloud-native path for a workspace whose data
+already lives in a real source (S3/ADLS/GCS/JDBC/Kafka/Unity Catalog) -- use them instead of
+improvising raw SDK calls. **The local-first flow described above remains the documented default**;
+flipping the defaults is a separate, still-pending step (see
+`docs/plans/2026-08-05-finish-cloud-first-restructure.md`, Task D2). Design spec:
+`docs/superpowers/specs/2026-08-05-cloud-first-restructure-design.md`.
+
+The chain, in order:
+
+```powershell
+uv run declare-source       --workspace workspaces/<project> --type <source-type> --location <uri>
+uv run discover-source      --workspace workspaces/<project>
+uv run prepare-intake-panel --workspace workspaces/<project>
+uv run apply-intake-answer  --workspace workspaces/<project> --question <id> --answer <option> --answered-by "<name>"
+uv run apply-intake-answer  --workspace workspaces/<project> --question playback_confirm --answer confirmed --answered-by "<name>"
+uv run prepare-blueprint    --workspace workspaces/<project>
+uv run confirm-blueprint    --workspace workspaces/<project> --confirmed-by "<name>"
+uv run plan-provisioning    --workspace workspaces/<project> --catalog <name> --env dev
+uv run apply-provisioning   --workspace workspaces/<project>
+uv run generate-ingestion   --workspace workspaces/<project>
+```
+
+- `declare-source` records where the data lives in `workspace_settings.json` (`source_declaration`).
+  `--credential-ref` is the NAME of a credential (secret scope/key, cloud profile, env-var name, UC
+  storage credential), never a secret value.
+- `discover-source` scans the declared source read-only into
+  `interns/generated/intake/discovery.json` (bounded by `--max-items` / `--max-seconds`).
+- `prepare-intake-panel` writes the merged interview panel
+  (`interns/reports/intake_panel/current.{json,md}`) plus the understanding playback
+  (`interns/reports/intake_playback/current.md`), which restates what the platform believes it was
+  told, tagged (measured)/(you said)/(default). `apply-intake-answer` records one answer at a time.
+- **Alignment gate -- not a bug.** `prepare-blueprint` refuses until the playback has been confirmed
+  with `apply-intake-answer --question playback_confirm --answer confirmed --answered-by "<name>"`.
+  Nothing is rendered or created by the refusal; read the playback, fix any wrong line by
+  re-answering that question, then confirm. Re-answering a question after the blueprint was
+  confirmed clears the gate again, on purpose.
+- `confirm-blueprint` is the ONE human gate: it requires a real `--confirmed-by` name (an agent
+  identity is refused) and refuses while any decision is still blocked on a missing fact.
+- `apply-provisioning` requires that confirmation; without it, it is a dry run and says so. It is
+  additive-only and idempotent -- existing objects are recorded `existing` and skipped, and
+  `blocked_destructive` steps are never executed. `AUTORESEARCH_ALLOW_REMOTE_EXECUTION=0` still
+  stops it.
+- `generate-ingestion` emits Databricks-native ingestion code per discovered table into
+  `workspaces/<project>/ingestion/` (git-tracked, like `dbt/`). It generates; it runs nothing.
+- After the source is live, `prepare-drift-panel` / `apply-drift-answer` handle schema evolution:
+  diff the new discovery against the previous snapshot and record `propagate`, `quarantine_column`,
+  or `block_pipeline` (the last two require a real `--confirmed-by`).
 
 ## Secret And Environment Display Guardrail
 

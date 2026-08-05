@@ -1,7 +1,11 @@
 {
   "version": 2,
   "source": "generated from pyproject.toml [project.scripts] by core.dev.tool_index",
-  "evidence_policy": "Derived, not curated. Do not hand-edit. Regenerate: uv run build-tool-index",
+  "evidence_policy": {
+    "secret_display_rule": "Never print or paste .env, .databrickscfg, private keys, tokens, connection strings, bearer headers, cookies, or shell environment dumps. Report only existence/status or redacted key names such as OPENAI_API_KEY=<redacted>.",
+    "raw_dataset_rule": "Use generated profile artifacts before raw data: read interns/generated/profiles/profile_index.json and the relevant *.profile.json first, and never paste raw dataset contents into prompts. Bounded samples only when profiles are insufficient, and state why.",
+    "generation": "Derived, not curated. Do not hand-edit. Regenerate: uv run build-tool-index"
+  },
   "tools": [
     {
       "name": "apply-blueprint-answer",
@@ -76,6 +80,12 @@
       "summary": "Governed document candidate promotion (Phase 3: promote path, step 2)."
     },
     {
+      "name": "apply-drift-answer",
+      "command": "uv run apply-drift-answer --workspace <workspace>",
+      "entry_point": "core.evolution.cli:apply_drift_answer_main",
+      "summary": "Governed CLI entry points for schema evolution."
+    },
+    {
       "name": "apply-duplicate-review-answer",
       "command": "uv run apply-duplicate-review-answer --workspace <workspace>",
       "entry_point": "core.onboarding.data_quality:apply_main",
@@ -120,6 +130,12 @@
         "data-engineering-pipeline-design",
         "stakeholder-memory"
       ]
+    },
+    {
+      "name": "apply-intake-answer",
+      "command": "uv run apply-intake-answer --workspace <workspace>",
+      "entry_point": "core.intake.cli:apply_intake_answer_main",
+      "summary": "Governed CLI entry points for Phase 0/1."
     },
     {
       "name": "apply-kpi-definition",
@@ -214,6 +230,12 @@
         "data-engineering-pipeline-design",
         "stakeholder-memory"
       ]
+    },
+    {
+      "name": "apply-provisioning",
+      "command": "uv run apply-provisioning --workspace <workspace>",
+      "entry_point": "core.provisioning.cli:apply_provisioning_main",
+      "summary": "Governed CLI entry points for provisioning + ingestion generation."
     },
     {
       "name": "apply-relationship-answer",
@@ -369,6 +391,12 @@
       ]
     },
     {
+      "name": "check-kpi-anomalies",
+      "command": "uv run check-kpi-anomalies --workspace <workspace>",
+      "entry_point": "core.observability.kpi_anomaly_check:check_kpi_anomalies_main",
+      "summary": "Post-results DAG task entrypoint: read this run's KPI results + this"
+    },
+    {
       "name": "check-platform-readiness",
       "command": "uv run check-platform-readiness --workspace <workspace>",
       "entry_point": "core.platform_readiness:main",
@@ -397,6 +425,12 @@
       "required_skills": [
         "workspace-governance"
       ]
+    },
+    {
+      "name": "confirm-blueprint",
+      "command": "uv run confirm-blueprint --workspace <workspace>",
+      "entry_point": "core.blueprint.cli:confirm_blueprint_main",
+      "summary": "CLI entry points for the blueprint slice."
     },
     {
       "name": "confirm-cli-agent-proposal",
@@ -451,6 +485,12 @@
       "summary": "Local dbt model lineage and blast radius -- no warehouse, no dbt install."
     },
     {
+      "name": "declare-source",
+      "command": "uv run declare-source --workspace <workspace>",
+      "entry_point": "core.intake.cli:declare_source_main",
+      "summary": "Governed CLI entry points for Phase 0/1."
+    },
+    {
       "name": "deploy-databricks-workspace",
       "command": "uv run deploy-databricks-workspace --workspace <workspace>",
       "entry_point": "core.onboarding.databricks.workspace_deployer:main",
@@ -497,6 +537,12 @@
         "data-engineering-pipeline-design",
         "task-onboarding"
       ]
+    },
+    {
+      "name": "discover-source",
+      "command": "uv run discover-source --workspace <workspace>",
+      "entry_point": "core.intake.cli:discover_source_main",
+      "summary": "Governed CLI entry points for Phase 0/1."
     },
     {
       "name": "doctor",
@@ -616,6 +662,12 @@
       "command": "uv run generate-dbt-project --workspace <workspace>",
       "entry_point": "core.onboarding.kpi.dbt_project_generator:main",
       "summary": "Generate a real, git-tracked dbt project from the same confirmed contracts"
+    },
+    {
+      "name": "generate-ingestion",
+      "command": "uv run generate-ingestion --workspace <workspace>",
+      "entry_point": "core.provisioning.cli:generate_ingestion_main",
+      "summary": "Governed CLI entry points for provisioning + ingestion generation."
     },
     {
       "name": "generate-kpi-engines",
@@ -842,6 +894,12 @@
       "summary": "Dependency-aware parallel KPI completion planning."
     },
     {
+      "name": "plan-provisioning",
+      "command": "uv run plan-provisioning --workspace <workspace>",
+      "entry_point": "core.provisioning.cli:plan_provisioning_main",
+      "summary": "Governed CLI entry points for provisioning + ingestion generation."
+    },
+    {
       "name": "plan-source-to-target",
       "command": "uv run plan-source-to-target --workspace <workspace>",
       "entry_point": "core.onboarding.relationships.source_to_target_planner:main",
@@ -884,6 +942,12 @@
         "workspace-kpi-query-optimizer",
         "evolution"
       ]
+    },
+    {
+      "name": "prepare-blueprint",
+      "command": "uv run prepare-blueprint --workspace <workspace>",
+      "entry_point": "core.blueprint.cli:prepare_blueprint_main",
+      "summary": "CLI entry points for the blueprint slice."
     },
     {
       "name": "prepare-bronze-silver-standards",
@@ -996,6 +1060,12 @@
       "summary": "Governed document candidate review panel (Phase 3: promote path, step 1)."
     },
     {
+      "name": "prepare-drift-panel",
+      "command": "uv run prepare-drift-panel --workspace <workspace>",
+      "entry_point": "core.evolution.cli:prepare_drift_panel_main",
+      "summary": "Governed CLI entry points for schema evolution."
+    },
+    {
       "name": "prepare-duplicate-review-panel",
       "command": "uv run prepare-duplicate-review-panel --workspace <workspace>",
       "entry_point": "core.onboarding.data_quality:panel_main",
@@ -1044,6 +1114,12 @@
       "command": "uv run prepare-genie-workspace --workspace <workspace>",
       "entry_point": "core.onboarding.databricks.genie_workspace:main",
       "summary": "Generate reviewable Databricks Genie workspace setup specs."
+    },
+    {
+      "name": "prepare-intake-panel",
+      "command": "uv run prepare-intake-panel --workspace <workspace>",
+      "entry_point": "core.intake.cli:prepare_intake_main",
+      "summary": "Governed CLI entry points for Phase 0/1."
     },
     {
       "name": "prepare-kpi-blocker-panel",

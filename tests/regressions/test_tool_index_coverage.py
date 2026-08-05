@@ -14,7 +14,14 @@ from __future__ import annotations
 import json
 import unittest
 
-from core.dev.tool_index import INDEX_PATH, build_index, registered_clis
+from core.dev.tool_index import (
+    INDEX_PATH,
+    RAW_DATASET_RULE,
+    REPO_ROOT,
+    SECRET_DISPLAY_RULE,
+    build_index,
+    registered_clis,
+)
 
 
 class ToolIndexCoverageTests(unittest.TestCase):
@@ -59,6 +66,35 @@ class ToolIndexFreshnessTests(unittest.TestCase):
             on_disk, build_index(),
             "the checked-in tool index is stale; regenerate with: uv run build-tool-index",
         )
+
+
+class EvidencePolicySafetyRuleTests(unittest.TestCase):
+    """Regression: `.agents/tools.json` v2 replaced the v1 evidence_policy dict with
+    one prose line. `adapter_generator._render_tool_registry` renders
+    `secret_display_rule` / `raw_dataset_rule` only from the dict form, so the two
+    guardrails silently vanished from every generated `.agents/<tool>/SKILLS.md` --
+    i.e. from every non-Claude CLI's skill index."""
+
+    def test_evidence_policy_declares_both_rules_as_explicit_fields(self):
+        policy = build_index()["evidence_policy"]
+        self.assertIsInstance(policy, dict, "prose-only policy renders neither rule")
+        self.assertEqual(policy["secret_display_rule"], SECRET_DISPLAY_RULE)
+        self.assertEqual(policy["raw_dataset_rule"], RAW_DATASET_RULE)
+        secret = SECRET_DISPLAY_RULE.lower()
+        for token in (".env", ".databrickscfg", "token", "cookies", "redacted"):
+            self.assertIn(token, secret)
+        raw = RAW_DATASET_RULE.lower()
+        for token in ("profile_index.json", "never paste raw dataset", "state why"):
+            self.assertIn(token, raw)
+
+    def test_every_generated_adapter_carries_both_rules(self):
+        adapters = sorted((REPO_ROOT / ".agents").glob("*/SKILLS.md"))
+        self.assertTrue(adapters, "no generated adapters; run: uv run generate-skill-adapters")
+        for adapter in adapters:
+            with self.subTest(adapter=adapter.name and adapter.parent.name):
+                text = adapter.read_text(encoding="utf-8")
+                self.assertIn(f"Secret display safety: {SECRET_DISPLAY_RULE}", text)
+                self.assertIn(f"Dataset access safety: {RAW_DATASET_RULE}", text)
 
 
 if __name__ == "__main__":

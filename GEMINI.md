@@ -121,6 +121,23 @@ or target layer, run the blocker-panel workflow instead of writing executable lo
 Repo skills are indexed in `.agents/gemini/SKILLS.md`, but the canonical skill bodies live in
 `skills/*/SKILL.md`.
 
+## Cloud-native source intake (built, not yet default)
+
+The local-first flow in `AGENTS.md` remains the default. For a workspace whose data already lives
+in a real source (S3/ADLS/GCS/JDBC/Kafka/Unity Catalog), these commands exist and run today -- use
+them instead of improvising raw SDK calls:
+
+`declare-source` -> `discover-source` -> `prepare-intake-panel` / `apply-intake-answer` ->
+`prepare-blueprint` -> `confirm-blueprint` -> `plan-provisioning` -> `apply-provisioning` ->
+`generate-ingestion`. Later schema drift: `prepare-drift-panel` / `apply-drift-answer`.
+
+Alignment gate, not a bug: `prepare-blueprint` refuses until the intake playback
+(`interns/reports/intake_playback/current.md`) is confirmed with
+`uv run apply-intake-answer --workspace <ws> --question playback_confirm --answer confirmed --answered-by "<name>"`.
+Nothing is created by that refusal. `confirm-blueprint` is the ONE human gate and refuses agent
+identities; `apply-provisioning` is a dry run without that confirmation, and is additive-only.
+Details: `AGENTS.md` > "New spine (built, not yet default)".
+
 ## Human-Friendly Command Rule
 
 Users should not be expected to type full internal CLI commands. Map short user intents to governed

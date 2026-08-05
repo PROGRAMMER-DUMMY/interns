@@ -125,6 +125,12 @@ CURATED_MODULES: tuple[str, ...] = (
     # Phase 1a.1: agent-token cost-ledger ANCHOR half (env-native session join key,
     # honest-empty schema, zero-anchor/over-threshold liveness gate).
     "tests.test_cost_ledger",
+    # Instruction drift: a command missing from AGENTS.md's Stage index is
+    # invisible to every agentic CLI, which then improvises around the gap
+    # instead of using the tool. That is what happened before this guard existed
+    # (47 of 130 CLIs undocumented). A drift guard CI never runs is the same
+    # failure class it exists to catch, so it belongs in the blocking gate.
+    "tests.test_instruction_drift",
     # Phase 1a.2b: transcript INGEST (privacy boundary, loud liveness, run-level
     # attribution, logged dedupe).
     "tests.test_cost_ingest",

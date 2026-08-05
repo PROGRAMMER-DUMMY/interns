@@ -35,8 +35,11 @@ core/onboarding/features/derivation_search.py
 core/onboarding/kpi/feature_resolver.py
 ```
 
-Use `resolve-kpi-features --include-candidates` to attach candidate patterns to unresolved KPI
-features after onboarding has generated profiles and the KPI registry artifact.
+Run `uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>` to attach candidate
+patterns to unresolved KPI features after onboarding has generated profiles and the KPI registry
+artifact. It owns resolution, derived-feature markdown, panel generation, and validation in
+lock-step. (`resolve-kpi-features --include-candidates` is the deprecated entry point; it now just
+redirects here and drops the flag.)
 
 ## Workflow
 

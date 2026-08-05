@@ -62,14 +62,14 @@ Two repo-native skills wrap the work — bounded so a fragile agent doesn't stal
   ambiguous (which KPI / which dimension / which chart type / fit-to-screen vs
   detail). Do NOT fire it on a clearly-specified request. Stops the agent guessing
   wrong and building the wrong dashboard.
-- **`grill-requirements`** — at the OUTPUT, before presenting: emit a short audit of the
+- **`grill-requirements` (output pass)** — before presenting: emit a short audit of the
   assumptions made (why log scale, which dimensions were dropped, why this chart
   type). It is **advisory** — it surfaces confidence/assumptions to the user but
   **never overrides the `dashboard-verify` gate**, which stays the sole pass/fail
   authority. A confident grill-requirements cannot wave through a failed overflow/color
   check; a low-confidence one is a signal to the user, not a silent block.
 
-(Use the REPO skills `grill-requirements` / `grill-requirements` — not the plugin
+(Use the REPO skill `grill-requirements` for both passes — not the plugin
 `clarify`/`self-score`/`grill-me`, which aren't reliably present for repo agents.)
 
 ## Chart-quality defaults (auto-apply on every regeneration)
@@ -117,9 +117,9 @@ Run the gate — it drives a real browser (`agent-browser`) and FAILS (exit 1) o
 overflow, blank charts, or a multi-series chart missing its legend:
 
 ```bash
-# 1. export (or boot the live Dash app and use its URL)
-uv run workspace-dashboard --workspace workspaces/<ws> --export
-# 2. GATE: browser-verify before presenting
+# 1. GATE: structure-aware screener (serves headless, shoots every page/sub-tab/chart)
+uv run workspace-dashboard --workspace workspaces/<ws> --screen
+# 2. or boot the live app and browser-verify a URL directly
 uv run dashboard-verify \
   --url "file:///C:/ABS/.../dashboard/exports/index.html" \
   --screenshot "<abs>/dashboard/exports/_shot.png"
@@ -146,7 +146,11 @@ uv run dashboard-verify \
 - `core/dashboard/inference.py`    — name/text fallback when result rows are unavailable
 - `core/dashboard/renderer.py`     — Dash app + Plotly figure builder
 - `core/dashboard/export.py`       — static HTML export (board grid + theme)
-- `tools/workspace_dashboard.py`   — `workspace-dashboard` CLI entry (`--export`)
+- `tools/workspace_dashboard.py`   — `workspace-dashboard` CLI entry (serve is the default;
+  `--screen`, `--refresh`, `--record-vision-review`, `--stop`). There is NO `--export` flag:
+  static HTML export is reachable only via `core.dashboard.export.export_static_html`
+  (used by the NL agent panel); deck/PDF exports are `workspace-dashboard-deck` /
+  `workspace-dashboard-pdf`.
 - `tests/test_dashboard_*.py`      — regression tests
 - `workspaces/<ws>/dashboard/`     — per-workspace specs + exports
 

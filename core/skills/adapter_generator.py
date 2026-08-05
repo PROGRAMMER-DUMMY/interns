@@ -82,7 +82,7 @@ class ToolDefinition:
 class ToolRegistry:
     source_path: str
     tools: list[ToolDefinition]
-    evidence_policy: dict[str, Any]
+    evidence_policy: dict[str, Any] | str
 
     def as_index_item(self) -> dict[str, Any]:
         return {
@@ -381,9 +381,10 @@ def _read_tool_registry(path: Path, repo_root: Path, *, known_skills: set[str]) 
         seen_names.add(tool.name)
         tools.append(tool)
 
+    # v1 carried a per-rule object; v2 carries one prose line. Accept both.
     evidence_policy = payload.get("evidence_policy", {})
-    if evidence_policy and not isinstance(evidence_policy, dict):
-        raise ValueError(f"tool registry evidence_policy must be an object: {path}")
+    if evidence_policy and not isinstance(evidence_policy, (dict, str)):
+        raise ValueError(f"tool registry evidence_policy must be an object or string: {path}")
     return ToolRegistry(
         source_path=_rel(path, repo_root),
         tools=tools,
@@ -400,10 +401,20 @@ def _read_tool_definition(
 ) -> ToolDefinition:
     name = _required_string_field(raw_tool, "name", index, path)
     command = _required_string_field(raw_tool, "command", index, path)
-    use_when = _required_string_list(raw_tool, "use_when", index, path)
-    outputs = _required_string_list(raw_tool, "outputs", index, path)
-    safety = _required_string_field(raw_tool, "safety", index, path)
-    required_skills = _required_string_list(raw_tool, "required_skills", index, path)
+    # `use_when` / `outputs` / `safety` / `required_skills` are the human-curated overlay
+    # fields of `.agents/tools.json` (v2): generated entries carry only name/command/
+    # entry_point/summary, and the curated notes are added per command. Absent = uncurated
+    # (fall back to the generated summary); present-but-empty or wrong-typed still fails.
+    use_when = _optional_string_list(raw_tool, "use_when", index, path)
+    if not use_when:
+        summary = _optional_string_field(raw_tool, "summary", index, path)
+        use_when = [summary] if summary else []
+    outputs = _optional_string_list(raw_tool, "outputs", index, path)
+    safety = (
+        _optional_string_field(raw_tool, "safety", index, path)
+        or "uncurated -- follow AGENTS.md safety rules for this command"
+    )
+    required_skills = _optional_string_list(raw_tool, "required_skills", index, path)
     missing_skills = sorted(set(required_skills) - known_skills)
     if missing_skills:
         raise ValueError(
@@ -530,6 +541,13 @@ def _optional_string_field(raw_tool: dict[str, Any], field: str, index: int, pat
     return value.strip()
 
 
+def _optional_string_list(raw_tool: dict[str, Any], field: str, index: int, path: Path) -> list[str]:
+    """Absent -> []. Present -> validated exactly like a required list."""
+    if field not in raw_tool:
+        return []
+    return _required_string_list(raw_tool, field, index, path)
+
+
 def _required_string_list(raw_tool: dict[str, Any], field: str, index: int, path: Path) -> list[str]:
     value = raw_tool.get(field)
     if not isinstance(value, list) or not value:
@@ -611,7 +629,9 @@ def _render_tool_registry(tool_registry: ToolRegistry) -> list[str]:
         f"- Source: `{tool_registry.source_path}`",
         "- Before using project tools, honor each registered command's `safety` guidance.",
     ]
-    if tool_registry.evidence_policy:
+    if isinstance(tool_registry.evidence_policy, str):
+        lines.append(f"- Evidence policy: {tool_registry.evidence_policy}")
+    elif tool_registry.evidence_policy:
         secret_rule = tool_registry.evidence_policy.get("secret_display_rule")
         raw_dataset_rule = tool_registry.evidence_policy.get("raw_dataset_rule")
         if secret_rule:
@@ -624,12 +644,15 @@ def _render_tool_registry(tool_registry: ToolRegistry) -> list[str]:
             [
                 f"- `{registered_tool.name}`",
                 f"  - Command: `{registered_tool.command}`",
-                f"  - Use when: {_join_items(registered_tool.use_when)}",
-                f"  - Outputs: {_join_items(registered_tool.outputs)}",
-                f"  - Safety: {registered_tool.safety}",
-                f"  - Required skills: {_join_items(registered_tool.required_skills)}",
             ]
         )
+        if registered_tool.use_when:
+            lines.append(f"  - Use when: {_join_items(registered_tool.use_when)}")
+        if registered_tool.outputs:
+            lines.append(f"  - Outputs: {_join_items(registered_tool.outputs)}")
+        lines.append(f"  - Safety: {registered_tool.safety}")
+        if registered_tool.required_skills:
+            lines.append(f"  - Required skills: {_join_items(registered_tool.required_skills)}")
         if registered_tool.recovery:
             lines.append(f"  - Recovery: {registered_tool.recovery}")
     lines.append("")
@@ -660,7 +683,9 @@ def _render_subagents(tool: str, subagents: list[SubagentDefinition]) -> list[st
                 f"- Target model: `{model}`",
                 f"- Target sandbox/permission: `{sandbox}`",
                 f"- Model policy: {_format_model_policy(subagent.model_policy)}",
-                f"- Default prompt: {subagent.default_prompt}",
+                # First line only: prompts carry multi-line phase/checklist bodies, and the
+                # full text is already rendered in the per-agent file.
+                f"- Default prompt: {subagent.default_prompt.splitlines()[0]}",
                 "",
             ]
         )

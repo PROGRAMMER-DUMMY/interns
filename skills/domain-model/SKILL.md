@@ -43,12 +43,21 @@ conversion local.
 
 ## Output
 
+Code-generated — READ these, never hand-write them:
+
 ```text
 workspaces/<project>/interns/generated/contracts/domain_model.json
-workspaces/<project>/interns/generated/contracts/domain_glossary.md
-workspaces/<project>/interns/generated/contracts/kpi_column_mapping.json
+workspaces/<project>/interns/generated/contracts/kpi_feature_mapping.json
 workspaces/<project>/interns/reports/open_questions.md
 ```
+
+(There is no `domain_glossary.md` and no `kpi_column_mapping.json` — nothing in the
+repo writes either. The KPI term -> column mapping is `kpi_feature_mapping.json`,
+written by `resolve-kpi-features`; treat it as a machine audit trail and read the
+paired report rather than the whole JSON.)
+
+Anything this skill authors itself is a note, not a contract: write it under
+`interns/reports/`, never into `interns/generated/contracts/`.
 
 If source documents disagree, record the conflict instead of guessing.
 Do not mark a KPI feature ready unless it is proven by source evidence or explicitly confirmed by

@@ -1,7 +1,7 @@
 """Stage-triggered specialist delegation for workspace-flow.
 
-The 14 subagents (`.claude/agents/`, `.gemini/agents/`, `.codex/agents/`)
-are LLM personas that the orchestrating CLI must activate. This module
+The subagents (`.claude/agents/`, `.gemini/agents/`, `.codex/agents/`,
+all generated from `skills/*/agents/*.yaml`) are LLM personas that the orchestrating CLI must activate. This module
 records, at each workflow stage, which specialist owns that stage and
 what programmatic verdict the workflow already computed on its behalf.
 
@@ -297,6 +297,69 @@ STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
     "evolution": {
         "agents": [],
         "skills": ["evolution"],
+    },
+    # --- Cloud-first spine stages (docs/superpowers/specs/2026-08-05-cloud-first-restructure-design.md
+    # Phase 0 measure -> Phase 1 ask -> Phase 4 blueprint -> Phase 5 autopilot, plus the
+    # velocity lanes / schema-drift additions in docs/plans/2026-08-05-generic-pipeline-alignment.md).
+    # Attach point: panel writers in core/intake, core/blueprint, core/provisioning and
+    # core/evolution must set `panel["stage"]` to one of these keys and merge
+    # `routing_for(stage)` into `summary.required_specialists` / `summary.suggested_skills`
+    # (flow.py `_attach_stage_routing` does exactly this for the local-flow panels). Until
+    # they do, the roster below is reachable but not yet auto-attached to those panels.
+    "source_declaration": {
+        # `declare-source`: connector type, location, credential *reference*.
+        "agents": ["data-engineer", "databricks-engineer"],
+        "skills": ["data-engineering-pipeline-design", "databricks-access-gates",
+                   "workspace-governance"],
+    },
+    "source_discovery": {
+        # `discover-source`: read-only scan -> tables, formats, sizes, arrival pattern.
+        "agents": ["data-engineer", "data-analyst"],
+        "skills": ["data-engineering-pipeline-design", "domain-model"],
+    },
+    "intake_interview": {
+        # `prepare-intake-panel` / `apply-intake-answer` + the understanding playback gate:
+        # requirements elicitation first, with the data-engineer owning the technical answers
+        # (retention, backfill depth, concurrency, budget).
+        "agents": ["business-analyst", "data-engineer"],
+        "skills": ["grill-requirements", "stakeholder-memory", "to-solution-brief"],
+    },
+    "blueprint_review": {
+        # `prepare-blueprint` / `confirm-blueprint`: the ONE human confirmation. Reviewed as a
+        # source-to-target proof (per-KPI model mapping) plus a compute/cost choice.
+        "agents": ["data-engineer", "source-to-target-reviewer", "databricks-engineer"],
+        "skills": ["data-engineering-pipeline-design", "data-model-creation", "grill-requirements"],
+    },
+    "velocity_lane_choice": {
+        # tables/velocity.yaml: batch / micro_batch / streaming / realtime_serving per source.
+        "agents": ["data-engineer", "sql-polars-pyspark-specialist"],
+        "skills": ["data-engineering-pipeline-design"],
+    },
+    "provisioning": {
+        # `plan-provisioning` / `apply-provisioning`: additive UC objects; the gatekeeper owns
+        # the destructive-op boundary.
+        "agents": ["databricks-engineer", "validation-gatekeeper"],
+        "skills": ["databricks-access-gates", "workspace-governance"],
+    },
+    "ingestion_generation": {
+        # `generate-ingestion`: Auto Loader / COPY INTO / JDBC watermark+MERGE / Kafka jobs.
+        "agents": ["data-engineer", "databricks-engineer"],
+        "skills": ["data-engineering-pipeline-design", "databricks-access-gates"],
+    },
+    "schema_drift_review": {
+        # `prepare-drift-panel` / `apply-drift-answer`: propagate / quarantine_column / block.
+        "agents": ["data-engineer", "source-to-target-reviewer"],
+        "skills": ["evolution", "domain-model"],
+    },
+    "performance_optimization": {
+        # Symptom -> cheapest-first remedy out of `config/optimization_playbook.yaml`
+        # (consulted via core.blueprint.playbook). Measured inputs come from
+        # `reconcile-warehouse-cost`, `recommend-kpi-engine`, `check-kpi-anomalies`
+        # and tools/optimizer_finder.py. Engine change is last resort, which is why
+        # the engine specialist is routed alongside the optimizer, not instead of it.
+        "agents": ["performance-optimizer", "sql-polars-pyspark-specialist",
+                   "databricks-engineer"],
+        "skills": ["workspace-kpi-query-optimizer", "data-engineering-pipeline-design"],
     },
 }
 

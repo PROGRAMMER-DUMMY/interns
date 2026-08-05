@@ -27,6 +27,21 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 INDEX_PATH = REPO_ROOT / ".agents" / "tools.json"
 
+# The two evidence guardrails every generated adapter must carry. They are
+# rendered per-tool by core.skills.adapter_generator, so a CLI that only ever
+# reads `.agents/<tool>/SKILLS.md` still gets them.
+SECRET_DISPLAY_RULE = (
+    "Never print or paste .env, .databrickscfg, private keys, tokens, connection "
+    "strings, bearer headers, cookies, or shell environment dumps. Report only "
+    "existence/status or redacted key names such as OPENAI_API_KEY=<redacted>."
+)
+RAW_DATASET_RULE = (
+    "Use generated profile artifacts before raw data: read "
+    "interns/generated/profiles/profile_index.json and the relevant *.profile.json "
+    "first, and never paste raw dataset contents into prompts. Bounded samples only "
+    "when profiles are insufficient, and state why."
+)
+
 def registered_clis() -> dict[str, str]:
     """Every `[project.scripts]` entry: CLI name -> "module:function".
 
@@ -121,9 +136,18 @@ def build_index() -> dict[str, Any]:
     return {
         "version": 2,
         "source": "generated from pyproject.toml [project.scripts] by core.dev.tool_index",
-        "evidence_policy": (
-            "Derived, not curated. Do not hand-edit. Regenerate: uv run build-tool-index"
-        ),
+        # Explicit fields, not prose: the adapter generator renders
+        # `secret_display_rule` / `raw_dataset_rule` into every `.agents/<tool>/
+        # SKILLS.md`, so every CLI keeps the two safety guardrails in its skill
+        # index. A prose-only policy (the v2 shape) silently dropped them.
+        # `generation` is carried for the reader of this file; it is not a rule.
+        "evidence_policy": {
+            "secret_display_rule": SECRET_DISPLAY_RULE,
+            "raw_dataset_rule": RAW_DATASET_RULE,
+            "generation": (
+                "Derived, not curated. Do not hand-edit. Regenerate: uv run build-tool-index"
+            ),
+        },
         "tools": tools,
     }
 

@@ -57,7 +57,7 @@ class SkillAdapterGeneratorContractTests(unittest.TestCase):
             self.assertIn("Required skills: demo-skill", adapter)
             self.assertIn("Recovery: If it fails, inspect the generated report before retrying.", adapter)
 
-    def test_tool_registry_requires_core_contract_fields(self):
+    def test_tool_registry_rejects_present_but_empty_safety(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_skill(root)
@@ -72,6 +72,7 @@ class SkillAdapterGeneratorContractTests(unittest.TestCase):
                                 "command": "uv run broken-tool",
                                 "use_when": ["broken registry check"],
                                 "outputs": ["report.md"],
+                                "safety": "",
                                 "required_skills": ["demo-skill"],
                             }
                         ]
@@ -81,8 +82,41 @@ class SkillAdapterGeneratorContractTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with self.assertRaisesRegex(ValueError, "missing non-empty safety"):
+            with self.assertRaisesRegex(ValueError, "invalid safety"):
                 SkillAdapterGenerator(root, tools=("codex",)).run()
+
+    def test_tool_registry_accepts_uncurated_v2_entry(self):
+        # `.agents/tools.json` v2 is generated from pyproject scripts: name/command/
+        # entry_point/summary only, with use_when/outputs/safety/required_skills as an
+        # optional human overlay. An uncurated entry must not break generation.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_skill(root)
+            registry_path = root / ".agents" / "tools.json"
+            registry_path.parent.mkdir(parents=True)
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "version": 2,
+                        "evidence_policy": "Derived, not curated. Do not hand-edit.",
+                        "tools": [
+                            {
+                                "name": "uncurated-tool",
+                                "command": "uv run uncurated-tool",
+                                "entry_point": "core.demo:main",
+                                "summary": "Does the demo thing.",
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            SkillAdapterGenerator(root, tools=("codex",)).run()
+            adapter = (root / ".agents" / "codex" / "SKILLS.md").read_text(encoding="utf-8")
+            self.assertIn("Use when: Does the demo thing.", adapter)
+            self.assertIn("Evidence policy: Derived, not curated.", adapter)
 
     def test_tool_registry_rejects_empty_use_when_and_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:

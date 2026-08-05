@@ -131,6 +131,47 @@ Agents should read `compact.md` first and run `session-snapshot verify` at check
 after edits, after command failures, after deletes, after user corrections, and before final
 answers.
 
+### prepare-data-source-panel
+
+Command:
+
+```powershell
+uv run prepare-data-source-panel --workspace workspaces/<project>
+```
+
+Asks once, at workspace level, where this workspace's data actually lives, instead of letting the
+`databricks_source` key in `workspace_settings.json` silently decide it. Writes:
+
+```text
+workspaces/<project>/interns/reports/data_source_panel/current.json
+workspaces/<project>/interns/reports/data_source_panel/current.md
+```
+
+Three options: `local_files` (scan/profile local `datasets/` only), `databricks_additive` (local
+`datasets/` AND the declared Unity Catalog catalog/schema, merged into one profile index), and
+`databricks_exclusive` (the declared catalog/schema only, local discovery skipped). Status is
+`needs_user_answer` until a `mode` has been declared explicitly; the currently effective mode is
+reported either way. Runs `validate-workspace-artifacts` as its validation step.
+
+### apply-data-source-answer
+
+Command:
+
+```powershell
+uv run apply-data-source-answer --workspace workspaces/<project> --answer <option_id> `
+  [--catalog <name> --schema <name>] --confirmed-by "<name>"
+```
+
+Records the durable decision into the workspace's `workspace_settings.json` as
+`databricks_source` (`catalog`, `schema`, `mode`, `source`, `confirmed_by`, `confirmed_at`), then
+rebuilds the panel so a re-run reflects it. `--answer` maps `local_files` -> mode `local_files`,
+`databricks_additive` -> `additive`, `databricks_exclusive` -> `exclusive`.
+
+Refuses any other `--answer` value, and refuses either Databricks answer unless `--catalog` and
+`--schema` are supplied here or already declared in `workspace_settings.json`. An empty
+`--confirmed-by` records the decision as agent-asserted (`source: agent`). `--allow-replay` re-runs
+an already-recorded identical answer.
+
 ### doctor
 
 Command:
@@ -609,6 +650,50 @@ workspaces/<project>/interns/reports/data_quality/current.json
 workspaces/<project>/interns/reports/data_quality/current.md
 ```
 
+### prepare-data-quality-panel
+
+Command:
+
+```powershell
+uv run prepare-data-quality-panel --workspace workspaces/<project>
+```
+
+Asks what "valid" means for one (dataset, column) actually used by a KPI, in the same JSON-backed
+option shape as the KPI blocker panel -- so dbt schema tests come from a recorded human answer, not
+hand-maintained YAML. It only fires where profiling evidence makes the rule genuinely ambiguous:
+nulls observed, or a string-typed column with a small (1-8) observed distinct-value set. A clean,
+unambiguous column is never asked about, and a column shared by two KPIs is asked once. Candidates
+come from `interns/generated/contracts/kpi_feature_mapping.json` (only KPIs whose features are all
+in a ready state) joined to `interns/generated/profiles/profile_index.json`. Writes:
+
+```text
+workspaces/<project>/interns/reports/data_quality_panel/current.json
+workspaces/<project>/interns/reports/data_quality_panel/current.md
+```
+
+Status is `needs_user_answer` (with `remaining_count`) or `no_pending_checks`. One question at a
+time. Runs `validate-workspace-artifacts` as its validation step.
+
+### apply-data-quality-answer
+
+Command:
+
+```powershell
+uv run apply-data-quality-answer --workspace workspaces/<project> --answer <option_id> `
+  --confirmed-by "<name>"
+```
+
+Appends the answered check to the durable contract
+`workspaces/<project>/interns/generated/contracts/data_quality_decisions.json` (`check_type`,
+`check_config`, `severity`, `source`, `confirmed_by`, `confirmed_at`), then rebuilds the panel with
+the next pending column. `dbt_project_generator` reads that file to emit real `not_null` /
+`accepted_values` tests; `skip` records that no test is wanted. Severity comes from the chosen
+option (`error` blocks the build, `warn` surfaces drift), never from a separate setting.
+
+Refuses when there is no `data_quality_panel/current.json` (run `prepare-data-quality-panel`
+first), when the panel has no pending question, or when `--answer` is neither an `option_id` nor an
+option label. An empty `--confirmed-by` records the decision as agent-asserted (`source: agent`).
+
 ### prepare-duplicate-review-panel
 
 Command:
@@ -725,6 +810,24 @@ workspaces/<project>/interns/reports/kpi_proof_packet/current.json
 workspaces/<project>/interns/generated/evidence/kpi_proof_packet/current.json
 ```
 
+### check-kpi-anomalies
+
+Command:
+
+```powershell
+uv run check-kpi-anomalies --workspace workspaces/<project>
+```
+
+Post-results check: median-absolute-deviation over the workspace's trailing KPI headline history, so
+a KPI number lurching for no known reason is flagged before it reaches the dashboard silently. Reads
+`interns/reports/kpi_results/current.json` and the headline history in
+`interns/generated/evidence/kpi_headline_history.json`, writes
+`interns/reports/kpi_alerts/current.md` (printing that path), then appends this run to the history.
+
+Optionally posts to a webhook when the alert webhook environment variable is set. Never raises on a
+missing or malformed artifact -- absent evidence means no findings this run, not a crashed task --
+so it is safe as a post-results task in the pipeline DAG.
+
 ### prepare-data-model-generation
 
 Command:
@@ -831,6 +934,51 @@ data-processing options, and writes `interns/reports/data_understanding/current.
 `current.md`. It reads generated profiles only (no raw dataset reads) and reuses the same classifier
 the workspace-flow gate uses. `--quiet` prints a compact summary line while still writing the full
 JSON and Markdown to disk.
+
+### prepare-document-candidate-review
+
+Command:
+
+```powershell
+uv run prepare-document-candidate-review --workspace workspaces/<project>
+```
+
+Reads the document-derived candidates `onboard-workspace` classified into
+`interns/generated/documents/candidates.json` and writes the human-review panel:
+
+```text
+workspaces/<project>/interns/reports/documents/candidates.md
+workspaces/<project>/interns/reports/documents/candidates.json
+```
+
+Display-only: it promotes nothing and mutates no contract. Each candidate gets a stable
+`candidate_id` derived from its type + source document + page + content hash, so ids survive
+re-runs and can be quoted back to `apply-document-candidate`. Ask from this panel; the panel's own
+interaction contract sets `generic_answer_picker_allowed: false`. With no `candidates.json` on disk
+it returns `status: no_candidates` and points at `onboard-workspace`.
+
+### apply-document-candidate
+
+Command:
+
+```powershell
+uv run apply-document-candidate --workspace workspaces/<project> --candidate-id <id> `
+  --confirmed-by "<name>" [--reject] [--note "<why>"]
+```
+
+Accepts or rejects ONE candidate from that panel and appends the decision to the durable artifact
+`workspaces/<project>/interns/generated/documents/accepted_candidates.json`. That file lives under
+`generated/documents/`, not `generated/contracts/`, precisely so an onboarding re-run (which clears
+and regenerates `contracts/`) cannot destroy accepted decisions. Rejections are appended too, with
+`decision: rejected` and the `--note`, so they stay auditable.
+
+It touches `kpi_registry.json`, `workspace_lexicon.json`, `relationship_contracts.json` and every
+other generated contract not at all -- merging accepted entries is a separate wired-in step.
+
+Refuses acceptance when `--confirmed-by` is empty (`status: refused`, nonzero exit); errors when
+`candidates.json` is missing or the `--candidate-id` is not in it. A `data_model_candidate` is
+recorded `executable: false` even after human acceptance -- profile RI proof is still required
+before any join derived from it may run.
 
 ### export-data-model-diagram
 
@@ -1057,6 +1205,343 @@ If a saved routing default exists and the user chooses a different route, the wo
 change reason before continuing. A one-off change does not update the default unless
 `--save-as-default` is used.
 
+### apply-external-source-intake
+
+Command:
+
+```powershell
+uv run apply-external-source-intake --external-root D:\Cold_Storage `
+  --proposed-workspace workspaces/<project> --answer <option_id> `
+  [--existing-workspace workspaces/<other>] [--workspace-name <name>] `
+  [--change-reason "<why>"] [--save-as-default]
+```
+
+Answers whichever stage the intake session is currently on (`route_selection`,
+`route_change_reason`, `outcome_selection`, `source_group_selection`), appends the answer to
+`external_source_intake_session.json`, and rewrites `external_source_intake/current.{json,md}` with
+the next stage. `--max-files` (default `2000`) and `--max-seconds` (default `30.0`) bound the
+metadata-only discovery that runs after routing. `--allow-replay` re-runs an already-recorded
+identical answer.
+
+Refuses when `--answer` matches no option in the current panel, when there is no active stage, when
+the chosen route is `attach_existing` and no `--existing-workspace` is resolvable, and when a custom
+new workspace is chosen without `--workspace-name`. Choosing a route that differs from a saved
+team default is held at a `route_change_reason` stage until `--change-reason` is given; the default
+itself only changes with `--save-as-default`.
+
+### declare-source
+
+Command:
+
+```powershell
+uv run declare-source --workspace workspaces/<project> --type <source-type> --location <uri> `
+  [--format-hint parquet] [--credential-ref <credential-name>] `
+  [--schema-registry-url <https-endpoint>] [--one-shot] [--declared-by "<name>"]
+```
+
+Records where this workspace's data actually lives, into `workspace_settings.json`
+(`source_declaration`). `--type` is constrained to the registered source types
+(`core.intake.declaration.SOURCE_TYPES`); `--location` is a bucket/URI, JDBC url, broker list,
+`<catalog>.<schema>`, or a path. `--credential-ref` is the NAME of a credential (secret scope/key,
+cloud profile, env-var name, UC storage credential) and must never be a secret value. `--one-shot`
+marks a source that is loaded once as a historical backfill rather than on a schedule.
+
+First command of the new cloud-native spine; see AGENTS.md > "New spine (built, not yet default)".
+
+### discover-source
+
+Command:
+
+```powershell
+uv run discover-source --workspace workspaces/<project> [--max-items 2000] [--max-seconds 30]
+```
+
+Read-only scan of the declared source. Bounded by `--max-items` / `--max-seconds` so a huge bucket
+cannot stall the session. Writes:
+
+```text
+workspaces/<project>/interns/generated/intake/discovery.json
+```
+
+Requires a prior `declare-source`. Re-run it after the source changes -- `prepare-drift-panel`
+diffs consecutive discoveries.
+
+### prepare-intake-panel
+
+Command:
+
+```powershell
+uv run prepare-intake-panel --workspace workspaces/<project>
+```
+
+Builds the merged intake interview from discovery plus prior answers, and writes the understanding
+playback -- the restatement of what the platform believes it was told, with each line tagged
+`(measured)` / `(you said)` / `(default)`:
+
+```text
+workspaces/<project>/interns/reports/intake_panel/current.json
+workspaces/<project>/interns/reports/intake_panel/current.md
+workspaces/<project>/interns/reports/intake_playback/current.md
+```
+
+Ask from the panel files; do not invent freehand intake questions. Runs
+`validate-workspace-artifacts` as its validation step.
+
+### apply-intake-answer
+
+Command:
+
+```powershell
+uv run apply-intake-answer --workspace workspaces/<project> --question <question_id> `
+  --answer <option_id_or_text> --answered-by "<name>"
+uv run apply-intake-answer --workspace workspaces/<project> `
+  --question playback_confirm --answer confirmed --answered-by "<name>"
+```
+
+Records one answer from the intake panel into
+`workspaces/<project>/interns/generated/intake/intake_answers.json`. `--answer` takes an option id,
+a comma-separated list of option ids, or free text. An empty `--answered-by` records the answer as
+agent-asserted.
+
+The second form is the alignment gate `prepare-blueprint` refuses without: confirm the playback
+only after reading `interns/reports/intake_playback/current.md`. If a line there is wrong,
+re-answer that question first. Re-answering any question after a blueprint was confirmed clears the
+confirmation again by design -- the previous confirmation covered the previous requirement.
+
+### prepare-solution-blueprint
+
+LEGACY producer -- see the strangler note at the end of this section before using it.
+
+Command:
+
+```powershell
+uv run prepare-solution-blueprint --workspace workspaces/<project> `
+  --source-root s3://<bucket>/ --catalog <name> `
+  [--bronze-schema bronze] [--silver-schema silver] [--gold-schema gold] `
+  [--ingestion-mode system|manual]
+```
+
+Turns an external-source discovery listing into a per-group plan -- what becomes a table, what
+becomes a Unity Catalog volume, what is not ingested at all -- and states it in plain English before
+anything exists. `--ingestion-mode system` means we run the bootstrap once approved; `manual` means
+we only emit the commands. Writes:
+
+```text
+workspaces/<project>/interns/reports/solution_blueprint/current.json
+workspaces/<project>/interns/reports/solution_blueprint/current.md
+```
+
+Defaults by discovered class: `dataset` / `delta_table` -> external table (zero copy, registered in
+place), `document` -> volume, `log_or_state` / `database` / `other` -> excluded and must be opted IN
+rather than out. The Unity Catalog bootstrap chain is EMITTED into the artifact, never executed, and
+`status` stays `draft` until an approval is recorded.
+
+Refuses when `interns/generated/requirements/external_source_discovery.json` does not exist -- run
+`discover-external-sources --workspace <ws> --external-root <root>` first, because a blueprint
+without a listing is a guess.
+
+Strangler overlap: this command and the new `prepare-blueprint` both write
+`interns/reports/solution_blueprint/current.json`. The new renderer preserves anything this legacy
+command wrote as `current.legacy.{json,md}` rather than overwriting it. Per
+`docs/plans/2026-08-05-finish-cloud-first-restructure.md` Task D1, `prepare-solution-blueprint` is
+slated to become a deprecation redirect to `prepare-blueprint` at the flip; prefer
+`prepare-blueprint` + `confirm-blueprint` for new work.
+
+### apply-blueprint-answer
+
+Command:
+
+```powershell
+uv run apply-blueprint-answer --workspace workspaces/<project> --exclude <group>
+uv run apply-blueprint-answer --workspace workspaces/<project> --include <group>
+uv run apply-blueprint-answer --workspace workspaces/<project> --as-volume <group>
+uv run apply-blueprint-answer --workspace workspaces/<project> --as-managed <group>
+uv run apply-blueprint-answer --workspace workspaces/<project> --approve --confirmed-by "<real name>"
+```
+
+The edit + approval gate for the legacy `prepare-solution-blueprint` artifact. Edits are typed
+flags, never parsed from prose: the agent translates the user's English into `--exclude` /
+`--include` / `--as-volume` / `--as-managed` (each repeatable) and the platform records the flags,
+so the decision can be replayed and audited. Edits persist across re-discovery, and a group named in
+a new instruction is dropped from every other bucket first. `--as-managed` is the one disposition
+that COPIES data.
+
+Any edit clears a prior approval and stamps `approval_invalidated` -- approving plan A must never
+carry over onto plan B.
+
+`--approve` refuses unless `--confirmed-by` resolves to a human (Human-Gate Provenance Rule): this
+approval authorises creating catalogs, schemas, volumes and tables. Both paths refuse when no
+blueprint exists yet.
+
+### apply-uc-intake
+
+Command:
+
+```powershell
+uv run apply-uc-intake --workspace workspaces/<project>                                  # dry run
+uv run apply-uc-intake --workspace workspaces/<project> --role-arn <aws-iam-role> --apply
+```
+
+Executes an APPROVED solution blueprint against Unity Catalog: storage credential, external
+location, catalog, schemas, volumes, external tables. It creates governance objects and moves no
+bytes. Writes:
+
+```text
+workspaces/<project>/interns/reports/uc_intake/current.json
+workspaces/<project>/interns/reports/uc_intake/current.md
+```
+
+Dry run is the default -- without `--apply` it reports exactly what would happen and creates
+nothing. Every operation is idempotent: existence is checked first and an already-present object is
+`skipped`, so a re-run after a partial failure resumes. Execution stops at the first failure,
+because later objects depend on earlier ones.
+
+Refusals, in order: no blueprint (`prepare-solution-blueprint` first); the blueprint is not
+`approved` (`apply-blueprint-answer --approve --confirmed-by "<name>"`); `--apply` without the
+remote-execution approval (`AUTORESEARCH_ALLOW_REMOTE_EXECUTION`, set by a human's own shell --
+`status: refused_no_remote_approval`); `--apply` without `--role-arn`, the AWS IAM role Unity
+Catalog assumes to reach the bucket, which has no safe default (`refused_no_role_arn`). A
+`managed_table` disposition is reported as `requires_copy` and deliberately NOT executed here --
+`COPY INTO` / Auto Loader move real bytes and need their own decision.
+
+### prepare-blueprint
+
+Command:
+
+```powershell
+uv run prepare-blueprint --workspace workspaces/<project> [--catalog <name>] `
+  [--bronze-schema bronze] [--silver-schema silver] [--gold-schema gold]
+```
+
+Evaluates the blueprint decision tables against discovery + intake answers and renders the pipeline
+blueprint (each choice shown with the rule that fired). `--catalog` defaults to the workspace name.
+Writes the decision record next to the contracts it drives, plus:
+
+```text
+workspaces/<project>/interns/reports/solution_blueprint/current.json
+workspaces/<project>/interns/reports/solution_blueprint/current.md
+```
+
+If an existing `current.json` was written by the legacy `prepare-solution-blueprint`, it is
+preserved as `current.legacy.{json,md}` rather than overwritten.
+
+Refuses -- cleanly, with `status: refused` and a nonzero exit, creating nothing -- until the intake
+playback is confirmed (`apply-intake-answer --question playback_confirm`). That refusal is the
+alignment gate working, not a bug.
+
+### confirm-blueprint
+
+Command:
+
+```powershell
+uv run confirm-blueprint --workspace workspaces/<project> --confirmed-by "<real name>"
+```
+
+The ONE human gate of the cloud-native spine. Writes
+`interns/reports/solution_blueprint/current.confirmed.json` and stamps `status: confirmed` with
+human provenance.
+
+It refuses (structured payload, nonzero exit) when: there is no blueprint yet; the blueprint on
+disk was written by a different command than `prepare-blueprint` (re-run `prepare-blueprint` so the
+confirmation covers the current decisions); `--confirmed-by` resolves to an agent rather than a
+human (Human-Gate Provenance Rule -- this confirmation authorises creating catalogs, schemas,
+external locations, tables and DAGs); or any decision is still blocked on a missing fact, in which
+case it names the missing facts to measure in discovery or answer in the interview.
+
+### plan-provisioning
+
+Command:
+
+```powershell
+uv run plan-provisioning --workspace workspaces/<project> [--catalog <base-name>] [--env dev|prod] `
+  [--schema bronze --schema silver --schema gold] [--grant-principal <principal>]
+```
+
+Plans additive-only Unity Catalog provisioning from the discovery + blueprint evidence. `--env`
+drives catalog-per-env naming (the env suffix is added to `--catalog`). `--schema` is repeatable
+and defaults to bronze/silver/gold. `--grant-principal` is repeatable and only grants read on a
+NEWLY created catalog. Writes:
+
+```text
+workspaces/<project>/interns/generated/contracts/provision_plan.json
+```
+
+The plan records each step's kind (catalog / schema / volume / external location / grant) and marks
+anything destructive as `blocked_destructive` -- planned so a human can decide, never executed.
+Runs `validate-workspace-artifacts` as its validation step.
+
+### apply-provisioning
+
+Command:
+
+```powershell
+uv run apply-provisioning --workspace workspaces/<project> [--dry-run | --no-dry-run]
+```
+
+Executes the provision plan against Unity Catalog, additively and idempotently. Every step checks
+existence first: an object already there is recorded `existing` and skipped, so a re-run after a
+partial failure resumes. `blocked_destructive` steps are refused by kind.
+
+Refusals happen before anything is created, and are structured payloads with a nonzero exit, never
+tracebacks:
+
+1. No confirmed blueprint (`interns/reports/solution_blueprint/current.confirmed.json`) -- this is a
+   dry run and says so. `--dry-run` defaults ON without that confirmation and OFF with it.
+2. `AUTORESEARCH_ALLOW_REMOTE_EXECUTION=0` -- the human kill-switch stops it even for a confirmed
+   workspace.
+3. Databricks unreachable -- structured failure pointing at `check-platform-readiness`.
+
+### generate-ingestion
+
+Command:
+
+```powershell
+uv run generate-ingestion --workspace workspaces/<project>
+```
+
+Generates Databricks-native ingestion code per discovered table (Auto Loader / `COPY INTO` per the
+connector) into `workspaces/<project>/ingestion/` -- git-tracked repo content, like `dbt/` -- plus
+`ingestion/jobs_manifest.json`. It generates; it runs nothing and mutates no remote object. A
+connector with no generated ingestion is reported as a `[~]` note rather than silently skipped.
+Edit the generator, not the generated files.
+
+### prepare-drift-panel
+
+Command:
+
+```powershell
+uv run prepare-drift-panel --workspace workspaces/<project>
+```
+
+Snapshots the current `interns/generated/intake/discovery.json`, diffs it against the previous
+snapshot, and opens a panel when a finding needs a decision:
+
+```text
+workspaces/<project>/interns/reports/schema_drift_panel/current.json
+workspaces/<project>/interns/reports/schema_drift_panel/current.md
+```
+
+Run it after re-running `discover-source` on a live source. Runs `validate-workspace-artifacts` as
+its validation step.
+
+### apply-drift-answer
+
+Command:
+
+```powershell
+uv run apply-drift-answer --workspace workspaces/<project> --finding <finding_id> `
+  --answer propagate|quarantine_column|block_pipeline --confirmed-by "<real name>"
+```
+
+Records one answer from the schema drift panel. For `quarantine_column` it also writes the
+`interns/generated/contracts/schema_exclusions.json` contract.
+
+`--confirmed-by` must be a real human name for `quarantine_column` and `block_pipeline`; an empty
+value or an agent identity records the decision as agent-asserted, which those two options refuse.
+An unknown finding, an unsupported option, or an agent-asserted human gate returns a structured
+refusal with a nonzero exit, not a traceback. The confirmer is part of the op identity, so a
+refused agent attempt does not make the human's retry look like a replay.
+
 ### resource-preflight
 
 Command:
@@ -1094,6 +1579,33 @@ provenance + plan hash) and stops at the approval boundary; any failing gate
 exits nonzero with the blocking reasons. `--dry-run` never records. An empty
 `--confirmed-by` fails G3 by design (Human-Gate Provenance Rule); agents must
 never set `AUTORESEARCH_ALLOW_REMOTE_EXECUTION` to satisfy G5.
+
+### apply-design-panel-answer
+
+Command:
+
+```powershell
+uv run apply-design-panel-answer --workspace workspaces/<project> `
+  --item fact:<name>|dim:<name>|"rel:<from_table>.<from_col>-><to_table>.<to_col>" `
+  --answer ratify --confirmed-by "<real name>" --reasoning "<why this is right>"
+```
+
+`medallion design` proposes a star schema with every fact, dimension and relationship marked
+`needs_user_confirmation: true`; this is the human step that clears ONE of them, without
+hand-editing `star_schema.json` or blanket-overriding the gate with `--force-with-blockers`. It
+rewrites `interns/generated/medallion/star_schema.json` (+ `star_schema.md`) with `confirmed_by`,
+`confirmed_at` and `confirmation_reasoning`, regenerates the design panel, and prints
+`remaining_open_count`.
+
+`ratify` is the only valid `--answer`. It refuses (nonzero exit, nothing written) when
+`--confirmed-by` is agent-asserted, when `--reasoning` is empty -- a name-only ratification is
+indistinguishable from a rubber stamp in an audit trail -- when the `--item` id does not match a
+fact, dimension or relationship in the schema, and when there is no `star_schema.json` yet (run
+`medallion design` first).
+
+This is deliberately not a full dimensional-modeling review: it does not ask about SCD type, grain,
+or history requirements. `confirmation_reasoning` is free text, and it is what the audit trail
+records as having actually been reviewed.
 
 ### context-router
 
@@ -1136,6 +1648,30 @@ Use the `--workload-shape-json`, `--decision-analysis-json`, `--bottlenecks-json
 to store detailed learning evidence. The derived lesson keeps compact routing signals such as
 workload family, common bottlenecks, rejected alternatives, confidence, promotion state, and next
 experiment.
+
+### prepare-wiki-memory
+
+Command:
+
+```powershell
+uv run prepare-wiki-memory --workspace workspaces/<project> [--domain <domain>]
+```
+
+Collects this workspace's governed definitions (accepted workspace definitions, KPI definitions and
+the like) into reviewable reuse cards, and merges them into the CROSS-workspace shared index. Every
+workspace's run read-modify-writes that shared file, so it is taken under a named lock keyed on a
+fixed sentinel rather than a per-workspace lock. Outputs:
+
+```text
+state/team_memory/wiki_memory_index.json
+workspaces/<project>/interns/generated/memory/wiki_memory_candidates.json
+workspaces/<project>/interns/reports/wiki_memory/current.json
+workspaces/<project>/interns/reports/wiki_memory/current.md
+```
+
+Cards are SUGGESTIONS for review, not applied decisions: the result reports `card_count`,
+`conflict_count` (a shared definition that disagrees with this workspace's) and `auto_fill_count`.
+Errors when the workspace path does not exist, is the repo root itself, or is outside the repo root.
 
 ### ingest-source-catalog
 
@@ -1321,6 +1857,48 @@ workspaces/<project>/interns/reports/blocker_question_panel/current.md
 workspaces/<project>/interns/reports/blocker_question_panel/index.json
 ```
 
+### prepare-phi-review-panel
+
+Command:
+
+```powershell
+uv run prepare-phi-review-panel --workspace workspaces/<project>
+```
+
+PHI/PII detection is otherwise automatic and silent -- a column gets `is_sensitive` in
+`semantic_contract.json` with no human step in between. This is that missing step. It lists every
+column flagged sensitive in `interns/generated/contracts/semantic_contract.json`, minus columns
+already dispositioned in `interns/generated/contracts/phi_disposition.json` and columns already in
+`data_policy.json`'s `not_sensitive_columns` allowlist (consulted directly, so an answer takes
+effect immediately even though the contract snapshot is stale). Writes:
+
+```text
+workspaces/<project>/interns/reports/phi_review_panel/current.json
+workspaces/<project>/interns/reports/phi_review_panel/current.md
+```
+
+Status is `needs_user_answer` or `no_pending_columns`.
+
+### apply-phi-review-answer
+
+Command:
+
+```powershell
+uv run apply-phi-review-answer --workspace workspaces/<project> --column <name> `
+  --answer hash_to_key|pass_through_and_tag|bronze_only|not_sensitive --confirmed-by "<real name>"
+```
+
+Records one human answer for one column. `not_sensitive` appends the column to `data_policy.json`'s
+`not_sensitive_columns` allowlist (plus a `not_sensitive_columns_confirmed_by` provenance entry) --
+written on the human's behalf only after an explicit answer, never silently. The three dispositions
+are recorded in `interns/generated/contracts/phi_disposition.json`: `hash_to_key` (irreversible
+hash, join-key use only), `pass_through_and_tag` (kept readable, governed by catalog-layer masking
+downstream), `bronze_only` (never selected past bronze).
+
+Refuses (nonzero exit, nothing written) when `--confirmed-by` is blank or resolves to an agent
+identity. PHI classification is high-sensitivity enough that this gate does NOT accept a persisted
+default identity -- every answer needs a real name on the command itself.
+
 ### validate-workspace-artifacts
 
 Command:
@@ -1458,8 +2036,8 @@ uv run apply-pipeline-format-answer --workspace workspaces/<project> --answer op
 ```
 
 Use before `prepare-pipeline-plan` for ETL, ELT, medallion, or ingestion tracks when the target
-table/file format is not already approved. The panel asks whether outputs should be stored as Delta,
-local Parquet, Iceberg, CSV export, or a custom policy. The panel is JSON-backed; agents must read
+table/file format is not already approved. The panel asks whether medallion outputs should be stored
+as Delta (`option_a`, recommended) or local Parquet (`option_b`). The panel is JSON-backed; agents must read
 `interns/reports/pipeline_format/current.md` or `current.json` before asking the user and must apply
 answers through `apply-pipeline-format-answer`.
 
@@ -1469,6 +2047,44 @@ Outputs:
 workspaces/<project>/interns/reports/pipeline_format/current.json
 workspaces/<project>/interns/reports/pipeline_format/current.md
 workspaces/<project>/interns/generated/contracts/pipeline_decisions.json
+```
+
+### apply-pipeline-format-answer
+
+Command:
+
+```powershell
+uv run apply-pipeline-format-answer --workspace workspaces/<project> --answer option_a
+```
+
+Records the chosen table format into
+`workspaces/<project>/interns/generated/contracts/pipeline_decisions.json` with the reason
+`Accepted <answer>`. `option_a` / `delta` / `Delta` record `delta`; every other value records
+`local_parquet` -- there is no third format and no rejection path, so pass an option id from the
+panel rather than free text. `--allow-replay` re-runs an already-recorded identical answer.
+
+This command takes no `--confirmed-by`: the format decision is recorded without human provenance.
+If the choice needs to be attributable, capture it in the workspace decision record separately.
+
+### prepare-bronze-silver-standards
+
+Command:
+
+```powershell
+uv run prepare-bronze-silver-standards --workspace workspaces/<project> [--domain <domain>]
+```
+
+Writes the layer-responsibility baseline the medallion harnesses check against -- what each layer
+may and may not do (bronze preserves source fidelity; silver does type/timestamp/null/naming
+normalization plus approved conformance; gold owns KPI formulas and business aggregation) -- plus
+the cross-engine parity policy (`sql`, `polars`, `pyspark`, blocking on an unsupported rule) and the
+workflow reroute rules. Deterministic; asks nothing. Outputs:
+
+```text
+workspaces/<project>/interns/generated/contracts/bronze_silver_standards.json
+workspaces/<project>/interns/generated/contracts/transformation_manifest.json
+workspaces/<project>/interns/generated/contracts/workflow_reroute_policy.json
+workspaces/<project>/interns/reports/bronze_silver_standards.md
 ```
 
 ### prepare-pipeline-deployment-plan
@@ -1695,6 +2311,53 @@ uv run python tools/methodology_parser.py --doc <file> --out <schema.json>
 
 Use when a methodology document, data dictionary, or contract must be converted
 into semantic schema JSON.
+
+### prepare-databricks-assets
+
+Command:
+
+```powershell
+uv run prepare-databricks-assets --workspace workspaces/<project> `
+  [--environment dev|stage|prod] [--domain <domain>] [--catalog <name>] [--schema <name>] `
+  [--workspace-root /Workspace/Autoresearch]
+```
+
+Turns `interns/generated/profiles/profile_index.json` into a registration manifest at
+`workspaces/<project>/interns/generated/requirements/databricks_asset_manifest.json`: one entry per
+profiled dataset with its source path/format and target `catalog.schema.table` FQN, plus the
+workspace asset layout under `<workspace-root>/<environment>/<domain>`. `--schema` defaults to
+`--domain`; duplicate table stems are disambiguated.
+
+It registers nothing and uploads nothing. Every asset is written with
+`registration_state: requires_user_approved_upload_or_table_registration` and the manifest carries
+`approval_required: true` -- remote registration and workspace deployment stay behind explicit
+approval, and local/DuckDB execution is a developer smoke test, not enterprise evidence.
+
+### prepare-genie-workspace
+
+Command:
+
+```powershell
+uv run prepare-genie-workspace --workspace workspaces/<project> `
+  [--manifest-path <path>] [--environment dev] [--domain <domain>] [--catalog <name>] `
+  [--schema <name>] [--workspace-root /Workspace/Autoresearch]
+```
+
+Turns the asset manifest into a reviewable Genie deployment spec, an operator runbook, and
+evolution memory. It builds the manifest first (via `prepare-databricks-assets`) when
+`--manifest-path` is absent and none exists yet. Mutates no Databricks workspace. Outputs:
+
+```text
+workspaces/<project>/interns/generated/requirements/genie_workspace_spec.json
+workspaces/<project>/interns/reports/genie_operator_runbook.md
+workspaces/<project>/interns/generated/memory/genie_workspace_decisions.json
+workspaces/<project>/interns/generated/memory/evolution.md
+workspaces/<project>/interns/generated/memory/lessons.json
+```
+
+The spec covers workspace folders, Genie spaces and their starter prompts, and the role/action
+permission matrix; the result reports a count for each. Errors when the workspace path does not
+exist, is the repo root itself, or is outside the repo root.
 
 ### Databricks Tools
 

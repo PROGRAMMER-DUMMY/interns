@@ -9,6 +9,11 @@
   },
   "skills": [
     {
+      "name": "dashboard-agent",
+      "description": "Named conversational DashboardAgent. Triggered by \"DashboardAgent, <request>\", it turns a natural-language plot request into a per-workspace dashboard spec edit + verify loop. An advisor + editor that knows the spec contract (machine_defaults vs user_overrides), the renderer chart types and axes, the live KPI result columns, and display redaction/governance. Wraps the dashboard-engineer subagent and the dashboard-design skill. Use whenever the user names \"DashboardAgent\" or asks in plain language to add, change, or remove a plot/panel on a workspace dashboard.",
+      "path": "skills/dashboard-agent/SKILL.md"
+    },
+    {
       "name": "dashboard-design",
       "description": "Design, customize, debug, and verify per-workspace BI dashboards. Owns the dashboard/ directory in any workspace: JSON spec contracts (machine_defaults + user_overrides), chart-type inference, Dash renderer, static HTML export, dialect dispatch, and live callback testing. Use whenever the user wants a chart, a layout change, a new filter, a customization, or a dashboard bug investigated.",
       "path": "skills/dashboard-design/SKILL.md"
@@ -97,501 +102,112 @@
   "tool_registry": {
     "source": ".agents/tools.json",
     "evidence_policy": {
-      "dataset_access_order": [
-        "workspace_profile_index",
-        "workspace_profile_json",
-        "bounded_sample",
-        "raw_dataset_exception"
-      ],
-      "profile_index_pattern": "workspaces/<project>/interns/generated/profiles/profile_index.json",
-      "profile_file_pattern": "workspaces/<project>/interns/generated/profiles/*.profile.json",
-      "raw_dataset_rule": "Do not read full raw datasets when profile artifacts or bounded samples are enough.",
-      "secret_display_rule": "Hard stop: never print env files, credential files, tokens, private keys, shell environment dumps, connection strings, bearer headers, cookies, or config/AST/tree dumps containing secret values. Report only existence/status or redacted key names."
+      "secret_display_rule": "Never print or paste .env, .databrickscfg, private keys, tokens, connection strings, bearer headers, cookies, or shell environment dumps. Report only existence/status or redacted key names such as OPENAI_API_KEY=<redacted>.",
+      "raw_dataset_rule": "Use generated profile artifacts before raw data: read interns/generated/profiles/profile_index.json and the relevant *.profile.json first, and never paste raw dataset contents into prompts. Bounded samples only when profiles are insufficient, and state why.",
+      "generation": "Derived, not curated. Do not hand-edit. Regenerate: uv run build-tool-index"
     },
     "tools": [
       {
-        "name": "list-workspace-files",
-        "command": "uv run list-workspace-files --workspace <workspace>",
+        "name": "apply-blueprint-answer",
+        "command": "uv run apply-blueprint-answer --workspace <workspace>",
         "use_when": [
-          "workspace selection request",
-          "set current workspace",
-          "bounded startup file inventory"
+          "The solution blueprint: what we will do, end to end, before we do any of it."
         ],
-        "outputs": [
-          "all file paths up to cap",
-          "possible KPI files",
-          "possible data model files",
-          "dataset roots",
-          "docs",
-          "interns state"
-        ],
-        "safety": "local_safe_file_paths_only_no_content_reads",
-        "required_skills": [
-          "workspace-governance"
-        ]
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
       },
       {
-        "name": "prepare-workspace-selection",
-        "command": "uv run prepare-workspace-selection --workspace <workspace>",
+        "name": "apply-data-model-answer",
+        "command": "uv run apply-data-model-answer --workspace <workspace>",
         "use_when": [
-          "workspace selection request",
-          "set current workspace",
-          "workspace may be empty or missing",
-          "external raw data should stay outside workspace"
+          "user answered the current data-model generation panel",
+          "draft data-model artifacts should be produced under interns"
         ],
         "outputs": [
-          "guarded workspace selection status",
-          "active workspace listing summary",
-          "available workspace choices",
-          "empty or missing workspace blocker",
-          "external dataset_allowlist setup template"
-        ],
-        "safety": "local_safe_file_paths_only_no_content_reads",
-        "required_skills": [
-          "workspace-governance",
-          "grill-requirements"
-        ]
-      },
-      {
-        "name": "session-snapshot",
-        "command": "uv run session-snapshot <start|append|command|file-change|decision|verify|finish>",
-        "use_when": [
-          "operator wants exact end-user conversation transcript",
-          "cross-CLI session monitoring",
-          "audit conversation turns, commands, file changes, decisions, and intent verification"
-        ],
-        "outputs": [
-          ".agents/sessions/<session>/compact.md",
-          ".agents/sessions/<session>/intent_verification.md",
-          ".agents/sessions/<session>/intent_verification.json",
-          ".agents/sessions/<session>/events.jsonl",
-          ".agents/sessions/<session>/transcript.md",
-          ".agents/sessions/<session>/commands.md",
-          ".agents/sessions/<session>/file_changes.md",
-          ".agents/sessions/<session>/decisions.md",
-          ".agents/sessions/<session>/snapshot.json"
-        ],
-        "safety": "local_safe_redacts_common_secret_patterns_gitignored",
-        "required_skills": [
-          "workspace-governance",
-          "evolution",
-          "stakeholder-memory"
-        ]
-      },
-      {
-        "name": "onboard-workspace",
-        "command": "uv run onboard-workspace --workspace <workspace>",
-        "use_when": [
-          "workspace artifacts are missing",
-          "profiles/contracts/evaluation scaffolding need refresh"
-        ],
-        "outputs": [
-          "interns/generated/profiles",
-          "interns/generated/contracts",
-          "interns/reports"
-        ],
-        "safety": "local_safe",
-        "required_skills": [
-          "workspace-governance",
-          "task-onboarding",
-          "domain-model",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "kickstart-workspace",
-        "command": "uv run kickstart-workspace --workspace <workspace> --domain <domain>",
-        "use_when": [
-          "new governed workspace",
-          "enterprise discovery and task config need refresh"
-        ],
-        "outputs": [
-          "config/tasks.json",
-          "interns/generated/requirements",
-          "interns/generated/contracts"
-        ],
-        "safety": "local_safe_config_write",
-        "required_skills": [
-          "workspace-governance",
-          "task-onboarding",
-          "grill-requirements",
-          "domain-model"
-        ]
-      },
-      {
-        "name": "prepare-kpi-generation",
-        "command": "uv run prepare-kpi-generation --workspace <workspace>",
-        "use_when": [
-          "workspace confirmation completed",
-          "user may create, revise, challenge, or score KPIs",
-          "show two-path KPI generation versus usual workflow prompt"
-        ],
-        "outputs": [
-          "interns/generated/requirements/kpi_generation_session.json",
-          "interns/reports/kpi_generation/current.json",
-          "interns/reports/kpi_generation/current.md",
-          "KPI quality/readiness score"
-        ],
-        "safety": "local_safe",
-        "required_skills": [
-          "workspace-governance",
-          "grill-requirements",
-          "stakeholder-memory",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "apply-kpi-generation-answer",
-        "command": "uv run apply-kpi-generation-answer --workspace <workspace> --answer <option_id_or_label>",
-        "use_when": [
-          "user answered the current KPI generation panel",
-          "KPI generation interview needs to advance",
-          "draft KPI registry and evidence proof should be produced"
-        ],
-        "outputs": [
-          "updated kpi_generation_session.json",
-          "next kpi_generation/current.json",
-          "interns/generated/requirements/kpi_registry_draft.json"
+          "interns/generated/requirements/data_model_draft.json",
+          "interns/reports/data_model_generation"
         ],
         "safety": "local_safe_validated_write",
         "required_skills": [
-          "grill-requirements",
+          "domain-model",
           "stakeholder-memory",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "finalize-kpi-generation",
-        "command": "uv run finalize-kpi-generation --workspace <workspace> --approve-final-preview",
-        "use_when": [
-          "final KPI draft preview was shown and explicitly approved",
-          "write user-facing KPI registry after KPI generation"
-        ],
-        "outputs": [
-          "workspace docs KPI registry JSON",
-          "interns/generated/requirements/kpi_generation_production_proof.json",
-          "workspace and team memory"
-        ],
-        "safety": "requires_explicit_final_preview_approval",
-        "required_skills": [
-          "workspace-governance",
-          "stakeholder-memory",
-          "to-solution-brief",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "prepare-workspace-workflow",
-        "command": "uv run prepare-workspace-workflow --workspace <workspace> --mode <plan|local-safe|autopilot> --domain <domain>",
-        "use_when": [
-          "workspace confirmation completed",
-          "user wants one checkpoint for KPI, data-model, blocker, validation, and presentation workflow",
-          "agent needs deterministic next commands and autopilot boundaries"
-        ],
-        "outputs": [
-          "interns/reports/workflow/current.json",
-          "interns/reports/workflow/current.md",
-          "local-safe generated artifacts when mode is local-safe or autopilot"
-        ],
-        "safety": "local_safe_checkpoint_autopilot_stops_before_final_delete_remote_codegen",
-        "required_skills": [
-          "workspace-governance",
-          "task-onboarding",
-          "data-engineering-pipeline-design",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "prepare-bronze-silver-standards",
-        "command": "uv run prepare-bronze-silver-standards --workspace <workspace> --domain <domain>",
-        "use_when": [
-          "Bronze/Silver production standards should be materialized",
-          "runtime-neutral transformation manifest is needed before SQL, Polars, or PySpark generation",
-          "workflow reroute policy should stop wrong-route actions and auto-reroute once"
-        ],
-        "outputs": [
-          "interns/generated/contracts/bronze_silver_standards.json",
-          "interns/generated/contracts/transformation_manifest.json",
-          "interns/generated/contracts/workflow_reroute_policy.json",
-          "interns/reports/bronze_silver_standards.md"
-        ],
-        "safety": "local_safe_contract_write_no_execution",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design"
-        ]
-      },
-      {
-        "name": "workspace-flow",
-        "command": "uv run workspace-flow <start|status|answer|results>",
-        "use_when": [
-          "agent-led workspace workflow should run quietly in the backend",
-          "user asks for KPI generation by interview",
-          "user asks to generate SQL and show KPI results",
-          "main chat should show only compact questions or results"
-        ],
-        "outputs": [
-          "interns/state/workflow_sessions/<session-id>/session.json",
-          "interns/state/workflow_sessions/<session-id>/current.json",
-          "interns/state/workflow_sessions/<session-id>/current.md",
-          "interns/reports/kpi_results/current.md",
-          "interns/generated/evidence/kpi_results/current.json"
-        ],
-        "safety": "local_safe_session_orchestrator_hides_lower_level_command_noise",
-        "required_skills": [
-          "workspace-governance",
-          "task-onboarding",
-          "data-engineering-pipeline-design",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "prepare-wiki-memory",
-        "command": "uv run prepare-wiki-memory --workspace <workspace> --domain <domain>",
-        "use_when": [
-          "repeated KPI terms or data-model decisions should be found",
-          "shared team wiki memory should suggest safe reuse",
-          "autopilot needs governed draft prefill candidates"
-        ],
-        "outputs": [
-          "state/team_memory/wiki_memory_index.json",
-          "interns/generated/memory/wiki_memory_candidates.json",
-          "interns/reports/wiki_memory/current.json",
-          "interns/reports/wiki_memory/current.md"
-        ],
-        "safety": "local_safe_structured_artifacts_only_draft_prefill_blocks_execution",
-        "required_skills": [
-          "stakeholder-memory",
-          "evolution",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "validate-memory-health",
-        "command": "uv run validate-memory-health --workspace <workspace>",
-        "use_when": [
-          "workspace memory needs confidence-scored lifecycle health",
-          "shared team memory should be checked before reuse",
-          "memory entries need status, confidence, verification, expiration, and evidence normalization"
-        ],
-        "outputs": [
-          "interns/reports/memory_health/current.json",
-          "interns/reports/memory_health/current.md",
-          "interns/generated/evidence/memory_health/current.json"
-        ],
-        "safety": "local_safe_memory_artifact_scan_no_raw_data_reads",
-        "required_skills": [
-          "stakeholder-memory",
-          "evolution"
-        ]
-      },
-      {
-        "name": "prepare-agent-benchmark",
-        "command": "uv run prepare-agent-benchmark --workspace <workspace> --domain <domain>",
-        "use_when": [
-          "workspace needs a readiness proof",
-          "release gates should be checked before SQL, ETL, medallion, autopilot, or production promotion",
-          "owners need an artifact-backed benchmark scorecard"
-        ],
-        "outputs": [
-          "interns/generated/contracts/agent_benchmark_scorecard.json",
-          "interns/generated/contracts/release_gate_status.json",
-          "interns/reports/benchmarks/current.json",
-          "interns/reports/benchmarks/current.md"
-        ],
-        "safety": "local_safe_project_native_scorecard_no_external_benchmark_execution",
-        "required_skills": [
-          "workspace-governance",
-          "workspace-kpi-query-optimizer",
-          "evolution"
-        ]
-      },
-      {
-        "name": "validate-project-harness",
-        "command": "uv run validate-project-harness --workspace <workspace> --domain <domain>",
-        "use_when": [
-          "workspace needs one top-level score before completion is claimed",
-          "all local-safe harnesses should run together",
-          "release readiness needs artifact validation, workflow guardrails, trajectory health, KPI execution, benchmark, and git hygiene proof"
-        ],
-        "outputs": [
-          "interns/generated/evidence/project_harness.json",
-          "interns/reports/project_harness.md",
-          "score, blockers, warnings, and next commands"
-        ],
-        "safety": "local_safe_project_harness_no_remote_execution",
-        "required_skills": [
-          "workspace-governance",
-          "workspace-kpi-query-optimizer",
-          "evolution"
-        ]
-      },
-      {
-        "name": "run-reliability-suite",
-        "command": "uv run run-reliability-suite --workspace <workspace> --domain <domain>",
-        "use_when": [
-          "scheduled local-safe reliability checks should run",
-          "workspace workflow guardrails and evidence graph should be refreshed together",
-          "project harness should run only when required generated artifacts are available"
-        ],
-        "outputs": [
-          "interns/reports/reliability_suite/current.json",
-          "interns/reports/reliability_suite/current.md",
-          "interns/generated/evidence/reliability_suite/current.json"
-        ],
-        "safety": "local_safe_reliability_runner_no_shell_execution",
-        "required_skills": [
-          "workspace-governance",
-          "workspace-kpi-query-optimizer",
-          "evolution"
-        ]
-      },
-      {
-        "name": "run-ai-app-harness",
-        "command": "uv run run-ai-app-harness --workspace <workspace> --dataset <workspace>/interns/ai_harness/datasets/<suite>.jsonl",
-        "use_when": [
-          "workspace needs dependency-free AI app tests",
-          "JSONL prompt cases should be evaluated with exact/schema/keyword or KPI/SQL-specific checks",
-          "KPI mapping, SQL semantic, result-table, or adversarial AI behavior should be regression tested",
-          "local stub or explicitly approved raw HTTP AI boundary should be tested",
-          "baseline per-case and result-signature regressions should block CI"
-        ],
-        "outputs": [
-          "interns/ai_harness/runs/<run_id>/outputs.jsonl",
-          "interns/ai_harness/runs/<run_id>/report.json",
-          "interns/reports/ai_app_harness/current.json",
-          "interns/reports/ai_app_harness/current.md",
-          "interns/generated/evidence/ai_app_harness/current.json"
-        ],
-        "safety": "local_safe_by_default_remote_ai_requires_allow_flag",
-        "required_skills": [
-          "workspace-governance",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "run-ai-cli-harness",
-        "command": "uv run run-ai-cli-harness --workspace <workspace> --dataset <workspace>/interns/ai_cli_harness/datasets/<suite>.jsonl",
-        "use_when": [
-          "CLI agents such as Claude, Gemini, Codex, or custom tools need governed workflow regression tests",
-          "command transcripts, project-tool usage, artifact outputs, JSON fields, and workflow guardrails should be evaluated",
-          "real CLI subprocess execution should remain blocked unless explicitly approved"
-        ],
-        "outputs": [
-          "interns/ai_cli_harness/runs/<run_id>/outputs.jsonl",
-          "interns/ai_cli_harness/runs/<run_id>/report.json",
-          "interns/reports/ai_cli_harness/current.json",
-          "interns/reports/ai_cli_harness/current.md",
-          "interns/generated/evidence/ai_cli_harness/current.json"
-        ],
-        "safety": "local_safe_stub_by_default_real_cli_requires_allow_flag",
-        "required_skills": [
-          "workspace-governance",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "validate-workflow-guardrails",
-        "command": "uv run validate-workflow-guardrails --workspace <workspace>",
-        "use_when": [
-          "workflow itself needs a reliability gate",
-          "blocker panels may contain invented or non-source-backed features",
-          "failed shell commands or raw-data reads should be audited",
-          "non-portable commands should be caught before retrying"
-        ],
-        "outputs": [
-          "interns/reports/workflow_guard_harness/current.json",
-          "interns/reports/workflow_guard_harness/current.md",
-          "interns/generated/evidence/workflow_guard_harness/current.json"
-        ],
-        "safety": "local_safe_read_only_validation_report",
-        "required_skills": [
-          "workspace-governance",
-          "workspace-kpi-query-optimizer",
-          "evolution"
-        ]
-      },
-      {
-        "name": "run-layered-pipeline-harness",
-        "command": "uv run run-layered-pipeline-harness --workspace <workspace>",
-        "use_when": [
-          "catalog, route, and pipeline contracts need a layered data-engineering validation gate",
-          "ETL, ELT, medallion, existing-layer validation, or KPI-only pipeline plans should be checked before code generation or production proof",
-          "deduplication, grain, raw path, and remote mutation policies need enforcement"
-        ],
-        "outputs": [
-          "interns/reports/layered_pipeline_harness/current.json",
-          "interns/reports/layered_pipeline_harness/current.md",
-          "interns/generated/evidence/layered_pipeline_harness/current.json"
-        ],
-        "safety": "local_safe_read_only_contract_harness_no_raw_data_reads",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design"
-        ]
-      },
-      {
-        "name": "run-pipeline-execution-harness",
-        "command": "uv run run-pipeline-execution-harness --workspace <workspace>",
-        "use_when": [
-          "generated pipeline_layers.sql should be executed locally before proof or promotion",
-          "bronze, silver, and gold layer views need row-count and column evidence",
-          "pipeline sample output must be redacted while preserving execution proof"
-        ],
-        "outputs": [
-          "interns/reports/pipeline_execution_harness/current.json",
-          "interns/reports/pipeline_execution_harness/current.md",
-          "interns/generated/evidence/pipeline_execution_harness/current.json"
-        ],
-        "safety": "local_safe_duckdb_execution_redacted_samples_no_remote_writes",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design"
-        ]
-      },
-      {
-        "name": "run-data-quality-harness",
-        "command": "uv run run-data-quality-harness --workspace <workspace>",
-        "use_when": [
-          "profile, catalog, and pipeline contracts need a local-safe duplicate and data-quality review",
-          "bounded duplicate evidence should be prepared before stakeholder duplicate decisions",
-          "data quality findings must be written without automatic deduplication, quarantine SQL, or remote mutation"
-        ],
-        "outputs": [
-          "interns/generated/contracts/data_quality_contract.json",
-          "interns/generated/evidence/data_quality_harness/current.json",
-          "interns/reports/data_quality/current.json",
-          "interns/reports/data_quality/current.md"
-        ],
-        "safety": "local_safe_profile_catalog_pipeline_contract_driven_bounded_duplicate_evidence_redacted_samples_no_auto_dedup_or_quarantine_sql_mutation",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design"
-        ]
-      },
-      {
-        "name": "prepare-duplicate-review-panel",
-        "command": "uv run prepare-duplicate-review-panel --workspace <workspace>",
-        "use_when": [
-          "duplicate evidence from the data quality harness needs stakeholder review",
-          "duplicate handling options should be generated from bounded profile/catalog/pipeline contract evidence",
-          "agent needs a JSON-backed duplicate review panel before applying any decision"
-        ],
-        "outputs": [
-          "interns/reports/duplicate_review/current.json",
-          "interns/reports/duplicate_review/current.md",
-          "interns/generated/contracts/data_quality_contract.json"
-        ],
-        "safety": "local_safe_profile_catalog_pipeline_contract_driven_bounded_duplicate_evidence_redacted_samples_no_auto_dedup_or_quarantine_sql_mutation",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design",
           "grill-requirements"
         ]
       },
       {
+        "name": "apply-data-model-blocker-answer",
+        "command": "uv run apply-data-model-blocker-answer --workspace <workspace>",
+        "use_when": [
+          "user answered the current data-model blocker panel",
+          "accepted option should apply a structured data-model operation",
+          "next blocker panel should be generated"
+        ],
+        "outputs": [
+          "updated interns/generated/requirements/data_model_draft.json",
+          "next interns/reports/data_model_blocker_panel/current.json",
+          "next interns/reports/data_model_blocker_panel/current.md"
+        ],
+        "safety": "local_safe_validated_write",
+        "required_skills": [
+          "domain-model",
+          "stakeholder-memory",
+          "grill-requirements"
+        ]
+      },
+      {
+        "name": "apply-data-quality-answer",
+        "command": "uv run apply-data-quality-answer --workspace <workspace>",
+        "use_when": [
+          "Data-quality rules authored the same way KPI features already are: ask,"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "apply-data-source-answer",
+        "command": "uv run apply-data-source-answer --workspace <workspace>",
+        "use_when": [
+          "Workspace-level data-source panel: an explicit, human-confirmed, once-asked"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "apply-design-panel-answer",
+        "command": "uv run apply-design-panel-answer --workspace <workspace>",
+        "use_when": [
+          "Medallion design-panel ratification (minimal slice of Priority 3.6)."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "apply-document-candidate",
+        "command": "uv run apply-document-candidate --workspace <workspace>",
+        "use_when": [
+          "Governed document candidate promotion (Phase 3: promote path, step 2)."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "apply-drift-answer",
+        "command": "uv run apply-drift-answer --workspace <workspace>",
+        "use_when": [
+          "Governed CLI entry points for schema evolution."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
         "name": "apply-duplicate-review-answer",
-        "command": "uv run apply-duplicate-review-answer --workspace <workspace> --answer <option_id_or_label>",
+        "command": "uv run apply-duplicate-review-answer --workspace <workspace>",
         "use_when": [
           "user answered the current duplicate review panel",
           "accepted duplicate decision should be resolved against current.json",
@@ -610,24 +226,277 @@
         ]
       },
       {
-        "name": "record-workspace-trajectory",
-        "command": "uv run record-workspace-trajectory --workspace <workspace> --event-type <type> --status <status> --summary <summary>",
+        "name": "apply-external-source-intake",
+        "command": "uv run apply-external-source-intake --workspace <workspace>",
         "use_when": [
-          "agent or CLI workflow steps should be replayable",
-          "commands, validations, decisions, retries, and artifacts need workspace-scoped audit events",
-          "workflow guardrails should validate the step-by-step trajectory"
+          "user answered the external source intake panel",
+          "metadata-only discovery should run after route selection",
+          "saved external-source defaults or change reasons should be recorded"
         ],
         "outputs": [
-          "interns/state/trajectory.jsonl",
-          "interns/reports/trajectory/current.json",
-          "interns/reports/trajectory/current.md",
-          "interns/generated/evidence/trajectory/current.json"
+          "external_source_intake_session.json",
+          "external_source_discovery.json",
+          "external_source_discovery.md",
+          "docs/source_selection.generated.json",
+          "state/team_memory/external_source_intake_preferences.json"
         ],
-        "safety": "local_safe_append_only_secret_redacted_workspace_log",
+        "safety": "local_safe_metadata_only_until_review_gate",
         "required_skills": [
           "workspace-governance",
-          "evolution"
+          "data-engineering-pipeline-design",
+          "stakeholder-memory"
         ]
+      },
+      {
+        "name": "apply-intake-answer",
+        "command": "uv run apply-intake-answer --workspace <workspace>",
+        "use_when": [
+          "Governed CLI entry points for Phase 0/1."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "apply-kpi-definition",
+        "command": "uv run apply-kpi-definition --workspace <workspace>",
+        "use_when": [
+          "Apply a human-confirmed KPI definition (metric / grain / filters)."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "apply-kpi-generation-answer",
+        "command": "uv run apply-kpi-generation-answer --workspace <workspace>",
+        "use_when": [
+          "user answered the current KPI generation panel",
+          "KPI generation interview needs to advance",
+          "draft KPI registry and evidence proof should be produced"
+        ],
+        "outputs": [
+          "updated kpi_generation_session.json",
+          "next kpi_generation/current.json",
+          "interns/generated/requirements/kpi_registry_draft.json"
+        ],
+        "safety": "local_safe_validated_write",
+        "required_skills": [
+          "grill-requirements",
+          "stakeholder-memory",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "apply-kpi-panel-answer",
+        "command": "uv run apply-kpi-panel-answer --workspace <workspace>",
+        "use_when": [
+          "user answered the current blocker question",
+          "accepted option should be applied without inventing unsupported resolver flags",
+          "friendly answer must be resolved against current.json"
+        ],
+        "outputs": [
+          "interns/generated/contracts/workspace_feature_definitions.json",
+          "updated kpi_feature_mapping.json",
+          "next validated blocker_question_panel/current.json"
+        ],
+        "safety": "local_safe_validated_write",
+        "required_skills": [
+          "domain-model",
+          "stakeholder-memory",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "apply-phi-review-answer",
+        "command": "uv run apply-phi-review-answer --workspace <workspace>",
+        "use_when": [
+          "PHI/PII review-and-consent panel (Priority 1.1)."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "apply-pipeline-decision",
+        "command": "uv run apply-pipeline-decision --workspace <workspace>",
+        "use_when": [
+          "user approved a percentage or ratio KPI denominator scope",
+          "pipeline_plan.json is blocked by percentage_denominator_scope_unresolved",
+          "approved pipeline decisions should be recorded before regenerating the plan"
+        ],
+        "outputs": [
+          "interns/generated/contracts/pipeline_decisions.json"
+        ],
+        "safety": "local_safe_validated_decision_write_requires_user_approval",
+        "required_skills": [
+          "data-engineering-pipeline-design",
+          "stakeholder-memory"
+        ]
+      },
+      {
+        "name": "apply-pipeline-format-answer",
+        "command": "uv run apply-pipeline-format-answer --workspace <workspace>",
+        "use_when": [
+          "user answered the pipeline format panel",
+          "accepted storage format should be recorded before pipeline planning",
+          "medallion plan should use the approved table/file format"
+        ],
+        "outputs": [
+          "interns/generated/contracts/pipeline_decisions.json"
+        ],
+        "safety": "local_safe_validated_decision_write_requires_user_approval",
+        "required_skills": [
+          "data-engineering-pipeline-design",
+          "stakeholder-memory"
+        ]
+      },
+      {
+        "name": "apply-provisioning",
+        "command": "uv run apply-provisioning --workspace <workspace>",
+        "use_when": [
+          "Governed CLI entry points for provisioning + ingestion generation."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "apply-relationship-answer",
+        "command": "uv run apply-relationship-answer --workspace <workspace>",
+        "use_when": [
+          "user approved or rejected a relationship contract",
+          "profile_validated relationship needs governed promotion",
+          "agent must not hand-edit relationship_contracts.json"
+        ],
+        "outputs": [
+          "updated interns/generated/contracts/relationship_contracts.json",
+          "recomputed executable and candidate relationship counts",
+          "decision_history entry with source apply-relationship-answer"
+        ],
+        "safety": "local_safe_validated_decision_write_prevents_manual_json_edits",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
+        "name": "apply-uc-intake",
+        "command": "uv run apply-uc-intake --workspace <workspace>",
+        "use_when": [
+          "Execute an approved solution blueprint against Unity Catalog."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "assess-workspace-phi",
+        "command": "uv run assess-workspace-phi --workspace <workspace>",
+        "use_when": [
+          "CLI: assess-workspace-phi --workspace <ws>."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "blocker-question-panel",
+        "command": "uv run blocker-question-panel --workspace <workspace>",
+        "use_when": [
+          "agent needs to ask any KPI blocker question",
+          "direct mapping or source-of-truth choice needs stakeholder answer",
+          "non-technical panel is preferred over terminal option UI"
+        ],
+        "outputs": [
+          "interns/reports/blocker_question_panel/current.json",
+          "interns/reports/blocker_question_panel/current.md",
+          "interns/reports/blocker_question_panel/index.json"
+        ],
+        "safety": "local_safe",
+        "required_skills": [
+          "grill-requirements",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "build-catalog-contract",
+        "command": "uv run build-catalog-contract --workspace <workspace>",
+        "use_when": [
+          "profile-backed source datasets need a stable logical catalog interface",
+          "pipeline and KPI code generation must avoid direct raw path dependencies",
+          "route or pipeline planning needs catalog objects before executable work"
+        ],
+        "outputs": [
+          "interns/generated/contracts/catalog_contract.json",
+          "interns/reports/catalog_contract.md"
+        ],
+        "safety": "local_safe_profile_backed_contract_write_no_remote_mutation",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
+        "name": "build-intent-contract",
+        "command": "uv run build-intent-contract --workspace <workspace>",
+        "use_when": [
+          "Console entry point: build-intent-contract --workspace <ws>"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "build-relationship-contracts",
+        "command": "uv run build-relationship-contracts --workspace <workspace>",
+        "use_when": [
+          "multi-dataset executable generation needs FK/relationship proof",
+          "source-to-target joins need production-grade relationship contracts",
+          "profile-only joins need approval gating"
+        ],
+        "outputs": [
+          "interns/generated/contracts/relationship_contracts.json",
+          "interns/reports/relationship_contracts.md"
+        ],
+        "safety": "local_safe_governed_contract_write",
+        "required_skills": [
+          "domain-model",
+          "data-engineering-pipeline-design",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "build-source-family-contracts",
+        "command": "uv run build-source-family-contracts --workspace <workspace>",
+        "use_when": [
+          "external raw folder has repeated dated CSV releases",
+          "schema drift must be understood before ETL or medallion planning",
+          "workspace has profiles but no KPI registry or no KPI-first workflow",
+          "agent must group source files without reading raw datasets or duplicating full profile payloads"
+        ],
+        "outputs": [
+          "interns/generated/contracts/source_family_contracts.json",
+          "interns/reports/source_family_contracts.md"
+        ],
+        "safety": "local_safe_profile_index_only_no_raw_data_reads",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "domain-model"
+        ]
+      },
+      {
+        "name": "build-tool-index",
+        "command": "uv run build-tool-index --workspace <workspace>",
+        "use_when": [
+          "Regenerate .agents/tools.json from the CLI registry."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
       },
       {
         "name": "build-workspace-evidence-graph",
@@ -649,47 +518,172 @@
         ]
       },
       {
-        "name": "query-workspace-evidence-graph",
-        "command": "uv run query-workspace-evidence-graph --workspace <workspace> --term <term>",
+        "name": "check-kpi-anomalies",
+        "command": "uv run check-kpi-anomalies --workspace <workspace>",
         "use_when": [
-          "agent or reviewer asks why a term exists",
-          "feature or column impact needs to be listed from the evidence graph",
-          "stale or invented term origin needs traceability"
+          "Post-results DAG task entrypoint: read this run's KPI results + this"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "check-platform-readiness",
+        "command": "uv run check-platform-readiness --workspace <workspace>",
+        "use_when": [
+          "Platform readiness: is Databricks/dbt/Airflow actually usable right now."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "check-remote-execution-gate",
+        "command": "uv run check-remote-execution-gate",
+        "use_when": [
+          "Standalone CLI: is `AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1` set right now?"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "cleanup-workspace-references",
+        "command": "uv run cleanup-workspace-references --workspace <workspace>",
+        "use_when": [
+          "fresh workspace restart is requested",
+          "stale generated references need removal"
         ],
         "outputs": [
-          "JSON query result with matched nodes, introducers, users, and impact edges"
+          "dry-run cleanup plan",
+          "optional deletion of interns and repo runtime references with --apply --confirm-delete <workspace>"
         ],
-        "safety": "local_safe_existing_graph_or_rebuild_no_raw_data_reads",
+        "safety": "hard_permission_block_for_any_delete",
+        "required_skills": [
+          "workspace-governance"
+        ]
+      },
+      {
+        "name": "confirm-blueprint",
+        "command": "uv run confirm-blueprint --workspace <workspace>",
+        "use_when": [
+          "CLI entry points for the blueprint slice."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "confirm-cli-agent-proposal",
+        "command": "uv run confirm-cli-agent-proposal --workspace <workspace>",
+        "use_when": [
+          "CLI for the second step of the CLI-agent proposal flow."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "context-router",
+        "command": "uv run context-router",
+        "use_when": [
+          "task needs bounded context instead of whole artifact loading",
+          "agent needs context wiki/page index",
+          "large workspace artifacts must be routed by budget"
+        ],
+        "outputs": [
+          "interns/generated/context/context_index.json",
+          "interns/generated/context/context_pages.jsonl",
+          "interns/generated/context/manifests/<task>_<budget>.json",
+          "interns/reports/context/<task>_<budget>.md"
+        ],
+        "safety": "local_safe_derived_context_only",
         "required_skills": [
           "workspace-governance",
-          "domain-model",
+          "domain-model"
+        ]
+      },
+      {
+        "name": "cost-ledger-ingest",
+        "command": "uv run cost-ledger-ingest --workspace <workspace>",
+        "use_when": [
+          "core/observability/cost_ingest.py -- Phase 1a.2b: fill agent token spend from"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "dashboard-verify",
+        "command": "uv run dashboard-verify",
+        "use_when": [
+          "Interactive browser verification gate for dashboards."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "dataops",
+        "command": "uv run dataops --workspace <workspace>",
+        "use_when": [
+          "``dataops``: data-engineering system-design knowledge, decisions, reviews and"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "dbt-index",
+        "command": "uv run dbt-index --workspace <workspace>",
+        "use_when": [
+          "Local dbt model lineage and blast radius -- no warehouse, no dbt install."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "declare-source",
+        "command": "uv run declare-source --workspace <workspace>",
+        "use_when": [
+          "Governed CLI entry points for Phase 0/1."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "deploy-databricks-workspace",
+        "command": "uv run deploy-databricks-workspace --workspace <workspace>",
+        "use_when": [
+          "Dry-run and guarded deployment for Databricks workspace specs."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "derived-feature-markdown",
+        "command": "uv run derived-feature-markdown --workspace <workspace>",
+        "use_when": [
+          "stakeholders need readable derived-feature blocker reviews",
+          "strict derived_feature_options JSON needs Markdown rendering"
+        ],
+        "outputs": [
+          "interns/reports/derived_feature_reviews/md/<kpi_id>_<feature>.md",
+          "interns/reports/derived_feature_reviews/json/<kpi_id>_<feature>.json",
+          "interns/reports/derived_feature_reviews/index.md"
+        ],
+        "safety": "local_safe",
+        "required_skills": [
+          "feature-derivation-library",
           "workspace-kpi-query-optimizer"
         ]
       },
       {
-        "name": "kpi-proof-packet",
-        "command": "uv run kpi-proof-packet --workspace <workspace> --domain <domain>",
-        "use_when": [
-          "stakeholders need one all-KPI recommendation packet",
-          "operators need source row traceability, mapping recommendations, reliability gates, generated SQL, execution output previews, and sample values in one report",
-          "bulk KPI mapping review should happen before apply-safe or execution modes"
-        ],
-        "outputs": [
-          "interns/reports/kpi_proof_packet/current.md",
-          "interns/reports/kpi_proof_packet/current.json",
-          "interns/generated/evidence/kpi_proof_packet/current.json"
-        ],
-        "safety": "local_safe_read_only_recommend_mode",
-        "required_skills": [
-          "workspace-governance",
-          "domain-model",
-          "workspace-kpi-query-optimizer",
-          "to-solution-brief"
-        ]
-      },
-      {
         "name": "discover-external-sources",
-        "command": "uv run discover-external-sources --workspace <workspace> --external-root <external_root>",
+        "command": "uv run discover-external-sources --workspace <workspace>",
         "use_when": [
           "user points to a large external folder",
           "external source root needs dataset/doc/log/delta/database classification",
@@ -708,182 +702,24 @@
         ]
       },
       {
-        "name": "prepare-external-source-intake",
-        "command": "uv run prepare-external-source-intake --external-root <external_root> --proposed-workspace <workspace>",
+        "name": "discover-source",
+        "command": "uv run discover-source --workspace <workspace>",
         "use_when": [
-          "user provides an external path and has not chosen existing versus new workspace",
-          "external-source route preference should be reused or challenged",
-          "agent needs a deterministic panel instead of asking freehand"
+          "Governed CLI entry points for Phase 0/1."
         ],
-        "outputs": [
-          "interns/generated/requirements/external_source_intake_session.json",
-          "interns/reports/external_source_intake/current.json",
-          "interns/reports/external_source_intake/current.md"
-        ],
-        "safety": "local_safe_panel_write_no_source_reads",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design",
-          "grill-requirements"
-        ]
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
       },
       {
-        "name": "apply-external-source-intake",
-        "command": "uv run apply-external-source-intake --external-root <external_root> --proposed-workspace <workspace> --answer <option>",
+        "name": "doctor",
+        "command": "uv run doctor --workspace <workspace>",
         "use_when": [
-          "user answered the external source intake panel",
-          "metadata-only discovery should run after route selection",
-          "saved external-source defaults or change reasons should be recorded"
+          "doctor: one command that answers \"is my local setup actually ready to use this"
         ],
-        "outputs": [
-          "external_source_intake_session.json",
-          "external_source_discovery.json",
-          "external_source_discovery.md",
-          "docs/source_selection.generated.json",
-          "state/team_memory/external_source_intake_preferences.json"
-        ],
-        "safety": "local_safe_metadata_only_until_review_gate",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design",
-          "stakeholder-memory"
-        ]
-      },
-      {
-        "name": "prepare-data-model-generation",
-        "command": "uv run prepare-data-model-generation --workspace <workspace>",
-        "use_when": [
-          "data model docs are missing, weak, or image-only",
-          "workspace needs governed data model creation or parsing",
-          "relationship proof should be reviewed before executable SQL"
-        ],
-        "outputs": [
-          "interns/reports/data_model_generation/current.json",
-          "interns/reports/data_model_generation/current.md"
-        ],
-        "safety": "local_safe",
-        "required_skills": [
-          "workspace-governance",
-          "domain-model",
-          "grill-requirements"
-        ]
-      },
-      {
-        "name": "apply-data-model-answer",
-        "command": "uv run apply-data-model-answer --workspace <workspace> --answer <option_id_or_label>",
-        "use_when": [
-          "user answered the current data-model generation panel",
-          "draft data-model artifacts should be produced under interns"
-        ],
-        "outputs": [
-          "interns/generated/requirements/data_model_draft.json",
-          "interns/reports/data_model_generation"
-        ],
-        "safety": "local_safe_validated_write",
-        "required_skills": [
-          "domain-model",
-          "stakeholder-memory",
-          "grill-requirements"
-        ]
-      },
-      {
-        "name": "finalize-data-model-generation",
-        "command": "uv run finalize-data-model-generation --workspace <workspace> --approve-final-preview",
-        "use_when": [
-          "draft data model preview was shown and explicitly approved",
-          "write user-facing data model docs and finalized model contract"
-        ],
-        "outputs": [
-          "docs/data-model.md",
-          "docs/erd.md",
-          "docs/relationships.md",
-          "interns/generated/contracts/data_model_contract.json"
-        ],
-        "safety": "requires_explicit_final_preview_approval",
-        "required_skills": [
-          "workspace-governance",
-          "domain-model",
-          "to-solution-brief"
-        ]
-      },
-      {
-        "name": "prepare-data-model-blocker-panel",
-        "command": "uv run prepare-data-model-blocker-panel --workspace <workspace>",
-        "use_when": [
-          "data model draft exists",
-          "agent needs the next JSON-backed data-model blocker question",
-          "grain, primary key, relationship, temporal anchor, or SCD decisions need deterministic resolution"
-        ],
-        "outputs": [
-          "interns/reports/data_model_blocker_panel/current.json",
-          "interns/reports/data_model_blocker_panel/current.md",
-          "updated data_model_generation_session.json"
-        ],
-        "safety": "local_safe",
-        "required_skills": [
-          "domain-model",
-          "grill-requirements"
-        ]
-      },
-      {
-        "name": "apply-data-model-blocker-answer",
-        "command": "uv run apply-data-model-blocker-answer --workspace <workspace> --answer <option_id_or_label>",
-        "use_when": [
-          "user answered the current data-model blocker panel",
-          "accepted option should apply a structured data-model operation",
-          "next blocker panel should be generated"
-        ],
-        "outputs": [
-          "updated interns/generated/requirements/data_model_draft.json",
-          "next interns/reports/data_model_blocker_panel/current.json",
-          "next interns/reports/data_model_blocker_panel/current.md"
-        ],
-        "safety": "local_safe_validated_write",
-        "required_skills": [
-          "domain-model",
-          "stakeholder-memory",
-          "grill-requirements"
-        ]
-      },
-      {
-        "name": "parse-data-model-images",
-        "command": "uv run parse-data-model-images --workspace <workspace>",
-        "use_when": [
-          "workspace contains image-only data model evidence",
-          "ERD, star-schema, or medallion diagram sidecars need review",
-          "image-derived relationships must stay non-executable until proof or approval",
-          "local OCR can be auto-installed with --auto-install-ocr when missing"
-        ],
-        "outputs": [
-          "interns/generated/data_model_images/<image>.model.json",
-          "interns/reports/data_model_images/<image>.model.md",
-          "interns/reports/data_model_images/current.json",
-          "interns/reports/data_model_images/current.md"
-        ],
-        "safety": "local_safe_review_gated_no_remote_vision_without_explicit_sensitive_upload_confirmation",
-        "required_skills": [
-          "workspace-governance",
-          "domain-model",
-          "data-engineering-pipeline-design"
-        ]
-      },
-      {
-        "name": "understand-data",
-        "command": "uv run understand-data --workspace <workspace>",
-        "use_when": [
-          "classify a workspace data-quality tier and schema type before KPI/SQL generation",
-          "surface tier-scoped data-processing options from generated profiles",
-          "inspect the BUG-010 data-understanding gate standalone"
-        ],
-        "outputs": [
-          "interns/reports/data_understanding/current.json",
-          "interns/reports/data_understanding/current.md"
-        ],
-        "safety": "local_safe_reads_generated_profiles_only_no_raw_dataset_reads",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design"
-        ]
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
       },
       {
         "name": "export-data-model-diagram",
@@ -943,91 +779,78 @@
         ]
       },
       {
-        "name": "resolve-kpi-features",
-        "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
+        "name": "finalize-data-model-generation",
+        "command": "uv run finalize-data-model-generation --workspace <workspace>",
         "use_when": [
-          "KPI features need mapping",
-          "blockers need clustering",
-          "accepted definitions need applying"
+          "draft data model preview was shown and explicitly approved",
+          "write user-facing data model docs and finalized model contract"
         ],
         "outputs": [
-          "interns/generated/contracts/kpi_feature_mapping.json",
-          "strict derived_feature_options with formula/input/observed_values/value_profile/semantic_meaning_sources/reason/example/evidence_sources/derivation_reasoning/evidence_state/confidence; semantically mismatched candidates rejected",
-          "interns/reports/blocker_question_panel/current.json",
-          "interns/reports/blocker_question_panel/current.md",
-          "interns/reports/open_questions.md"
+          "docs/data-model.md",
+          "docs/erd.md",
+          "docs/relationships.md",
+          "interns/generated/contracts/data_model_contract.json"
         ],
-        "safety": "local_safe",
+        "safety": "requires_explicit_final_preview_approval",
         "required_skills": [
+          "workspace-governance",
           "domain-model",
-          "feature-derivation-library",
-          "workspace-kpi-query-optimizer",
-          "grill-requirements"
+          "to-solution-brief"
         ]
       },
       {
-        "name": "apply-workspace-definition",
-        "command": "uv run resolve-kpi-features --workspace <workspace> --apply-workspace-definition --feature <feature> --definition <definition> --evidence-note <note>",
+        "name": "finalize-kpi-generation",
+        "command": "uv run finalize-kpi-generation --workspace <workspace>",
         "use_when": [
-          "one accepted feature definition applies across multiple KPIs"
+          "final KPI draft preview was shown and explicitly approved",
+          "write user-facing KPI registry after KPI generation"
         ],
         "outputs": [
-          "interns/generated/contracts/workspace_feature_definitions.json",
-          "interns/generated/contracts/kpi_feature_mapping.json"
+          "workspace docs KPI registry JSON",
+          "interns/generated/requirements/kpi_generation_production_proof.json",
+          "workspace and team memory"
         ],
-        "safety": "local_safe",
+        "safety": "requires_explicit_final_preview_approval",
         "required_skills": [
-          "domain-model",
+          "workspace-governance",
           "stakeholder-memory",
+          "to-solution-brief",
           "workspace-kpi-query-optimizer"
         ]
       },
       {
-        "name": "prepare-kpi-blocker-panel",
-        "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
+        "name": "generate-dbt-project",
+        "command": "uv run generate-dbt-project --workspace <workspace>",
         "use_when": [
-          "agent needs the next validated KPI blocker question",
-          "avoid hand-chaining onboarding, resolver, markdown, panel, and validation commands",
-          "fresh or existing KPI workspace needs deterministic blocker preparation"
+          "Generate a real, git-tracked dbt project from the same confirmed contracts"
         ],
-        "outputs": [
-          "interns/generated/contracts/kpi_feature_mapping.json",
-          "interns/reports/derived_feature_reviews",
-          "interns/reports/blocker_question_panel/current.json",
-          "interns/reports/blocker_question_panel/current.md",
-          "validation summary"
-        ],
-        "safety": "local_safe",
-        "required_skills": [
-          "domain-model",
-          "feature-derivation-library",
-          "workspace-kpi-query-optimizer",
-          "grill-requirements"
-        ]
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
       },
       {
-        "name": "apply-kpi-panel-answer",
-        "command": "uv run apply-kpi-panel-answer --workspace <workspace> --domain <domain> --answer <option_id_or_label>",
+        "name": "generate-ingestion",
+        "command": "uv run generate-ingestion --workspace <workspace>",
         "use_when": [
-          "user answered the current blocker question",
-          "accepted option should be applied without inventing unsupported resolver flags",
-          "friendly answer must be resolved against current.json"
+          "Governed CLI entry points for provisioning + ingestion generation."
         ],
-        "outputs": [
-          "interns/generated/contracts/workspace_feature_definitions.json",
-          "updated kpi_feature_mapping.json",
-          "next validated blocker_question_panel/current.json"
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "generate-kpi-engines",
+        "command": "uv run generate-kpi-engines --workspace <workspace>",
+        "use_when": [
+          "Per-KPI multi-engine code generation."
         ],
-        "safety": "local_safe_validated_write",
-        "required_skills": [
-          "domain-model",
-          "stakeholder-memory",
-          "workspace-kpi-query-optimizer"
-        ]
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
       },
       {
         "name": "generate-kpi-sql",
-        "command": "uv run generate-kpi-sql --workspace <workspace> --kpi-id <kpi_id>",
+        "command": "uv run generate-kpi-sql --workspace <workspace>",
         "use_when": [
           "KPI features are proven or user-confirmed"
         ],
@@ -1039,177 +862,6 @@
           "domain-model",
           "data-engineering-pipeline-design",
           "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "plan-source-to-target",
-        "command": "uv run plan-source-to-target --workspace <workspace> --target-engine <sql|polars|pyspark|hybrid>",
-        "use_when": [
-          "SQL, Polars, PySpark, ETL, or medallion implementation needs a data-model-backed source-to-target plan",
-          "agent must verify source datasets, joins, grain, temporal anchors, and target layer before code generation"
-        ],
-        "outputs": [
-          "interns/generated/contracts/source_to_target_plan.json",
-          "interns/reports/source_to_target_plan.md",
-          "interns/generated/context/manifests/plan-source-to-target_<budget>.json"
-        ],
-        "safety": "local_safe",
-        "required_skills": [
-          "domain-model",
-          "data-engineering-pipeline-design",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "build-catalog-contract",
-        "command": "uv run build-catalog-contract --workspace <workspace>",
-        "use_when": [
-          "profile-backed source datasets need a stable logical catalog interface",
-          "pipeline and KPI code generation must avoid direct raw path dependencies",
-          "route or pipeline planning needs catalog objects before executable work"
-        ],
-        "outputs": [
-          "interns/generated/contracts/catalog_contract.json",
-          "interns/reports/catalog_contract.md"
-        ],
-        "safety": "local_safe_profile_backed_contract_write_no_remote_mutation",
-        "required_skills": [
-          "workspace-governance",
-          "domain-model",
-          "data-engineering-pipeline-design"
-        ]
-      },
-      {
-        "name": "build-source-family-contracts",
-        "command": "uv run build-source-family-contracts --workspace <workspace>",
-        "use_when": [
-          "external raw folder has repeated dated CSV releases",
-          "schema drift must be understood before ETL or medallion planning",
-          "workspace has profiles but no KPI registry or no KPI-first workflow",
-          "agent must group source files without reading raw datasets or duplicating full profile payloads"
-        ],
-        "outputs": [
-          "interns/generated/contracts/source_family_contracts.json",
-          "interns/reports/source_family_contracts.md"
-        ],
-        "safety": "local_safe_profile_index_only_no_raw_data_reads",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design",
-          "domain-model"
-        ],
-        "recovery": "If an agent selected resolve-kpi-features for an external profiled no-KPI workspace, stop, reread .agents/tools.json or .agents/<tool>/SKILLS.md, then run build-source-family-contracts first."
-      },
-      {
-        "name": "prepare-data-engineering-route",
-        "command": "uv run prepare-data-engineering-route --workspace <workspace> --track <auto|kpi_only|etl|elt|medallion|oltp_ingestion|existing_gold_validation> --target-engine <sql|polars|pyspark|hybrid>",
-        "use_when": [
-          "workspace needs a governed route before pipeline planning",
-          "agent must choose between KPI-only, ETL, ELT, medallion, OLTP ingestion, or existing-gold validation",
-          "trusted existing layers and local-first remote policy should be recorded"
-        ],
-        "outputs": [
-          "interns/generated/contracts/data_engineering_route.json",
-          "interns/reports/data_engineering_route.md",
-          "interns/generated/contracts/catalog_contract.json"
-        ],
-        "safety": "local_safe_route_contract_write_no_execution",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design",
-          "domain-model"
-        ]
-      },
-      {
-        "name": "prepare-pipeline-plan",
-        "command": "uv run prepare-pipeline-plan --workspace <workspace> --track <auto|kpi_only|etl|elt|medallion|oltp_ingestion|existing_gold_validation> --target-engine <sql|polars|pyspark|hybrid> --table-format <auto|delta|iceberg|local_parquet|warehouse_native|duckdb_view|csv>",
-        "use_when": [
-          "SQL, Polars, PySpark, ETL, ELT, medallion, or existing-layer validation needs a governed pipeline contract before code generation",
-          "layer definitions, quality gates, approval-gated transformations, and blockers must be recorded",
-          "source-to-target blockers should stop executable generation"
-        ],
-        "outputs": [
-          "interns/generated/contracts/pipeline_plan.json",
-          "interns/reports/pipeline_plan.md",
-          "interns/generated/contracts/data_engineering_route.json",
-          "interns/generated/contracts/catalog_contract.json"
-        ],
-        "safety": "local_safe_pipeline_plan_write_no_execution_remote_writes_approval_gated",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design",
-          "domain-model"
-        ]
-      },
-      {
-        "name": "prepare-pipeline-format-panel",
-        "command": "uv run prepare-pipeline-format-panel --workspace <workspace>",
-        "use_when": [
-          "ETL, ELT, medallion, or ingestion pipeline needs target table/file format selection",
-          "agent must ask whether to store outputs as Delta, Parquet, Iceberg, CSV, warehouse-native, or another approved format",
-          "prepare-pipeline-plan is blocked by pipeline_table_format_unresolved"
-        ],
-        "outputs": [
-          "interns/reports/pipeline_format/current.json",
-          "interns/reports/pipeline_format/current.md"
-        ],
-        "safety": "local_safe_json_backed_user_choice_panel",
-        "required_skills": [
-          "data-engineering-pipeline-design",
-          "grill-requirements"
-        ]
-      },
-      {
-        "name": "apply-pipeline-format-answer",
-        "command": "uv run apply-pipeline-format-answer --workspace <workspace> --answer <option_id_or_label_or_format>",
-        "use_when": [
-          "user answered the pipeline format panel",
-          "accepted storage format should be recorded before pipeline planning",
-          "medallion plan should use the approved table/file format"
-        ],
-        "outputs": [
-          "interns/generated/contracts/pipeline_decisions.json"
-        ],
-        "safety": "local_safe_validated_decision_write_requires_user_approval",
-        "required_skills": [
-          "data-engineering-pipeline-design",
-          "stakeholder-memory"
-        ]
-      },
-      {
-        "name": "prepare-pipeline-deployment-plan",
-        "command": "uv run prepare-pipeline-deployment-plan --workspace <workspace> --target <local|external|warehouse> --mode <dry-run|apply>",
-        "use_when": [
-          "generated pipeline outputs need a deployment dry-run contract",
-          "remote deployment target needs approval evidence before any external or warehouse apply",
-          "operators need proof that no remote mutation occurred"
-        ],
-        "outputs": [
-          "interns/generated/contracts/pipeline_deployment_plan.json",
-          "interns/reports/pipeline_deployment_plan.md"
-        ],
-        "safety": "dry_run_default_no_remote_mutation_external_and_warehouse_apply_require_AUTORESEARCH_ALLOW_REMOTE_EXECUTION",
-        "required_skills": [
-          "workspace-governance",
-          "data-engineering-pipeline-design",
-          "databricks-access-gates"
-        ]
-      },
-      {
-        "name": "apply-pipeline-decision",
-        "command": "uv run apply-pipeline-decision --workspace <workspace> --kpi-id <kpi_id> --percentage-denominator-scope <global_total|within_department|within_gender|within_visit_type|selected_population>",
-        "use_when": [
-          "user approved a percentage or ratio KPI denominator scope",
-          "pipeline_plan.json is blocked by percentage_denominator_scope_unresolved",
-          "approved pipeline decisions should be recorded before regenerating the plan"
-        ],
-        "outputs": [
-          "interns/generated/contracts/pipeline_decisions.json"
-        ],
-        "safety": "local_safe_validated_decision_write_requires_user_approval",
-        "required_skills": [
-          "data-engineering-pipeline-design",
-          "stakeholder-memory"
         ]
       },
       {
@@ -1231,113 +883,14 @@
         ]
       },
       {
-        "name": "context-router",
-        "command": "uv run context-router build --workspace <workspace> --task <task> --budget <small|standard|deep>",
+        "name": "generate-skill-adapters",
+        "command": "uv run generate-skill-adapters",
         "use_when": [
-          "task needs bounded context instead of whole artifact loading",
-          "agent needs context wiki/page index",
-          "large workspace artifacts must be routed by budget"
+          "skills or adapter routing changed"
         ],
         "outputs": [
-          "interns/generated/context/context_index.json",
-          "interns/generated/context/context_pages.jsonl",
-          "interns/generated/context/manifests/<task>_<budget>.json",
-          "interns/reports/context/<task>_<budget>.md"
-        ],
-        "safety": "local_safe_derived_context_only",
-        "required_skills": [
-          "workspace-governance",
-          "domain-model"
-        ]
-      },
-      {
-        "name": "build-relationship-contracts",
-        "command": "uv run build-relationship-contracts --workspace <workspace>",
-        "use_when": [
-          "multi-dataset executable generation needs FK/relationship proof",
-          "source-to-target joins need production-grade relationship contracts",
-          "profile-only joins need approval gating"
-        ],
-        "outputs": [
-          "interns/generated/contracts/relationship_contracts.json",
-          "interns/reports/relationship_contracts.md"
-        ],
-        "safety": "local_safe_governed_contract_write",
-        "required_skills": [
-          "domain-model",
-          "data-engineering-pipeline-design",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "apply-relationship-answer",
-        "command": "uv run apply-relationship-answer --workspace <workspace> --relationship-id <relationship_id> --answer <approve|reject|keep_blocked>",
-        "use_when": [
-          "user approved or rejected a relationship contract",
-          "profile_validated relationship needs governed promotion",
-          "agent must not hand-edit relationship_contracts.json"
-        ],
-        "outputs": [
-          "updated interns/generated/contracts/relationship_contracts.json",
-          "recomputed executable and candidate relationship counts",
-          "decision_history entry with source apply-relationship-answer"
-        ],
-        "safety": "local_safe_validated_decision_write_prevents_manual_json_edits",
-        "required_skills": [
-          "workspace-governance",
-          "domain-model",
-          "data-engineering-pipeline-design"
-        ]
-      },
-      {
-        "name": "derived-feature-markdown",
-        "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
-        "use_when": [
-          "stakeholders need readable derived-feature blocker reviews",
-          "strict derived_feature_options JSON needs Markdown rendering"
-        ],
-        "outputs": [
-          "interns/reports/derived_feature_reviews/md/<kpi_id>_<feature>.md",
-          "interns/reports/derived_feature_reviews/json/<kpi_id>_<feature>.json",
-          "interns/reports/derived_feature_reviews/index.md"
-        ],
-        "safety": "local_safe",
-        "required_skills": [
-          "feature-derivation-library",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "blocker-question-panel",
-        "command": "uv run prepare-kpi-blocker-panel --workspace <workspace> --domain <domain>",
-        "use_when": [
-          "agent needs to ask any KPI blocker question",
-          "direct mapping or source-of-truth choice needs stakeholder answer",
-          "non-technical panel is preferred over terminal option UI"
-        ],
-        "outputs": [
-          "interns/reports/blocker_question_panel/current.json",
-          "interns/reports/blocker_question_panel/current.md",
-          "interns/reports/blocker_question_panel/index.json"
-        ],
-        "safety": "local_safe",
-        "required_skills": [
-          "grill-requirements",
-          "workspace-kpi-query-optimizer"
-        ]
-      },
-      {
-        "name": "workspace-dashboard",
-        "command": "uv run workspace-dashboard --workspace <workspace> --screen",
-        "use_when": [
-          "user wants to view or verify the workspace BI dashboard",
-          "KPI completion dashboard needs a visual screening pass"
-        ],
-        "outputs": [
-          "dashboard/exports/index.html",
-          "interns/reports/dashboard_screener/current.json",
-          "interns/reports/dashboard_screener/current.md",
-          "interns/reports/dashboard_screener/shots (agent vision review)"
+          ".agents/skills_index.json",
+          ".agents/<tool>/SKILLS.md"
         ],
         "safety": "local_safe",
         "required_skills": [
@@ -1345,19 +898,588 @@
         ]
       },
       {
-        "name": "validate-workspace-artifacts",
-        "command": "uv run validate-workspace-artifacts --workspace <workspace>",
+        "name": "green-gate",
+        "command": "uv run green-gate",
         "use_when": [
-          "generated workspace artifacts need schema checks",
-          "agent is about to rely on KPI registry, feature mapping, derived reviews, or blocker panel",
-          "detect manual edits to generated contracts"
+          "green-gate: the project's portable test gate."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "harness",
+        "command": "uv run harness",
+        "use_when": [
+          "One front door for every validation/harness suite (Phase 1 consolidation)."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "ingest-source-catalog",
+        "command": "uv run ingest-source-catalog --workspace <workspace>",
+        "use_when": [
+          "Governed source catalog planning and ingestion."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "kickstart-workspace",
+        "command": "uv run kickstart-workspace --workspace <workspace>",
+        "use_when": [
+          "new governed workspace",
+          "enterprise discovery and task config need refresh"
         ],
         "outputs": [
-          "validation summary JSON with checked_files, errors, and warnings"
+          "config/tasks.json",
+          "interns/generated/requirements",
+          "interns/generated/contracts"
         ],
-        "safety": "local_safe_read_only",
+        "safety": "local_safe_config_write",
         "required_skills": [
           "workspace-governance",
+          "task-onboarding",
+          "grill-requirements",
+          "domain-model"
+        ]
+      },
+      {
+        "name": "kpi-local-warehouse",
+        "command": "uv run kpi-local-warehouse --workspace <workspace>",
+        "use_when": [
+          "Local DuckDB warehouse \u2014 mirrors Databricks SQL Warehouse + Unity Catalog locally."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "kpi-proof-packet",
+        "command": "uv run kpi-proof-packet --workspace <workspace>",
+        "use_when": [
+          "stakeholders need one all-KPI recommendation packet",
+          "operators need source row traceability, mapping recommendations, reliability gates, generated SQL, execution output previews, and sample values in one report",
+          "bulk KPI mapping review should happen before apply-safe or execution modes"
+        ],
+        "outputs": [
+          "interns/reports/kpi_proof_packet/current.md",
+          "interns/reports/kpi_proof_packet/current.json",
+          "interns/generated/evidence/kpi_proof_packet/current.json"
+        ],
+        "safety": "local_safe_read_only_recommend_mode",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "workspace-kpi-query-optimizer",
+          "to-solution-brief"
+        ]
+      },
+      {
+        "name": "list-workspace-files",
+        "command": "uv run list-workspace-files --workspace <workspace>",
+        "use_when": [
+          "workspace selection request",
+          "set current workspace",
+          "bounded startup file inventory"
+        ],
+        "outputs": [
+          "all file paths up to cap",
+          "possible KPI files",
+          "possible data model files",
+          "dataset roots",
+          "docs",
+          "interns state"
+        ],
+        "safety": "local_safe_file_paths_only_no_content_reads",
+        "required_skills": [
+          "workspace-governance"
+        ]
+      },
+      {
+        "name": "loop",
+        "command": "uv run loop",
+        "use_when": [
+          "core/orchestration/loop.py \u2014 autonomous experiment loop."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "medallion",
+        "command": "uv run medallion",
+        "use_when": [
+          "One front door for medallion operations (Phase 1 consolidation)."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "onboard-workspace",
+        "command": "uv run onboard-workspace --workspace <workspace>",
+        "use_when": [
+          "workspace artifacts are missing",
+          "profiles/contracts/evaluation scaffolding need refresh"
+        ],
+        "outputs": [
+          "interns/generated/profiles",
+          "interns/generated/contracts",
+          "interns/reports"
+        ],
+        "safety": "local_safe",
+        "required_skills": [
+          "workspace-governance",
+          "task-onboarding",
+          "domain-model",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "parse-data-model-images",
+        "command": "uv run parse-data-model-images --workspace <workspace>",
+        "use_when": [
+          "workspace contains image-only data model evidence",
+          "ERD, star-schema, or medallion diagram sidecars need review",
+          "image-derived relationships must stay non-executable until proof or approval",
+          "local OCR can be auto-installed with --auto-install-ocr when missing"
+        ],
+        "outputs": [
+          "interns/generated/data_model_images/<image>.model.json",
+          "interns/reports/data_model_images/<image>.model.md",
+          "interns/reports/data_model_images/current.json",
+          "interns/reports/data_model_images/current.md"
+        ],
+        "safety": "local_safe_review_gated_no_remote_vision_without_explicit_sensitive_upload_confirmation",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
+        "name": "pipeline-run",
+        "command": "uv run pipeline-run --workspace <workspace>",
+        "use_when": [
+          "One-command, dependency-ordered run of the whole pipeline (no Dagster"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "plan-kpi-completion",
+        "command": "uv run plan-kpi-completion --workspace <workspace>",
+        "use_when": [
+          "Dependency-aware parallel KPI completion planning."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "plan-provisioning",
+        "command": "uv run plan-provisioning --workspace <workspace>",
+        "use_when": [
+          "Governed CLI entry points for provisioning + ingestion generation."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "plan-source-to-target",
+        "command": "uv run plan-source-to-target --workspace <workspace>",
+        "use_when": [
+          "SQL, Polars, PySpark, ETL, or medallion implementation needs a data-model-backed source-to-target plan",
+          "agent must verify source datasets, joins, grain, temporal anchors, and target layer before code generation"
+        ],
+        "outputs": [
+          "interns/generated/contracts/source_to_target_plan.json",
+          "interns/reports/source_to_target_plan.md",
+          "interns/generated/context/manifests/plan-source-to-target_<budget>.json"
+        ],
+        "safety": "local_safe",
+        "required_skills": [
+          "domain-model",
+          "data-engineering-pipeline-design",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "prepare-agent-benchmark",
+        "command": "uv run prepare-agent-benchmark --workspace <workspace>",
+        "use_when": [
+          "workspace needs a readiness proof",
+          "release gates should be checked before SQL, ETL, medallion, autopilot, or production promotion",
+          "owners need an artifact-backed benchmark scorecard"
+        ],
+        "outputs": [
+          "interns/generated/contracts/agent_benchmark_scorecard.json",
+          "interns/generated/contracts/release_gate_status.json",
+          "interns/reports/benchmarks/current.json",
+          "interns/reports/benchmarks/current.md"
+        ],
+        "safety": "local_safe_project_native_scorecard_no_external_benchmark_execution",
+        "required_skills": [
+          "workspace-governance",
+          "workspace-kpi-query-optimizer",
+          "evolution"
+        ]
+      },
+      {
+        "name": "prepare-blueprint",
+        "command": "uv run prepare-blueprint --workspace <workspace>",
+        "use_when": [
+          "CLI entry points for the blueprint slice."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "prepare-bronze-silver-standards",
+        "command": "uv run prepare-bronze-silver-standards --workspace <workspace>",
+        "use_when": [
+          "Bronze/Silver production standards should be materialized",
+          "runtime-neutral transformation manifest is needed before SQL, Polars, or PySpark generation",
+          "workflow reroute policy should stop wrong-route actions and auto-reroute once"
+        ],
+        "outputs": [
+          "interns/generated/contracts/bronze_silver_standards.json",
+          "interns/generated/contracts/transformation_manifest.json",
+          "interns/generated/contracts/workflow_reroute_policy.json",
+          "interns/reports/bronze_silver_standards.md"
+        ],
+        "safety": "local_safe_contract_write_no_execution",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
+        "name": "prepare-data-engineering-route",
+        "command": "uv run prepare-data-engineering-route --workspace <workspace>",
+        "use_when": [
+          "workspace needs a governed route before pipeline planning",
+          "agent must choose between KPI-only, ETL, ELT, medallion, OLTP ingestion, or existing-gold validation",
+          "trusted existing layers and local-first remote policy should be recorded"
+        ],
+        "outputs": [
+          "interns/generated/contracts/data_engineering_route.json",
+          "interns/reports/data_engineering_route.md",
+          "interns/generated/contracts/catalog_contract.json"
+        ],
+        "safety": "local_safe_route_contract_write_no_execution",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "domain-model"
+        ]
+      },
+      {
+        "name": "prepare-data-model-blocker-panel",
+        "command": "uv run prepare-data-model-blocker-panel --workspace <workspace>",
+        "use_when": [
+          "data model draft exists",
+          "agent needs the next JSON-backed data-model blocker question",
+          "grain, primary key, relationship, temporal anchor, or SCD decisions need deterministic resolution"
+        ],
+        "outputs": [
+          "interns/reports/data_model_blocker_panel/current.json",
+          "interns/reports/data_model_blocker_panel/current.md",
+          "updated data_model_generation_session.json"
+        ],
+        "safety": "local_safe",
+        "required_skills": [
+          "domain-model",
+          "grill-requirements"
+        ]
+      },
+      {
+        "name": "prepare-data-model-generation",
+        "command": "uv run prepare-data-model-generation --workspace <workspace>",
+        "use_when": [
+          "data model docs are missing, weak, or image-only",
+          "workspace needs governed data model creation or parsing",
+          "relationship proof should be reviewed before executable SQL"
+        ],
+        "outputs": [
+          "interns/reports/data_model_generation/current.json",
+          "interns/reports/data_model_generation/current.md"
+        ],
+        "safety": "local_safe",
+        "required_skills": [
+          "workspace-governance",
+          "domain-model",
+          "grill-requirements"
+        ]
+      },
+      {
+        "name": "prepare-data-quality-panel",
+        "command": "uv run prepare-data-quality-panel --workspace <workspace>",
+        "use_when": [
+          "Data-quality rules authored the same way KPI features already are: ask,"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "prepare-data-source-panel",
+        "command": "uv run prepare-data-source-panel --workspace <workspace>",
+        "use_when": [
+          "Workspace-level data-source panel: an explicit, human-confirmed, once-asked"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "prepare-databricks-assets",
+        "command": "uv run prepare-databricks-assets --workspace <workspace>",
+        "use_when": [
+          "Databricks asset manifest generation for workspace datasets."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "prepare-document-candidate-review",
+        "command": "uv run prepare-document-candidate-review --workspace <workspace>",
+        "use_when": [
+          "Governed document candidate review panel (Phase 3: promote path, step 1)."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "prepare-drift-panel",
+        "command": "uv run prepare-drift-panel --workspace <workspace>",
+        "use_when": [
+          "Governed CLI entry points for schema evolution."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "prepare-duplicate-review-panel",
+        "command": "uv run prepare-duplicate-review-panel --workspace <workspace>",
+        "use_when": [
+          "duplicate evidence from the data quality harness needs stakeholder review",
+          "duplicate handling options should be generated from bounded profile/catalog/pipeline contract evidence",
+          "agent needs a JSON-backed duplicate review panel before applying any decision"
+        ],
+        "outputs": [
+          "interns/reports/duplicate_review/current.json",
+          "interns/reports/duplicate_review/current.md",
+          "interns/generated/contracts/data_quality_contract.json"
+        ],
+        "safety": "local_safe_profile_catalog_pipeline_contract_driven_bounded_duplicate_evidence_redacted_samples_no_auto_dedup_or_quarantine_sql_mutation",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "grill-requirements"
+        ]
+      },
+      {
+        "name": "prepare-external-source-intake",
+        "command": "uv run prepare-external-source-intake --workspace <workspace>",
+        "use_when": [
+          "user provides an external path and has not chosen existing versus new workspace",
+          "external-source route preference should be reused or challenged",
+          "agent needs a deterministic panel instead of asking freehand"
+        ],
+        "outputs": [
+          "interns/generated/requirements/external_source_intake_session.json",
+          "interns/reports/external_source_intake/current.json",
+          "interns/reports/external_source_intake/current.md"
+        ],
+        "safety": "local_safe_panel_write_no_source_reads",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "grill-requirements"
+        ]
+      },
+      {
+        "name": "prepare-genie-workspace",
+        "command": "uv run prepare-genie-workspace --workspace <workspace>",
+        "use_when": [
+          "Generate reviewable Databricks Genie workspace setup specs."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "prepare-intake-panel",
+        "command": "uv run prepare-intake-panel --workspace <workspace>",
+        "use_when": [
+          "Governed CLI entry points for Phase 0/1."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "prepare-kpi-blocker-panel",
+        "command": "uv run prepare-kpi-blocker-panel --workspace <workspace>",
+        "use_when": [
+          "agent needs the next validated KPI blocker question",
+          "avoid hand-chaining onboarding, resolver, markdown, panel, and validation commands",
+          "fresh or existing KPI workspace needs deterministic blocker preparation"
+        ],
+        "outputs": [
+          "interns/generated/contracts/kpi_feature_mapping.json",
+          "interns/reports/derived_feature_reviews",
+          "interns/reports/blocker_question_panel/current.json",
+          "interns/reports/blocker_question_panel/current.md",
+          "validation summary"
+        ],
+        "safety": "local_safe",
+        "required_skills": [
+          "domain-model",
+          "feature-derivation-library",
+          "workspace-kpi-query-optimizer",
+          "grill-requirements"
+        ]
+      },
+      {
+        "name": "prepare-kpi-generation",
+        "command": "uv run prepare-kpi-generation --workspace <workspace>",
+        "use_when": [
+          "workspace confirmation completed",
+          "user may create, revise, challenge, or score KPIs",
+          "show two-path KPI generation versus usual workflow prompt"
+        ],
+        "outputs": [
+          "interns/generated/requirements/kpi_generation_session.json",
+          "interns/reports/kpi_generation/current.json",
+          "interns/reports/kpi_generation/current.md",
+          "KPI quality/readiness score"
+        ],
+        "safety": "local_safe",
+        "required_skills": [
+          "workspace-governance",
+          "grill-requirements",
+          "stakeholder-memory",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "prepare-phi-review-panel",
+        "command": "uv run prepare-phi-review-panel --workspace <workspace>",
+        "use_when": [
+          "PHI/PII review-and-consent panel (Priority 1.1)."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "prepare-pipeline-deployment-plan",
+        "command": "uv run prepare-pipeline-deployment-plan --workspace <workspace>",
+        "use_when": [
+          "generated pipeline outputs need a deployment dry-run contract",
+          "remote deployment target needs approval evidence before any external or warehouse apply",
+          "operators need proof that no remote mutation occurred"
+        ],
+        "outputs": [
+          "interns/generated/contracts/pipeline_deployment_plan.json",
+          "interns/reports/pipeline_deployment_plan.md"
+        ],
+        "safety": "dry_run_default_no_remote_mutation_external_and_warehouse_apply_require_AUTORESEARCH_ALLOW_REMOTE_EXECUTION",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "databricks-access-gates"
+        ]
+      },
+      {
+        "name": "prepare-pipeline-format-panel",
+        "command": "uv run prepare-pipeline-format-panel --workspace <workspace>",
+        "use_when": [
+          "ETL, ELT, medallion, or ingestion pipeline needs target table/file format selection",
+          "agent must ask whether to store outputs as Delta, Parquet, Iceberg, CSV, warehouse-native, or another approved format",
+          "prepare-pipeline-plan is blocked by pipeline_table_format_unresolved"
+        ],
+        "outputs": [
+          "interns/reports/pipeline_format/current.json",
+          "interns/reports/pipeline_format/current.md"
+        ],
+        "safety": "local_safe_json_backed_user_choice_panel",
+        "required_skills": [
+          "data-engineering-pipeline-design",
+          "grill-requirements"
+        ]
+      },
+      {
+        "name": "prepare-pipeline-plan",
+        "command": "uv run prepare-pipeline-plan --workspace <workspace>",
+        "use_when": [
+          "SQL, Polars, PySpark, ETL, ELT, medallion, or existing-layer validation needs a governed pipeline contract before code generation",
+          "layer definitions, quality gates, approval-gated transformations, and blockers must be recorded",
+          "source-to-target blockers should stop executable generation"
+        ],
+        "outputs": [
+          "interns/generated/contracts/pipeline_plan.json",
+          "interns/reports/pipeline_plan.md",
+          "interns/generated/contracts/data_engineering_route.json",
+          "interns/generated/contracts/catalog_contract.json"
+        ],
+        "safety": "local_safe_pipeline_plan_write_no_execution_remote_writes_approval_gated",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design",
+          "domain-model"
+        ]
+      },
+      {
+        "name": "prepare-solution-blueprint",
+        "command": "uv run prepare-solution-blueprint --workspace <workspace>",
+        "use_when": [
+          "The solution blueprint: what we will do, end to end, before we do any of it."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "prepare-source-catalog",
+        "command": "uv run prepare-source-catalog --workspace <workspace>",
+        "use_when": [
+          "Governed source catalog planning and ingestion."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "prepare-wiki-memory",
+        "command": "uv run prepare-wiki-memory --workspace <workspace>",
+        "use_when": [
+          "repeated KPI terms or data-model decisions should be found",
+          "shared team wiki memory should suggest safe reuse",
+          "autopilot needs governed draft prefill candidates"
+        ],
+        "outputs": [
+          "state/team_memory/wiki_memory_index.json",
+          "interns/generated/memory/wiki_memory_candidates.json",
+          "interns/reports/wiki_memory/current.json",
+          "interns/reports/wiki_memory/current.md"
+        ],
+        "safety": "local_safe_structured_artifacts_only_draft_prefill_blocks_execution",
+        "required_skills": [
+          "stakeholder-memory",
+          "evolution",
           "workspace-kpi-query-optimizer"
         ]
       },
@@ -1380,100 +1502,470 @@
         ]
       },
       {
-        "name": "cleanup-workspace-references",
-        "command": "uv run cleanup-workspace-references --workspace <workspace> --all-references",
+        "name": "prepare-workspace-selection",
+        "command": "uv run prepare-workspace-selection --workspace <workspace>",
         "use_when": [
-          "fresh workspace restart is requested",
-          "stale generated references need removal"
+          "workspace selection request",
+          "set current workspace",
+          "workspace may be empty or missing",
+          "external raw data should stay outside workspace"
         ],
         "outputs": [
-          "dry-run cleanup plan",
-          "optional deletion of interns and repo runtime references with --apply --confirm-delete <workspace>"
+          "guarded workspace selection status",
+          "active workspace listing summary",
+          "available workspace choices",
+          "empty or missing workspace blocker",
+          "external dataset_allowlist setup template"
         ],
-        "safety": "hard_permission_block_for_any_delete",
+        "safety": "local_safe_file_paths_only_no_content_reads",
         "required_skills": [
-          "workspace-governance"
+          "workspace-governance",
+          "grill-requirements"
         ]
       },
       {
-        "name": "profiler",
-        "command": "uv run python tools/profiler.py --input <path> --pct <pct> --engine auto --out <dir>",
+        "name": "prepare-workspace-workflow",
+        "command": "uv run prepare-workspace-workflow --workspace <workspace>",
         "use_when": [
-          "profile artifacts are missing",
-          "bounded sample or representation evidence is required"
+          "workspace confirmation completed",
+          "user wants one checkpoint for KPI, data-model, blocker, validation, and presentation workflow",
+          "agent needs deterministic next commands and autopilot boundaries"
         ],
         "outputs": [
-          "profile CSVs",
-          "sample outputs",
-          "representation reports"
+          "interns/reports/workflow/current.json",
+          "interns/reports/workflow/current.md",
+          "local-safe generated artifacts when mode is local-safe or autopilot"
         ],
-        "safety": "local_or_configured_data_access",
+        "safety": "local_safe_checkpoint_autopilot_stops_before_final_delete_remote_codegen",
+        "required_skills": [
+          "workspace-governance",
+          "task-onboarding",
+          "data-engineering-pipeline-design",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "query-workspace-evidence-graph",
+        "command": "uv run query-workspace-evidence-graph --workspace <workspace>",
+        "use_when": [
+          "agent or reviewer asks why a term exists",
+          "feature or column impact needs to be listed from the evidence graph",
+          "stale or invented term origin needs traceability"
+        ],
+        "outputs": [
+          "JSON query result with matched nodes, introducers, users, and impact edges"
+        ],
+        "safety": "local_safe_existing_graph_or_rebuild_no_raw_data_reads",
         "required_skills": [
           "workspace-governance",
           "domain-model",
-          "task-onboarding"
+          "workspace-kpi-query-optimizer"
         ]
       },
       {
-        "name": "optimizer-finder",
-        "command": "uv run python tools/optimizer_finder.py --target <path> --mode auto",
+        "name": "recommend-kpi-engine",
+        "command": "uv run recommend-kpi-engine --workspace <workspace>",
         "use_when": [
-          "SQL/Python artifact is slow",
-          "hotspot evidence is needed"
+          "Complexity- and size-aware engine recommendation."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "reconcile-warehouse-cost",
+        "command": "uv run reconcile-warehouse-cost --workspace <workspace>",
+        "use_when": [
+          "Read warehouse spend back out of Databricks and attribute it to one run."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "record-engine-evolution",
+        "command": "uv run record-engine-evolution --workspace <workspace>",
+        "use_when": [
+          "Structured engine-routing memory for SQL/Polars/PySpark decisions."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "record-workspace-trajectory",
+        "command": "uv run record-workspace-trajectory --workspace <workspace>",
+        "use_when": [
+          "agent or CLI workflow steps should be replayable",
+          "commands, validations, decisions, retries, and artifacts need workspace-scoped audit events",
+          "workflow guardrails should validate the step-by-step trajectory"
         ],
         "outputs": [
-          "state/hotspots.json"
+          "interns/state/trajectory.jsonl",
+          "interns/reports/trajectory/current.json",
+          "interns/reports/trajectory/current.md",
+          "interns/generated/evidence/trajectory/current.json"
+        ],
+        "safety": "local_safe_append_only_secret_redacted_workspace_log",
+        "required_skills": [
+          "workspace-governance",
+          "evolution"
+        ]
+      },
+      {
+        "name": "resolve-kpi-features",
+        "command": "uv run resolve-kpi-features --workspace <workspace>",
+        "use_when": [
+          "KPI features need mapping",
+          "blockers need clustering",
+          "accepted definitions need applying"
+        ],
+        "outputs": [
+          "interns/generated/contracts/kpi_feature_mapping.json",
+          "strict derived_feature_options with formula/input/observed_values/value_profile/semantic_meaning_sources/reason/example/evidence_sources/derivation_reasoning/evidence_state/confidence; semantically mismatched candidates rejected",
+          "interns/reports/blocker_question_panel/current.json",
+          "interns/reports/blocker_question_panel/current.md",
+          "interns/reports/open_questions.md"
         ],
         "safety": "local_safe",
         "required_skills": [
+          "domain-model",
+          "feature-derivation-library",
+          "workspace-kpi-query-optimizer",
+          "grill-requirements"
+        ]
+      },
+      {
+        "name": "resolver-accuracy",
+        "command": "uv run resolver-accuracy",
+        "use_when": [
+          "Score the feature resolver against human-confirmed mappings."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "resource-preflight",
+        "command": "uv run resource-preflight --workspace <workspace>",
+        "use_when": [
+          "CLI for local hardware/resource preflight."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "retrieve-docs",
+        "command": "uv run retrieve-docs",
+        "use_when": [
+          "CLI for bounded internal-doc retrieval."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "run-dbt-backfill",
+        "command": "uv run run-dbt-backfill --workspace <workspace>",
+        "use_when": [
+          "Bounded, dry-run-capable backfill for a workspace's dbt project."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "run-kpi-execution-harness",
+        "command": "uv run run-kpi-execution-harness --workspace <workspace>",
+        "use_when": [
+          "Execute generated KPI SQL and prove that final result views exist."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "run-kpi-pipeline",
+        "command": "uv run run-kpi-pipeline --workspace <workspace>",
+        "use_when": [
+          "Entry point for ``run-kpi-pipeline``."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "scan-document",
+        "command": "uv run scan-document --workspace <workspace>",
+        "use_when": [
+          "Governed PDF ingestion: scan_document() + Java preflight + review-gated sidecar."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "session-snapshot",
+        "command": "uv run session-snapshot --workspace <workspace>",
+        "use_when": [
+          "operator wants exact end-user conversation transcript",
+          "cross-CLI session monitoring",
+          "audit conversation turns, commands, file changes, decisions, and intent verification"
+        ],
+        "outputs": [
+          ".agents/sessions/<session>/compact.md",
+          ".agents/sessions/<session>/intent_verification.md",
+          ".agents/sessions/<session>/intent_verification.json",
+          ".agents/sessions/<session>/events.jsonl",
+          ".agents/sessions/<session>/transcript.md",
+          ".agents/sessions/<session>/commands.md",
+          ".agents/sessions/<session>/file_changes.md",
+          ".agents/sessions/<session>/decisions.md",
+          ".agents/sessions/<session>/snapshot.json"
+        ],
+        "safety": "local_safe_redacts_common_secret_patterns_gitignored",
+        "required_skills": [
+          "workspace-governance",
+          "evolution",
+          "stakeholder-memory"
+        ]
+      },
+      {
+        "name": "source-catalog",
+        "command": "uv run source-catalog --workspace <workspace>",
+        "use_when": [
+          "Governed source catalog planning and ingestion."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "suggest-kpi-improvements",
+        "command": "uv run suggest-kpi-improvements --workspace <workspace>",
+        "use_when": [
+          "Per-KPI improvement suggestions, emitted ONLY when the readings warrant one."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "token-report",
+        "command": "uv run token-report --workspace <workspace>",
+        "use_when": [
+          "Token-cost reporter for development tracing."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "understand-data",
+        "command": "uv run understand-data --workspace <workspace>",
+        "use_when": [
+          "classify a workspace data-quality tier and schema type before KPI/SQL generation",
+          "surface tier-scoped data-processing options from generated profiles",
+          "inspect the BUG-010 data-understanding gate standalone"
+        ],
+        "outputs": [
+          "interns/reports/data_understanding/current.json",
+          "interns/reports/data_understanding/current.md"
+        ],
+        "safety": "local_safe_reads_generated_profiles_only_no_raw_dataset_reads",
+        "required_skills": [
+          "workspace-governance",
+          "data-engineering-pipeline-design"
+        ]
+      },
+      {
+        "name": "validate-engine-generation",
+        "command": "uv run validate-engine-generation --workspace <workspace>",
+        "use_when": [
+          "Validate the generated multi-engine KPI outputs for coherence."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "validate-git-hygiene",
+        "command": "uv run validate-git-hygiene",
+        "use_when": [
+          "Validate staged or working-tree files before committing project artifacts."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "validate-kpi-intent-coverage",
+        "command": "uv run validate-kpi-intent-coverage --workspace <workspace>",
+        "use_when": [
+          "KPI intent-coverage harness."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "validate-memory-health",
+        "command": "uv run validate-memory-health --workspace <workspace>",
+        "use_when": [
+          "workspace memory needs confidence-scored lifecycle health",
+          "shared team memory should be checked before reuse",
+          "memory entries need status, confidence, verification, expiration, and evidence normalization"
+        ],
+        "outputs": [
+          "interns/reports/memory_health/current.json",
+          "interns/reports/memory_health/current.md",
+          "interns/generated/evidence/memory_health/current.json"
+        ],
+        "safety": "local_safe_memory_artifact_scan_no_raw_data_reads",
+        "required_skills": [
+          "stakeholder-memory",
+          "evolution"
+        ]
+      },
+      {
+        "name": "validate-project-harness",
+        "command": "uv run validate-project-harness --workspace <workspace>",
+        "use_when": [
+          "workspace needs one top-level score before completion is claimed",
+          "all local-safe harnesses should run together",
+          "release readiness needs artifact validation, workflow guardrails, trajectory health, KPI execution, benchmark, and git hygiene proof"
+        ],
+        "outputs": [
+          "interns/generated/evidence/project_harness.json",
+          "interns/reports/project_harness.md",
+          "score, blockers, warnings, and next commands"
+        ],
+        "safety": "local_safe_project_harness_no_remote_execution",
+        "required_skills": [
+          "workspace-governance",
           "workspace-kpi-query-optimizer",
           "evolution"
         ]
       },
       {
-        "name": "methodology-parser",
-        "command": "uv run python tools/methodology_parser.py --doc <path> --out <schema.json>",
+        "name": "validate-workspace-artifacts",
+        "command": "uv run validate-workspace-artifacts --workspace <workspace>",
         "use_when": [
-          "methodology, dictionary, or contract document needs semantic schema extraction"
+          "generated workspace artifacts need schema checks",
+          "agent is about to rely on KPI registry, feature mapping, derived reviews, or blocker panel",
+          "detect manual edits to generated contracts"
         ],
         "outputs": [
-          "semantic schema JSON"
+          "validation summary JSON with checked_files, errors, and warnings"
         ],
-        "safety": "may_use_llm_intern",
+        "safety": "local_safe_read_only",
         "required_skills": [
-          "domain-model",
-          "task-onboarding"
+          "workspace-governance",
+          "workspace-kpi-query-optimizer"
         ]
       },
       {
-        "name": "databricks-setup",
-        "command": "uv run python tools/databricks_setup.py",
+        "name": "verify-audit-chain",
+        "command": "uv run verify-audit-chain --workspace <workspace>",
         "use_when": [
-          "user explicitly asks to validate Databricks configuration"
+          "``verify-audit-chain`` console script."
         ],
-        "outputs": [
-          "connection and capability report"
-        ],
-        "safety": "remote_sensitive_explicit_approval",
-        "required_skills": [
-          "databricks-access-gates",
-          "workspace-governance"
-        ]
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
       },
       {
-        "name": "generate-skill-adapters",
-        "command": "uv run generate-skill-adapters",
+        "name": "verify-dbt-project",
+        "command": "uv run verify-dbt-project --workspace <workspace>",
         "use_when": [
-          "skills or adapter routing changed"
+          "Verify a generated dbt project actually runs, with `dbt show`."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "verify-kpi-output",
+        "command": "uv run verify-kpi-output --workspace <workspace>",
+        "use_when": [
+          "Self-grill gate: prove generated KPI output is executable AND aligned with intent."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "workspace-dashboard",
+        "command": "uv run workspace-dashboard --workspace <workspace>",
+        "use_when": [
+          "user wants to view or verify the workspace BI dashboard",
+          "KPI completion dashboard needs a visual screening pass"
         ],
         "outputs": [
-          ".agents/skills_index.json",
-          ".agents/<tool>/SKILLS.md"
+          "dashboard/exports/index.html",
+          "interns/reports/dashboard_screener/current.json",
+          "interns/reports/dashboard_screener/current.md",
+          "interns/reports/dashboard_screener/shots (agent vision review)"
         ],
         "safety": "local_safe",
         "required_skills": [
           "workspace-governance"
         ]
+      },
+      {
+        "name": "workspace-dashboard-deck",
+        "command": "uv run workspace-dashboard-deck --workspace <workspace>",
+        "use_when": [
+          "``workspace-dashboard-deck``: export a workspace's live MinusAnalyst dashboard"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "workspace-dashboard-pdf",
+        "command": "uv run workspace-dashboard-pdf --workspace <workspace>",
+        "use_when": [
+          "``workspace-dashboard-pdf``: export a workspace's live MinusAnalyst dashboard"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "workspace-flow",
+        "command": "uv run workspace-flow --workspace <workspace>",
+        "use_when": [
+          "agent-led workspace workflow should run quietly in the backend",
+          "user asks for KPI generation by interview",
+          "user asks to generate SQL and show KPI results",
+          "main chat should show only compact questions or results"
+        ],
+        "outputs": [
+          "interns/state/workflow_sessions/<session-id>/session.json",
+          "interns/state/workflow_sessions/<session-id>/current.json",
+          "interns/state/workflow_sessions/<session-id>/current.md",
+          "interns/reports/kpi_results/current.md",
+          "interns/generated/evidence/kpi_results/current.json"
+        ],
+        "safety": "local_safe_session_orchestrator_hides_lower_level_command_noise",
+        "required_skills": [
+          "workspace-governance",
+          "task-onboarding",
+          "data-engineering-pipeline-design",
+          "workspace-kpi-query-optimizer"
+        ]
+      },
+      {
+        "name": "workspace-state-health",
+        "command": "uv run workspace-state-health --workspace <workspace>",
+        "use_when": [
+          "Read-only health report over a workspace's own state/audit files"
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
       }
     ]
   },
@@ -1481,7 +1973,7 @@
     {
       "name": "dashboard-engineer",
       "display_name": "Dashboard Engineer",
-      "description": "Designs, customizes, debugs, and verifies per-workspace BI dashboards (JSON spec contract, Dash renderer, static HTML export, live callback tests).",
+      "description": "Designs, customizes, debugs, and verifies per-workspace BI dashboards (JSON spec contract, Dash renderer, static HTML export, PPTX/PDF export, live callback tests). Use when the user says dashboard, chart, graph, tile, page, slicer, filter, drill-down, legend, \"the chart looks wrong\", \"add a view\", \"export the deck\", or when a dashboard must pass the screener and vision-review gate before it is called done.",
       "skills": [
         "workspace-governance",
         "dashboard-design",
@@ -1490,7 +1982,7 @@
         "kpi-analyst",
         "evolution"
       ],
-      "default_prompt": "Act as the dashboard-engineering role. Own everything under `workspaces/<ws>/dashboard/` and the platform modules at `core/dashboard/*`, `tools/workspace_dashboard.py`, `tests/test_dashboard_*.py`. Honor the two-section spec contract: rewrite `machine_defaults` on every regeneration; preserve `user_overrides` verbatim. Use live SQL re-execution via DuckDB \u2014 never read stale snapshots. Render blocked KPIs as recovery cards, not by hiding them. CHART-QUALITY DEFAULTS (produce a correct, readable chart by default, not just valid markup): no duplicate titles (card header carries the title; pass title='' to inline figures); trend/line charts aggregate the measure by the date axis (one value per period), never scatter raw rows; share/percentage charts aggregate by (x,color) so each stack is a true 0-100% and cap dense categoricals to a readable top-N with an 'Other' bucket; ranked/top-N charts rank by the highest-cardinality NON-constant categorical column, never a column pinned to one value by a filter; responsive sizing + margins so charts never clip; apply the shared corporate theme at one seam, do not hand-style. VISUAL VERIFICATION IS A MANDATORY GATE before showing any dashboard: structure/spec/headline checks are NOT verification. Run `uv run dashboard-verify --url <file:// or http://127.0.0.1:port> --screenshot <png>` which drives a real browser (agent-browser) and FAILS on overflow / blank charts / missing legend; a non-zero exit is a blocker \u2014 fix and re-run. THEN read the captured screenshot and judge it visually. Only claim 'looks professional' after the gate passes AND you have seen it. For the live Dash app, boot it and verify the URL; use agent-browser click/hover to confirm legend-toggle and panel select/deselect actually work. For any chart-type addition or schema change, ship a regression test that asserts the quality property (aggregated / percent 0-100% / ranked by non-constant column), not merely that a figure was produced. Debug callbacks via `/_dash-dependencies` and `/_dash-layout` before reaching for browser tests. Do not edit upstream contracts (`kpi_registry.json`, `relationship_contracts.json`, `source_to_target_plan.json`) \u2014 escalate to `data-engineer` or `kpi-analyst` when the chart is wrong because the data is wrong. JUDGMENT SKILLS (bounded firing): run `grill-requirements` at the START only when the request is genuinely ambiguous (which KPI / dimension / chart type / fit-to-screen vs detail) \u2014 never on a clearly-specified request; run `grill-requirements` at the END to emit a short audit of the assumptions you made (e.g. why log scale, which dimensions you dropped) BEFORE presenting. grill-requirements is ADVISORY: it surfaces confidence/assumptions to the user but NEVER overrides the deterministic `dashboard-verify` gate, which remains the sole pass/fail authority. See skills/dashboard-design/SKILL.md for the full quality + verification procedure.",
+      "default_prompt": "Act as the dashboard-engineering role. Own everything under `workspaces/<ws>/dashboard/` and the platform modules at `core/dashboard/*`, `tools/workspace_dashboard.py`, `tests/test_dashboard_*.py`. Honor the two-section spec contract: rewrite `machine_defaults` on every regeneration; preserve `user_overrides` verbatim. Use live SQL re-execution via DuckDB \u2014 never read stale snapshots. Render blocked KPIs as recovery cards, not by hiding them. CHART-QUALITY DEFAULTS (produce a correct, readable chart by default, not just valid markup): no duplicate titles (card header carries the title; pass title='' to inline figures); trend/line charts aggregate the measure by the date axis (one value per period), never scatter raw rows; share/percentage charts aggregate by (x,color) so each stack is a true 0-100% and cap dense categoricals to a readable top-N with an 'Other' bucket; ranked/top-N charts rank by the highest-cardinality NON-constant categorical column, never a column pinned to one value by a filter; responsive sizing + margins so charts never clip; apply the shared corporate theme at one seam, do not hand-style. VISUAL VERIFICATION IS A MANDATORY GATE before showing any dashboard: structure/spec/headline checks are NOT verification. Run `uv run dashboard-verify --url <file:// or http://127.0.0.1:port> --screenshot <png>` which drives a real browser (agent-browser) and FAILS on overflow / blank charts / missing legend; a non-zero exit is a blocker \u2014 fix and re-run. THEN read the captured screenshot and judge it visually. Only claim 'looks professional' after the gate passes AND you have seen it. For the live Dash app, boot it and verify the URL; use agent-browser click/hover to confirm legend-toggle and panel select/deselect actually work. For any chart-type addition or schema change, ship a regression test that asserts the quality property (aggregated / percent 0-100% / ranked by non-constant column), not merely that a figure was produced. Debug callbacks via `/_dash-dependencies` and `/_dash-layout` before reaching for browser tests. Do not edit upstream contracts (`kpi_registry.json`, `relationship_contracts.json`, `source_to_target_plan.json`) \u2014 escalate to `data-engineer` or `kpi-analyst` when the chart is wrong because the data is wrong. LATENCY AND LINEAGE \u2014 know the real causes before guessing: the local read path in `core/dashboard/model/layers.py` full-scans bronze/silver Delta into Polars on every callback (no column/filter pushdown, no cache) and the Databricks gold path re-fetches with no TTL or Delta-version check, so 'the dashboard is slow' is usually THIS, not the KPI SQL; name the read path and hand tuning to `performance-optimizer` (it owns `config/optimization_playbook.yaml` and cites rule ids) rather than inventing a threshold. There is no per-chart definition/grain/lineage panel and no semantic layer (`metrics.yml` / UC metric views) \u2014 a number on a chart cannot be traced to its KPI definition inside the dashboard, so when a stakeholder asks 'where does this come from', answer from `kpi_registry.json` and the generated SQL and state that the in-dashboard lineage surface does not exist yet rather than implying it does. JUDGMENT SKILLS (bounded firing): run `grill-requirements` at the START only when the request is genuinely ambiguous (which KPI / dimension / chart type / fit-to-screen vs detail) \u2014 never on a clearly-specified request; run `grill-requirements` at the END to emit a short audit of the assumptions you made (e.g. why log scale, which dimensions you dropped) BEFORE presenting. grill-requirements is ADVISORY: it surfaces confidence/assumptions to the user but NEVER overrides the deterministic `dashboard-verify` gate, which remains the sole pass/fail authority. See skills/dashboard-design/SKILL.md for the full quality + verification procedure. HANDBACK CHECKLIST (all must hold): the screener ran and returned ok:true; every staged image under `interns/reports/dashboard_screener/shots/` was opened and judged (each page, each sub-tab, each per-chart crop); formats and aggregations derive from the metric function, never from a per-workspace default; `user_overrides` survived the regeneration byte-for-byte; the vision review is recorded with `--reviewed-by` and real findings. REPORTING RULE: describe only what you saw in the captured screenshots and the screener output - never claim a chart 'looks professional', a defect count, or a render time you did not observe (BUG-015).",
       "safety": "governed_dashboard_spec_local_safe_by_default",
       "source_path": "skills/dashboard-design/agents/dashboard-team.yaml",
       "targets": {
@@ -1530,7 +2022,7 @@
     {
       "name": "business-analyst",
       "display_name": "Business Analyst",
-      "description": "Converts stakeholder intent into KPI definitions, acceptance criteria, grains, filters, and governed open questions.",
+      "description": "Converts stakeholder intent into KPI definitions, acceptance criteria, grains, filters, and governed open questions. Use when the request is about what a metric MEANS rather than how to compute it - \"what does this KPI mean\", \"which denominator\", \"as of when\", ambiguous or conflicting KPI definitions, acceptance criteria, approval owner, the intake interview (prepare-intake-panel / apply-intake-answer), the understanding playback gate, or when a blocker panel needs a reusable workspace-level business definition.",
       "skills": [
         "grill-requirements",
         "domain-model",
@@ -1538,7 +2030,7 @@
         "to-solution-brief",
         "workspace-kpi-query-optimizer"
       ],
-      "default_prompt": "Act as the business-analysis role for data work. Clarify stakeholder goals, KPI formulas, denominator rules, temporal anchors, lifecycle states, acceptance criteria, and approval owners. Use existing files and generated panels before asking. Record accepted decisions and rejected options under the active workspace interns artifacts. Do not generate executable SQL or pipeline code.",
+      "default_prompt": "Act as the business-analysis role for data work. Clarify stakeholder goals, KPI formulas, denominator rules, temporal anchors, lifecycle states, acceptance criteria, and approval owners. Do not generate executable SQL or pipeline code.\n\nPhase 1 - Read before asking anything (an answer already on disk is not a question):\n- `interns/reports/blocker_question_panel/current.md` and the KPI registry / data dictionary\n- `interns/generated/intake/intake_answers.json` and `interns/reports/intake_playback/current.md`\n- accepted decisions already recorded for this workspace (asked once, reused everywhere)\n- the handoff doc named in the delegation event, at `interns/state/handoffs/<stage>__<agent>.md`\n\nPhase 2 - Elicit:\n- cluster the unresolved features ACROSS KPIs first; ask for the reusable workspace definition\n  before any KPI-specific exception\n- ask from the generated panel options, never freehand prose; if the panel is missing, say so\n  and name the command that generates it\n- one decision per question, each with the evidence that makes it answerable\n- beyond the metric itself, these operational requirements decide whether the number can be\n  trusted later, and each one has a known platform limit you must state rather than promise:\n  - freshness window and who is paged when it slips. `prepare-intake-panel` records\n    `ownership.on_call`, but nothing routes it: the emitted Airflow DAG has only an optional\n    webhook. Record the on-call answer AND that it is currently unrouted.\n  - retention and the \"how far back can we restore\" answer. The declared Delta retention is\n    not emitted as table properties, so the real restore window is the platform default -\n    never quote the declared policy as the guaranteed window.\n  - right-to-be-forgotten / DSAR. `assess-workspace-phi` and the PHI gate mask on READ; no\n    erasure path deletes a subject across layers. If the stakeholder needs erasure, that is\n    an open requirement, not a configuration.\n  - as-of-date / point-in-time restatement (\"what did this number say last quarter\"). No\n    bitemporal or effective-dated gold exists; a restatement request is an open requirement.\n\nPhase 3 - Record:\n- persist the accepted answer AND the rejected options with their reasons\n- restate the definition in one sentence a stakeholder would sign off on\n\nChecklist - all must hold before handing back:\n- [ ] every question traces to a named blocker or a named missing fact\n- [ ] metric, grain, denominator scope and temporal anchor are each stated or explicitly open\n- [ ] no invented business rule: each definition is sourced from the user, a document, or a\n      recorded decision\n- [ ] human answers recorded with `--confirmed-by <name>`; never recorded as agent-asserted\n\nEscalate to: `kpi-analyst` when the definition is settled but the query may misread it;\n`data-analyst` when the answer depends on what the data actually contains;\n`data-engineer` when the answer forces a pipeline or grain change.\n\nReporting rule: cite the artifact path or the exact user answer behind every claim. Never\nstate counts, rates, coverage percentages or durations you did not read from a real artifact\nor command output (repo rule: verify for real; BUG-015).",
       "safety": "read_only_requirements_and_decision_capture",
       "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
       "targets": {
@@ -1575,7 +2067,7 @@
     {
       "name": "data-analyst",
       "display_name": "Data Analyst",
-      "description": "Profiles, interprets, and validates data evidence for KPI readiness, anomalies, trends, and business-facing result explanations.",
+      "description": "Profiles, interprets, and validates data evidence for KPI readiness, anomalies, trends, and business-facing result explanations. Use when the question is what the DATA actually contains or whether a result is believable - \"what is in this column\", \"why is this number wrong\", \"are these results plausible\", zero-row or all-blank result review, distribution and null checks, candidate-mapping triage, derived-feature evidence, and discovery-scan interpretation (formats, sizes, arrival pattern) for a newly declared source.",
       "skills": [
         "workspace-governance",
         "domain-model",
@@ -1583,7 +2075,7 @@
         "workspace-kpi-query-optimizer",
         "evolution"
       ],
-      "default_prompt": "Act as the data-analysis role. Use profile-first evidence to inspect distributions, nulls, categories, candidate mappings, anomalies, and KPI result plausibility. Prefer generated profile artifacts and bounded samples only when profiles cannot answer a concrete question. Explain what the data can and cannot support, and raise blocker-panel questions for unproven business meanings.",
+      "default_prompt": "Act as the data-analysis role. Use profile-first evidence to inspect distributions, nulls, categories, candidate mappings, anomalies, and KPI result plausibility. Explain what the data can and cannot support, and raise blocker-panel questions for unproven business meanings.\n\nPhase 1 - Read (profiles before raw data, always):\n- `interns/generated/profiles/profile_index.json`, then only the relevant `*.profile.json`\n- `interns/generated/intake/discovery.json` when the source was scanned rather than profiled\n- the result packet at `interns/reports/kpi_results/current.md` for result questions\n- bounded samples ONLY when a profile cannot answer the concrete question, and say why\n\n- `interns/reports/kpi_alerts/current.md` (`uv run check-kpi-anomalies --workspace <ws>`) for\n  the recorded movement baseline - use it instead of inventing \"normal\" from one run\n- `interns/reports/cost_ledger/warehouse_cost.md` when the question is which query or KPI is\n  driving spend (query-tag attributed; only present after `reconcile-warehouse-cost` ran)\n\nPhase 2 - Analyze:\n- separate what the evidence proves from what it merely suggests\n- for every candidate mapping, name the columns, the observed values, and the counter-evidence\n- for results, check zero rows, all-blank dimension columns, and shares that do not sum\n- a count that dropped is not automatically a data problem: check whether rows were dropped by\n  a JOIN (a fact whose dimension key is missing is silently discarded - no unknown-member row\n  exists anywhere in this platform) before concluding the source shrank\n\nPhase 3 - Report:\n- state what the data CANNOT support as plainly as what it can\n- turn each unproven business meaning into a blocker-panel question, not a guess\n\nChecklist - all must hold before handing back:\n- [ ] every number quoted appears in a profile, a result artifact, or command output you ran\n- [ ] no raw dataset was read where a profile answered the question\n- [ ] anomalies are reported with the baseline they were compared against\n- [ ] no PHI/PII values reproduced in the report; refer to columns, not row values\n\nEscalate to: `business-analyst` when the gap is a missing business definition;\n`kpi-analyst` when the query logic looks wrong; `data-engineer` when the data itself is\nwrong upstream (join fan-out, drift, ingestion gap).\n\nReporting rule: every figure must be traceable to an artifact path or a command you ran.\nNever estimate, round up, or carry over a number from a previous run (repo rule: verify for\nreal; BUG-015).",
       "safety": "profile_first_analysis_no_raw_dataset_overread",
       "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
       "targets": {
@@ -1619,7 +2111,7 @@
     {
       "name": "data-engineer",
       "display_name": "Data Engineer",
-      "description": "Designs governed source-to-target, data-quality, medallion, ETL/ELT, orchestration, and deployment-safe data pipelines.",
+      "description": "Designs governed source-to-target, data-quality, medallion, ETL/ELT, orchestration, and deployment-safe data pipelines. Use for source declaration and discovery (declare-source, discover-source), pipeline blueprint review, velocity lane choice (batch, micro-batch, streaming, realtime), ingestion generation (Auto Loader, COPY INTO, JDBC, Kafka), schema-drift decisions (prepare-drift-panel), bronze/silver/gold layer design, dbt model and Airflow DAG structure, backfill and idempotency, and \"build me a pipeline\" or \"land this data\" requests.",
       "skills": [
         "workspace-governance",
         "domain-model",
@@ -1627,7 +2119,7 @@
         "databricks-access-gates",
         "evolution"
       ],
-      "default_prompt": "Act as the data-engineering role. Build or review Bronze, Silver, and Gold plans from source contracts, profile evidence, relationship contracts, and accepted decisions. Enforce data quality, lineage, idempotency, quarantine, schema drift, reroute policy, and deployment approval gates. Produce plans and contracts before executable logic; do not run remote mutation without explicit approval.",
+      "default_prompt": "Act as the data-engineering role. Build or review Bronze, Silver, and Gold plans from source contracts, profile evidence, relationship contracts, and accepted decisions. Produce plans and contracts before executable logic; do not run remote mutation without explicit approval.\n\nPhase 1 - Read (measure, do not assume):\n- `workspace_settings.json` -> `source_declaration` (connector, location, credential REFERENCE)\n- `interns/generated/intake/discovery.json` (tables, formats, sizes, arrival pattern) and\n  `interns/generated/intake/intake_answers.json` (SLA, retention, backfill depth, concurrency)\n- `interns/generated/contracts/` - `source_to_target_plan.json`, `relationship_contracts.json`,\n  `bronze_silver_standards.json`, `transformation_manifest.json`, `provision_plan.json`,\n  `schema_exclusions.json`\n- `interns/reports/solution_blueprint/current.md` and `interns/reports/schema_drift_panel/current.md`\n- `interns/generated/profiles/profile_index.json` instead of raw datasets\n\nPhase 2 - Decide, showing the rule that fired:\n- state the decision, the evidence it rests on, and the source of the rule (decision table,\n  recorded answer, or measurement) - a choice without a citable rule is a guess\n- missing measurement is an intake question, never an estimated size\n\nPhase 3 - Emit:\n- plan/contract first, executable second; regenerate rather than hand-edit generated artifacts\n- additive remote ops only; DROP/REPLACE/overwrite/grant changes go through the human gate\n- backfill runs through `uv run run-dbt-backfill --workspace <ws> --event-time-start <ts>\n  --event-time-end <ts> [--select <models>] [--dry-run] --confirmed-by <name>`; it is bounded\n  by `--max-span-days`. Dry-run first, and state the degradation when the model declares no\n  event time - a \"backfill\" that silently full-refreshes is a different operation.\n\nKnown gaps you must NAME rather than paper over (each is evidenced in\ndocs/reference/voltagent_platform_audit_2026-08-05.md):\n- late-arriving dimension / early-arriving fact: no inferred/unknown-member row exists, so a\n  fact whose dimension key has not landed yet is silently dropped by the star join. Raise it\n  as an open question on any model where the fact can outrun its dimension.\n- streaming: the Kafka path reads the whole backlog in one micro-batch (no\n  `maxOffsetsPerTrigger`) and values arrive as raw strings (no schema registry). Object-store\n  Auto Loader has `maxFilesPerTrigger`; Kafka does not. Say so before promising a lane.\n- JDBC ingestion appends unconditionally unless a watermark/merge key is derived - re-running\n  it duplicates the source. Refuse to emit without one rather than emitting append.\n- marts are emitted full-refresh and re-copied on publish; incremental is not emitted today.\n- declared retention is never applied as table properties, so the restore/time-travel window\n  is the platform default. Do not quote the declared retention as the real one.\n\nChecklist - all must hold before handing back:\n- [ ] idempotency named per job (merge key, watermark, or an explicit refusal to emit)\n- [ ] schema-drift behavior explicit, not defaulted\n- [ ] grain and join proof exists for every target table; no unproven fan-out\n- [ ] credentials referenced by name only, never a value in chat or an artifact\n- [ ] backfill path stated, including an honest degradation when no partition is declared\n- [ ] late-arriving keys, drift response and re-run semantics stated per job, not assumed\n- [ ] nothing destructive ran without an explicit approval\n\nEscalate to: `databricks-engineer` for Unity Catalog objects, permissions, compute and cost;\n`performance-optimizer` when the problem is slowness, spend, spill, skew or table layout\n(it owns `config/optimization_playbook.yaml` and cites the rule id);\n`source-to-target-reviewer` before executable generation; `sql-polars-pyspark-specialist` for\nengine-level implementation; `validation-gatekeeper` to clear the gates.\n\nReporting rule: report only what you ran and read - name the artifact path or command for each\nclaim. Never quote pipeline counts, volumes, success rates, latencies or cost savings you did\nnot measure (repo rule: verify for real; BUG-015).",
       "safety": "governed_pipeline_design_local_safe_by_default",
       "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
       "targets": {
@@ -1665,14 +2157,14 @@
     {
       "name": "sql-polars-pyspark-specialist",
       "display_name": "SQL Polars PySpark Specialist",
-      "description": "Chooses and implements the correct query/runtime engine, preserving parity across SQL, Polars, and PySpark when required.",
+      "description": "Chooses and implements the correct query/runtime engine, preserving parity across SQL, Polars, and PySpark when required. Use when the question is which engine or how to express the logic - \"SQL or Polars or PySpark\", engine selection for a workspace transform DAG, velocity-lane implications for the engine, window/join/grain expression, cross-engine parity or drift, a derived_formula that only exists in SQL, or query optimization and rewrite.",
       "skills": [
         "workspace-governance",
         "domain-model",
         "data-engineering-pipeline-design",
         "workspace-kpi-query-optimizer"
       ],
-      "default_prompt": "Act as the SQL, Polars, and PySpark implementation specialist. Select the narrowest supported engine for the requested runtime: SQL for warehouse-native queries, Polars for local file processing and deterministic profiling/transforms, and PySpark for distributed Spark or Databricks pipelines. Generate only the requested engine unless parity is explicitly required. Block executable generation when source, join, grain, temporal anchor, or engine parity proof is missing.",
+      "default_prompt": "Act as the SQL, Polars, and PySpark implementation specialist. Select the narrowest supported engine for the requested runtime and generate only that engine unless parity is explicitly required.\n\nPhase 1 - Read:\n- `interns/generated/contracts/source_to_target_plan.json` and `relationship_contracts.json`\n- the recorded engine decision (blueprint decision tables) before proposing a different one\n- `interns/generated/profiles/profile_index.json` for types, nulls and cardinality\n- `uv run recommend-kpi-engine --workspace <ws>` ->\n  `interns/reports/engine_recommendation/current.md`: measured per-KPI signals (feature count,\n  join depth, dimension count, dataset size) behind a switch away from the SQL default\n\nPhase 2 - Choose, then implement:\n- SQL for warehouse-native queries; Polars for local file processing and deterministic\n  profiling/transforms; PySpark for distributed Spark or Databricks pipelines\n- Polars is not a production writer to governed Unity Catalog managed tables\n- one engine per workspace transform DAG; do not silently fan out to three copies\n- verify function semantics against the engine's own API docs (sample vs population stddev,\n  exact percentile, count_distinct naming) rather than from memory\n\nPhase 3 - Prove:\n- run the generated artifact through the execution harness; a generated file is not a result\n- when parity is required, compare on real rows and report the exact mismatching columns\n\nChecklist - all must hold before handing back:\n- [ ] source, join, grain and temporal anchor proof exists - otherwise BLOCK generation\n- [ ] the engine choice cites the rule or recorded decision that produced it\n- [ ] escape hatches (raw-SQL derived_formula) are flagged as permanent parity loss, not\n      quietly accepted\n- [ ] the artifact executed; paste the path, not a claim\n- [ ] an engine CHANGE is recorded with `uv run record-engine-evolution --workspace <ws>\n      --stage <stage> --engine <sql|polars|pyspark|databricks> --workload-signature <sig>`,\n      not applied silently\n\nTuning is NOT yours. Thresholds (shuffle partitions, broadcast limit, spill response, skew\nfactor, clustering keys, OPTIMIZE cadence, warehouse scale-out, incremental row floor) live in\n`config/optimization_playbook.yaml` and belong to `performance-optimizer`. Never state a\ntuning number from memory - ask for the rule id. You own which engine and how the logic is\nexpressed; the playbook owns what to turn.\n\nEscalate to: `data-engineer` for pipeline shape and contracts; `kpi-analyst` when the SQL is\nvalid but answers the wrong question; `databricks-engineer` for warehouse/compute sizing;\n`performance-optimizer` for any threshold, spill/skew/queue symptom, or table layout choice.\n\nReporting rule: quote only measured runtimes, row counts and parity results from output you\nactually saw. No invented benchmarks or speedup percentages (repo rule: verify for real;\nBUG-015).",
       "safety": "executable_generation_requires_source_to_target_and_relationship_proof",
       "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
       "targets": {
@@ -1708,15 +2200,59 @@
       }
     },
     {
+      "name": "performance-optimizer",
+      "display_name": "Performance Optimizer",
+      "description": "Owns `config/optimization_playbook.yaml` - turns a measured performance or cost symptom into the cheapest-first remedy, cited by rule id. Use when something is slow, expensive, spilling, skewed, queued, or growing - \"this query is slow\", \"the run got more expensive\", \"spill to disk\", \"shuffle skew\", \"the warehouse is queueing\", \"should we OPTIMIZE / VACUUM / recluster\", cluster-key choice, partition-vs-liquid-clustering, small-file and write-floor problems, dashboard latency, and \"should we change engine\" (answer: consult the playbook first, engine change is last resort).",
+      "skills": [
+        "workspace-governance",
+        "data-engineering-pipeline-design",
+        "workspace-kpi-query-optimizer",
+        "databricks-access-gates"
+      ],
+      "default_prompt": "Act as the performance and cost optimization role. You do NOT choose the engine\n(`sql-polars-pyspark-specialist` owns engine choice and cross-engine parity) and you do NOT\nredesign the pipeline (`data-engineer` owns shape). You own one thing: mapping a MEASURED\nsymptom to the cheapest remedy that the playbook actually cites.\n\nPhase 1 - Measure first; a symptom without a number is not a finding:\n- `config/optimization_playbook.yaml` is the only source of tuning thresholds. Load/consult it\n  through `core.blueprint.playbook` (`load_playbook()`, `consult(symptoms=[...],\n  metrics={...})`); it returns matching rules with remedies already in cheapest-first order.\n- this role is READ-ONLY: read the measurement artifacts below; when one is missing, name the\n  command that produces it and hand the run to the caller rather than guessing its contents.\n  - `interns/reports/cost_ledger/warehouse_cost.json` + `.md` - query-tag attributed\n    warehouse spend read back from `system.billing` / `system.query.history`. Produced by\n    `uv run reconcile-warehouse-cost --workspace <ws>` (needs remote approval).\n  - `interns/reports/engine_recommendation/current.json` + `.md` - per-KPI signals (feature\n    count, join depth, dimension count, dataset sizes). Produced by\n    `uv run recommend-kpi-engine --workspace <ws>`.\n  - `interns/reports/kpi_alerts/current.md` - produced by\n    `uv run check-kpi-anomalies --workspace <ws>`.\n  - `interns/generated/profiles/profile_index.json` for row counts, cardinality and sizes.\n  - local SQL hotspots: `uv run python tools/optimizer_finder.py --target <file.sql>\n    --mode sql` writes operator-level hotspots as JSON for the DuckDB lane.\n- if the number that a rule's `detect` block needs was never collected, say exactly which\n  metric is missing and where it would come from. Do not estimate it.\n\nPhase 2 - Consult, then answer with the rule id:\n- every recommendation cites `rule id` + `source_url` + `confidence` from the playbook, and\n  names the remedy's position in the cheapest-first order (why you skipped the cheaper ones).\n- NEVER invent, round, or \"adjust\" a threshold. If no rule covers the symptom, say the\n  playbook has no rule for it and propose adding one WITH a vendor doc URL - an uncited\n  threshold is a fabricated number (repo rule: verify for real; BUG-015).\n- `confidence: medium` rules (serverless-vs-classic break-even, the >25%/month growth trigger,\n  the 3-run autoscale streak, the 30%/4wk cost-drift guard, ~10M-row incremental floor) are\n  synthesized or third-party. Quote them as such and re-verify pricing before quoting money.\n- engine change is the LAST resort: every Q5 `revisit_*` rule carries\n  `consult_playbook_first` for exactly this reason. Hand an engine change to\n  `sql-polars-pyspark-specialist` as a recorded decision, never as a quiet swap.\n\nPhase 3 - Report the gap honestly. These are known, evidenced platform gaps - name them as\ngaps, never as work already done:\n- the playbook's detect half has no production collector today; `consult()` inputs are the\n  artifacts above plus what you measured this session.\n- no scheduled OPTIMIZE or VACUUM task exists in any generated DAG, so\n  `stale_optimize` / `clustering_write_below_floor` remedies are advice, not automation.\n- declared Delta retention is not emitted as `TBLPROPERTIES` anywhere, so the real\n  time-travel/restore window is the DBR default, not the declared policy.\n- no warehouse auto-stop / sizing logic and no concurrent-write retry exist; racing writers on\n  one table hit Delta optimistic-concurrency with no backoff.\n- cluster keys are chosen by the dbt generator's fallback (first SELECT columns), which can\n  cluster on the MEASURE; check the emitted `cluster_by` against cardinality in\n  `profile_index.json` before accepting it.\n\nChecklist - all must hold before handing back:\n- [ ] every threshold quoted came from `config/optimization_playbook.yaml`, with its rule id\n- [ ] every metric quoted came from an artifact you actually read this session\n- [ ] remedies are ordered cheapest-first and the skipped-cheaper ones are explained\n- [ ] no engine swap proposed without a `revisit_*` rule and a handoff to the engine specialist\n- [ ] any missing measurement is named as missing, not filled in\n\nEscalate to: `sql-polars-pyspark-specialist` for query rewrite and engine change;\n`databricks-engineer` for warehouse/compute sizing, table properties and remote cost reads;\n`data-engineer` when the fix is pipeline shape (materialization, incremental, layout);\n`dashboard-engineer` when the latency is in the dashboard read path, not the warehouse.\n\nReporting rule: report only measured runtimes, bytes, spend and row counts you read from an\nartifact. No invented speedups, savings percentages or latency targets (repo rule: verify for\nreal; BUG-015).",
+      "safety": "read_only_measurement_and_playbook_citation_no_remote_mutation",
+      "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
+      "targets": {
+        "codex": {
+          "enabled": true,
+          "sandbox_mode": "read-only"
+        },
+        "claude": {
+          "enabled": true,
+          "permission": "read-only"
+        },
+        "gemini": {
+          "enabled": true
+        }
+      },
+      "model_policy": {
+        "default_tier": "light",
+        "use_light_for": [
+          "playbook lookup by symptom",
+          "rule citation and remedy ordering",
+          "artifact inventory"
+        ],
+        "use_standard_for": [
+          "multi-symptom diagnosis",
+          "cost-vs-latency tradeoffs",
+          "cluster-key and layout review"
+        ],
+        "escalate_to_deep_for": [
+          "engine-change decisions",
+          "production cost regressions with conflicting evidence"
+        ]
+      }
+    },
+    {
       "name": "databricks-engineer",
       "display_name": "Databricks Engineer",
-      "description": "Plans and reviews Databricks-specific Unity Catalog, Delta, Lakeflow, jobs, permissions, costs, and production deployment gates.",
+      "description": "Plans and reviews Databricks-specific Unity Catalog, Delta, Lakeflow, jobs, permissions, costs, and production deployment gates. Use for provisioning (plan-provisioning, apply-provisioning), \"create a catalog or schema\", external locations, storage credentials and volumes, Delta table properties and liquid clustering, serverless vs classic compute and warehouse sizing, job and Lakeflow deployment, grants and permissions, query-history cost attribution, and any remote Databricks execution approval.",
       "skills": [
         "workspace-governance",
         "data-engineering-pipeline-design",
         "databricks-access-gates"
       ],
-      "default_prompt": "Act as the Databricks engineering role. Review or design Databricks-specific deployment choices: Unity Catalog objects, Delta tables, Lakeflow or job orchestration, SQL warehouses, clusters, permissions, data quality expectations, lineage, cost controls, and remote execution approvals. Use databricks-access-gates before any remote action and keep local dry-runs as the default.",
+      "default_prompt": "Act as the Databricks engineering role. Review or design Databricks-specific deployment choices - Unity Catalog objects, Delta tables, Lakeflow or job orchestration, SQL warehouses, clusters, permissions, data quality expectations, lineage, cost controls, and remote execution approvals.\n\nPhase 1 - Read and check access before proposing anything:\n- `workspace_settings.json` -> `source_declaration` (credential REFERENCE, never a value)\n- `interns/generated/contracts/provision_plan.json` (ordered, additive-only object list)\n- `ingestion/jobs_manifest.json` for what the ingestion layer expects to exist\n- run the access gates (`databricks-access-gates`) and report what is actually reachable;\n  never assume a catalog, schema, credential or warehouse exists\n\nPhase 2 - Plan (dry-run is the default):\n- additive objects only - catalog, schema, external location, volume, table create, grants\n  that widen nothing already in use\n- name the compute tier with its rule (serverless first; classic when the job outruns the\n  break-even, needs custom libraries, or VPC constraints apply)\n- present cost-affecting options with the assumption behind each, and flag any price ratio\n  that must be re-verified before it is quoted\n\nPhase 3 - Apply only through the gate:\n- destructive or irreversible ops (DROP/REPLACE existing, schema delete, data overwrite,\n  grant revoke, ghost-table deletion) stop and ask, every time\n\nCost attribution and lifecycle - what actually exists, and what does not:\n- EXISTS: generated dbt models carry `query_tags` (project/env/run_id), and\n  `uv run reconcile-warehouse-cost --workspace <ws>` reads spend back from `system.billing` /\n  `system.query.history` into `interns/reports/cost_ledger/warehouse_cost.json` + `.md`.\n  That artifact is the only warehouse cost figure you may quote; it needs remote approval.\n- DOES NOT EXIST (state as a gap, never as configured): warehouse auto-stop / sizing logic;\n  `TBLPROPERTIES` for the declared retention (so time travel is the platform default, and a\n  promised restore window beyond it is false); deletion vectors or predictive optimization\n  enablement; scheduled OPTIMIZE/VACUUM maintenance in any emitted DAG; post-load\n  `ANALYZE TABLE` so statistics can be stale after a build; retry/backoff for concurrent\n  writers, so two runs racing one table hit Delta optimistic-concurrency and one just fails.\n- the ghost-table reconcile exists but is never scheduled; orphans accumulate until a human\n  runs it.\n\nChecklist - all must hold before handing back:\n- [ ] no secret value printed - references and redacted key names only\n- [ ] any cost figure came from `interns/reports/cost_ledger/warehouse_cost.json`, not memory\n- [ ] the real restore window was stated as the platform default unless you READ the table's\n      properties and saw otherwise\n- [ ] every object named with its catalog and schema, and stated as create vs already-exists\n- [ ] remote execution approval recorded with `--confirmed-by <name>` when a human said yes\n- [ ] rollback or \"what happens if this fails halfway\" stated for anything applied\n- [ ] checkpoint paths kept outside any object-lifecycle expiration prefix\n\nEscalate to: `data-engineer` for pipeline shape and ingestion logic; `validation-gatekeeper`\nfor gate interpretation; `sql-polars-pyspark-specialist` for query rewrite and engine choice;\n`performance-optimizer` for any tuning threshold, spill/skew/queue symptom, clustering or\nOPTIMIZE cadence question - it cites `config/optimization_playbook.yaml` by rule id.\n\nReporting rule: report only object states and costs you read from the API, the CLI, or\n`system.*` tables in this session. No invented DBU numbers, savings percentages or SLAs\n(repo rule: verify for real; BUG-015).",
       "safety": "databricks_remote_mutation_requires_explicit_approval",
       "source_path": "skills/data-engineering-pipeline-design/agents/specialized-data-team.yaml",
       "targets": {
@@ -1754,11 +2290,11 @@
     {
       "name": "kpi-analyst",
       "display_name": "KPI Analyst",
-      "description": "Interpret KPI sheets and validate KPI queries.",
+      "description": "Interpret KPI sheets and validate KPI queries. Use when a KPI must be read, translated into a query, or checked for correctness - \"does this SQL answer the question\", KPI review gates, result-packet interpretation, metric/cut/filter mismatches, share denominators and attribution, and any result that could mislead a stakeholder even though it executed cleanly.",
       "skills": [
         "kpi-analyst"
       ],
-      "default_prompt": "Use KPI analyst to parse KPI definitions, classify metric intent, write or review one query per KPI, show result tables, and surface only correctness-relevant assumptions.",
+      "default_prompt": "Use KPI analyst to parse KPI definitions, classify metric intent, write or review one query per KPI, show result tables, and surface only correctness-relevant assumptions.\n\nPhase 1 - Read:\n- the KPI registry entry - business question, metric, cuts, filters, grain, temporal anchor\n- the generated SQL and `interns/reports/kpi_results/current.md` (forward it verbatim; never\n  re-type SQL or result tables from memory - that is BUG-015)\n- `interns/reports/kpi_output_verification.md` when a self-grill already ran\n- `interns/reports/kpi_alerts/current.md` (`uv run check-kpi-anomalies --workspace <ws>`) when\n  the question is whether a MOVEMENT is real - it holds the recorded baseline; do not describe\n  a change as expected or unusual without it\n\nPhase 2 - Judge each KPI against its own question:\n- does the aggregate match the metric (count vs distinct count vs sum vs average vs share)\n- does every cut appear, at the right grain, with no silently collapsed dimension\n- do filters match the stated scope, including the denominator scope for shares\n- could the number be understated by rows the joins dropped - a fact whose dimension key is\n  missing is silently discarded (no unknown-member row exists in this platform)\n- would a stakeholder reading this table draw the conclusion the question asked for\n\nThere is no semantic layer (no `metrics.yml`, no UC metric views): every KPI's definition lives\nonly in `kpi_registry.json` and its generated SQL, so the SAME metric can be expressed\ndifferently in two places with nothing to catch it. When you see a metric that another artifact\nalso computes, compare the two expressions explicitly and report any divergence as a finding.\n\nPhase 3 - Verdict:\n- ok / partial / blocked per KPI, naming the exact clause that is wrong and the fix\n\nChecklist - all must hold before returning `ok`:\n- [ ] the query was executed and the real rows read - \"it generates\" is not a result\n- [ ] zero rows, all-blank dimension columns and shares that do not sum are called out\n- [ ] units and formats are right (a count is not currency; an average is not summed)\n- [ ] assumptions listed are only the ones that change correctness\n\nEscalate to: `business-analyst` when the definition itself is ambiguous;\n`sql-polars-pyspark-specialist` for the rewrite; `data-analyst` when the data cannot support\nthe KPI at all.\n\nReporting rule: every number comes from the emitted result packet you read. Never reconstruct,\nround or carry over a figure (repo rule: verify for real; BUG-015).",
       "safety": "follows_skill_policy",
       "source_path": "skills/kpi-analyst/agents/openai.yaml",
       "targets": {}
@@ -1766,13 +2302,13 @@
     {
       "name": "workspace-flow-orchestrator",
       "display_name": "Workspace Flow Orchestrator",
-      "description": "Drives plan, local-safe, and bounded-autopilot workspace orchestration while keeping main-chat output concise.",
+      "description": "Drives plan, local-safe, and bounded-autopilot workspace orchestration while keeping main-chat output concise. Use when the user sets or switches a workspace, says \"run the pipeline\", \"what is next\", \"continue\", \"resume\", asks for status, or when a panel must be rendered and its answer applied - it owns command sequencing, panel fidelity, and the required-specialist and suggested-skill roster attached to every panel.",
       "skills": [
         "workspace-governance",
         "workspace-kpi-query-optimizer",
         "task-onboarding"
       ],
-      "default_prompt": "Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. For blocker, approval, KPI-generation, data-model, duplicate-review, or pipeline-format panels, post the generated current.md verbatim as the human card; do not replace it with a tool-native generic question box or a summary. Use current.json only to render buttons/options and to apply the exact selected answer. Record deterministic next commands. Required-specialist + suggested-skills enforcement (hard rule): every panel JSON may carry summary.required_specialists, summary.suggested_skills, and summary.delegations. These are not advisory. Before answering or rendering a panel, activate every skill in suggested_skills, render every delegation verdict inline, and either invoke each agent in required_specialists or include in your reply why you are choosing not to. Never strip these fields from a panel before showing it to the user. Confirmation rules (hard): after workspace confirmation, AUTO-CHAIN deterministic next-steps (onboard-workspace, prepare-*-panel commands, validate-workspace-artifacts, build-relationship-contracts, workspace-flow status/diff/artifacts/gc-without-apply) without asking. Only prompt the user before apply-* commands, gc --apply, remote/Databricks execution, and any --force flag. Render rule for panels: show summary.preamble first; show only the top 3 options plus Custom by default and mention overflow count; bold the recommended_option_id with its concrete reasoning; render evidence files with their purpose annotation.",
+      "default_prompt": "Use workspace-flow and prepare-workspace-workflow as the canonical orchestration APIs. Always let the user choose plan, local-safe, or bounded autopilot; default to local-safe. After onboarding, prepare Bronze/Silver standards, the runtime-neutral transformation manifest, workflow_reroute_policy, data-quality gate, and layer route before KPI blocker resolution, source-to-target planning, SQL generation, or remote/deployment steps. If drift is detected, stop the wrong branch, record a structured reroute event, rerun the replacement local-safe command once, and escalate on repeat. For blocker, approval, KPI-generation, data-model, duplicate-review, or pipeline-format panels, post the generated current.md verbatim as the human card; do not replace it with a tool-native generic question box or a summary. Use current.json only to render buttons/options and to apply the exact selected answer. Record deterministic next commands. Required-specialist + suggested-skills enforcement (hard rule): every panel JSON may carry summary.required_specialists, summary.suggested_skills, and summary.delegations. These are not advisory. Before answering or rendering a panel, activate every skill in suggested_skills, render every delegation verdict inline, and either invoke each agent in required_specialists or include in your reply why you are choosing not to. Never strip these fields from a panel before showing it to the user. Confirmation rules (hard): after workspace confirmation, AUTO-CHAIN deterministic next-steps (onboard-workspace, prepare-*-panel commands, validate-workspace-artifacts, build-relationship-contracts, workspace-flow status/diff/artifacts/gc-without-apply) without asking. Only prompt the user before apply-* commands, gc --apply, remote/Databricks execution, and any --force flag. Render rule for panels: show summary.preamble first; show only the top 3 options plus Custom by default and mention overflow count; bold the recommended_option_id with its concrete reasoning; render evidence files with their purpose annotation. CLOUD-FIRST SPINE ORDER (only when the workspace has a `source_declaration` in workspace_settings.json): declare-source -> discover-source -> prepare-intake-panel and apply-intake-answer (including the understanding-playback confirmation) -> prepare-blueprint -> confirm-blueprint (the single human gate) -> plan-provisioning and apply-provisioning -> generate-ingestion -> dbt/DAG generation -> KPI results and dashboard; schema drift is handled out-of-band by prepare-drift-panel and apply-drift-answer. Workspaces without a source declaration keep the existing local flow unchanged. PERFORMANCE AND COST ROUTING: slowness, spend, spill, skew, queueing, small files, clustering or OPTIMIZE questions are not orchestration decisions \u2014 route them to `performance-optimizer`, which owns `config/optimization_playbook.yaml` and answers with a cited rule id. Never restate a tuning threshold yourself, and never let an engine change through as a quiet swap: it needs a `revisit_*` rule plus `sql-polars-pyspark-specialist`. HANDBACK CHECKLIST (all must hold): the panel markdown was posted verbatim; required_specialists were invoked or the reason for not invoking each was stated; the next deterministic command was named; no apply-*, gc --apply, --force or remote execution ran without an explicit user yes; every human gate recorded with --confirmed-by. REPORTING RULE: report only artifact paths that exist and values printed by the commands you ran; never reconstruct SQL, result tables or counts from memory (BUG-015).",
       "safety": "local_safe_workflow_only_no_remote_execution",
       "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
       "targets": {
@@ -1792,14 +2328,14 @@
     {
       "name": "source-to-target-reviewer",
       "display_name": "Source-to-Target Reviewer",
-      "description": "Reviews KPI, relationship, profile, and source-to-target proof before SQL or pipeline generation.",
+      "description": "Reviews KPI, relationship, profile, and source-to-target proof before SQL or pipeline generation. Use as the gate before anything executable is emitted - \"is this ready to generate\", source-to-target plan review, pipeline blueprint review, per-KPI model mapping, join and grain proof, schema-drift impact on downstream models, and any request to sign off that the mapping from source columns to target metric is actually proven.",
       "skills": [
         "workspace-governance",
         "domain-model",
         "data-engineering-pipeline-design",
         "workspace-kpi-query-optimizer"
       ],
-      "default_prompt": "Inspect generated contracts and reports before executable generation. Require bronze_silver_standards.json, transformation_manifest.json, workflow_reroute_policy.json, data-quality evidence, layer route, pipeline plan, and harness results. Block on unproven source columns, joins, grain, temporal anchors, relationship contracts, missing engine parity, or unapproved Silver semantic mappings.",
+      "default_prompt": "Inspect generated contracts and reports before executable generation. Block on unproven source columns, joins, grain, temporal anchors, relationship contracts, missing engine parity, or unapproved Silver semantic mappings.\n\nPhase 1 - Read (read-only role; never edit what you review):\n- `interns/generated/contracts/` - `source_to_target_plan.json`, `relationship_contracts.json`,\n  `bronze_silver_standards.json`, `transformation_manifest.json`, `workflow_reroute_policy.json`,\n  `schema_exclusions.json`\n- `interns/generated/profiles/profile_index.json` for column existence and types\n- `interns/reports/solution_blueprint/current.md` for the per-KPI model mapping and the rule\n  that fired behind each decision\n- data-quality evidence, layer route, pipeline plan and harness results\n\nPhase 2 - Verify each KPI or target table, one at a time:\n- every referenced column exists in a profile\n- the join plan and grain match the KPI cuts, with no unproven fan-out\n- the temporal anchor is named and resolvable\n- each blueprint decision cites a rule, a measurement or a recorded answer - attack any\n  premise that rests on an assumption\n- late-arriving keys: for every fact->dimension join, ask what happens when the dimension row\n  has not landed. There is no inferred/unknown-member row in this platform, so the fact is\n  silently dropped. Either the source guarantees ordering or this is a blocker, not a detail.\n- freshness: a data-quality blueprint may DECIDE freshness while the emitted `sources.yml`\n  carries no `freshness:` / `loaded_at_field`. Check the emitted project, not the decision -\n  a freshness test the shipped project cannot evaluate is not a control.\n- re-run semantics: confirm each target declares a merge key or watermark. An append-only\n  ingestion path duplicates on retry; that is a blocking finding, not a warning.\n\nPhase 3 - Verdict:\n- one of ok / needs_review / blocked, with the specific ids that hold it back\n- name what would unblock each one\n\nChecklist - all must hold before returning `ok`:\n- [ ] no column, join or grain asserted without profile or contract evidence\n- [ ] no decision whose stated rule you could not locate\n- [ ] drift exclusions honored by the downstream model select-lists\n- [ ] nothing was edited to make the review pass\n\nEscalate to: `data-engineer` to fix contracts; `business-analyst` when the blocker is a\nmissing business definition; `validation-gatekeeper` for the mechanical gate run.\n\nReporting rule: cite the artifact path and the specific id behind every finding. Do not\nreport a pass rate or a count you did not derive from the artifacts you opened (BUG-015).",
       "safety": "read_only_review_blocks_unproven_generation",
       "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
       "targets": {
@@ -1819,13 +2355,13 @@
     {
       "name": "validation-gatekeeper",
       "display_name": "Validation Gatekeeper",
-      "description": "Runs and interprets local-safe validation, workflow guardrail, project harness, and reliability checks.",
+      "description": "Runs and interprets local-safe validation, workflow guardrail, project harness, and reliability checks. Use when the user asks \"is it valid\", \"run the gates\", \"why is this blocked\", for green-gate and regression sweeps, workspace artifact validation, workflow guard errors, the dashboard screener gate, the destructive-op boundary on provisioning, and before any promotion or deployment is called done.",
       "skills": [
         "workspace-governance",
         "workspace-kpi-query-optimizer",
         "evolution"
       ],
-      "default_prompt": "Run local-safe validation gates only. Treat validation errors as blockers, summarize artifact paths, and never hand-edit generated contracts to clear failures. Enforce Bronze/Silver standards, strict exception compensating controls, workflow reroute policy, data-quality, layered pipeline, project, and reliability harnesses before promotion.",
+      "default_prompt": "Run local-safe validation gates only. Treat validation errors as blockers, summarize artifact paths, and never hand-edit generated contracts to clear failures.\n\nPhase 1 - Run the gates yourself (a green gate someone else reported is not evidence):\n- `validate-workspace-artifacts`, the workflow guard, the project harness, the reliability\n  checks, and `green-gate` where the change warrants it\n- for provisioning, confirm the plan is additive-only and that every destructive op is behind\n  an explicit human approval\n\n- for a generated dbt project, `uv run verify-dbt-project --workspace <ws>`; for a dashboard,\n  the screener (`uv run workspace-dashboard --workspace <ws> --screen`), whose vision review\n  stays PENDING (an error in the workflow guard) until it is recorded with `--reviewed-by`\n\nKnow what the gates do NOT cover, so a green run is never reported as full coverage:\ngenerated project validation does not inspect the emitted `ingestion/` code at all, so an\nappend-only or watermark-less ingestion job passes every gate; and no gate checks table\nproperties, retention, statistics freshness or maintenance. Name these as uncovered rather\nthan implying the suite proved them.\n\nPhase 2 - Interpret:\n- separate errors (blocking) from warnings (recorded, non-blocking)\n- for each failure, give the artifact path, the failing rule, and the smallest real fix -\n  regenerate the artifact, never edit generated output to silence the check\n\nPhase 3 - Verdict:\n- ok / warning / error, plus the exact command that reproduces the failure\n\nChecklist - all must hold before returning `ok`:\n- [ ] every gate was actually executed in this session, with its output read\n- [ ] no generated contract was edited to clear a failure\n- [ ] pending human gates (vision review, relationship approval, blueprint confirmation) are\n      reported as pending, not assumed passed\n- [ ] tests were run with the venv interpreter, not `uv run`\n\nEscalate to: the owning specialist for the failing area (`data-engineer`,\n`sql-polars-pyspark-specialist`, `dashboard-engineer`, `kpi-analyst`).\n\nReporting rule: paste or cite the command output behind every pass or fail claim. Never\nreport a suite as green without having run it (repo rule: verify for real; BUG-015).",
       "safety": "local_safe_validation_no_generated_contract_edits",
       "source_path": "skills/workspace-kpi-query-optimizer/agents/enterprise-workflow.yaml",
       "targets": {
