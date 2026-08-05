@@ -1,0 +1,128 @@
+# Velocity lane selection.
+#
+# Velocity used to be an implicit `is_streaming: false` on every discovered
+# table. It is a routed decision like engine and compute: it sets mart
+# materialization (full rebuild vs incremental merge), whether ingestion has to
+# checkpoint, and whether the modeling table needs inferred dimension members.
+#
+# The input fact `target_latency` comes from the intake question of the same
+# name, OR is derived when the MEASURED arrival pattern and the answered
+# freshness SLA already agree on a lane. When neither holds, the fact is absent
+# and this decision BLOCKS naming it -- a guessed cadence would silently decide
+# three downstream behaviours.
+decision: velocity_lane
+version: 1
+mode: first_match
+
+rules:
+  - id: VEL-R1
+    choice: realtime_serving
+    when:
+      target_latency: {eq: realtime_serving}
+      online_store_serving_edge: {eq: true}
+    rationale: >-
+      Real-time serving means an online store answers point lookups from data the
+      lakehouse feeds. The platform does not build that edge yet (audit M4: operational /
+      reverse-ETL sync missing - `operational_app` consumers have no CDC/upsert-to-OLTP
+      path), so the fact `online_store_serving_edge` cannot be produced by any input and
+      this decision BLOCKS. That is deliberate: promising a realtime lane the generators
+      cannot emit is worse than saying the capability is missing. Pick streaming or
+      micro_batch, or wait for the serving-edge slice.
+    citation: https://docs.databricks.com/aws/en/oltp/projects/reverse-etl
+    alternatives:
+      - choice: streaming
+        cost_note: >-
+          A continuously running job keeps gold seconds-fresh, but a lakehouse scan still
+          will not meet a sub-10 ms point lookup - it narrows the gap, it does not close it.
+      - choice: micro_batch
+        cost_note: >-
+          Cheapest of the three and it restarts cleanly, but the serving surface is a
+          table read, not a key lookup.
+
+  - id: VEL-R2
+    choice: streaming
+    when:
+      target_latency: {eq: streaming}
+      checkpointable_source: {eq: true}
+    rationale: >-
+      Continuous arrival on a source that supports offsets/checkpoints (object store via
+      Auto Loader, or a queue): a continuously running, checkpointed job with exactly-once
+      progress tracking. Marts become incremental merges - a full rebuild per micro-batch
+      does not fit the window.
+    citation: https://docs.databricks.com/aws/en/structured-streaming/
+    alternatives:
+      - choice: micro_batch
+        cost_note: >-
+          Scheduled triggers restart cleanly and cost less when the stream is idle, at the
+          price of the scheduling interval added to end-to-end latency.
+
+  - id: VEL-R3
+    choice: micro_batch
+    when:
+      target_latency: {eq: streaming}
+      checkpointable_source: {eq: false}
+    rationale: >-
+      Streaming was asked for, but the declared connector exposes no checkpointable
+      progress (no file-notification/offset surface), so a continuous job could not
+      resume without re-reading. The lane DEGRADES to frequent scheduled pulls and the
+      degradation is stated rather than silently promised as streaming.
+    citation: https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/
+    alternatives:
+      - choice: streaming
+        cost_note: >-
+          Available once the source moves to an object store or a queue; until then a
+          continuous job would replay the whole source on every restart.
+
+  - id: VEL-R4
+    choice: micro_batch
+    when:
+      target_latency: {eq: micro_batch}
+    rationale: >-
+      Hourly-or-faster scheduled runs: incremental merges into marts with an event-time
+      column and a lookback window, ingestion throttled per trigger. Restartable, and
+      cheap when the source is idle.
+    citation: https://docs.databricks.com/aws/en/structured-streaming/triggers
+    alternatives:
+      - choice: streaming
+        cost_note: "Removes the schedule interval from end-to-end latency, and pays for a job that never stops."
+      - choice: batch
+        cost_note: "One run a day is cheaper and simpler, and the number is a day old."
+
+  - id: VEL-R5
+    choice: batch
+    when:
+      target_latency: {eq: batch}
+    rationale: >-
+      One scheduled run per day (or slower): full rebuilds are affordable at this cadence,
+      which keeps the pipeline the simplest thing that can be correct.
+    citation: https://docs.getdbt.com/docs/build/incremental-models
+    alternatives:
+      - choice: micro_batch
+        cost_note: >-
+          Hourly freshness for the cost of incremental state - a merge key, an event-time
+          column, and a lookback window to maintain.
+
+  - id: VEL-R6
+    choice: batch
+    when: {}
+    rationale: >-
+      Terminal default: daily batch. Reached only when a lane was neither answered nor
+      implied, which the rules above block on first - this exists so the table always
+      terminates.
+    citation: https://docs.getdbt.com/docs/build/materializations
+    alternatives:
+      - choice: micro_batch
+        cost_note: "Answer `target_latency` in the intake interview to pick the lane deliberately."
+
+constraints:
+  - id: VEL-C1
+    applies_to: [streaming, micro_batch]
+    note: >-
+      Late-arriving dimensions become likely at this cadence: facts can reference a
+      dimension member that has not landed yet. The modeling table's R10 modifier adds
+      inferred members so those facts are not dropped.
+  - id: VEL-C2
+    applies_to: [streaming]
+    note: >-
+      A checkpoint location is state: it is per-target and must not be shared between
+      two jobs writing the same table, or progress from one silently skips the other.

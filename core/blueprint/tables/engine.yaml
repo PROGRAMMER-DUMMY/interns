@@ -1,0 +1,161 @@
+# Transform-engine selection for ONE workspace transform DAG.
+#
+# Spec: docs/superpowers/specs/2026-08-05-cloud-first-restructure-design.md Section 5.
+# Research: docs/reference/engine_compute_selection_research.md (Q1 decision table, Q2).
+#
+# Read top-down, FIRST MATCH WINS. "Working set" = compressed bytes actually
+# scanned per run, never bytes at rest and never a fabricated size: a rule that
+# needs a byte count it does not have BLOCKS the decision instead of guessing.
+#
+# Scope constraint (spec Section 5 + research Q2): ingestion is platform
+# infrastructure (Auto Loader / Lakeflow) and is NOT part of this choice. A
+# streaming SOURCE therefore does not force a streaming TRANSFORM engine.
+decision: engine
+version: 1
+mode: first_match
+
+rules:
+  - id: ENG-R1
+    choice: pyspark
+    when:
+      non_sql_logic: {eq: true}
+    rationale: >-
+      A KPI needs logic SQL cannot express (ML inference, custom libraries, complex
+      parsing). dbt's own guidance is to use Python models only for what SQL genuinely
+      cannot express; at that point the transform DAG belongs on PySpark.
+    citation: https://docs.getdbt.com/docs/build/python-models
+    alternatives:
+      - choice: sql_dbt_warehouse
+        cost_note: >-
+          Cheaper per run and one dialect, but only viable if the non-SQL step is
+          isolated into a named boundary table built by a separate task.
+
+  - id: ENG-R2
+    choice: pyspark
+    when:
+      working_set_bytes: {gte: 1099511627776}   # 1 TiB
+    rationale: >-
+      Working set above ~1 TB, or a shuffle larger than node RAM, needs a distributed
+      engine. Single-node engines OOM rather than spill.
+    citation: https://docs.coiled.io/blog/tpch.html
+    alternatives:
+      - choice: sql_dbt_warehouse
+        cost_note: >-
+          Viable if the heavy models become incremental/microbatch first - dbt
+          microbatch has taken 2 TB/45 min scans down to 20 GB/2 min. Try that before
+          paying for a second engine.
+
+  - id: ENG-R3
+    choice: sql_dbt_warehouse
+    when:
+      working_set_bytes: {gte: 53687091200}     # 50 GiB
+    rationale: >-
+      At or above the 50 GiB Decathlon ceiling the workspace is past single-node
+      eligibility, and SQL/dbt on a warehouse is the platform default overall.
+    citation: https://pola.rs/posts/case-decathlon/
+    alternatives:
+      - choice: pyspark
+        cost_note: >-
+          Only worth it with big-by-big joins or heavy skew; distributed is slower and
+          pricier at this size (Spark ~10x slower than single-node at small scale).
+
+  - id: ENG-R4
+    choice: sql_dbt_warehouse
+    when:
+      has_streaming_source: {eq: true}
+    rationale: >-
+      A streaming source is landed by platform-owned ingestion (Auto Loader /
+      Lakeflow) into bronze; the transform DAG downstream of it stays SQL/dbt. The
+      medallion split is two-engine by design, which is standard, not a violation.
+    citation: https://docs.databricks.com/aws/en/lakehouse/medallion
+    alternatives:
+      - choice: pyspark
+        cost_note: >-
+          Required only if a named decision needs sub-15-minute freshness end to end;
+          always-on streaming compute costs materially more than scheduled batch.
+
+  - id: ENG-R5
+    choice: sql_dbt_warehouse
+    when:
+      join_complexity: {eq: heavy}
+    rationale: >-
+      Heavy joins and fan-out are what break single-node engines; the warehouse
+      spills and rebalances where Polars fails hard.
+    citation: https://milescole.dev/data-engineering/2024/12/12/Should-You-Ditch-Spark-DuckDB-Polars.html
+    alternatives:
+      - choice: pyspark
+        cost_note: "Only if the joins are big-by-big with measured skew; otherwise pure overhead."
+
+  - id: ENG-R6
+    choice: sql_dbt_warehouse
+    when:
+      consumer_class_count: {gte: 2}
+    rationale: >-
+      Multi-consumer gold means unknown future questions and concurrent BI readers.
+      One SQL dialect on a governed warehouse is the only option that survives a
+      second consumer appearing later.
+    citation: https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior
+    alternatives:
+      - choice: polars_single_node
+        cost_note: "~$0 marginal compute, but not a governed writer - see ENG-C1."
+
+  - id: ENG-R7
+    choice: polars_single_node
+    when:
+      is_cloud_workspace: {eq: false}
+      working_set_bytes: {lt: 10737418240}      # 10 GiB
+      join_complexity: {in: [simple, moderate]}
+    rationale: >-
+      Local/offline workspace under 10 GB with simple joins: single-node always wins
+      below 10 GB, and distributed compute is slower at this scale. Dev/POC tier.
+    citation: https://motherduck.com/blog/big-data-is-dead/
+    alternatives:
+      - choice: sql_dbt_warehouse
+        cost_note: "Serverless SQL 2X-Small, auto-stop; costs money but is the governed path."
+
+  - id: ENG-R8
+    choice: sql_dbt_warehouse
+    when:
+      working_set_bytes: {lt: 53687091200}      # 50 GiB
+    rationale: >-
+      Under 50 GiB is the band where Polars is ELIGIBLE (Decathlon's production
+      rule), but SQL/dbt stays the default writer because credential vending makes
+      non-Spark external writers read-only on governed UC managed tables. Size
+      stability gates the ALTERNATIVE, not this choice - the warehouse is safe
+      either way.
+    citation: https://pola.rs/posts/case-decathlon/
+    alternatives:
+      - choice: polars_single_node
+        cost_note: >-
+          4-8 vCPU / 32-64 GB single node, roughly free next to a warehouse, and
+          Decathlon measured 100 GiB -> 10 GiB RAM on the streaming engine. Only if
+          the largest input's size is stable (ENG-C3), and capped at dev-loop and
+          sampled reconciliation (ENG-C1).
+
+# No terminal catch-all rule: ENG-R3 (>= 50 GiB) and ENG-R8 (< 50 GiB) partition
+# the size axis, so a workspace with a measured working set always matches one of
+# them. Without a measured working set, ENG-R2 blocks -- which is the correct
+# outcome, not a case for a default.
+
+# Constraints reported alongside whichever rule fired. Not selectors.
+constraints:
+  - id: ENG-C1
+    applies_to: [polars_single_node]
+    note: >-
+      Polars is never a production writer to governed Unity Catalog managed tables:
+      credential vending is read-only for external writers and masked/filtered tables
+      are unsupported. Its production role is capped at dev-loop, sampled
+      reconciliation, and light non-governed tasks.
+    citation: https://docs.databricks.com/aws/en/lakehouse/medallion
+  - id: ENG-C2
+    applies_to: [polars_single_node, sql_dbt_warehouse, pyspark]
+    note: >-
+      Ingestion (Auto Loader / Lakeflow / COPY INTO) is platform infrastructure and is
+      outside this choice. The single-engine rule binds the KPI/transform DAG only.
+    citation: https://docs.databricks.com/aws/en/lakehouse/medallion
+  - id: ENG-C3
+    applies_to: [polars_single_node]
+    note: >-
+      Never choose a single-node engine for a table whose size is not stable, and
+      re-run selection if the largest input grows more than 25% month over month.
+    citation: https://pola.rs/posts/case-decathlon/

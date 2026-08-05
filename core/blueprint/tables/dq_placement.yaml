@@ -1,0 +1,105 @@
+# Data-quality check placement and severity by medallion layer.
+#
+# Research: docs/reference/data_quality_frameworks_research.md sections 3 and the
+# layer-by-layer placement table. Spec Section 7.
+#
+# mode: all - every rule that matches is emitted. This is placement, not a
+# either/or selection, so there is no first-match short-circuit.
+#
+# No new framework: dbt tests are the primary surface, Databricks-native
+# expectations sit at the bronze boundary. GE / Soda / Deequ are deliberately not
+# adopted - they cover nothing dbt tests plus native expectations do not already.
+decision: dq
+version: 1
+mode: all
+
+severity_tiers:
+  warn: "Logged, row kept, does not count as a failed check and does not page anyone."
+  fail: "Stops the run; the last-good published table keeps serving (WAP)."
+  quarantine: "Row branches to a dead-letter table with structured failure metadata; ingestion continues."
+
+rules:
+  - id: DQ-R1
+    layer: bronze
+    choice: bronze_schema_freshness_volume
+    when: {}
+    checks: [schema_conformance, freshness, volume_row_count_anomaly]
+    severity: warn_or_quarantine
+    generated_as: "Databricks-native expectations (Lakeflow expect / expect_or_drop) or DQX at the ingestion boundary"
+    rationale: >-
+      Bronze is where dbt cannot see the data yet. Check schema conformance, arrival
+      freshness, and volume anomaly against a trailing baseline - and never
+      expect_or_fail: do not halt ingestion on a single bad batch.
+    citation: https://docs.databricks.com/aws/en/lakehouse/medallion
+    alternatives:
+      - choice: bronze_fail_hard
+        cost_note: "Stops bad data earlier, at the cost of a paged on-call for every malformed batch."
+
+  - id: DQ-R2
+    layer: silver
+    choice: silver_uniqueness_referential_null_type
+    when: {}
+    checks: [pk_uniqueness, referential_integrity, null_rate_thresholds, type_format_conformance]
+    severity: fail
+    generated_as: "dbt generic tests (unique, not_null, relationships) plus dbt-expectations for richer assertions"
+    rationale: >-
+      Silver is the conformance layer, and it is the like-for-like target for the
+      existing home-grown null_keys / dim_uniqueness / referential / no_fanout /
+      lossless / type_conformance checks - expressed as dbt tests on the silver models
+      rather than a separate Python certifier.
+    citation: https://docs.getdbt.com/docs/build/data-tests
+    alternatives:
+      - choice: silver_quarantine
+        cost_note: "Keeps the run alive by dead-lettering bad rows; downstream totals then silently under-count."
+
+  - id: DQ-R3
+    layer: gold
+    choice: gold_business_rule_and_reconciliation
+    when: {}
+    checks: [business_rule_assertions, reconciliation_vs_upstream_totals]
+    severity: fail
+    generated_as: "dbt singular tests generated from the KPI definitions, gated into the existing kpi-analyst review"
+    rationale: >-
+      A wrong number in gold is the worst place for it to be wrong, so gold fails hard.
+      Build to staging, run the checks, then swap (write-audit-publish) so a failed
+      check leaves the last-good table live.
+    citation: https://docs.getdbt.com/docs/build/data-tests
+    alternatives:
+      - choice: gold_warn_only
+        cost_note: "Never blocks a refresh; publishes numbers nobody has verified."
+
+  - id: DQ-R4
+    layer: bronze
+    choice: bronze_immutable_retention_floor
+    when:
+      any_of:
+        - consumer_classes: {contains: regulatory}
+        - lineage_required: {eq: true}
+    checks: [immutable_raw_retention, attribute_level_lineage_export]
+    severity: fail
+    generated_as: "Retention floor on the bronze external location plus a lineage export from the dbt manifest"
+    rationale: >-
+      A regulatory consumer sets a raw-retention floor and needs attribute-level
+      lineage from capture to report, which turns bronze immutability into a hard
+      requirement rather than a convention.
+    citation: https://www.bis.org/publ/bcbs_nl36.htm
+    alternatives:
+      - choice: bronze_rolling_retention
+        cost_note: "Lower storage cost; a restatement can no longer be reproduced from source."
+
+auto_derived_from_profiles:
+  - not_null_completeness_thresholds
+  - dtype_type_conformance
+  - pk_candidate_uniqueness
+  - low_cardinality_accepted_values
+  - numeric_min_max_soft_bounds
+
+must_be_asked:
+  - "Which FK relationships must hold, and what orphan tolerance is acceptable"
+  - "Business-rule value ranges with real-world meaning"
+  - "Reconciliation baselines: which upstream total is truth"
+  - "Freshness / SLA commitments per consumer"
+
+alerting: >-
+  Aggregate correlated failures into one alert; alert on the rate or depth of the
+  quarantine queue, never per row. A schema change must not fire 1,000 alerts.

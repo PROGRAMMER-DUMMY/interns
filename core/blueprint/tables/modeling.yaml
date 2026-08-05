@@ -1,0 +1,179 @@
+# Modeling technique selection.
+#
+# The 8-rule table from docs/reference/end_users_data_modeling_research.md
+# (Q3 "Decision table: context -> technique" and Step 2), kept in its published
+# order. R5 (conformed star) is the default the spec names; R9 is the terminal
+# fallback for a workspace where R1-R6 all miss.
+#
+# R7 and R8 are MODIFIERS: they are evaluated after the base technique is chosen
+# and appended as additional decisions, because SCD2 and an OBT projection sit on
+# top of whichever base rule fired rather than replacing it.
+decision: modeling
+version: 1
+mode: first_match
+
+rules:
+  - id: R1
+    choice: data_vault_silver_star_gold
+    when:
+      any_of:
+        - lineage_required: {eq: true}
+        - consumer_classes: {contains: regulatory}
+    rationale: >-
+      Attribute-level lineage or a regulatory consumer: Data Vault (Raw + Business) in
+      Silver, star in Gold, SCD2 mandatory, deterministic hash keys. BCBS 239 requires
+      tracing every metric from capture to report; Data Vault's insert-only satellites
+      give that for free and allow parallel loading.
+    citation: https://www.databricks.com/blog/data-vault-best-practice-implementation-lakehouse
+    alternatives:
+      - choice: effective_dated_3nf_silver
+        cost_note: >-
+          Data Vault's parallel-loading win needs roughly three or more source systems
+          to pay for its machinery; with fewer, effective-dated 3NF in Silver gives the
+          same as-of audit story for far less modelling.
+      - choice: conformed_star_gold
+        cost_note: >-
+          Far less machinery and cheaper to query, but it cannot reproduce
+          point-in-time state after a restatement - which is what the regulator asks for.
+
+  - id: R2
+    choice: feature_tables_plus_star
+    when:
+      consumer_classes: {contains: ml_features}
+    rationale: >-
+      An ML consumer needs denormalized time-series feature tables at the training-join
+      grain with point-in-time correctness; the star still serves analytics alongside.
+      Leakage here is a correctness bug, not a performance question.
+    citation: https://docs.databricks.com/aws/en/machine-learning/feature-store/time-series
+    alternatives:
+      - choice: conformed_star_gold
+        cost_note: "Cheaper to build, but training sets joined without point-in-time lookups leak labels."
+
+  - id: R3
+    choice: synced_key_grain_table
+    when:
+      consumer_classes: {contains: operational_app}
+      latency_sla: {eq: sub_minute}
+    rationale: >-
+      An operational app doing sub-second point lookups gets a narrow key-grain table
+      synced to an OLTP store. Do not reshape the analytics model for it.
+    citation: https://docs.databricks.com/aws/en/oltp/projects/reverse-etl
+    alternatives:
+      - choice: conformed_star_gold
+        cost_note: "No extra store to run, but lakehouse scan latency will not meet a sub-10 ms lookup target."
+
+  - id: R4
+    choice: obt_from_conformed_silver
+    when:
+      consumer_class_count: {eq: 1}
+      query_shape: {eq: stable}
+      kpi_count: {lte: 5}
+    rationale: >-
+      One consumer, one stable query shape, few KPIs: a one-big-table / materialized
+      view derived from conformed Silver entities. Benchmarked 25-50% faster than a
+      star on fixed shapes, at roughly 2x storage.
+    citation: https://www.fivetran.com/blog/star-schema-vs-obt
+    alternatives:
+      - choice: conformed_star_gold
+        cost_note: >-
+          Half the storage and cheap dimension corrections; an OBT rewrite of millions
+          of rows is the price of every corrected attribute.
+
+  - id: R5
+    choice: conformed_star_gold
+    when:
+      any_of:
+        - consumer_class_count: {gte: 2}
+        - query_shape: {eq: exploratory}
+    rationale: >-
+      Two or more consumer classes, or exploratory querying: conformed Kimball star in
+      Gold. Conformed dimensions deliver consistent attributes across marts and support
+      drill-across; it is the only option that survives a second consumer appearing later.
+    citation: https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/kimball-data-warehouse-bus-architecture/
+    alternatives:
+      - choice: obt_from_conformed_silver
+        cost_note: "25-50% faster on the shapes you already know, ~2x storage, and it loses conformance."
+
+  - id: R6
+    choice: activity_schema_or_event_fact
+    when:
+      event_shaped: {eq: true}
+    rationale: >-
+      Event-stream-shaped source with journey/funnel questions: consider an activity
+      schema, otherwise an event fact with conformed dimensions. Ecosystem support for
+      activity schema is thin, so it is a considered option, not a default.
+    citation: https://www.activityschema.com/
+    alternatives:
+      - choice: conformed_star_gold
+        cost_note: "Better BI-tool and dbt-package support; funnel queries stay join-heavy."
+
+  - id: R9
+    choice: conformed_star_gold
+    when: {}
+    rationale: >-
+      Terminal default: conformed star in Gold, atomic fact grain, one grain per fact.
+      What Databricks recommends for Gold and what the platform ships.
+    citation: https://www.databricks.com/blog/databricks-lakehouse-data-modeling-myths-truths-and-best-practices
+    alternatives:
+      - choice: obt_from_conformed_silver
+        cost_note: "Only defensible with exactly one consumer and one query shape."
+
+modifiers:
+  - id: R7
+    choice: scd2_on_history_dimensions
+    when:
+      scd2_required: {eq: true}
+    rationale: >-
+      "As it was then" was answered yes, so SCD2 applies to those dimensions regardless
+      of which base rule fired: valid_from / valid_to / is_current plus a surrogate key
+      per version, with the fact storing the key resolved at event time.
+    citation: https://docs.databricks.com/aws/en/delta/clustering
+    alternatives:
+      - choice: scd1_overwrite
+        cost_note: "Cheaper storage and simpler merges; historical restatements become unanswerable."
+
+  - id: R8
+    choice: obt_projection_off_star
+    when:
+      query_shape: {eq: stable}
+      consumer_class_count: {gte: 2}
+    rationale: >-
+      A hot, stable query shape under R5 earns an OBT projection off the star for that
+      shape only - derived from the star, never beside it, with its rebuild cost stated.
+      If the shape stops being hot, the projection is deleted.
+    citation: https://www.fivetran.com/blog/star-schema-vs-obt
+    alternatives:
+      - choice: none
+        cost_note: "Skip the projection: one less table to rebuild when a dimension attribute is corrected."
+
+  - id: R10
+    choice: inferred_member_dimensions
+    when:
+      any_of:
+        - velocity_lane: {in: [micro_batch, streaming]}
+        - restatement_mode: {eq: restate_within_window}
+    rationale: >-
+      At micro-batch or streaming cadence a fact routinely arrives before the dimension
+      member it references, and a restatement window means an already-published fact can
+      be re-pointed later. Without an inferred (unknown) member the star's inner joins
+      drop those facts silently and the total is quietly wrong. Insert a placeholder
+      member keyed on the natural key with is_inferred = true, join LEFT and coalesce to
+      it, then type-1 overwrite the placeholder when the real member lands.
+    citation: https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/late-arriving-dimensions/
+    alternatives:
+      - choice: none
+        cost_note: >-
+          No placeholder rows to reconcile, and every early-arriving fact is dropped by the
+          dimension join until someone notices the count is short.
+
+# Physical defaults the renderer states alongside whichever technique fired.
+defaults:
+  grain: "Atomic, one grain per fact table, declared as a sentence and tested for uniqueness."
+  history: "SCD1 unless the intake answer asked for as-of history (R7)."
+  physical: "Liquid clustering, <= 4 keys, no partitioning below ~1 TB; dimensions clustered on filtered attributes, facts on FKs + date."
+  keys: "Deterministic hash surrogate keys of the natural key (+ effective date for SCD2), not identity columns, so rebuilds are reproducible."
+  constraints: "Declare PK/FK with RELY and ANALYZE dimension keys - free dynamic join elimination."
+  metric_definition: "Each measure defined exactly once, in a UC metric view or the dbt semantic layer."
+citations:
+  physical: https://docs.databricks.com/aws/en/delta/clustering
+  keys: https://www.databricks.com/blog/data-modeling-best-practices-implementation-modern-lakehouse

@@ -1,0 +1,504 @@
+# Optimization playbook — Slice 5 of the cloud-first restructure.
+#
+# Every rule below is copied from a cited vendor/first-party doc (or, where marked
+# confidence: medium, a third-party/order-of-magnitude source flagged as such in the
+# research report). No invented thresholds. Source report:
+#   docs/reference/engine_compute_selection_research.md (Q4 "Optimization reference /
+#   playbook" + Q5 "When to revisit the engine choice").
+# Consulted by core/blueprint/playbook.py. Consult-first, engine-change-last-resort
+# per docs/superpowers/specs/2026-08-05-cloud-first-restructure-design.md Section 5.
+#
+# Schema per rule:
+#   id, engine (spark|dbsql|polars|dbt|any), symptom,
+#   detect: {metric, source, comparator, threshold},
+#   remedies: [{action, why}, ...]   # ordered cheapest-first
+#   source_url, confidence (high|medium)
+
+version: 1
+
+rules:
+  # ---------------------------------------------------------------------------
+  # Spark / AQE config defaults (spark.apache.org/docs/latest/sql-performance-tuning.html)
+  # ---------------------------------------------------------------------------
+
+  - id: aqe_disabled
+    engine: spark
+    symptom: "adaptive query execution disabled"
+    detect:
+      metric: spark.sql.adaptive.enabled
+      source: spark_conf
+      comparator: "=="
+      threshold: false
+    remedies:
+      - action: enable_aqe
+        why: "set spark.sql.adaptive.enabled=true — the AQE master switch that unlocks partition coalescing and skew handling"
+    source_url: https://spark.apache.org/docs/latest/sql-performance-tuning.html
+    confidence: high
+
+  - id: broadcast_join_threshold_exceeded
+    engine: spark
+    symptom: "small join side too large to auto-broadcast"
+    detect:
+      metric: join.small_side_bytes
+      source: "spark stage / query plan (join strategy)"
+      comparator: ">="
+      threshold: 10485760  # 10 MB, spark.sql.autoBroadcastJoinThreshold default
+    remedies:
+      - action: force_broadcast_hint
+        why: "add a BROADCAST hint if the small side is only slightly over 10MB and safely fits executor memory"
+      - action: pre_aggregate_small_side
+        why: "filter/aggregate the small side below 10MB before the join"
+      - action: raise_autobroadcast_threshold
+        why: "raise spark.sql.autoBroadcastJoinThreshold only once the small side is verified safe to broadcast"
+    source_url: https://spark.apache.org/docs/latest/sql-performance-tuning.html
+    confidence: high
+
+  - id: untuned_shuffle_partitions
+    engine: spark
+    symptom: "shuffle partition count left at the default, mismatched to actual data volume"
+    detect:
+      metric: spark.sql.shuffle.partitions
+      source: spark_conf
+      comparator: "=="
+      threshold: 200
+    remedies:
+      - action: enable_aqe_coalesce
+        why: "spark.sql.adaptive.coalescePartitions.enabled=true auto-merges small post-shuffle partitions toward advisoryPartitionSizeInBytes=64MB (floor minPartitionSize=1MB)"
+      - action: tune_shuffle_partitions
+        why: "set spark.sql.shuffle.partitions to match measured data volume instead of the 200 default"
+    source_url: https://spark.apache.org/docs/latest/sql-performance-tuning.html
+    confidence: high
+
+  - id: aqe_skew_join_config
+    engine: spark
+    symptom: "shuffle partition skew (pre-emptive config check)"
+    detect:
+      metric: "partition.bytes vs median partition.bytes"
+      source: "spark AQE skew detector"
+      comparator: ">"
+      threshold: {skewed_partition_factor: 5.0, skewed_partition_threshold_bytes: 268435456}  # 256 MB
+    remedies:
+      - action: verify_aqe_skew_enabled
+        why: "ensure spark.sql.adaptive.skewJoin.enabled=true so partitions over 5.0x the median AND over 256MB auto-split"
+      - action: salt_key
+        why: "if AQE skew handling is already on and skew persists, salt the join key"
+      - action: pre_aggregate
+        why: "pre-aggregate the skewed side before the join"
+    source_url: https://spark.apache.org/docs/latest/sql-performance-tuning.html
+    confidence: high
+
+  - id: skewed_join
+    engine: spark
+    symptom: "max task duration >> p75 task duration"
+    detect:
+      metric: "stage.task_duration_max / stage.task_duration_p75"
+      source: "Spark UI / query profile stage metrics"
+      comparator: ">"
+      threshold: 1.5
+    remedies:
+      - action: verify_config
+        why: "confirm spark.sql.adaptive.skewJoin.enabled=true"
+      - action: salt_key
+        why: "salt the join key to spread the hot partition"
+      - action: pre_aggregate
+        why: "pre-aggregate before the join to shrink the skewed side"
+    source_url: https://learn.microsoft.com/en-us/azure/databricks/optimizations/spark-ui-guide/long-spark-stage-page
+    confidence: high
+
+  - id: small_input_partitions
+    engine: spark
+    symptom: "input read split into too many small partitions"
+    detect:
+      metric: spark.sql.files.maxPartitionBytes
+      source: spark_conf
+      comparator: "=="
+      threshold: 134217728  # 128 MB
+    remedies:
+      - action: tune_max_partition_bytes
+        why: "adjust spark.sql.files.maxPartitionBytes from the 128MB default to match file layout and desired parallelism"
+    source_url: https://spark.apache.org/docs/latest/sql-performance-tuning.html
+    confidence: high
+
+  - id: spill_to_disk
+    engine: any
+    symptom: "bytes spilled to disk > 0"
+    detect:
+      metric: query_profile.bytes_spilled_to_disk
+      source: system.query.history
+      comparator: ">"
+      threshold: 0
+    remedies:
+      - action: size_up_compute
+        why: "next warehouse t-shirt size / add executor memory"
+      - action: reduce_projection
+        why: "drop unused columns; pre-aggregate before the join"
+    source_url: https://docs.databricks.com/aws/en/sql/user/queries/performance-insights
+    confidence: high
+
+  # ---------------------------------------------------------------------------
+  # Delta / liquid clustering layout (docs.databricks.com/aws/en/delta/clustering,
+  # performance-efficiency best practices)
+  # ---------------------------------------------------------------------------
+
+  - id: too_many_clustering_keys
+    engine: any
+    symptom: "liquid clustering defined with more than 4 keys"
+    detect:
+      metric: clustering.key_count
+      source: "table DDL / DESCRIBE DETAIL"
+      comparator: ">"
+      threshold: 4
+    remedies:
+      - action: reduce_clustering_keys
+        why: "liquid clustering supports at most 4 effective keys; use CLUSTER BY AUTO (DBR 15.4+) to let query history pick them"
+    source_url: https://docs.databricks.com/aws/en/delta/clustering
+    confidence: high
+
+  - id: clustering_write_below_floor
+    engine: any
+    symptom: "writes too small to trigger liquid clustering"
+    detect:
+      metric: write_batch_bytes
+      source: "Delta write metrics"
+      comparator: "<"
+      threshold: {floor_1_key_bytes: 67108864, floor_4_keys_bytes: 1073741824}  # 64 MB / 1 GB on UC
+    remedies:
+      - action: batch_larger_writes
+        why: "clustering only triggers above the write-size floor (64MB at 1 key, 1GB at 4 keys on UC); batch smaller writes together"
+      - action: schedule_optimize
+        why: "run OPTIMIZE every 1-2h for frequently-updated tables whose individual writes stay below the floor"
+    source_url: https://docs.databricks.com/aws/en/delta/clustering
+    confidence: high
+
+  - id: stale_optimize
+    engine: any
+    symptom: "table not OPTIMIZEd recently despite frequent updates"
+    detect:
+      metric: hours_since_last_optimize
+      source: "table history / DESCRIBE HISTORY"
+      comparator: ">"
+      threshold: 2
+    remedies:
+      - action: schedule_optimize
+        why: "OPTIMIZE every 1-2h for frequently-updated tables"
+      - action: optimize_full
+        why: "run OPTIMIZE FULL after changing clustering keys"
+    source_url: https://docs.databricks.com/aws/en/delta/clustering
+    confidence: high
+
+  - id: over_partitioned_small_table
+    engine: any
+    symptom: "table is partitioned but smaller than 1 TB"
+    detect:
+      metric: table.bytes
+      source: "information_schema / table detail"
+      comparator: "<"
+      threshold: 1000000000000  # 1 TB; rule only fires when the table is also partitioned
+    remedies:
+      - action: migrate_to_liquid_clustering
+        why: "CLUSTER BY AUTO, <=4 keys — do not partition below 1TB"
+    source_url: https://docs.azure.cn/en-us/databricks/lakehouse-architecture/performance-efficiency/best-practices
+    confidence: high
+
+  - id: partition_below_1gb
+    engine: any
+    symptom: "individual partitions smaller than 1 GB"
+    detect:
+      metric: partition.bytes
+      source: "table detail"
+      comparator: "<"
+      threshold: 1073741824  # 1 GiB
+    remedies:
+      - action: consolidate_partitions
+        why: "keep each partition >=1GB; prefer liquid clustering + OPTIMIZE over fine-grained partitioning"
+    source_url: https://docs.azure.cn/en-us/databricks/lakehouse-architecture/performance-efficiency/best-practices
+    confidence: high
+
+  # ---------------------------------------------------------------------------
+  # Photon (docs.databricks.com/aws/en/compute/photon)
+  # ---------------------------------------------------------------------------
+
+  - id: photon_no_benefit_workload
+    engine: dbsql
+    symptom: "workload matches a Photon exclusion (no speedup expected)"
+    detect:
+      metric: workload.characteristic
+      source: "query profile / cluster spark event log"
+      comparator: "in"
+      threshold: [query_duration_under_2s, udf_heavy, rdd_or_dataset_api, stateful_streaming]
+    remedies:
+      - action: no_action_expected
+        why: "Photon does not help queries under 2 seconds, UDFs, RDD/Dataset APIs, or stateful streaming (transparent fallback); do not budget for a Photon speedup here"
+      - action: migrate_to_dataframe_sql_api
+        why: "if on RDD/Dataset APIs, migrate to DataFrame/SQL to become Photon-eligible"
+    source_url: https://docs.databricks.com/aws/en/compute/photon
+    confidence: high
+
+  # ---------------------------------------------------------------------------
+  # Warehouse SQL / dbt (docs.getdbt.com, warehouse-behavior)
+  # ---------------------------------------------------------------------------
+
+  - id: incremental_below_10m_rows
+    engine: dbt
+    symptom: "incremental materialization used on a model under ~10M rows"
+    detect:
+      metric: model.row_count
+      source: "dbt run / target table row count"
+      comparator: "<"
+      threshold: 10000000
+    remedies:
+      - action: use_table_materialization
+        why: "incremental below ~10M rows usually costs more in complexity than it saves; use table/view materialization instead"
+    source_url: https://docs.getdbt.com/docs/build/incremental-models-overview
+    confidence: medium  # doc states this as an approximate ("~10M rows"), "usually" qualifier
+
+  - id: warehouse_queue_wait
+    engine: dbsql
+    symptom: "query queued more than 5 minutes"
+    detect:
+      metric: queue_wait_seconds
+      source: "DBSQL warehouse metrics"
+      comparator: ">"
+      threshold: 300
+    remedies:
+      - action: add_cluster
+        why: "DBSQL scale-out rule: a query queued 5 min triggers scale-up (+1 cluster per 2-6 min of estimated load, +2 for 6-12 min, +3 for 12-22 min, then +1 per additional 15 min)"
+    source_url: https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior
+    confidence: high
+
+  - id: serverless_vs_classic_breakeven
+    engine: dbsql
+    symptom: "choosing serverless vs classic compute for a job"
+    detect:
+      metric: job.duration_minutes
+      source: "job run history"
+      comparator: "<"
+      threshold: 30
+    remedies:
+      - action: use_serverless
+        why: "below ~30 min, serverless wins on eliminated 5-12 min classic startup and zero idle cost, despite ~1.5-3x higher $/DBU"
+      - action: use_classic_reserved_or_spot
+        why: "at/above ~30 min, classic on reserved or spot capacity is usually cheaper — re-verify against the live pricing page before quoting"
+    source_url: https://qubika.com/blog/databricks-cost-series-part-2-serverless-vs-classic/
+    confidence: medium  # third-party pricing blogs; report flags "re-verify against current pricing page before quoting"
+
+  # ---------------------------------------------------------------------------
+  # Polars (docs.pola.rs)
+  # ---------------------------------------------------------------------------
+
+  - id: polars_working_set_exceeds_ram
+    engine: polars
+    symptom: "Polars working set larger than available node RAM"
+    detect:
+      metric: working_set_bytes
+      source: "Polars lazy plan estimate vs node RAM"
+      comparator: ">"
+      threshold: node_ram_bytes  # relative threshold: compare against the node's own RAM, not a fixed number
+    remedies:
+      - action: use_streaming_engine
+        why: "collect(engine='streaming') keeps larger-than-RAM pipelines running; inspect operators that silently fall back in-memory with show_graph(plan_stage='physical', engine='streaming')"
+    source_url: https://docs.pola.rs/user-guide/concepts/streaming/
+    confidence: high
+
+  # ---------------------------------------------------------------------------
+  # Q5 — when to revisit the engine choice. Every row of the research report's
+  # revisit-trigger table, encoded as a rule. Canonical remedy on every one:
+  # "consult playbook first; engine change is last resort" (Section 5 of the
+  # cloud-first restructure design spec).
+  # ---------------------------------------------------------------------------
+
+  - id: revisit_tier_boundary
+    engine: any
+    symptom: "working set crosses a size tier boundary, sustained 3 runs"
+    detect:
+      metric: working_set_bytes
+      source: "run telemetry history (3 consecutive runs)"
+      comparator: crosses
+      threshold: [5000000000, 53687091200, 1000000000000]  # 5 GB / 50 GiB / 1 TB tier boundaries
+    remedies:
+      - action: rerun_engine_selection
+        why: "tier crossing sustained across 3 runs -> re-run the Phase-2/3 engine + compute decision table"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: https://motherduck.com/blog/big-data-is-dead/
+    confidence: high
+
+  - id: revisit_growth_rate
+    engine: any
+    symptom: "largest input table growing, or no longer size-stable"
+    detect:
+      metric: table.month_over_month_growth_pct
+      source: "Delta table history / commit bytes over time"
+      comparator: ">"
+      threshold: 25
+    remedies:
+      - action: revoke_polars_eligibility
+        why: "Decathlon's Polars-eligibility rule requires stable size; growth >25%/month or lost stability revokes single-node eligibility"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: https://pola.rs/posts/case-decathlon/
+    confidence: medium  # the 25%/month figure is the report's own operationalization of Decathlon's qualitative "stable size" rule
+
+  - id: revisit_spill
+    engine: any
+    symptom: "bytes spilled to disk > 0 on any run (tier-revisit framing)"
+    detect:
+      metric: query_profile.bytes_spilled_to_disk
+      source: system.query.history
+      comparator: ">"
+      threshold: 0
+    remedies:
+      - action: size_up_now
+        why: "size up compute immediately"
+      - action: rerun_engine_selection
+        why: "if spill repeats after one size-up, re-run engine selection"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: https://docs.databricks.com/aws/en/sql/user/queries/performance-insights
+    confidence: high
+
+  - id: revisit_queueing
+    engine: dbsql
+    symptom: "any query queued more than 5 minutes"
+    detect:
+      metric: queue_wait_seconds
+      source: "DBSQL warehouse metrics"
+      comparator: ">"
+      threshold: 300
+    remedies:
+      - action: add_clusters
+        why: "DBSQL rule: queue >5 min triggers scale-out"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior
+    confidence: high
+
+  - id: revisit_autoscale_pinned
+    engine: any
+    symptom: "autoscale pinned at max workers on 3+ consecutive runs"
+    detect:
+      metric: cluster.workers_at_max_streak
+      source: "cluster autoscale events"
+      comparator: ">="
+      threshold: 3
+    remedies:
+      - action: tier_up
+        why: "autoscale pinned at max workers for 3+ consecutive runs -> move to the next compute tier"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: https://docs.databricks.com/aws/en/lakehouse-architecture/cost-optimization/best-practices
+    confidence: medium  # the "3 consecutive runs" streak is the report's own synthesized guard, not a directly-quoted vendor number
+
+  - id: revisit_oom_on_single_node
+    engine: polars
+    symptom: "any OOM / hard failure on the single-node engine"
+    detect:
+      metric: run.oom_failure
+      source: "run telemetry / process exit signal"
+      comparator: "=="
+      threshold: true
+    remedies:
+      - action: leave_single_node_tier
+        why: "single-node engines OOM rather than spill — they do not degrade gracefully; do not retry at the same tier"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: https://docs.coiled.io/blog/tpch.html
+    confidence: high
+
+  - id: revisit_sla_headroom
+    engine: any
+    symptom: "p95 runtime exceeds half of the freshness SLA window"
+    detect:
+      metric: run.p95_duration_pct_of_sla_window
+      source: "freshness SLA vs measured p95 run duration"
+      comparator: ">"
+      threshold: 50
+    remedies:
+      - action: tier_up_before_breach
+        why: "p95 runtime >50% of the freshness window -> tier up before the SLA actually breaches"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: docs/reference/engine_compute_selection_research.md#q5-when-to-revisit-the-engine-choice
+    confidence: medium  # report's own synthesized guard threshold, not a vendor-quoted number
+
+  - id: revisit_cost_drift
+    engine: any
+    symptom: "cost per run drifting up with flat volume"
+    detect:
+      metric: cost_per_run_pct_change_4wk
+      source: system.billing.usage
+      comparator: ">"
+      threshold: 30
+    remedies:
+      - action: investigate_before_retier
+        why: "$/run up >30% over 4 weeks with flat volume — investigate first, usually a layout/small-files problem, not an engine problem"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: https://docs.databricks.com/aws/en/admin/system-tables/billing
+    confidence: medium  # the 30%/4-week figure is the report's own synthesized guard threshold
+
+  - id: revisit_full_refresh_window
+    engine: dbt
+    symptom: "full-refresh duration exceeds the maintenance window"
+    detect:
+      metric: full_refresh_duration
+      source: "declared maintenance window vs measured full-refresh duration"
+      comparator: ">"
+      threshold: maintenance_window  # relative: workspace-declared window, not a fixed number
+    remedies:
+      - action: switch_to_incremental_or_microbatch
+        why: "switch the model to incremental/microbatch before switching engine"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: https://docs.getdbt.com/docs/build/incremental-microbatch
+    confidence: high
+
+  - id: revisit_latency_requirement_change
+    engine: spark
+    symptom: "a new named business decision needs materially lower latency"
+    detect:
+      metric: named_decision.required_latency_minutes
+      source: "named latency decision (Phase 1 intake)"
+      comparator: "<"
+      threshold: 15
+    remedies:
+      - action: move_to_available_now_microbatch
+        why: "<15 min required latency -> move to Trigger.AvailableNow micro-batch"
+      - action: move_to_continuous
+        why: "<1 min required latency -> continuous/real-time streaming mode"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: https://docs.databricks.com/aws/en/structured-streaming/triggers
+    confidence: high
+
+  - id: revisit_concurrency
+    engine: dbsql
+    symptom: "peak concurrent queries exceed current cluster capacity"
+    detect:
+      metric: "peak_concurrent_queries / 10"
+      source: "warehouse concurrency metrics vs current cluster count"
+      comparator: ">"
+      threshold: current_cluster_count  # relative: ~10 concurrent queries per SQL-warehouse cluster
+    remedies:
+      - action: add_clusters
+        why: "~10 concurrent queries per SQL-warehouse cluster; add clusters when peak concurrency / 10 exceeds the current count"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior
+    confidence: high
+
+  - id: revisit_engine_feature_gap
+    engine: any
+    symptom: "a KPI needs a shape the chosen engine cannot express"
+    detect:
+      metric: kpi.unsupported_shape
+      source: "kpi_intent / feature mapping engine-expressibility check"
+      comparator: "=="
+      threshold: true
+    remedies:
+      - action: surface_the_gap
+        why: "do not add a second engine silently — surface the gap so it is a recorded layer-split decision, not a quiet per-KPI engine mix"
+      - action: consult_playbook_first
+        why: "consult playbook first; engine change is last resort"
+    source_url: docs/reference/engine_compute_selection_research.md#q5-when-to-revisit-the-engine-choice
+    confidence: medium  # report's own synthesized trigger, not a vendor-quoted number

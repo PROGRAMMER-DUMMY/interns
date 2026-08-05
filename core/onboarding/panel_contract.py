@@ -83,6 +83,35 @@ def normalize_decision_panel(
     return panel
 
 
+def attach_stage_routing(payload: dict[str, Any], stage: str) -> dict[str, Any]:
+    """Stamp `payload["stage"]` and merge `routing_for(stage)` into its roster footer.
+
+    Same key names and merge semantics as `flow.py::_attach_stage_routing` (union,
+    de-duplicated, entries the writer already set are preserved), but attached at
+    the top level: the cloud-first spine writers emit the summary/panel itself, not
+    a panel wrapping a `summary` block, and `workflow_guard_harness` reads
+    `required_specialists` off the top level of a `current.json` too.
+
+    An unknown stage attaches no roster keys rather than empty ones, so a writer
+    can never ship a footer it cannot fill.
+    """
+    from core.onboarding.workspace.delegation import routing_for
+
+    payload["stage"] = stage
+    roster = routing_for(stage)
+    for key, routed in (("required_specialists", roster["agents"]),
+                        ("suggested_skills", roster["skills"])):
+        merged = list(payload.get(key) or [])
+        have = {item.get("name") if isinstance(item, dict) else item for item in merged}
+        for name in routed:
+            if name not in have:
+                merged.append(name)
+                have.add(name)
+        if merged:
+            payload[key] = merged
+    return payload
+
+
 def validate_decision_panel(panel: dict[str, Any]) -> list[str]:
     """Return a list of contract violations ([] means conformant)."""
     errors: list[str] = []
@@ -105,6 +134,7 @@ def validate_decision_panel(panel: dict[str, Any]) -> list[str]:
 __all__ = [
     "DECISION_PANEL_VERSION",
     "REQUIRED_KEYS",
+    "attach_stage_routing",
     "normalize_decision_panel",
     "validate_decision_panel",
 ]

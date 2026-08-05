@@ -1,0 +1,157 @@
+# Compute tier under the chosen transform engine.
+#
+# Spec Section 5 ("serverless-first; classic when a job exceeds ~30 min, needs
+# custom libraries, or VPC constraints apply; DBSQL sizing from the first-party
+# t-shirt tables").
+# Research: docs/reference/engine_compute_selection_research.md Q3.
+#
+# Databricks' own default: "Serverless requires no configuration, is always
+# available, and scales automatically with workloads in seconds. Only configure
+# classic compute manually if serverless does not support your use case."
+#
+# Cost caveat carried into every option note: the ~1.5-3x serverless/classic DBU
+# ratio and the ~30-minute break-even come from third-party pricing write-ups.
+# Re-verify against the live pricing page before quoting a number to a user.
+decision: compute
+version: 1
+mode: first_match
+
+rules:
+  - id: CMP-R0
+    choice: single_node_host
+    when:
+      engine: {eq: polars_single_node}
+    rationale: >-
+      A single-node engine runs on whatever the box is; there is no warehouse or
+      cluster to size. 4-8 vCPU / 32-64 GB covers the sub-50 GiB band, and the lazy API
+      with engine="streaming" is what keeps it inside RAM.
+    citation: https://docs.pola.rs/user-guide/concepts/streaming/
+    notes:
+      - "Single-node engines OOM rather than spill: keep peak memory (working set x join fan-out) under ~60% of node RAM."
+    alternatives:
+      - choice: serverless_sql_2x_small
+        cost_note: "Costs money per query but is the governed path and does not fail hard on a bad join."
+
+  - id: CMP-R1
+    choice: classic_job_cluster
+    when:
+      serverless_allowed: {eq: false}
+    rationale: >-
+      Serverless is ruled out by a governance/VPC constraint, so compute must run in
+      the customer's own network on classic clusters.
+    citation: https://docs.databricks.com/gcp/en/lakehouse-architecture/deployment-guide/compute
+    notes:
+      - "Startup 5-12 min vs 15-30 s serverless; size for the worst model, not the average."
+      - "Spot for workers, on-demand for the driver; auto-terminate interactive compute."
+    alternatives:
+      - choice: classic_pro_sql_warehouse
+        cost_note: "Lower $/DBU than serverless and in-VPC, but you pay for idle until auto-stop."
+
+  - id: CMP-R2
+    choice: classic_job_cluster
+    when:
+      engine: {eq: pyspark}
+      resumability: {eq: must_resume}
+      budget_posture: {eq: cost_capped}
+    rationale: >-
+      A Spark job that must resume rather than re-run does not fit its window, which
+      puts it past the ~30-minute break-even where classic's lower unit rate wins -
+      and the workspace has already said idle capacity is acceptable if it is cheaper.
+    citation: https://qubika.com/blog/databricks-cost-series-part-2-serverless-vs-classic/
+    notes:
+      - "Classic cluster sizing: 8-32 nodes for production ETL; memory-optimized for shuffle-heavy work."
+      - "Photon on; it does not help sub-2-second queries, UDFs, RDD APIs, or stateful streaming."
+    alternatives:
+      - choice: serverless_jobs
+        cost_note: "~1.5-3x DBU rate, no capacity risk, no 5-12 min startup. Worth it if runs are bursty."
+
+  - id: CMP-R3
+    choice: serverless_jobs
+    when:
+      engine: {eq: pyspark}
+    rationale: >-
+      Short or infrequent Spark jobs go serverless: Photon and autoscaling are on by
+      default and there is no cluster-start tax.
+    citation: https://docs.databricks.com/gcp/en/lakehouse-architecture/deployment-guide/compute
+    notes:
+      - "Never run scheduled jobs on an all-purpose cluster - it is the most expensive DBU."
+    alternatives:
+      - choice: classic_job_cluster
+        cost_note: "Cheapest $/DBU and spot-eligible, but 5-12 min startup; only pays off past ~30 min of run time."
+
+  - id: CMP-R4
+    choice: classic_pro_sql_warehouse
+    when:
+      budget_posture: {eq: cost_capped}
+      resumability: {eq: must_resume}
+    rationale: >-
+      A hard monthly ceiling with idle capacity accepted, on a load long enough that a
+      full re-run does not fit its window: this is the one warehouse case where paying
+      for idle beats paying the serverless premium (the ~30-minute break-even).
+    citation: https://qubika.com/blog/databricks-cost-series-part-2-serverless-vs-classic/
+    notes:
+      - "Downscale after 15 consecutive minutes of low load; one cluster per 10 concurrent queries."
+    alternatives:
+      - choice: serverless_sql_medium
+        cost_note: "Zero idle and 15-30 s starts, at roughly 1.5-3x the DBU rate."
+
+  - id: CMP-R5
+    choice: serverless_sql_2x_small
+    when:
+      working_set_bytes: {lt: 5368709120}       # 5 GiB
+    rationale: >-
+      Working set under 5 GB with fewer than ~10 concurrent BI users fits the smallest
+      warehouse; size up only when queries spill to disk.
+    citation: https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior
+    notes:
+      - "Size UP for single-query speed; add CLUSTERS for more users (one per 10 concurrent queries)."
+      - "A query queued 5 minutes triggers scale-up; bytes spilled to disk > 0 means size up."
+    alternatives:
+      - choice: serverless_sql_x_small
+        cost_note: "One size up with result cache; faster first query, modestly higher $/run."
+
+  - id: CMP-R6
+    choice: serverless_sql_small
+    when:
+      working_set_bytes: {lt: 53687091200}      # 50 GiB
+    rationale: >-
+      5-50 GiB of scanned data on Serverless SQL Small with Photon on by default.
+    citation: https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior
+    notes:
+      - "Start with one larger warehouse and size down; size up when queries spill."
+    alternatives:
+      - choice: serverless_sql_medium
+        cost_note: "Roughly double the DBUs per hour, halves single-query latency on scan-bound models."
+
+  - id: CMP-R7
+    choice: serverless_sql_medium
+    when:
+      working_set_bytes: {lt: 1099511627776}    # 1 TiB
+    rationale: >-
+      50 GB - 1 TB of relational, incremental-able work: Serverless SQL Small to Medium,
+      sized up on measured spill rather than on prediction.
+    citation: https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior
+    notes:
+      - "Make the heaviest models incremental/microbatch before buying a bigger warehouse."
+    alternatives:
+      - choice: serverless_sql_large
+        cost_note: "Only after spill is observed; one t-shirt size is roughly a doubling of cost."
+
+  - id: CMP-R8
+    choice: serverless_jobs
+    when: {}
+    rationale: >-
+      Serverless-first default when no sizing signal selected a warehouse tier.
+    citation: https://docs.databricks.com/gcp/en/lakehouse-architecture/deployment-guide/compute
+    alternatives:
+      - choice: classic_job_cluster
+        cost_note: "Cheapest per DBU for long steady batch; adds 5-12 min startup per run."
+
+# Emitted as revisit triggers next to the chosen tier (research Q5).
+revisit_triggers:
+  - {id: CMP-T1, trigger: "bytes_spilled_to_disk > 0 on any run", implies: "size up now; re-run selection if it repeats after one size-up"}
+  - {id: CMP-T2, trigger: "any query queued > 5 min", implies: "add clusters (DBSQL rule)"}
+  - {id: CMP-T3, trigger: "autoscale pinned at max on >= 3 consecutive runs", implies: "tier up"}
+  - {id: CMP-T4, trigger: "p95 runtime > 50% of the freshness window", implies: "tier up before it breaches"}
+  - {id: CMP-T5, trigger: "$/run up > 30% over 4 weeks with flat volume", implies: "investigate layout/small files before re-tiering"}
+  - {id: CMP-T6, trigger: "working set crosses 5 GB / 50 GiB / 1 TB, sustained 3 runs", implies: "re-run engine selection"}
