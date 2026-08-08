@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from core.provisioning import sync_code
 from pathlib import Path
 from unittest import mock
 
@@ -162,7 +163,9 @@ class DirectorySelectionTests(unittest.TestCase):
             self.assertEqual([e["dir"] for e in result["synced"]], ["ingestion"])
             self.assertEqual(
                 [(e["dir"], e["reason"]) for e in result["skipped"]],
-                [("dbt", "not generated")],
+                # `context` is the curated artifact set; absent here because this
+                # fixture generated no publishable artifacts.
+                [("dbt", "not generated"), ("context", "not generated")],
             )
 
     def test_no_generated_code_is_a_named_no_op(self):
@@ -247,3 +250,66 @@ class SyncLogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContextPublicationTests(unittest.TestCase):
+    """Publishing the pipeline's MEANING into the workspace.
+
+    A teammate -- or a Databricks-native agent pointed at the folder -- should be
+    able to see what the pipeline builds and what the KPIs mean without cloning
+    the repo. The set is curated, not a directory dump: `interns/` also holds
+    profile evidence with sampled values, which on a regulated workspace can
+    carry personal data into a broadly readable location.
+    """
+
+    def _ws(self, tmp):
+        ws = Path(tmp) / "workspaces" / "demo"
+        (ws / "interns" / "reports" / "solution_blueprint").mkdir(parents=True)
+        (ws / "interns" / "generated" / "contracts").mkdir(parents=True)
+        (ws / "interns" / "generated" / "profiles").mkdir(parents=True)
+        (ws / "interns" / "reports" / "solution_blueprint" / "current.md").write_text("bp")
+        (ws / "interns" / "generated" / "contracts" / "kpi_registry.json").write_text("{}")
+        # A sample-bearing artifact that must never be published.
+        (ws / "interns" / "generated" / "profiles" / "patients.profile.json").write_text(
+            '{"samples": ["Jane Doe", "1980-02-03"]}'
+        )
+        return ws
+
+    def test_curated_artifacts_are_staged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = self._ws(tmp)
+            count, _ = sync_code.stage_context(ws)
+            self.assertEqual(count, 2)
+            staged = {p.name for p in (ws / "context").iterdir()}
+            self.assertIn("current.md", staged)
+            self.assertIn("kpi_registry.json", staged)
+            self.assertIn("README.md", staged)
+
+    def test_profiles_are_never_published(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = self._ws(tmp)
+            sync_code.stage_context(ws)
+            published = list((ws / "context").rglob("*"))
+            blob = "\n".join(p.read_text(errors="ignore") for p in published if p.is_file())
+            self.assertNotIn("Jane Doe", blob, "a sampled value reached the published set")
+            self.assertFalse(
+                any("profile" in p.name for p in published),
+                "a profile artifact reached the published set",
+            )
+
+    def test_never_publish_list_covers_sample_bearing_paths(self):
+        for token in ("profiles/", "evidence/", "state/"):
+            self.assertIn(token, sync_code.NEVER_PUBLISH)
+
+    def test_no_publishable_artifact_is_sample_bearing(self):
+        """The curated list itself must not name a sample-bearing path."""
+        for rel in sync_code.PUBLISHABLE_ARTIFACTS:
+            for token in sync_code.NEVER_PUBLISH:
+                self.assertNotIn(token, rel, f"{rel} matches never-publish token {token}")
+
+    def test_readme_explains_the_exclusion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = self._ws(tmp)
+            sync_code.stage_context(ws)
+            readme = (ws / "context" / "README.md").read_text(encoding="utf-8")
+            self.assertIn("EXCLUDED", readme)

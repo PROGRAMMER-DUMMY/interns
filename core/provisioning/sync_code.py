@@ -41,7 +41,8 @@ from core.storage.workspace_layout import WorkspaceLayout
 SYNC_LOG_VERSION = 1
 
 #: Generated code trees, in push order. A workspace may have either or both.
-CODE_DIRS = ("ingestion", "dbt")
+# `context` is the curated, PHI-safe artifact set staged by stage_context().
+CODE_DIRS = ("ingestion", "dbt", "context")
 #: Build output and vendored deps: regenerated remotely, never worth pushing.
 EXCLUDES = ("target/**", "dbt_packages/**", "logs/**", ".venv/**", "__pycache__/**")
 DEFAULT_REMOTE_PARENT = "/Workspace/Shared"
@@ -60,8 +61,86 @@ READINESS_COMMAND = "uv run check-platform-readiness"
 STDERR_TAIL_CHARS = 600
 
 
+# Artifacts worth publishing INTO the workspace so a teammate -- or a
+# Databricks-native agent (Assistant/Genie) pointed at this folder -- has the
+# context without cloning the repo: what the pipeline is, what the KPIs mean,
+# what was decided and why.
+#
+# CURATED, not a directory dump. `interns/` also holds profile evidence with
+# SAMPLED DATA VALUES, which on a regulated workspace can carry PHI/PII;
+# publishing that wholesale would move person-derived samples into a broadly
+# readable location. Anything sample-bearing stays out, and what does go is
+# re-checked by the PHI gate before upload.
+PUBLISHABLE_ARTIFACTS: tuple[str, ...] = (
+    "interns/reports/solution_blueprint/current.md",
+    "interns/reports/intake_playback/current.md",
+    "interns/reports/onboarding_report.md",
+    "interns/generated/contracts/kpi_registry.json",
+    "interns/generated/contracts/domain_model.json",
+    "interns/generated/contracts/semantic_contract.json",
+    "interns/generated/contracts/provision_plan.json",
+)
+
+# Never publish, even if a future path glob would reach them: sampled values,
+# machine audit trails, and anything holding credentials or session state.
+NEVER_PUBLISH = ("profiles/", "evidence/", "state/", "trajectory", "session", "events.jsonl")
+
+
+def collect_publishable(workspace_dir: Path) -> tuple[list[Path], list[dict[str, str]]]:
+    """(files to publish, skipped-with-reason). Refuses sample-bearing paths."""
+    keep: list[Path] = []
+    skipped: list[dict[str, str]] = []
+    for rel in PUBLISHABLE_ARTIFACTS:
+        if any(token in rel for token in NEVER_PUBLISH):
+            skipped.append({"path": rel, "reason": "may carry sampled values or session state"})
+            continue
+        path = workspace_dir / rel
+        if path.is_file():
+            keep.append(path)
+        else:
+            skipped.append({"path": rel, "reason": "not generated yet"})
+    return keep, skipped
+
+
 def default_remote_root(workspace: str | Path) -> str:
     return f"{DEFAULT_REMOTE_PARENT}/{Path(str(workspace)).name}"
+
+
+def stage_context(workspace_dir: Path) -> tuple[int, list[dict[str, str]]]:
+    """Copy the curated artifacts into `<workspace>/context/` for publication.
+
+    A staged copy rather than syncing `interns/` directly: `interns/` is the
+    machine audit trail (sampled values, session state, event logs) and must not
+    be published wholesale. Staging makes the published set an explicit,
+    reviewable list instead of whatever happens to be on disk.
+    """
+    keep, skipped = collect_publishable(workspace_dir)
+    out = workspace_dir / "context"
+    if keep:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "README.md").write_text(
+            "\n".join(
+                [
+                    "# Workspace context",
+                    "",
+                    "Published by `sync-workspace-code` so a teammate -- or a",
+                    "Databricks-native agent pointed at this folder -- has the pipeline's",
+                    "meaning without cloning the repo: what it builds, what the KPIs are,",
+                    "and what was decided and why.",
+                    "",
+                    "Generated. Edit the workspace and re-sync; do not edit here.",
+                    "",
+                    "Deliberately EXCLUDED: data profiles and evidence. Those carry",
+                    "sampled values, which on a regulated workspace can contain personal",
+                    "data, and this folder is broadly readable.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+    for src in keep:
+        (out / src.name).write_bytes(src.read_bytes())
+    return len(keep), skipped
 
 
 def build_sync_commands(
@@ -102,6 +181,10 @@ def sync_workspace_code(
     confirmed = confirmed_blueprint_path(layout).exists()
     # --dry-run defaults OFF only when the confirmed blueprint is present.
     effective_dry_run = (not confirmed) if dry_run is None else bool(dry_run)
+
+    # Stage the curated context BEFORE deciding what is present, so a workspace
+    # that has generated artifacts but no code still publishes its meaning.
+    context_count, context_skipped = stage_context(layout.project_root)
 
     present = [n for n in CODE_DIRS if (layout.project_root / n).is_dir()]
     absent = [
