@@ -651,7 +651,7 @@ the matching `### <command>` section of `TOOLS.md` for the one command you are a
 | Stage | Commands (each is a `###` section in TOOLS.md) |
 | --- | --- |
 | Workspace selection | `list-workspace-files`, `prepare-workspace-selection`, `session-snapshot`, `prepare-data-source-panel`, `apply-data-source-answer` |
-| Source intake (declare/discover/interview) | `declare-source`, `discover-source`, `prepare-intake-panel`, `apply-intake-answer` -- the new-spine Phase 0/1 chain; see "New spine (built, not yet default)" below |
+| Source intake (declare/discover/interview) | `declare-source`, `discover-source`, `fetch-source-documents`, `prepare-intake-panel`, `apply-intake-answer` -- the new-spine Phase 0/1 chain; see "New spine (built, not yet default)" below |
 | Onboarding | `onboard-workspace`, `kickstart-workspace`, `understand-data`, `scan-document`, `prepare-document-candidate-review`, `apply-document-candidate` |
 | Cloud-native (dbt/Airflow) | `check-platform-readiness`, `generate-dbt-project`, `prepare-data-quality-panel`, `apply-data-quality-answer`, `verify-dbt-project`, `verify-orchestration`, `dbt-index`, `run-dbt-backfill`, `reconcile-warehouse-cost` |
 | KPI definition + blockers | `prepare-kpi-blocker-panel`, `apply-kpi-panel-answer`, `apply-kpi-definition`, `confirm-cli-agent-proposal`, `prepare-kpi-generation`, `apply-kpi-generation-answer`, `finalize-kpi-generation`, `build-intent-contract`, `plan-kpi-completion` (deprecated redirects: `resolve-kpi-features`, `blocker-question-panel`, `derived-feature-markdown`) |

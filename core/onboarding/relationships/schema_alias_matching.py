@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from core.onboarding.features.derived_evidence import (
     column_profile_summary,
+    iter_nested_leaf_entries,
     semantic_meaning_sources,
     value_profile,
 )
@@ -56,6 +57,31 @@ def schema_index_from_profiles(profiles: list[dict[str, Any]]) -> dict[str, list
                     "row_count": row_count,
                     "profile_path": profile.get("profile_path"),
                     **column_profile_summary(profile, column),
+                }
+            )
+        # Fields nested inside a Struct/List column (e.g. a JSON-sourced
+        # payload's `metadata.patient.ssn`) -- tagged `is_nested_leaf` so a
+        # promotion candidate (derivation_patterns.py) can tell one apart from
+        # a real physical column, and `raw_source_column` traces it back to
+        # the bronze column that actually holds it.
+        for leaf in iter_nested_leaf_entries(profile):
+            name = leaf["name"]
+            index.setdefault(normalize(name), []).append(
+                {
+                    "dataset": dataset,
+                    "column": name,
+                    "dtype": leaf["dtype"],
+                    "row_count": row_count,
+                    "profile_path": profile.get("profile_path"),
+                    "is_nested_leaf": True,
+                    "raw_source_column": name.split(".", 1)[0].split("[", 1)[0],
+                    "sample_values": leaf["sample_values"],
+                    "sample_min": leaf["sample_min"],
+                    "sample_max": leaf["sample_max"],
+                    "exact_min": leaf["exact_min"],
+                    "exact_max": leaf["exact_max"],
+                    "null_count": leaf["null_count"],
+                    "profile_source": leaf["source"],
                 }
             )
     return index

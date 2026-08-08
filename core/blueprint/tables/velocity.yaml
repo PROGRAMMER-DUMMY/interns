@@ -16,6 +16,7 @@ mode: first_match
 
 rules:
   - id: VEL-R1
+    hard_block: true  # capability refusal (audit M4), not a measurement gap
     choice: realtime_serving
     when:
       target_latency: {eq: realtime_serving}

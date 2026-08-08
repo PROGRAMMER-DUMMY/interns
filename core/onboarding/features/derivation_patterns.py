@@ -16,6 +16,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from core.onboarding.features.blockers import normalize
+from core.sql_safety import UnsafeIdentifierError, assert_safe_identifier, quote_ident_backtick
+
 # ISO-ish date / datetime value, used to recognize a temporal column profiled as
 # a plain string (the common CSV case). Same shape used by metric_derivation.
 _DATE_VALUE_RE = re.compile(
@@ -186,6 +189,8 @@ def _option(
     input_columns: list[dict[str, Any]],
     reasoning: str,
     confidence: str,
+    formula_templates: dict[str, str] | None = None,
+    option_kind: str | None = None,
 ) -> dict[str, Any]:
     # Full option contract (derived_markdown REQUIRED_OPTION_FIELDS /
     # REQUIRED_EXAMPLE_FIELDS / REQUIRED_REASONING_FIELDS) — same shape as
@@ -193,7 +198,7 @@ def _option(
     example_inputs = {
         str(col.get("column")): col.get("example_value") for col in input_columns
     }
-    return {
+    option: dict[str, Any] = {
         "derived_column_name": name,
         "source_pattern_id": pattern_id,
         "business_meaning": business_meaning,
@@ -241,6 +246,11 @@ def _option(
         "confidence": confidence,
         "needs_user_confirmation": True,
     }
+    if formula_templates:
+        option["formula_templates"] = formula_templates
+    if option_kind:
+        option["option_kind"] = option_kind
+    return option
 
 
 def _temporal_pair(columns: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]] | None:
@@ -502,6 +512,133 @@ def _uom_option(
     )
 
 
+def _raw_source_entry(
+    schema_index: dict[str, list[dict[str, Any]]],
+    raw_column: str,
+    leaf_entry: dict[str, Any],
+) -> dict[str, Any]:
+    """The physical bronze column's own schema_index entry for the same
+    dataset as ``leaf_entry`` -- real dtype/profile_path/row_count evidence
+    for the input-column contract. Falls back to a synthesized entry from the
+    leaf's own evidence when the raw column isn't separately indexed (should
+    not normally happen -- schema_index_from_profiles always indexes every
+    top-level column -- but stay evidence-honest rather than raising)."""
+    dataset = leaf_entry.get("dataset")
+    for candidate in schema_index.get(normalize(raw_column), []):
+        if not candidate.get("is_nested_leaf") and candidate.get("dataset") == dataset:
+            return candidate
+    return {
+        "column": raw_column,
+        "dataset": dataset,
+        "dtype": "unknown",
+        "row_count": leaf_entry.get("row_count"),
+        "profile_path": leaf_entry.get("profile_path"),
+        "sample_values": [],
+    }
+
+
+def _polars_struct_chain_text(raw_column: str, dot_path: str) -> str:
+    chain = f'pl.col("{raw_column}")'
+    for seg in dot_path.split(".")[1:]:
+        chain += f'.struct.field("{seg.split("[")[0]}")'
+    return chain
+
+
+def detect_json_leaf_promotion_candidates(
+    feature_token: str, schema_index: dict[str, list[dict[str, Any]]]
+) -> list[dict[str, Any]]:
+    """A feature token that names a field nested inside a JSON payload column
+    (e.g. ``ssn`` matching a profiled ``metadata.contact.ssn`` leaf --
+    core.profiling.data_model_profiler's nested-leaf discovery, indexed by
+    schema_index_from_profiles/columns_from_profile_index with
+    ``is_nested_leaf: True``) becomes a promotable derived-column candidate:
+    extract that leaf into a real typed silver column via a per-dialect
+    JSON-path formula.
+
+    Bronze representation (JSON string vs. an already-parsed struct/variant)
+    is a real, unresolved ambiguity across DuckDB/Spark/Polars -- recorded
+    explicitly in ``derivation_reasoning`` rather than guessed. Same
+    JSON-backed option contract (_option) every other pattern in this module
+    uses, so it flows through the SAME human-confirmation panel as
+    duration-bucket/recurrence/uom -- no silent promotion. Deterministic,
+    never fatal: an unsafe/unparseable identifier just skips that candidate.
+    """
+    # Nested leaves are indexed under their FULL dot-path (e.g.
+    # "metadatacontactssn"), never under a bare leaf-segment key like "ssn" --
+    # deliberately, so the resolver's pre-existing direct-column branch (which
+    # keys off the exact same schema_index) never auto-treats a JSON leaf as
+    # "proven_direct" with no human review. This detector therefore scans and
+    # matches on the leaf's OWN last segment instead of doing a dict lookup.
+    token_norm = normalize(feature_token)
+    matches: list[dict[str, Any]] = []
+    for entries in schema_index.values():
+        for entry in entries:
+            if not entry.get("is_nested_leaf"):
+                continue
+            dot_path = str(entry.get("column") or "")
+            if not dot_path:
+                continue
+            last_segment = dot_path.rsplit(".", 1)[-1].split("[")[0]
+            if normalize(last_segment) == token_norm:
+                matches.append(entry)
+    options: list[dict[str, Any]] = []
+    for entry in matches:
+        dot_path = str(entry.get("column") or "")
+        raw_column = str(entry.get("raw_source_column") or "")
+        if not dot_path or not raw_column:
+            continue
+        try:
+            assert_safe_identifier(raw_column, context="json_leaf_promotion_source_column")
+        except UnsafeIdentifierError:
+            continue
+        json_path = "$." + ".".join(
+            seg.split("[")[0] for seg in dot_path.split(".")[1:] if seg.split("[")[0]
+        )
+        raw_entry = _raw_source_entry(schema_index, raw_column, entry)
+        # Column/dataset routing comes from the RAW physical column (what the
+        # formula actually reads and what design.py's host-table resolution
+        # needs); the review-facing EVIDENCE (observed_values etc.) comes from
+        # the LEAF's own profiled stats -- a Struct's own "sample values"
+        # aren't meaningful, but "contact.ssn looked like 123-45-6789" is
+        # exactly what a human confirming this promotion needs to see.
+        evidence_entry = dict(raw_entry)
+        evidence_entry["sample_values"] = entry.get("sample_values") or raw_entry.get("sample_values") or []
+        derived_name = re.sub(r"[^a-z0-9]+", "_", dot_path.lower()).strip("_")
+        duckdb_sql = f"json_extract_string({_quote(raw_column)}, '{json_path}')"
+        spark_sql = f"get_json_object({quote_ident_backtick(raw_column)}, '{json_path}')"
+        polars = _polars_struct_chain_text(raw_column, dot_path)
+        options.append(
+            _option(
+                name=derived_name,
+                pattern_id="json_leaf_promotion",
+                business_meaning=(
+                    f"Promotes the `{dot_path}` field nested inside the "
+                    f"`{raw_column}` JSON payload column to a real typed "
+                    "silver column."
+                ),
+                formula=duckdb_sql,
+                input_columns=[_input_col(evidence_entry, "json_leaf_source")],
+                reasoning=(
+                    f"`{feature_token}` matched a field discovered nested "
+                    f"inside the profiled `{raw_column}` payload column at "
+                    f"path `{dot_path}`. assumes_bronze_representation: "
+                    "json_string -- if bronze instead stores an "
+                    "already-parsed struct/variant, the DuckDB/Spark "
+                    "formulas need dot/get_json_object adjustment at review "
+                    "time."
+                ),
+                confidence="medium",
+                formula_templates={
+                    "duckdb_sql": duckdb_sql,
+                    "spark_sql": spark_sql,
+                    "polars": polars,
+                },
+                option_kind="json_leaf_promotion",
+            )
+        )
+    return options
+
+
 def detect_derivation_patterns(
     question: str, columns: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -527,4 +664,5 @@ __all__ = [
     "detect_duration_bucket",
     "detect_recurrence_within_window",
     "detect_uom_normalization",
+    "detect_json_leaf_promotion_candidates",
 ]

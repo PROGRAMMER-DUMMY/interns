@@ -138,3 +138,83 @@ shown so the inference can be attacked; unmatched evidence yields "unknown" and
 the full list rather than a guess. Domain vocabulary ships as DATA, never as
 branches in code, and a genericity guard test keeps domain names out of
 `core/intake` logic.
+
+## F8-F11 [FIXED] Four defects found while driving the intake
+
+- **F8 provenance bypass (governance).** `decision_source` normalised the WHOLE
+  identity and did an exact set-membership test, so `agent (platform
+  recommendation)` became `agentplatformrecommendation`, matched nothing, and was
+  recorded as `source: human`. Any agent could bypass any human gate by appending
+  one word to its name. Matching is now per WORD and fails closed.
+- **F9 playback misattribution.** Platform-supplied answers were played back as
+  "(you said)", so confirming the alignment gate meant agreeing to statements
+  nobody made. Now tagged "(assumed by the platform -- correct it if wrong)".
+- **F10 template answers.** A `suggested_answer` applied verbatim reached the
+  playback as a real requirement (grain: "one row per <business entity>").
+  Templates are refused at the door, and every shipped suggestion must contain a
+  placeholder -- two did not, and were hidden defaults.
+- **F11 bulk upload read as a stream.** Two files written 3s apart classified as
+  `continuous`, routing `claims` to Auto Loader streaming instead of batch COPY
+  INTO. A cadence now needs enough arrivals over a long enough span.
+
+## F12 [BLOCKER, FIXED] Documents in the source were unreachable
+
+The workspace's KPIs sat in `docs/Sample_KPI (1).xlsx` INSIDE the source bucket
+for the whole run. Discovery listed the file; nothing could read it. So the KPI
+registry stayed empty, `join_complexity` was unmeasurable, the engine decision
+blocked, and `confirm-blueprint` refused a plan it could never complete.
+
+The bytes were reachable the entire time through the credential Unity Catalog
+already holds. `core/intake/documents.py` + `fetch-source-documents` now read
+them via `read_files(..., format => 'binaryFile')` + `base64(...)`, bounded, with
+a short read REFUSED rather than stored (half a workbook parses as a whole one).
+Verified live: 372,953 B diagram and 12,191 B workbook recovered byte-exact, no
+local cloud credential. Onboarding then registered **18 real KPIs** from the
+workbook.
+
+## F13 [BLOCKER, FIXED] Circular dependency deadlocked the blueprint
+
+With KPIs registered the engine decision STILL blocked, on `join_complexity`:
+
+```
+engine <- join_complexity <- feature mapping <- feature resolution
+       <- profiles <- data landed in UC <- ingestion <- apply-provisioning
+       <- confirmed blueprint <- engine
+```
+
+A genuine deadlock. The cause was narrower than the cycle suggests: rules are
+first-match, and evaluation halted at `ENG-R5 (join_complexity == heavy)` even
+though `ENG-R6 (consumer_class_count >= 2)` and `ENG-R8 (< 50GB)` both fired on
+fully-known facts and BOTH yielded `sql_dbt_warehouse`. The unknown could not
+change the outcome, yet it blocked.
+
+FIX: an unknown blocks only when it could change the answer. If every later rule
+that fires on known facts agrees, the decision is taken and records why it did not
+block. The relaxation is deliberately narrow -- any disagreement, a second
+unknown, or no later rule firing still blocks -- and a rule may declare
+`hard_block: true` for a CAPABILITY refusal (VEL-R1's missing online-store
+serving edge), which is never fallen back past. Five tests pin all five cases.
+
+---
+
+## Replay outcome
+
+Ran end to end to the remote-execution boundary:
+
+| Step | Result |
+|---|---|
+| declare-source | s3://amzn-workspace-rcm/datasets/, credential by reference |
+| discover-source | 12 tables, 11.3 MB, measured through Unity Catalog |
+| fetch-source-documents | 2 documents recovered byte-exact |
+| onboard-workspace | 18 KPIs registered from the workbook |
+| intake | 18 answers (4 human, 14 platform defaults, honestly attributed) |
+| playback | confirmed |
+| prepare-blueprint | 10 decisions, 0 blocked |
+| confirm-blueprint | confirmed, `source: human` |
+| plan-provisioning | catalog `rcm_dev`, 6 additive steps, 0 blocked |
+| generate-ingestion | 12 jobs; no `useNotifications` (F2 honored); no destructive statements |
+
+STOPPED AT: `apply-provisioning`, which requires
+`AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1`. A human must set that in the executing
+shell; an agent must never set it. Nothing has been created in the Databricks
+account by this replay.

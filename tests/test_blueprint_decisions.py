@@ -8,6 +8,7 @@ The blocking half is the point of the slice: the predecessor
 from __future__ import annotations
 
 import unittest
+from core.blueprint import decisions
 
 from core.blueprint.decisions import (
     INTAKE_FACT_BRIDGE,
@@ -628,3 +629,75 @@ class TableIntegrityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DecisiveUnknownTests(unittest.TestCase):
+    """An unknown blocks only when it could change the answer.
+
+    Found live: `join_complexity` was unmeasurable until data landed in Unity
+    Catalog, but landing data needed a confirmed blueprint, which needed this
+    decision -- a real deadlock. Two later rules already agreed on the same
+    engine, so the missing fact could not have changed the outcome.
+
+    The relaxation is narrow ON PURPOSE: any disagreement among the later rules,
+    or a second unknown, still blocks.
+    """
+
+    TABLE = {
+        "decision": "engine",
+        "mode": "first_match",
+        "rules": [
+            {"id": "R1", "when": {"mystery": {"eq": "heavy"}}, "choice": "spark"},
+            {"id": "R2", "when": {"consumers": {"gte": 2}}, "choice": "warehouse"},
+            {"id": "R3", "when": {"size": {"lt": 100}}, "choice": "warehouse"},
+        ],
+    }
+
+    def _facts(self, **kw):
+        return {
+            k: decisions.Fact(name=k, value=v, source="measured", origin="test")
+            for k, v in kw.items()
+        }
+
+    def test_unknown_that_cannot_change_the_answer_decides(self):
+        out = decisions.evaluate_table(
+            "engine", self._facts(consumers=4, size=10), table=self.TABLE
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].status, decisions.STATUS_DECIDED)
+        self.assertEqual(out[0].choice, "warehouse")
+        self.assertTrue(
+            any("cannot change it" in e for e in out[0].evidence),
+            "the decision must say WHY it did not block",
+        )
+
+    def test_unknown_still_blocks_when_later_rules_disagree(self):
+        table = dict(self.TABLE)
+        table["rules"] = [
+            {"id": "R1", "when": {"mystery": {"eq": "heavy"}}, "choice": "spark"},
+            {"id": "R2", "when": {"consumers": {"gte": 2}}, "choice": "warehouse"},
+            {"id": "R3", "when": {"size": {"lt": 100}}, "choice": "polars"},
+        ]
+        out = decisions.evaluate_table(
+            "engine", self._facts(consumers=4, size=10), table=table
+        )
+        self.assertEqual(out[0].status, decisions.STATUS_BLOCKED)
+        self.assertIn("mystery", out[0].missing_facts)
+
+    def test_unknown_still_blocks_when_no_later_rule_fires(self):
+        out = decisions.evaluate_table(
+            "engine", self._facts(consumers=1, size=999), table=self.TABLE
+        )
+        self.assertEqual(out[0].status, decisions.STATUS_BLOCKED)
+
+    def test_a_second_unknown_still_blocks(self):
+        out = decisions.evaluate_table("engine", self._facts(size=10), table=self.TABLE)
+        self.assertEqual(out[0].status, decisions.STATUS_BLOCKED)
+
+    def test_a_known_earlier_rule_still_wins(self):
+        """The relaxation must not reorder anything that was already decidable."""
+        out = decisions.evaluate_table(
+            "engine", self._facts(mystery="heavy", consumers=4, size=10), table=self.TABLE
+        )
+        self.assertEqual(out[0].choice, "spark")
+        self.assertEqual(out[0].rule_id, "R1")

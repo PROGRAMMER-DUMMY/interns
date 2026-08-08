@@ -386,6 +386,39 @@ class UnityCatalogGateway:
         result = getattr(response, "result", None)
         return list(getattr(result, "data_array", None) or []) if result else []
 
+    def fetch_base64(self, uri: str) -> str:
+        """A single object's bytes, base64-encoded, read through the warehouse.
+
+        Same credential path as :meth:`list_uri`: Unity Catalog already holds
+        the storage credential, so a document beside the data is readable
+        without a second cloud credential on the operator's machine.
+        `binaryFile` is Databricks' own reader; `base64` carries the bytes
+        through a SQL result set without corruption.
+
+        Bounded on purpose -- see `core.intake.documents.MAX_DOCUMENT_BYTES`.
+        A result cell is not a file-transfer protocol.
+        """
+        warehouse_id, _ = self.warehouse()
+        safe = _assert_safe_uri(uri)
+        statement = (
+            "SELECT base64(content) AS b64 FROM "
+            f"read_files('{safe}', format => 'binaryFile')"
+        )
+        response = self.client.statement_execution.execute_statement(
+            warehouse_id=warehouse_id, statement=statement, wait_timeout="50s"
+        )
+        while _statement_state(response) in {"PENDING", "RUNNING"}:
+            time.sleep(2)
+            response = self.client.statement_execution.get_statement(response.statement_id)
+        state = _statement_state(response)
+        if state != "SUCCEEDED":
+            error = getattr(getattr(response, "status", None), "error", None)
+            message = getattr(error, "message", "") or state
+            raise RuntimeError(f"binaryFile read failed ({state}): {redact(str(message))}")
+        result = getattr(response, "result", None)
+        rows = list(getattr(result, "data_array", None) or []) if result else []
+        return str(rows[0][0]) if rows and rows[0] else ""
+
 
 def scan_via_unity_catalog(
     declaration: SourceDeclaration, *, workspace: Path, repo_root: Path,
@@ -572,6 +605,23 @@ def _matching_external_location(uri: str, locations: list[tuple[str, str]]) -> s
         if target.startswith(root):
             return name
     return ""
+
+
+def _assert_safe_uri(uri: str) -> str:
+    """A URI safe to embed in a SQL string literal, or raise.
+
+    The statements here interpolate a path (`LIST '<uri>'`,
+    `read_files('<uri>')`) because neither takes a bind parameter. A quote or a
+    newline in that position is a statement break, so it is refused rather than
+    escaped -- object-store URIs never legitimately contain either.
+    """
+    text = str(uri or "").strip()
+    if not text or "'" in text or any(char in text for char in "\r\n"):
+        raise ValueError(
+            "refusing to build SQL for a URI containing a quote or newline: "
+            f"{redact(text)!r}"
+        )
+    return text
 
 
 def _object_store_uri(connector: str, location: str) -> str:

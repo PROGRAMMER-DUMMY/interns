@@ -428,6 +428,17 @@ class KPIFeatureResolver:
                     if normalize_blocker(str(option.get("derived_column_name") or ""))
                     == norm
                 ]
+                # JSON-leaf-promotion candidates (a field nested inside a
+                # Struct/List payload column, e.g. metadata.patient.ssn --
+                # core.onboarding.features.derivation_patterns). Matched by the
+                # unresolved TOKEN against the leaf's own last segment, not by
+                # derived_column_name equality (the promoted name is a
+                # flattened dot path like metadata_patient_ssn, never equal to
+                # the bare token) -- so this is appended directly rather than
+                # routed through the derived_column_name == norm filter above.
+                candidate_derived_options.extend(
+                    self._json_leaf_promotion_options(token, schema_index)
+                )
             features.append({
                 "feature": token,
                 "state": "blocked_missing_evidence",
@@ -496,6 +507,21 @@ class KPIFeatureResolver:
                 return []
             columns = columns_from_profile_index(json.loads(path.read_text(encoding="utf-8")))
             return detect_derivation_patterns(question, columns)
+        except Exception:  # pragma: no cover - pattern detection is advisory
+            return []
+
+    def _json_leaf_promotion_options(
+        self, token: str, schema_index: dict[str, list[dict[str, Any]]]
+    ) -> list[dict[str, Any]]:
+        """Promotion candidates for a token that names a field nested inside a
+        JSON payload column (e.g. `ssn` matching a profiled
+        `metadata.patient.ssn` leaf). Advisory, never raises."""
+        try:
+            from core.onboarding.features.derivation_patterns import (
+                detect_json_leaf_promotion_candidates,
+            )
+
+            return detect_json_leaf_promotion_candidates(token, schema_index)
         except Exception:  # pragma: no cover - pattern detection is advisory
             return []
 

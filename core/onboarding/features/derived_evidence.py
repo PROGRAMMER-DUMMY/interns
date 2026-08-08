@@ -289,6 +289,33 @@ def example_value(input_name: str, evidence: dict[str, Any]) -> Any:
     return f"example_{input_name}"
 
 
+def iter_nested_leaf_entries(profile: dict[str, Any]):
+    """Yield one evidence dict per field nested inside a Struct/List column
+    (e.g. ``metadata.patient.ssn`` from a JSON-sourced payload), straight from
+    the profiler's own ``nested_leaf_columns`` (see
+    ``core.profiling.data_model_profiler``). Every consumer that flattens a
+    profile into column evidence -- the PHI/PCI gate, schema-alias matching,
+    and KPI feature resolution -- calls this ONE helper instead of each
+    hand-rolling the same loop, so nested-leaf visibility is fixed once, not
+    three times. Yields nothing when the profile predates this field (older
+    profile_index.json artifacts stay valid input).
+    """
+    for leaf in profile.get("nested_leaf_columns") or []:
+        if not isinstance(leaf, dict) or not leaf.get("name"):
+            continue
+        yield {
+            "name": str(leaf["name"]),
+            "dtype": str(leaf.get("dtype") or ""),
+            "null_count": leaf.get("null_count"),
+            "sample_values": leaf.get("sample_values") or [],
+            "sample_min": leaf.get("sample_min"),
+            "sample_max": leaf.get("sample_max"),
+            "exact_min": leaf.get("exact_min"),
+            "exact_max": leaf.get("exact_max"),
+            "source": leaf.get("source"),
+        }
+
+
 def column_profile_summary(profile: dict[str, Any], column: str) -> dict[str, Any]:
     for item in profile.get("columns") or []:
         if item.get("name") == column:

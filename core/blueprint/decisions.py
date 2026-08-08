@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -593,6 +593,43 @@ def _blocked(decision: str, rule: dict[str, Any], missing: list[str]) -> Decisio
     )
 
 
+def _decisive_fallback(
+    decision_name: str,
+    later_rules: list[dict[str, Any]],
+    facts: dict[str, Fact],
+    table: dict[str, Any],
+) -> Decision | None:
+    """The decision a first-match table reaches regardless of one unknown.
+
+    Returns a Decision only when EVERY later rule that can be evaluated on
+    known facts agrees on the same choice, and at least one of them fires. Any
+    disagreement -- or another unknown -- means the missing fact really is
+    load-bearing, so the caller blocks instead.
+    """
+    firing: list[dict[str, Any]] = []
+    for rule in later_rules:
+        result, _ = eval_condition(rule.get("when"), facts)
+        if result is None:
+            return None  # a second unknown: the outcome is genuinely undetermined
+        if result is True:
+            firing.append(rule)
+    if not firing:
+        return None
+    choices = {str(rule.get("choice") or "") for rule in firing}
+    if len(choices) != 1:
+        return None
+    decision = _decision_from_rule(decision_name, firing[0], facts, table)
+    return replace(
+        decision,
+        evidence=list(decision.evidence)
+        + [
+            "an earlier rule needed a fact nobody has measured yet, but every "
+            "later rule that applies agrees on this choice, so the missing fact "
+            "cannot change it -- decided rather than blocked",
+        ],
+    )
+
+
 def evaluate_table(
     name: str, facts: dict[str, Fact], table: dict[str, Any] | None = None
 ) -> list[Decision]:
@@ -603,9 +640,30 @@ def evaluate_table(
     mode = str(table.get("mode") or "first_match")
     out: list[Decision] = []
 
-    for rule in table.get("rules") or []:
+    rules = list(table.get("rules") or [])
+    for index, rule in enumerate(rules):
         result, missing = eval_condition(rule.get("when"), facts)
         if result is None:
+            # An unknown only blocks when it could CHANGE the answer. In a
+            # first-match table, if every later rule that fires on fully-known
+            # facts yields the same choice, then resolving this fact either way
+            # lands in the same place -- so blocking asks the operator for a
+            # measurement that cannot matter. Found live: `join_complexity` was
+            # unmeasurable until data landed, but landing data needed a confirmed
+            # blueprint, which needed this decision -- a real deadlock, on a fact
+            # where two later rules already agreed on `sql_dbt_warehouse`.
+            # `hard_block: true` marks a CAPABILITY refusal rather than a
+            # measurement gap -- the fact is unknown because the platform cannot
+            # do the thing at all (e.g. no online-store serving edge). Falling
+            # back past one would quietly plan a pipeline that cannot be built.
+            fallback = (
+                None
+                if rule.get("hard_block")
+                else _decisive_fallback(decision_name, rules[index + 1:], facts, table)
+            )
+            if mode == "first_match" and fallback is not None:
+                out.append(fallback)
+                break
             out.append(_blocked(decision_name, rule, missing))
             if mode == "first_match":
                 return out

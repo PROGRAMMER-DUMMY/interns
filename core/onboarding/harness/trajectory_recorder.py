@@ -50,6 +50,10 @@ class WorkspaceTrajectoryRecorder:
     def trajectory_path(self) -> Path:
         return self.layout.state_dir / "trajectory.jsonl"
 
+    @property
+    def _summary_state_path(self) -> Path:
+        return self.layout.state_dir / "trajectory_summary_state.json"
+
     def record(
         self,
         *,
@@ -105,6 +109,21 @@ class WorkspaceTrajectoryRecorder:
             except Exception:  # noqa: BLE001
                 pass
 
+            # Incrementally maintain the summary counter from the ONE new
+            # record instead of a full trajectory.jsonl re-scan (this fires
+            # on every tool_start/tool_result -- a full re-parse per append
+            # is O(n) per write / O(n^2) total over a workspace's lifetime).
+            # Bootstraps once via a real full scan if the counter is
+            # missing/corrupt (a pre-existing trajectory.jsonl from before
+            # this fix, or an out-of-band writer) -- that scan already
+            # includes the record just appended above, so no double-count.
+            state = _load_summary_state(self._summary_state_path)
+            if state is None:
+                state = _bootstrap_summary_state(self.trajectory_path)
+            else:
+                state = _apply_record_to_summary_state(state, record)
+            _save_summary_state(self._summary_state_path, state)
+
         return self.render()
 
     def render(self) -> TrajectoryRecordResult:
@@ -115,16 +134,34 @@ class WorkspaceTrajectoryRecorder:
         # then writes 3 files from it; an unlocked concurrent call could
         # interleave/truncate mid-write on any of them.
         with workspace_lock(self.workspace):
-            records = load_trajectory(self.trajectory_path)
+            # event_count/summary come from the persisted counter (O(1),
+            # bootstrapped via one full scan if absent) rather than a full
+            # re-parse of trajectory.jsonl; `events` only ever needs the last
+            # 100 records (same as before), read via a bounded tail-read
+            # instead of the whole file. current.json's OUTPUT SHAPE is
+            # unchanged -- this is a computation-cost fix, not a behavior
+            # change (see tests/regressions/test_trajectory_recorder_incremental_summary.py).
+            state = _load_summary_state(self._summary_state_path)
+            if state is None:
+                state = _bootstrap_summary_state(self.trajectory_path)
+                _save_summary_state(self._summary_state_path, state)
+            event_count = state["event_count"]
+            summary = {
+                "failures": state["failures"],
+                "recoveries": state["recoveries"],
+                "validations": state["validations"],
+                "commands": state["commands"],
+                "last_status": state["last_status"],
+            }
             report = {
                 "artifact_type": "trajectory/current.json",
                 "version": TRAJECTORY_VERSION,
                 "generated_by": "record-workspace-trajectory",
                 "workspace": self.workspace_rel,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
-                "event_count": len(records),
-                "summary": _summarize(records),
-                "events": records[-100:],
+                "event_count": event_count,
+                "summary": summary,
+                "events": _tail_records(self.trajectory_path, 100),
             }
             report_dir = self.layout.reports_dir / "trajectory"
             evidence_dir = self.layout.evidence_dir / "trajectory"
@@ -140,7 +177,7 @@ class WorkspaceTrajectoryRecorder:
         return TrajectoryRecordResult(
             workspace=self.workspace_rel,
             ok=True,
-            event_count=len(records),
+            event_count=event_count,
             trajectory_path=_rel(self.trajectory_path, self.repo_root),
             current_json_path=_rel(current_json, self.repo_root),
             current_markdown_path=_rel(current_md, self.repo_root),
@@ -200,22 +237,127 @@ def record_trajectory_event_safe(
         }
 
 
+def _parse_trajectory_line(line: str) -> dict[str, Any] | None:
+    """Parse one raw JSONL line into a record dict, or None to skip it
+    (blank line / non-dict JSON value). An unparseable line becomes a
+    synthetic ``parse_error`` record rather than being silently dropped --
+    shared by both the full-file ``load_trajectory`` and the tail-read path
+    so both see the exact same rows for the same input."""
+    if not line.strip():
+        return None
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError:
+        return {"event_type": "parse_error", "status": "error", "summary": "Invalid JSONL trajectory row."}
+    if isinstance(value, dict):
+        return value
+    return None
+
+
 def load_trajectory(path: str | Path) -> list[dict[str, Any]]:
+    """Full trajectory history. Real callers beyond this module need the
+    WHOLE history (workflow_guard_harness.py's reliability checks scan
+    across every past event, not just the tail) -- this function's contract
+    is intentionally unchanged; only WorkspaceTrajectoryRecorder's internal
+    render()/record() hot path was changed to avoid calling this on every
+    append (see _tail_records / the summary-state counter below)."""
     source = Path(path)
     if not source.exists():
         return []
     records: list[dict[str, Any]] = []
     for line in source.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            records.append({"event_type": "parse_error", "status": "error", "summary": "Invalid JSONL trajectory row."})
-            continue
-        if isinstance(value, dict):
-            records.append(value)
+        parsed = _parse_trajectory_line(line)
+        if parsed is not None:
+            records.append(parsed)
     return records
+
+
+def _tail_lines(path: Path, n: int, chunk_size: int = 8192) -> list[str]:
+    """Return up to the last *n* raw lines of a text file, reading from the
+    end in bounded chunks instead of the whole file. Standard seek-backward
+    tail-read; used so trajectory_recorder's render() doesn't pay an O(file
+    size) cost on every append just to get the last ~100 events."""
+    if not path.exists():
+        return []
+    with path.open("rb") as f:
+        f.seek(0, 2)  # seek to end
+        pos = f.tell()
+        data = b""
+        while pos > 0 and data.count(b"\n") <= n:
+            read_size = min(chunk_size, pos)
+            pos -= read_size
+            f.seek(pos)
+            data = f.read(read_size) + data
+    text = data.decode("utf-8", errors="replace")
+    return text.splitlines()[-n:]
+
+
+def _tail_records(path: Path, n: int) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for line in _tail_lines(path, n):
+        parsed = _parse_trajectory_line(line)
+        if parsed is not None:
+            records.append(parsed)
+    return records[-n:]
+
+
+_EMPTY_SUMMARY_STATE: dict[str, Any] = {
+    "event_count": 0,
+    "failures": 0,
+    "recoveries": 0,
+    "validations": 0,
+    "commands": 0,
+    "last_status": "empty",
+}
+
+
+def _load_summary_state(path: Path) -> dict[str, Any] | None:
+    """Return the persisted incremental summary counter, or None if it's
+    missing/unreadable/corrupt -- the caller bootstraps via a real full scan
+    in that case (a pre-existing trajectory.jsonl from before this fix, or an
+    out-of-band writer that never touched the counter file)."""
+    if not path.exists():
+        return None
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(state, dict) or "event_count" not in state:
+        return None
+    return state
+
+
+def _save_summary_state(path: Path, state: dict[str, Any]) -> None:
+    path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+
+
+def _apply_record_to_summary_state(state: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+    """Fold ONE new record into the previous counter state -- O(1), mirrors
+    _summarize()'s per-record logic exactly so the incremental and full-scan
+    paths always agree."""
+    updated = dict(state)
+    updated["event_count"] = state.get("event_count", 0) + 1
+    if _is_failure(record):
+        updated["failures"] = state.get("failures", 0) + 1
+    event_type = str(record.get("event_type") or "").lower()
+    if event_type in {"retry", "recovery"}:
+        updated["recoveries"] = state.get("recoveries", 0) + 1
+    if event_type == "validation":
+        updated["validations"] = state.get("validations", 0) + 1
+    if record.get("command"):
+        updated["commands"] = state.get("commands", 0) + 1
+    updated["last_status"] = record.get("status")
+    return updated
+
+
+def _bootstrap_summary_state(trajectory_path: Path) -> dict[str, Any]:
+    """One-time full scan (only when the persisted counter is absent/corrupt)
+    to compute the correct starting state -- reuses the existing
+    load_trajectory + _summarize logic verbatim, so the bootstrap value is
+    byte-for-byte what the old always-full-scan code would have computed."""
+    records = load_trajectory(trajectory_path)
+    summary = _summarize(records)
+    return {"event_count": len(records), **summary}
 
 
 def _summarize(records: list[dict[str, Any]]) -> dict[str, Any]:

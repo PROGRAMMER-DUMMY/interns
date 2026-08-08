@@ -614,6 +614,12 @@
       ]
     },
     {
+      "name": "fetch-source-documents",
+      "command": "uv run fetch-source-documents --workspace <workspace>",
+      "entry_point": "core.intake.cli:fetch_source_documents_main",
+      "summary": "Copy the declared source's documents into the workspace."
+    },
+    {
       "name": "finalize-data-model-generation",
       "command": "uv run finalize-data-model-generation --workspace <workspace>",
       "entry_point": "core.onboarding.data_model.generation_cli:finalize_main",

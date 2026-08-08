@@ -144,8 +144,21 @@ class KPIMultiEngineGenerator:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
         self.layout = WorkspaceLayout(project_root=self.workspace)
+        settings = self.layout.load_settings()
+        db_source = settings.get("databricks_source") or {}
+        if db_source and db_source.get("catalog") and db_source.get("schema"):
+            sql_gen = lambda kpi_id: DuckDBKPISQLGenerator(
+                self.repo_root,
+                workspace,
+                dialect="databricks",
+                catalog=db_source["catalog"],
+                schema=db_source["schema"],
+            ).generate(kpi_id)
+        else:
+            sql_gen = lambda kpi_id: DuckDBKPISQLGenerator(self.repo_root, workspace).generate(kpi_id)
+
         self._generators: dict[str, Callable[[str], Any]] = {
-            "sql": lambda kpi_id: DuckDBKPISQLGenerator(self.repo_root, workspace).generate(kpi_id),
+            "sql": sql_gen,
             "polars": lambda kpi_id: PolarsKPIGenerator(self.repo_root, workspace).generate(kpi_id),
             "pyspark": lambda kpi_id: PySparkKPIGenerator(self.repo_root, workspace).generate(kpi_id),
         }

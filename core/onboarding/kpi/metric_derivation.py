@@ -948,8 +948,14 @@ def columns_from_profile_index(profile_index: dict[str, Any]) -> list[dict[str, 
 
     Mirrors ``schema_index_from_profiles`` / ``column_profile_summary`` so this
     module consumes the same generated artifacts the rest of the platform does.
-    Returns an empty list when no profiles are present.
+    Returns an empty list when no profiles are present. Also includes fields
+    nested inside a Struct/List column (e.g. a JSON-sourced payload's
+    ``visit.admitted_at``) -- without this, a duration/recurrence pattern
+    whose start/stop timestamps live inside a nested payload would never be
+    detected as a temporal pair by ``derivation_patterns.detect_derivation_patterns``.
     """
+    from core.onboarding.features.derived_evidence import iter_nested_leaf_entries
+
     columns: list[dict[str, Any]] = []
     for profile in profile_index.get("profiles") or []:
         dataset = profile.get("path", "")
@@ -967,6 +973,22 @@ def columns_from_profile_index(profile_index: dict[str, Any]) -> list[dict[str, 
                     "sample_values": summary.get("sample_values") or [],
                     "profile_path": profile.get("profile_path"),
                     "dictionary_description": summary.get("dictionary_description"),
+                }
+            )
+        for leaf in iter_nested_leaf_entries(profile):
+            name = leaf["name"]
+            columns.append(
+                {
+                    "column": name,
+                    "dataset": dataset,
+                    "dtype": leaf["dtype"],
+                    "row_count": row_count,
+                    "n_unique": None,
+                    "sample_values": leaf["sample_values"],
+                    "profile_path": profile.get("profile_path"),
+                    "dictionary_description": None,
+                    "is_nested_leaf": True,
+                    "raw_source_column": name.split(".", 1)[0].split("[", 1)[0],
                 }
             )
         # Datasets sometimes carry only the ``columns`` list (no schema map).

@@ -27,6 +27,7 @@ from typing import Any
 import aiohttp
 import polars as pl
 
+from core.governance.injection_guard import neutralize_text
 from core.paths import rel_to as _rel
 from core.resource.manager import ResourceManager
 from core.storage.external_data import (
@@ -1736,7 +1737,19 @@ def _normalize_catalog_entry(entry: dict[str, Any], source_id: str, idx: int) ->
     tags = _extract_tags(entry)
     publisher = _first_text(entry, "publisher", "provider", "owner", "organization")
     modified = _first_text(entry, "modified", "modified_at", "updated", "updated_at")
+    # match_keys is a search-tokenization aid (never rendered to an LLM/human
+    # directly), computed from the RAW text before neutralization so a
+    # neutralize marker never pollutes the token set.
     match_text = " ".join([entry_id, title, description, publisher, " ".join(tags)])
+    # These fields DO reach human-review reports / panels downstream (T8:
+    # this is a remote, attacker-influenceable external catalog -- source,
+    # description, publisher, and tags are exactly the free-text fields an
+    # adversarial catalog entry could use to inject instructions). Neutralize
+    # at the source so every current and future consumer is protected.
+    title = neutralize_text(title)
+    description = neutralize_text(description)
+    publisher = neutralize_text(publisher)
+    tags = [neutralize_text(tag) for tag in tags]
     return {
         "source_catalog_id": source_id,
         "entry_id": str(entry_id),

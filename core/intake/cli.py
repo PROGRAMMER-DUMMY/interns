@@ -166,3 +166,44 @@ __all__ = [
     "discover_source_main",
     "prepare_intake_main",
 ]
+
+
+@anchored("fetch-source-documents")
+def fetch_source_documents_main(argv: list[str] | None = None) -> int:
+    """Copy the declared source's documents into the workspace."""
+    from core.intake.documents import fetch_documents
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Fetch documents (KPI workbook, data model, dictionary) from the declared "
+            "source into <workspace>/docs/, read through Unity Catalog so no local "
+            "cloud credential is needed."
+        )
+    )
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
+    parser.add_argument(
+        "--docs-uri", default="",
+        help="Override the documents prefix (default: a sibling docs/ of the declared data prefix).",
+    )
+    args = parser.parse_args(argv)
+
+    holder: dict[str, Any] = {}
+
+    def _run() -> Any:
+        holder["result"] = fetch_documents(
+            args.repo_root, args.workspace, docs_uri=args.docs_uri
+        ).summary()
+        return holder["result"]
+
+    code = run_workspace_command(
+        command="fetch-source-documents",
+        workspace=args.workspace,
+        repo_root=args.repo_root,
+        fn=_run,
+        metadata={"docs_uri": args.docs_uri},
+    )
+    if code != 0:
+        return code
+    result = holder.get("result") or {}
+    return 0 if result.get("ok") else 1
