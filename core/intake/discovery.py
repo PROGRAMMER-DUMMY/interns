@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import statistics
 import time
 from collections import defaultdict
@@ -59,6 +60,14 @@ ARRIVAL_UNKNOWN = "unknown"
 # carries the real numbers, so a reviewer can disagree with the threshold rather
 # than with an unexplained label.
 CONTINUOUS_MEDIAN_GAP_SECONDS = 300.0
+# Below these, the timestamps describe one upload rather than a repeating
+# arrival. Two files written 3s apart are a bulk drop; calling that "continuous"
+# picks a streaming ingestion mode off two data points.
+MIN_ARRIVALS_FOR_CADENCE = 3
+# Count carries the signal; the span floor only rejects a tight burst (three
+# files written within a minute of each other is still one upload). Keep it
+# small, or a real stream -- ten files a minute apart -- gets mistaken for a drop.
+BULK_UPLOAD_SPAN_SECONDS = 60.0
 
 # Which freshness answers are coherent with a measured arrival pattern, and the
 # lane the pair implies. A pair that is not listed implies NOTHING -- the intake
@@ -94,11 +103,25 @@ def classify_arrival(mtimes: list[float]) -> tuple[str, str]:
         )
     gaps = [later - earlier for earlier, later in zip(distinct, distinct[1:])]
     median = statistics.median(gaps)
+    span = distinct[-1] - distinct[0]
     evidence = (
         f"{len(stamps)} file(s), {len(distinct)} distinct modification times spanning "
-        f"{distinct[-1] - distinct[0]:.0f}s, median gap {median:.0f}s "
+        f"{span:.0f}s, median gap {median:.0f}s "
         f"(threshold {CONTINUOUS_MEDIAN_GAP_SECONDS:.0f}s)"
     )
+    # A handful of files written seconds apart is ONE bulk upload, not a cadence.
+    # Found live: two files 3s apart were called `continuous`, which routed the
+    # table to Auto Loader streaming instead of a batch COPY INTO -- the wrong
+    # ingestion mode for a one-time load, chosen from two data points.
+    # A stream has to look like a stream: several arrivals, spread over a window
+    # longer than a single upload could plausibly take.
+    if len(distinct) < MIN_ARRIVALS_FOR_CADENCE or span < BULK_UPLOAD_SPAN_SECONDS:
+        return (
+            ARRIVAL_ONE_SHOT,
+            f"{evidence}; too few arrivals over too short a span to be a cadence "
+            f"(needs >= {MIN_ARRIVALS_FOR_CADENCE} arrivals spanning "
+            f">= {BULK_UPLOAD_SPAN_SECONDS:.0f}s) -- treated as a single bulk drop",
+        )
     pattern = ARRIVAL_CONTINUOUS if median <= CONTINUOUS_MEDIAN_GAP_SECONDS else ARRIVAL_PERIODIC
     return pattern, evidence
 
@@ -860,9 +883,29 @@ def _group_paths(
         else:
             grouped[("/".join(rel[:-1]), _format_of(path))].append(entry)
 
+    grouped = _split_distinct_entities(grouped)
+
+    # A bare stem is ambiguous the moment two folders hold the same entity
+    # (hospital-a/patients.csv and hospital-b/patients.csv). Two tables with one
+    # name collide in bronze naming and in the generated dbt models, so qualify
+    # with the parent folder -- but only for the names that actually collide,
+    # so an unambiguous estate keeps its short, readable names.
+    raw_names: dict[tuple[str, str], str] = {}
+    for (key_path, fmt), members in grouped.items():
+        raw_names[(key_path, fmt)] = (
+            Path(key_path).stem
+            if len(members) == 1 and fmt != "delta"
+            else (Path(key_path).name or root.name)
+        )
+    collisions = {n for n in raw_names.values() if list(raw_names.values()).count(n) > 1}
+
     tables: list[DiscoveredTable] = []
     for (key_path, fmt), members in sorted(grouped.items()):
-        name = Path(key_path).stem if len(members) == 1 and fmt != "delta" else (Path(key_path).name or root.name)
+        name = raw_names[(key_path, fmt)]
+        if name in collisions:
+            parent = Path(key_path).parent.name
+            if parent:
+                name = f"{parent}__{name}"
         display = f"{uri_prefix}{key_path}" if uri_prefix else str((root / key_path) if key_path else root)
         pattern, evidence = classify_arrival([mtime for _, _, mtime in members if mtime is not None])
         tables.append(
@@ -877,6 +920,45 @@ def _group_paths(
             )
         )
     return tables
+
+
+def _shard_template(stem: str) -> str:
+    """A filename with its varying shard token removed.
+
+    `part-00001` and `part-00002` are two shards of ONE dataset; `patients` and
+    `providers` are two datasets that merely share a folder. Collapsing digit
+    runs is what separates those cases: shards of a set converge on the same
+    template, distinct entities do not.
+    """
+    return re.sub(r"\d+", "#", stem.lower())
+
+
+def _split_distinct_entities(
+    grouped: dict[tuple[str, str], list[tuple[Path, int, float | None]]],
+) -> dict[tuple[str, str], list[tuple[Path, int, float | None]]]:
+    """Split a directory group whose files are DIFFERENT entities, not shards.
+
+    The directory rule ("everything under one folder is one table") is right for
+    a part-file layout and catastrophically wrong for a folder holding one file
+    per entity: merging `patients.csv` and `transactions.csv` into a single
+    bronze table silently unions unrelated schemas, and every downstream grain
+    and join is then built on a table that never existed.
+
+    A group survives intact only when every member reduces to the same shard
+    template. Otherwise each file becomes its own table, keyed by its own stem.
+    """
+    out: dict[tuple[str, str], list[tuple[Path, int, float | None]]] = defaultdict(list)
+    for (key_path, fmt), members in grouped.items():
+        stems = {Path(p).stem for p, _, _ in members}
+        templates = {_shard_template(s) for s in stems}
+        if fmt == "delta" or len(members) == 1 or len(templates) == 1:
+            out[(key_path, fmt)].extend(members)
+            continue
+        for member in members:
+            stem = Path(member[0]).stem
+            child = f"{key_path}/{stem}" if key_path else stem
+            out[(child, fmt)].append(member)
+    return out
 
 
 def _rel_parts(path: Path, root: Path) -> tuple[str, ...]:

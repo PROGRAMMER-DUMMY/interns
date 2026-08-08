@@ -305,6 +305,10 @@ _LISTINGS = {
     "s3://bucket/data/orders/": [
         ["s3://bucket/data/orders/part-0.parquet", "part-0.parquet", "10", "1700000000000"],
         ["s3://bucket/data/orders/part-1.parquet", "part-1.parquet", "15", "1700000060000"],
+        # A cadence needs more than two arrivals: two files a minute apart is one
+        # upload, not a stream (see BulkUploadNotCadenceTests).
+        ["s3://bucket/data/orders/part-2.parquet", "part-2.parquet", "20", "1700000120000"],
+        ["s3://bucket/data/orders/part-3.parquet", "part-3.parquet", "25", "1700000180000"],
     ],
     "s3://bucket/data/archive.parquet/": [],
 }
@@ -325,10 +329,10 @@ class TestUnityCatalogScanner(_TempWorkspace):
         self.assertEqual(result.status, "ok")
         self.assertEqual({"snapshot", "orders"}, set(tables))
         self.assertEqual(120, tables["snapshot"]["size_bytes"])
-        self.assertEqual(25, tables["orders"]["size_bytes"])
+        self.assertEqual(70, tables["orders"]["size_bytes"])  # 10+15+20+25, summed across parts
         self.assertEqual("parquet", tables["orders"]["format"])
         self.assertEqual("s3://bucket/data/orders", tables["orders"]["path"])
-        self.assertEqual(145, payload["working_set_estimate_bytes"])
+        self.assertEqual(190, payload["working_set_estimate_bytes"])  # 120 snapshot + 70 orders
         # arrival measured from modification_time_ms, never fabricated
         self.assertEqual(ARRIVAL_CONTINUOUS, tables["orders"]["arrival_pattern"])
         self.assertEqual(ARRIVAL_ONE_SHOT, tables["snapshot"]["arrival_pattern"])
@@ -496,3 +500,104 @@ class StageRoutingTests(_TempWorkspace):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EntityGroupingTests(unittest.TestCase):
+    """A folder of distinct entities is not a part-file layout.
+
+    Found by a live replay: five EMR entity files per hospital
+    (departments/encounters/patients/providers/transactions) were collapsed into
+    ONE table named after the folder. Merging unrelated schemas into a single
+    bronze table poisons every grain and join built on top of it.
+    """
+
+    def _tables(self, names, root="root"):
+        entries = [(Path(root) / n, 100, None) for n in names]
+        return discovery_module._group_paths(Path(root), entries)
+
+    def test_distinct_entities_in_one_folder_become_separate_tables(self):
+        tables = self._tables([
+            "EMR/hospital-a/patients.csv",
+            "EMR/hospital-a/encounters.csv",
+            "EMR/hospital-a/providers.csv",
+        ])
+        self.assertEqual(len(tables), 3, [t.name for t in tables])
+        self.assertEqual(
+            {t.name for t in tables}, {"patients", "encounters", "providers"}
+        )
+
+    def test_shards_of_one_dataset_stay_grouped(self):
+        """part-00001/part-00002 differ only by a digit run: one dataset."""
+        tables = self._tables([
+            "orders/part-00001.csv",
+            "orders/part-00002.csv",
+            "orders/part-00003.csv",
+        ])
+        self.assertEqual(len(tables), 1, [t.name for t in tables])
+        self.assertEqual(tables[0].size_bytes, 300)
+
+    def test_numbered_sources_of_one_dataset_stay_grouped(self):
+        """hospital1_claim_data / hospital2_claim_data: same template, one set."""
+        tables = self._tables([
+            "claims/hospital1_claim_data.csv",
+            "claims/hospital2_claim_data.csv",
+        ])
+        self.assertEqual(len(tables), 1, [t.name for t in tables])
+        self.assertEqual(tables[0].name, "claims")
+
+    def test_same_entity_in_two_folders_gets_unique_qualified_names(self):
+        """Two tables cannot share a name: bronze naming and dbt models collide."""
+        tables = self._tables([
+            "EMR/hospital-a/patients.csv",
+            "EMR/hospital-a/encounters.csv",
+            "EMR/hospital-b/patients.csv",
+            "EMR/hospital-b/encounters.csv",
+        ])
+        names = [t.name for t in tables]
+        self.assertEqual(len(names), len(set(names)), names)
+        self.assertIn("hospital-a__patients", names)
+        self.assertIn("hospital-b__patients", names)
+
+    def test_unambiguous_names_are_left_short(self):
+        """Only colliding names get qualified; the rest stay readable."""
+        tables = self._tables([
+            "EMR/hospital-a/patients.csv",
+            "EMR/hospital-a/encounters.csv",
+            "cptcodes/cptcodes.csv",
+        ])
+        self.assertIn("cptcodes", [t.name for t in tables])
+
+    def test_sizes_are_preserved_across_the_split(self):
+        tables = self._tables([
+            "EMR/hospital-a/patients.csv",
+            "EMR/hospital-a/encounters.csv",
+        ])
+        self.assertEqual(sum(t.size_bytes for t in tables), 200)
+
+
+class BulkUploadNotCadenceTests(unittest.TestCase):
+    """A few files written seconds apart is one upload, not a stream.
+
+    Found live: two files 3s apart were classified `continuous`, which routed the
+    table to Auto Loader streaming instead of a batch COPY INTO -- an ingestion
+    mode chosen from two data points.
+    """
+
+    def test_two_files_seconds_apart_is_a_single_drop(self):
+        pattern, evidence = discovery_module.classify_arrival([1000.0, 1003.0])
+        self.assertEqual(pattern, discovery_module.ARRIVAL_ONE_SHOT)
+        self.assertIn("bulk drop", evidence)
+
+    def test_tight_burst_is_a_single_drop(self):
+        pattern, _ = discovery_module.classify_arrival([1000.0, 1001.0, 1002.0])
+        self.assertEqual(pattern, discovery_module.ARRIVAL_ONE_SHOT)
+
+    def test_a_real_stream_is_still_continuous(self):
+        stamps = [1000.0 + 60 * i for i in range(10)]
+        pattern, _ = discovery_module.classify_arrival(stamps)
+        self.assertEqual(pattern, discovery_module.ARRIVAL_CONTINUOUS)
+
+    def test_a_daily_cadence_is_periodic(self):
+        stamps = [1000.0 + 86400 * i for i in range(5)]
+        pattern, _ = discovery_module.classify_arrival(stamps)
+        self.assertEqual(pattern, discovery_module.ARRIVAL_PERIODIC)

@@ -22,15 +22,26 @@ one is recommended) so the orchestrator needs no new display mode.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from core.contracts.versioning import register_contract
 from core.governance.provenance import decision_source as decision_source_for
 from core.intake.discovery import ARRIVAL_UNKNOWN, implied_lane, load_discovery
+from core.intake.domain_detect import (
+    UNKNOWN_DOMAIN,
+    DomainSignal,
+    detect_domain,
+    domain_labels,
+    load_vocabulary,
+    overlay_for,
+)
 from core.onboarding.panel_contract import attach_stage_routing
+from core.onboarding.sources.external_discovery import DOC_SUFFIXES
 from core.storage.workspace_layout import WorkspaceLayout
 
 PANEL_VERSION = 1
@@ -49,16 +60,57 @@ def _opts(*pairs: tuple[str, str]) -> list[dict[str, str]]:
     return [{"option_id": option_id, "label": label} for option_id, label in pairs]
 
 
+DOMAIN_QUESTION_ID = "domain_confirm"
+# The escape hatch, so an estate the vocabulary has never seen is still
+# answerable. Never recommended -- it retunes nothing.
+DOMAIN_OTHER_OPTION = "other"
+
+
+def _domain_options() -> list[dict[str, str]]:
+    """Every domain the vocabulary knows, plus `other`. Option ids are the
+    vocabulary slugs, so adding a domain is a data edit, not a code edit."""
+    return _opts(
+        *sorted(domain_labels().items()),
+        (DOMAIN_OTHER_OPTION, "Something else, or more than one -- say which in the notes"),
+    )
+
+
 # id, text, why_it_matters, answer_type, options, recommended_option_id,
 # maps_to (the decision fields this feeds), merged_from (research provenance).
+# Every option-backed question carries a recommendation and every free-text one
+# carries a `suggested_answer`: an intake that asks 18 questions and defends none
+# of them is an interrogation, not a recommendation engine. `domain_confirm` is
+# the single exception, and only because its recommendation is EVIDENCE -- it is
+# computed at panel time and stays blank when nothing matched.
 QUESTIONS: list[dict[str, Any]] = [
+    {
+        "id": DOMAIN_QUESTION_ID,
+        "text": "Which business domain is this workspace's data from?",
+        "why_it_matters": (
+            "The platform does not know which enterprise team it is talking to, and "
+            "guessing is worse than asking: what counts as regulated, whether "
+            "published numbers get restated, and whether lineage is mandatory all "
+            "move with the domain. Answered first because it retunes the defaults "
+            "of the questions below."
+        ),
+        "answer_type": "select",
+        "options": _domain_options(),
+        # Computed at panel time from the evidence -- see `_domain_entry`.
+        "recommended_option_id": "",
+        "recommended_at_panel_time": True,
+        "maps_to": ["intake.domain", "governance.regime", "panel.defaults"],
+        "merged_from": ["owner:domain_first"],
+    },
     {
         "id": "consumers",
         "text": "Who consumes this workspace's output? Pick every class that applies.",
         "why_it_matters": (
             "Consumer class -- not data volume -- sets freshness, grain, serving "
             "surface and access model. Two or more classes is the default trigger "
-            "for a conformed star rather than a one-off wide table."
+            "for a conformed star rather than a one-off wide table. Recommended: "
+            "a dashboard with known query shapes -- the narrowest class that still "
+            "serves a real reader, so a second class is added when it actually "
+            "exists instead of paying star-schema cost for a consumer nobody named."
         ),
         "answer_type": "multi_select",
         "options": _opts(
@@ -70,7 +122,7 @@ QUESTIONS: list[dict[str, Any]] = [
             ("regulatory", "Regulatory or compliance reporting"),
             ("external_share", "An external party consuming a shared data product"),
         ),
-        "recommended_option_id": "",
+        "recommended_option_id": "bi_dashboard",
         "maps_to": ["modeling.technique", "serving.surface", "dq.criticality_tier"],
         "merged_from": ["end_users:Q1"],
     },
@@ -85,6 +137,11 @@ QUESTIONS: list[dict[str, Any]] = [
         "answer_type": "text",
         "options": [],
         "recommended_option_id": "",
+        "suggested_answer": (
+            "<consumer> reviews this <daily/weekly>; if it moved by more than "
+            "<threshold> they would <the action they would take>. Nothing else "
+            "changes today's decision."
+        ),
         "maps_to": ["dq.criticality_tier", "compute.latency_class", "blueprint.header"],
         "merged_from": ["end_users:Q2", "engine:Q1"],
     },
@@ -118,6 +175,12 @@ QUESTIONS: list[dict[str, Any]] = [
         "answer_type": "text",
         "options": [],
         "recommended_option_id": "",
+        "suggested_answer": (
+            "Owner: <named person or team, not a distribution list>. Paged when it "
+            "is wrong or late: <the same team, in <tool>>. That team already runs "
+            "<warehouse / orchestrator / BI tool>, so prefer a design they can "
+            "operate over one that only benchmarks better."
+        ),
         "maps_to": ["ownership.owner", "ownership.on_call", "engine.operability"],
         "merged_from": ["end_users:Q4", "engine:Q10"],
     },
@@ -191,6 +254,7 @@ QUESTIONS: list[dict[str, Any]] = [
         "answer_type": "text",
         "options": [],
         "recommended_option_id": "",
+        "suggested_answer": "one row per <business entity> per <calendar day>",
         "maps_to": ["modeling.grain", "dq.uniqueness_test"],
         "merged_from": ["end_users:Q8"],
     },
@@ -222,6 +286,17 @@ QUESTIONS: list[dict[str, Any]] = [
         "answer_type": "text",
         "options": [],
         "recommended_option_id": "",
+        # Placeholders are mandatory in a suggestion: fully-formed prose is a
+        # hidden default wearing a prompt's clothes -- applied verbatim it books
+        # a retention commitment nobody chose. 25 months is offered because it
+        # spans a full year-on-year comparison; the retention floor is whatever
+        # the operator's regulator or contract imposes, which only they know.
+        "suggested_answer": (
+            "Queryable: <25> months (this year plus last year, so a full "
+            "year-on-year comparison always fits). Reprocessable: <the same 25> "
+            "months. Raw retained: <7 years, or the longest retention a regulator "
+            "or contract imposes on you -- whichever is longer>."
+        ),
         "maps_to": ["orchestration.backfill_depth", "storage.retention", "compute.tier"],
         "merged_from": ["end_users:Q10", "engine:Q5"],
     },
@@ -236,6 +311,11 @@ QUESTIONS: list[dict[str, Any]] = [
         "answer_type": "text",
         "options": [],
         "recommended_option_id": "",
+        "suggested_answer": (
+            "Date range on every query, plus <the one or two attributes the "
+            "readers slice by>. Treat the set as stable for now; say "
+            "'exploratory' instead if analysts will invent their own cuts."
+        ),
         "maps_to": ["modeling.obt_projection", "storage.clustering_keys"],
         "merged_from": ["end_users:Q11"],
     },
@@ -253,6 +333,12 @@ QUESTIONS: list[dict[str, Any]] = [
         "answer_type": "text",
         "options": [],
         "recommended_option_id": "",
+        "suggested_answer": (
+            "Largest table roughly <N> GB today, roughly <M> GB a year ago, and "
+            "no step change is planned. Give a range you are confident in rather "
+            "than a precise number you are not -- an unstated size is worse than "
+            "a wide one."
+        ),
         "maps_to": ["engine.working_set_bytes", "engine.size_stability", "compute.tier"],
         "merged_from": ["end_users:Q12", "engine:Q3", "engine:Q4", "engine:Q12"],
         "answerable_from": DISCOVERY_PREDICATE_WORKING_SET,
@@ -268,6 +354,13 @@ QUESTIONS: list[dict[str, Any]] = [
         "answer_type": "text",
         "options": [],
         "recommended_option_id": "",
+        # The NUMBER is the thing only the operator knows; stating it as settled
+        # prose makes a warehouse-sizing input look agreed when nobody agreed it.
+        "suggested_answer": (
+            "Fewer than <10> at peak (one team opening the same dashboard in the "
+            "same hour) -- correct the number if a whole department or an "
+            "embedded app is the reader."
+        ),
         "maps_to": ["compute.cluster_count", "compute.warehouse_size"],
         "merged_from": ["end_users:Q12", "engine:Q6"],
     },
@@ -282,6 +375,12 @@ QUESTIONS: list[dict[str, Any]] = [
         "answer_type": "text",
         "options": [],
         "recommended_option_id": "",
+        "suggested_answer": (
+            "Any column that names, contacts or uniquely numbers a person, plus "
+            "anything that becomes identifying when joined to one of those; "
+            "unmasked access limited to <the team that operates on the record>, "
+            "everyone else sees masked or aggregated values."
+        ),
         "maps_to": ["governance.masking", "governance.row_filters", "governance.phi_gate"],
         "merged_from": ["end_users:Q13"],
     },
@@ -383,6 +482,139 @@ QUESTIONS_BY_ID: dict[str, dict[str, Any]] = {
 PLAYBACK_CONFIRM_QUESTION = "playback_confirm"
 
 
+# --------------------------------------------------------------------------
+# domain awareness: detect, offer, confirm, retune
+# --------------------------------------------------------------------------
+
+# ponytail: bounded walk, not an index. A workspace is a folder of source
+# documents; if one ever holds a million files, feed the doc list from discovery
+# instead of raising these.
+_MAX_DOCUMENT_SCAN = 200
+_MAX_WALK_ENTRIES = 5000
+_MAX_KPI_TERMS = 400
+_SKIP_SCAN_DIRS = {"interns", "dashboard", ".git", "__pycache__", ".venv"}
+
+
+def _workspace_documents(workspace: Path) -> list[str]:
+    """Document FILENAMES a user dropped in the workspace -- KPI workbooks, data
+    dictionaries, specs. Names only; contents are never read here."""
+    found: list[str] = []
+    if not workspace.exists():
+        return found
+    for index, path in enumerate(workspace.rglob("*")):
+        if index >= _MAX_WALK_ENTRIES or len(found) >= _MAX_DOCUMENT_SCAN:
+            break
+        if any(part in _SKIP_SCAN_DIRS for part in path.parts):
+            continue
+        if path.suffix.lower() in DOC_SUFFIXES and path.is_file():
+            found.append(path.name)
+    return found
+
+
+def _kpi_terms(layout: WorkspaceLayout) -> list[str]:
+    """Every short string in the KPI registry, if one has been built."""
+    path = layout.kpi_registry_path
+    if not path.exists():
+        return []
+    try:
+        data: Any = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    terms: list[str] = []
+    stack: list[Any] = [data]
+    while stack and len(terms) < _MAX_KPI_TERMS:
+        node = stack.pop()
+        if isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+        elif isinstance(node, str) and 0 < len(node) <= 200:
+            terms.append(node)
+    return terms
+
+
+def confirmed_domain(answers: dict[str, Any]) -> str:
+    """The domain the USER confirmed, or "". Detection alone never retunes a
+    question: a proposal the user has not seen is still an assumption."""
+    entry = answers.get(DOMAIN_QUESTION_ID)
+    answer = str(entry.get("answer") or "") if isinstance(entry, dict) else str(entry or "")
+    return answer if answer in load_vocabulary() else ""
+
+
+def _domain_entry(entry: dict[str, Any], signal: DomainSignal) -> dict[str, Any]:
+    """The domain question with the detected domain offered first and marked
+    recommended -- or, when nothing matched, with no recommendation at all."""
+    entry = dict(entry)
+    options = list(entry["options"])
+    if signal.domain in {option["option_id"] for option in options}:
+        entry["options"] = [o for o in options if o["option_id"] == signal.domain] + [
+            o for o in options if o["option_id"] != signal.domain
+        ]
+        entry["recommended_option_id"] = signal.domain
+        entry["why_it_matters"] += (
+            f" Best case here: `{signal.domain}` (confidence {signal.confidence:.2f}), "
+            "read off the workspace's own names -- "
+            + "; ".join(signal.evidence[:4])
+            + ". Confirm it or pick another; the evidence is listed so you can "
+            "attack it rather than trust it."
+        )
+    else:
+        entry["recommended_option_id"] = ""
+        entry["why_it_matters"] += (
+            " Nothing in the discovered table names, column names, document "
+            "filenames or KPI terms matched a known domain, so NOTHING is "
+            "recommended here -- the full list is offered and the choice is "
+            "yours. A guessed domain would retune every default below."
+        )
+    entry["domain_signal"] = signal.to_dict()
+    return entry
+
+
+def _apply_domain_overlay(
+    entry: dict[str, Any], overlay: dict[str, dict[str, Any]], domain: str
+) -> dict[str, Any]:
+    """Retune ONE question for the confirmed domain, from the vocabulary file.
+
+    Labels, recommendations and suggested answers move; option IDS never do --
+    ``core/blueprint/decisions.py::INTAKE_FACT_BRIDGE`` translates those ids, so
+    a domain that renamed one would silently break the blueprint.
+    """
+    tune = overlay.get(entry["id"])
+    if not tune:
+        return entry
+    entry = dict(entry)
+    options = list(entry.get("options") or [])
+    labels = tune.get("option_labels") or {}
+    if labels and options:
+        entry["options"] = [
+            {**option, "label": str(labels.get(option["option_id"], option["label"]))}
+            for option in options
+        ]
+    recommended = str(tune.get("recommended_option_id") or "")
+    if recommended in {option["option_id"] for option in options}:
+        entry["recommended_option_id"] = recommended
+    suggested = str(tune.get("suggested_answer") or "")
+    if suggested and not options:
+        entry["suggested_answer"] = suggested
+    why = str(tune.get("why") or "")
+    if why:
+        entry["why_it_matters"] = f"{entry['why_it_matters']} {why}"
+    entry["domain_tuned_for"] = domain
+    return entry
+
+
+@lru_cache(maxsize=1)
+def _overlay_labels() -> dict[str, dict[str, str]]:
+    """``{question_id: {domain-tuned label: option_id}}`` -- so an answer typed
+    off a domain-tuned panel still resolves to the stable option id."""
+    labels: dict[str, dict[str, str]] = {}
+    for slug in load_vocabulary():
+        for question_id, tune in overlay_for(slug).items():
+            for option_id, label in (tune.get("option_labels") or {}).items():
+                labels.setdefault(question_id, {})[str(label).strip().lower()] = str(option_id)
+    return labels
+
+
 @dataclass(frozen=True)
 class IntakePanelResult:
     current_json_path: str
@@ -408,10 +640,22 @@ class IntakePanelBuilder:
         self.layout.ensure_runtime_dirs()
         discovery = load_discovery(self.layout)
         answers = load_intake_answers(self.layout)
+        # Detection runs on whatever evidence exists; none of it is required.
+        signal = detect_domain(
+            discovery,
+            _workspace_documents(self.workspace),
+            _kpi_terms(self.layout),
+        )
+        domain = confirmed_domain(answers)
+        overlay = overlay_for(domain)
 
         entries: list[dict[str, Any]] = []
         for question in QUESTIONS:
             entry = dict(question)
+            if entry["id"] == DOMAIN_QUESTION_ID:
+                entry = _domain_entry(entry, signal)
+            elif overlay:
+                entry = _apply_domain_overlay(entry, overlay, domain)
             answer = answers.get(question["id"])
             measured = _measured_evidence(question, discovery, answers)
             if answer is not None:
@@ -442,6 +686,13 @@ class IntakePanelBuilder:
             "pending_count": len(pending),
             "skipped_count": len(skipped),
             "discovery_status": str(discovery.get("status") or "missing"),
+            "domain": {
+                "confirmed": domain,
+                "detected": signal.domain,
+                "confidence": signal.confidence,
+                "evidence": signal.evidence,
+                "alternatives": signal.alternatives,
+            },
             "questions": entries,
             "apply_command": (
                 f"uv run apply-intake-answer --workspace {workspace_rel} "
@@ -462,7 +713,8 @@ class IntakePanelBuilder:
         playback_dir.mkdir(parents=True, exist_ok=True)
         playback_md = playback_dir / "current.md"
         playback_md.write_text(
-            render_playback(workspace_rel, discovery, answers), encoding="utf-8"
+            render_playback(workspace_rel, discovery, answers, signal=signal, domain=domain),
+            encoding="utf-8",
         )
         return IntakePanelResult(
             current_json_path=_rel(current_json, self.repo_root),
@@ -489,6 +741,17 @@ class IntakeAnswerRecorder:
                 f"--question must be one of {', '.join(sorted(QUESTIONS_BY_ID))}, got {question_id!r}"
             )
         normalized = _normalize_answer(question, answer)
+
+        # A `suggested_answer` is a TEMPLATE to edit. Stored verbatim it reaches
+        # the blueprint as a real requirement -- a grain of "one row per
+        # <business entity>" would design a pipeline on a sentence nobody wrote.
+        # Refuse it here rather than let it flow downstream looking answered.
+        if _PLACEHOLDER.search(normalized):
+            raise ValueError(
+                f"answer for `{question['id']}` is still a template: "
+                f"{_PLACEHOLDER.findall(normalized)} must be replaced with real values. "
+                "The suggested answer is a starting point to edit, not an answer."
+            )
 
         path = self.layout.generated_dir / "intake" / "intake_answers.json"
         answers = load_intake_answers(self.layout)
@@ -558,6 +821,8 @@ def _normalize_answer(question: dict[str, Any], answer: str) -> str:
 
     by_id = {option["option_id"].lower(): option["option_id"] for option in options}
     by_label = {option["label"].strip().lower(): option["option_id"] for option in options}
+    # A domain-tuned panel shows a different LABEL for the same id; accept it too.
+    by_label.update(_overlay_labels().get(question["id"], {}))
     parts = [part.strip() for part in text.split(",")] if question["answer_type"] == "multi_select" else [text]
     resolved: list[str] = []
     for part in parts:
@@ -660,10 +925,24 @@ def aggregate_arrival_pattern(discovery: dict[str, Any]) -> str:
 _MEASURED = "(measured)"
 _YOU_SAID = "(you said)"
 _DEFAULT = "(default)"
+# An answer the PLATFORM supplied is not something the operator said. Tagging it
+# "(you said)" turns the alignment gate into a rubber stamp: the reader confirms
+# statements they never made. Found live -- a whole interview of platform
+# recommendations was played back as the operator's own words.
+_ASSUMED = "(assumed by the platform -- correct it if wrong)"
+# A suggested_answer is a TEMPLATE to edit, not an answer. Applied verbatim it
+# reaches the playback as e.g. "one row per <business entity>", and a grain like
+# that would design a meaningless pipeline.
+_PLACEHOLDER = re.compile(r"<[^<>]{1,80}>")
 
 
 def render_playback(
-    workspace: str, discovery: dict[str, Any], answers: dict[str, Any]
+    workspace: str,
+    discovery: dict[str, Any],
+    answers: dict[str, Any],
+    *,
+    signal: DomainSignal | None = None,
+    domain: str = "",
 ) -> str:
     """"Did I get you right?" -- every requirement restated in plain English, each
     line tagged with where it came from, so a wrong assumption is visible before
@@ -675,10 +954,20 @@ def render_playback(
             return ""
         return str(entry.get("answer") or "").strip()
 
+    def tag_for(question_id: str) -> str:
+        """Attribute the line to whoever actually supplied it."""
+        entry = answers.get(question_id)
+        if not isinstance(entry, dict):
+            return _DEFAULT
+        answer = str(entry.get("answer") or "")
+        if _PLACEHOLDER.search(answer):
+            return "(UNANSWERED -- still a template, replace the <placeholders>)"
+        return _YOU_SAID if entry.get("source") == "human" else _ASSUMED
+
     def line(label: str, question_id: str, default: str) -> str:
         answer = said(question_id)
         if answer:
-            return f"- {label}: {answer.replace(',', ', ')} {_YOU_SAID}"
+            return f"- {label}: {answer.replace(',', ', ')} {tag_for(question_id)}"
         return f"- {label}: {default} {_DEFAULT}"
 
     pattern = aggregate_arrival_pattern(discovery)
@@ -697,6 +986,7 @@ def render_playback(
         "",
         "## Requirements",
         "",
+        *_playback_domain_lines(domain, signal),
         line("Consumers", "consumers", "not stated"),
         line("Decisions the number drives", "decisions_driven", "not stated"),
         line("Grain (one row is)", "grain_sentence", "not stated"),
@@ -733,6 +1023,40 @@ def render_playback(
         "",
     ]
     return "\n".join(lines)
+
+
+def _playback_domain_lines(domain: str, signal: DomainSignal | None) -> list[str]:
+    """The confirmed domain and the evidence it rested on.
+
+    Every later default in this playback was tuned by that answer, so the
+    evidence belongs here rather than only in the panel that asked.
+    """
+    labels = domain_labels()
+    detected = signal.domain if signal else UNKNOWN_DOMAIN
+    evidence = list(signal.evidence) if signal else []
+    if domain:
+        lines = [f"- Business domain: {labels.get(domain, domain)} {_YOU_SAID}"]
+    elif detected != UNKNOWN_DOMAIN:
+        lines = [
+            f"- Business domain: not confirmed yet; detected {labels.get(detected, detected)} "
+            f"at confidence {signal.confidence:.2f} {_DEFAULT}"
+            if signal
+            else f"- Business domain: not confirmed yet {_DEFAULT}"
+        ]
+    else:
+        lines = [
+            "- Business domain: not confirmed, and no evidence matched a known "
+            f"domain -- nothing below was domain-tuned {_DEFAULT}"
+        ]
+    if evidence:
+        lines.append(
+            f"  Evidence ({detected}): " + "; ".join(evidence[:6])
+        )
+    elif domain:
+        lines.append(
+            "  Evidence: none matched; the domain above is your answer, not an inference."
+        )
+    return lines
 
 
 def _playback_lane(
@@ -808,13 +1132,20 @@ def render_markdown(panel: dict[str, Any]) -> str:
 def _option_lines(question: dict[str, Any]) -> list[str]:
     options = question.get("options") or []
     if not options:
-        return ["Free-text answer.", ""]
+        suggested = str(question.get("suggested_answer") or "")
+        lines = ["Free-text answer.", ""]
+        if suggested:
+            lines.extend(["Suggested starting point (edit it, do not just paste it):", "", f"> {suggested}", ""])
+        return lines
     recommended = str(question.get("recommended_option_id") or "")
     multi = question.get("answer_type") == "multi_select"
     lines = ["Options:" + (" (comma-separate more than one)" if multi else ""), ""]
     for option in options:
         suffix = " [RECOMMENDED]" if option["option_id"] == recommended else ""
         lines.append(f"- `{option['option_id']}`{suffix} · {option['label']}")
+    if not recommended:
+        lines.append("")
+        lines.append("No option is recommended: the evidence does not support one.")
     lines.append("")
     return lines
 
@@ -836,6 +1167,8 @@ def _rel(path: Path, root: Path) -> str:
 
 __all__ = [
     "ANSWERS_VERSION",
+    "DOMAIN_OTHER_OPTION",
+    "DOMAIN_QUESTION_ID",
     "PANEL_VERSION",
     "PLAYBACK_CONFIRM_QUESTION",
     "QUESTIONS",
@@ -845,6 +1178,7 @@ __all__ = [
     "IntakePanelBuilder",
     "IntakePanelResult",
     "aggregate_arrival_pattern",
+    "confirmed_domain",
     "load_intake_answers",
     "render_markdown",
     "render_playback",

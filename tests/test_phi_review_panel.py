@@ -186,3 +186,39 @@ class PHIReviewPanelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProvenanceWordMatchingTests(unittest.TestCase):
+    """An agent identity must not launder itself into a human approval.
+
+    Found live during a real replay: the check normalised the WHOLE string and
+    did an exact set-membership test, so `agent (platform recommendation)`
+    became `agentplatformrecommendation`, matched nothing, and was recorded as
+    `human` -- defeating every gate that refuses agent identities. Any agent
+    could bypass a human gate by appending one word to its name.
+    """
+
+    def test_agent_identity_with_extra_words_is_still_an_agent(self):
+        from core.governance.provenance import decision_source
+
+        for identity in (
+            "agent (platform recommendation)",
+            "Claude Opus",
+            "automated run",
+            "data team (automation)",
+            "cli agent",
+            "bot-3",
+        ):
+            self.assertEqual(decision_source(identity), "agent", identity)
+
+    def test_real_human_names_are_still_human(self):
+        from core.governance.provenance import decision_source
+
+        for identity in ("shubham", "Dr. Smith", "alice", "Priya Nair", "j.doe@corp.com"):
+            self.assertEqual(decision_source(identity), "human", identity)
+
+    def test_empty_or_blank_is_an_agent(self):
+        from core.governance.provenance import decision_source
+
+        for identity in ("", "   ", None):
+            self.assertEqual(decision_source(identity), "agent", repr(identity))

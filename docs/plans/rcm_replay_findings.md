@@ -92,3 +92,49 @@ for. This is an unplanned but useful test of the idempotency contract.
 - Phase 0 (access): DONE -- credential and external location already existed and validate.
 - Phase A: in progress; F1 promoted to the top of the queue because it blocks discovery.
 - Phase B: blocked on F1.
+
+## F6 [BLOCKER, fixed] Distinct entities collapsed into one table
+
+`discover-source` returned FOUR tables for an estate that has twelve. The
+directory grouping rule ("files under one folder are one table") is correct for a
+part-file layout and catastrophically wrong for a folder holding one file per
+entity: `departments/encounters/patients/providers/transactions` under one
+hospital folder were merged into a single table named after the folder.
+
+Merging unrelated schemas into one bronze table poisons everything downstream --
+every grain, join and KPI would have been built on a table that never existed.
+
+FIX: a group survives intact only when every member reduces to the same shard
+template (digit runs collapsed). `part-00001`/`part-00002` and
+`hospital1_claim_data`/`hospital2_claim_data` converge on one template and stay
+grouped -- correctly, they ARE shards of one dataset. `patients`/`providers` do
+not, so they split.
+
+The fix then exposed a second layer: `patients` existed under two hospital
+folders, so two tables shared a name and would have collided in bronze naming and
+in the generated dbt models. Colliding names are now qualified by their parent
+(`trendytech-hospital-a__patients`); unambiguous names stay short.
+
+Result: 4 tables -> 12 uniquely-named tables, matching the real estate.
+
+## F7 [DESIGN, in progress] The interview presumed a domain instead of deriving one
+
+Driving the intake against a real estate showed the interview asks generic
+questions and leaves the judgment to the agent -- so the agent starts inventing
+domain assumptions (healthcare/claims restatement behaviour, PHI columns,
+regulatory lineage). On a platform where "rcm is just one user out of others",
+that is exactly backwards.
+
+Owner's requirement: the platform already HAS the evidence to infer the domain
+once it can see the data and the documentation, so it should derive the domain,
+CONFIRM it with the user, and only then offer domain-accurate options -- and
+every question should carry a recommended best-case option. Consumers stay a
+blackbox until the user states them; lineage/reproducibility and who-to-notify
+are grilling questions with options, never agent assumptions.
+
+FIX IN FLIGHT: a `domain_confirm` question whose options are built from evidence
+(discovered table/column names, document filenames), with the matched tokens
+shown so the inference can be attacked; unmatched evidence yields "unknown" and
+the full list rather than a guess. Domain vocabulary ships as DATA, never as
+branches in code, and a genericity guard test keeps domain names out of
+`core/intake` logic.

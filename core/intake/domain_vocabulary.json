@@ -1,0 +1,451 @@
+{
+  "artifact_type": "intake/domain_vocabulary.json",
+  "version": 1,
+  "_readme": [
+    "DATA, not code. `core/intake/*.py` must never branch on a domain name; it",
+    "reads this file and matches `tokens` against evidence the workspace itself",
+    "produced (discovered table names, column names, document filenames, KPI",
+    "registry terms). A domain with no token match is never proposed.",
+    "`question_overlay` retunes an EXISTING intake question for a CONFIRMED",
+    "domain. Option ids are never introduced or renamed here -- only labels,",
+    "recommendations and suggested answers -- because core/blueprint/decisions.py",
+    "INTAKE_FACT_BRIDGE keys on those ids."
+  ],
+  "domains": {
+    "healthcare": {
+      "label": "Healthcare -- clinical, provider or payer operations",
+      "tokens": [
+        "patient",
+        "encounter",
+        "diagnosis",
+        "procedure",
+        "provider",
+        "payer",
+        "payor",
+        "admission",
+        "discharge",
+        "icd",
+        "cpt",
+        "npi",
+        "prescription",
+        "pharmacy",
+        "clinical",
+        "physician",
+        "hospital",
+        "ehr",
+        "hl7",
+        "fhir",
+        "claim",
+        "denial",
+        "remittance"
+      ],
+      "question_overlay": {
+        "pii_regulated": {
+          "suggested_answer": "Direct identifiers (name, date of birth, address, contact, member/record number) plus anything that ties a person to a clinical event; only the care and billing teams may see them unmasked, analysts get masked or aggregated values.",
+          "why": "Health data is regulated by default, so the safe starting point names identifiers rather than waiting for someone to spot one."
+        },
+        "lineage_reproducibility": {
+          "recommended_option_id": "required",
+          "why": "A regulated number that cannot be reproduced as of its publication date cannot be defended in an audit, so this domain pays the cheaper-than-a-finding cost up front."
+        },
+        "calendar_and_restatement": {
+          "recommended_option_id": "restate_within_window",
+          "why": "Late adjustments and corrections arrive after publication in this domain, so an append-only assumption silently understates already-published periods.",
+          "option_labels": {
+            "restate_within_window": "Published numbers are restated within a known window (adjustments, denials and corrections land after publication)"
+          }
+        },
+        "consumers": {
+          "recommended_option_id": "regulatory",
+          "why": "Compliance reporting is the consumer that can veto a design here; satisfying it first means the others get a lawful surface for free."
+        }
+      }
+    },
+    "finance_banking": {
+      "label": "Finance / banking -- accounting, lending or capital markets",
+      "tokens": [
+        "ledger",
+        "journal",
+        "debit",
+        "credit",
+        "reconciliation",
+        "portfolio",
+        "trade",
+        "settlement",
+        "counterparty",
+        "iban",
+        "swift",
+        "loan",
+        "mortgage",
+        "interest",
+        "custody",
+        "chargeback",
+        "treasury",
+        "accrual",
+        "invoice",
+        "receivable",
+        "payable"
+      ],
+      "question_overlay": {
+        "pii_regulated": {
+          "suggested_answer": "Account and card numbers, national identifiers, names and addresses on parties to a transaction; unmasked access limited to the finance and fraud teams, everyone else sees tokenised or aggregated values.",
+          "why": "The identifiers here are also payment credentials, so masking is the starting point rather than the exception."
+        },
+        "lineage_reproducibility": {
+          "recommended_option_id": "required",
+          "why": "A published financial figure has to be reproducible as of its reporting date, which is exactly what attribute-level lineage buys."
+        },
+        "calendar_and_restatement": {
+          "recommended_option_id": "frozen_after_close",
+          "why": "A closed accounting period is frozen and corrections go to the next period, so rebuilding history freely would contradict what was already reported.",
+          "option_labels": {
+            "restate_within_window": "Published numbers are restated within a known window (adjusting entries land before the period is closed)"
+          }
+        },
+        "consumers": {
+          "recommended_option_id": "regulatory",
+          "why": "The reporting pack with the hardest constraints wins; a surface that satisfies it also serves the internal readers."
+        }
+      }
+    },
+    "insurance": {
+      "label": "Insurance -- underwriting, policy or claims operations",
+      "tokens": [
+        "policy",
+        "premium",
+        "underwriting",
+        "claimant",
+        "adjuster",
+        "endorsement",
+        "actuarial",
+        "peril",
+        "deductible",
+        "reinsurance",
+        "broker",
+        "insured",
+        "coverage",
+        "loss",
+        "subrogation",
+        "claim"
+      ],
+      "question_overlay": {
+        "pii_regulated": {
+          "suggested_answer": "Policyholder and claimant identity (name, date of birth, address, national id), plus any health or loss detail attached to a claim; unmasked only for claims handling, masked for analysis.",
+          "why": "Claim detail often carries health or criminal information, which is regulated well beyond ordinary customer data."
+        },
+        "lineage_reproducibility": {
+          "recommended_option_id": "required",
+          "why": "Reserves and loss ratios are restated as claims develop, so every published figure needs an as-of-date reproduction."
+        },
+        "calendar_and_restatement": {
+          "recommended_option_id": "restate_within_window",
+          "why": "Claims develop for months after the event, so published triangles are restated by design rather than appended to.",
+          "option_labels": {
+            "restate_within_window": "Published numbers are restated within a known window (claims develop for months after the loss date)"
+          }
+        },
+        "consumers": {
+          "recommended_option_id": "regulatory",
+          "why": "Statutory reporting is the binding consumer; the actuarial and operational readers sit on the same conformed layer."
+        }
+      }
+    },
+    "retail_ecommerce": {
+      "label": "Retail / e-commerce -- orders, catalogue and fulfilment",
+      "tokens": [
+        "sku",
+        "basket",
+        "cart",
+        "checkout",
+        "merchandising",
+        "storefront",
+        "promotion",
+        "shopper",
+        "coupon",
+        "fulfilment",
+        "fulfillment",
+        "assortment",
+        "markdown",
+        "footfall",
+        "till",
+        "refund",
+        "orderline"
+      ],
+      "question_overlay": {
+        "pii_regulated": {
+          "suggested_answer": "Customer name, contact details, delivery address and payment reference; the marketing and analytics teams work from hashed customer keys, only fulfilment and support see contact details.",
+          "why": "Contact and delivery data is the disclosure risk here, and it is easy to keep out of the analytical surface entirely."
+        },
+        "lineage_reproducibility": {
+          "recommended_option_id": "not_required",
+          "why": "Trading numbers are re-derived from the current order book rather than defended as of a past date, so the cheaper default holds unless finance says otherwise."
+        },
+        "calendar_and_restatement": {
+          "recommended_option_id": "restate_within_window",
+          "why": "Returns and cancellations land after the sale, so a day's revenue keeps moving for the length of the returns window.",
+          "option_labels": {
+            "restate_within_window": "Published numbers are restated within a known window (returns and cancellations land after the sale)"
+          }
+        },
+        "consumers": {
+          "recommended_option_id": "bi_dashboard",
+          "why": "Trading review runs on a small set of known query shapes; more classes can be added once a second reader actually exists."
+        }
+      }
+    },
+    "manufacturing_supply_chain": {
+      "label": "Manufacturing / supply chain -- production and procurement",
+      "tokens": [
+        "bom",
+        "workorder",
+        "plant",
+        "machine",
+        "downtime",
+        "scrap",
+        "defect",
+        "supplier",
+        "procurement",
+        "mrp",
+        "throughput",
+        "yield",
+        "assembly",
+        "lot",
+        "changeover",
+        "oee",
+        "requisition"
+      ],
+      "question_overlay": {
+        "pii_regulated": {
+          "suggested_answer": "Operator and approver names on work orders and inspections, plus supplier contact people; keep them out of the analytical layer and report by role or station instead.",
+          "why": "The personal data here is incidental to the process data, so it can usually be dropped rather than masked."
+        },
+        "lineage_reproducibility": {
+          "recommended_option_id": "required",
+          "why": "A quality escape has to be traced back to the lot and station that produced it, which is attribute-level lineage by another name."
+        },
+        "calendar_and_restatement": {
+          "recommended_option_id": "restate_within_window",
+          "why": "Inspection and scrap outcomes are recorded after the production run, so the run's numbers are corrected after they are first published.",
+          "option_labels": {
+            "restate_within_window": "Published numbers are restated within a known window (inspection and scrap outcomes land after the run)"
+          }
+        },
+        "consumers": {
+          "recommended_option_id": "operational_app",
+          "why": "The number is acted on at the line rather than read in a pack, and an operational surface also feeds the reporting one."
+        }
+      }
+    },
+    "telecom": {
+      "label": "Telecom -- network, subscriber and usage operations",
+      "tokens": [
+        "subscriber",
+        "msisdn",
+        "imsi",
+        "imei",
+        "cdr",
+        "roaming",
+        "arpu",
+        "sim",
+        "bearer",
+        "handset",
+        "prepaid",
+        "postpaid",
+        "cell",
+        "tower",
+        "topup",
+        "hlr"
+      ],
+      "question_overlay": {
+        "pii_regulated": {
+          "suggested_answer": "Subscriber identifiers (MSISDN, IMSI, IMEI, account name) and anything that reveals location or who contacted whom; analysts get pseudonymised keys and coarse location only.",
+          "why": "Usage records are communications metadata, which is regulated separately from ordinary customer data in most jurisdictions."
+        },
+        "lineage_reproducibility": {
+          "recommended_option_id": "required",
+          "why": "A disputed bill has to be reconstructed from the usage as it was rated, not as the current rating rules would compute it."
+        },
+        "calendar_and_restatement": {
+          "recommended_option_id": "restate_within_window",
+          "why": "Usage records arrive late from roaming partners and mediation, so an already-published day keeps growing for a known window.",
+          "option_labels": {
+            "restate_within_window": "Published numbers are restated within a known window (roaming and mediated usage records arrive late)"
+          }
+        },
+        "consumers": {
+          "recommended_option_id": "bi_dashboard",
+          "why": "Network and commercial reviews share a fixed set of query shapes; widen only when a second class is named."
+        }
+      }
+    },
+    "saas_product_analytics": {
+      "label": "SaaS / product analytics -- usage, funnel and subscription",
+      "tokens": [
+        "signup",
+        "activation",
+        "retention",
+        "mrr",
+        "arr",
+        "tenant",
+        "trial",
+        "funnel",
+        "pageview",
+        "cohort",
+        "onboarding",
+        "churn",
+        "seat",
+        "subscription",
+        "clickstream",
+        "impression",
+        "upsell"
+      ],
+      "question_overlay": {
+        "pii_regulated": {
+          "suggested_answer": "End-user email, name, IP address and any free-text they typed; product analysis runs on hashed user and tenant ids, with raw identity limited to support.",
+          "why": "Behavioural events are personal data once they carry a stable user id, and the analytical use rarely needs the raw identity."
+        },
+        "lineage_reproducibility": {
+          "recommended_option_id": "not_required",
+          "why": "Product metrics are re-derived from the event log rather than defended as of a past date, so the cheaper default holds."
+        },
+        "calendar_and_restatement": {
+          "recommended_option_id": "restate_within_window",
+          "why": "Late-arriving client events and session stitching change yesterday's counts for a day or two after publication.",
+          "option_labels": {
+            "restate_within_window": "Published numbers are restated within a known window (late client events and session stitching change yesterday)"
+          }
+        },
+        "consumers": {
+          "recommended_option_id": "self_serve_analyst",
+          "why": "The question set here is genuinely exploratory, and a conformed model is what keeps ad-hoc answers agreeing with each other."
+        }
+      }
+    },
+    "hr_people": {
+      "label": "HR / people operations -- workforce, payroll and hiring",
+      "tokens": [
+        "employee",
+        "headcount",
+        "payroll",
+        "attrition",
+        "compensation",
+        "recruiting",
+        "candidate",
+        "applicant",
+        "tenure",
+        "absence",
+        "appraisal",
+        "salary",
+        "workforce",
+        "requisition",
+        "termination",
+        "promotion"
+      ],
+      "question_overlay": {
+        "pii_regulated": {
+          "suggested_answer": "Everything that identifies a person plus pay, performance, health and disciplinary detail; access is restricted to HR, and every other reader sees values aggregated above a minimum group size.",
+          "why": "In this domain nearly the whole record is sensitive, and small groups re-identify people even when identifiers are removed."
+        },
+        "lineage_reproducibility": {
+          "recommended_option_id": "required",
+          "why": "Pay and headcount figures are challenged after the fact, so each has to be reproducible exactly as it was published."
+        },
+        "calendar_and_restatement": {
+          "recommended_option_id": "restate_within_window",
+          "why": "Backdated hires, leavers and pay corrections change an already-reported period as a matter of routine.",
+          "option_labels": {
+            "restate_within_window": "Published numbers are restated within a known window (backdated hires, leavers and pay corrections)"
+          }
+        },
+        "consumers": {
+          "recommended_option_id": "regulatory",
+          "why": "Statutory pay and diversity reporting has the strictest constraints, and satisfying it makes the management view safe by construction."
+        }
+      }
+    },
+    "logistics": {
+      "label": "Logistics -- freight, transport and last-mile delivery",
+      "tokens": [
+        "shipment",
+        "consignment",
+        "freight",
+        "carrier",
+        "waybill",
+        "depot",
+        "dispatch",
+        "manifest",
+        "container",
+        "haul",
+        "courier",
+        "parcel",
+        "tracking",
+        "eta",
+        "linehaul",
+        "route"
+      ],
+      "question_overlay": {
+        "pii_regulated": {
+          "suggested_answer": "Recipient name, address and contact number, plus driver identity and position traces; keep addresses at postcode level for analysis and leave full detail in the operational system.",
+          "why": "Delivery addresses and driver traces are both personal data, and analysis almost never needs either at full precision."
+        },
+        "lineage_reproducibility": {
+          "recommended_option_id": "not_required",
+          "why": "Service performance is recomputed from the current event history rather than defended as of a past date."
+        },
+        "calendar_and_restatement": {
+          "recommended_option_id": "restate_within_window",
+          "why": "Scan events arrive out of order from partners, so a day's on-time rate settles only after the late scans land.",
+          "option_labels": {
+            "restate_within_window": "Published numbers are restated within a known window (scan events arrive out of order from partners)"
+          }
+        },
+        "consumers": {
+          "recommended_option_id": "operational_app",
+          "why": "The number drives a dispatch or exception decision while the shipment is moving, so the operational surface comes first."
+        }
+      }
+    },
+    "energy_utilities": {
+      "label": "Energy / utilities -- metering, generation and grid",
+      "tokens": [
+        "meter",
+        "kwh",
+        "grid",
+        "outage",
+        "substation",
+        "turbine",
+        "feeder",
+        "emission",
+        "wellhead",
+        "rig",
+        "smartmeter",
+        "curtailment",
+        "voltage",
+        "megawatt",
+        "consumption",
+        "tariff"
+      ],
+      "question_overlay": {
+        "pii_regulated": {
+          "suggested_answer": "Metering point identifiers tied to a household, plus account name and address; half-hourly consumption reveals occupancy, so analysis runs on aggregated or pseudonymised meter keys.",
+          "why": "Interval consumption is personal data because it exposes when a home is occupied, which is easy to miss when the column looks purely numeric."
+        },
+        "lineage_reproducibility": {
+          "recommended_option_id": "required",
+          "why": "Settlement and billing figures are audited against the readings as they stood at settlement time."
+        },
+        "calendar_and_restatement": {
+          "recommended_option_id": "restate_within_window",
+          "why": "Estimated readings are replaced by actuals through the settlement window, restating already-published consumption.",
+          "option_labels": {
+            "restate_within_window": "Published numbers are restated within a known window (estimated readings are replaced by actuals at settlement)"
+          }
+        },
+        "consumers": {
+          "recommended_option_id": "regulatory",
+          "why": "Settlement and regulatory submissions bind the design; internal reporting rides on the same conformed numbers."
+        }
+      }
+    }
+  }
+}

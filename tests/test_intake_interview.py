@@ -3,10 +3,15 @@ from __future__ import annotations
 
 import json
 import tempfile
+import tempfile
 import unittest
+from core.intake import interview
 from pathlib import Path
 
+from core.blueprint.decisions import INTAKE_FACT_BRIDGE
+from core.intake.domain_detect import load_vocabulary, overlay_for
 from core.intake.interview import (
+    DOMAIN_QUESTION_ID,
     QUESTIONS,
     QUESTIONS_BY_ID,
     IntakeAnswerRecorder,
@@ -70,7 +75,9 @@ class TestQuestionSet(unittest.TestCase):
             for question in QUESTIONS
             for source in question["merged_from"]
         }
-        self.assertEqual(sources, {"end_users", "engine"})
+        # Both research reports, plus questions the platform owner added later
+        # (`owner:*`) -- provenance stays recorded either way.
+        self.assertLessEqual({"end_users", "engine"}, sources)
 
     def test_the_merge_is_deduplicated_not_concatenated(self):
         # 14 (end_users) + 12 (engine) = 26 asked separately; the merged set is
@@ -104,6 +111,178 @@ class TestQuestionSet(unittest.TestCase):
                 continue
             ids = {option["option_id"] for option in question.get("options") or []}
             self.assertIn(recommended, ids, question["id"])
+
+
+class TestRecommendationCoverage(unittest.TestCase):
+    """An intake that asks 18 questions and defends none of them is an
+    interrogation. Asserted over the WHOLE list so a new question cannot land
+    without a recommendation or a suggested starting point."""
+
+    def test_every_question_recommends_something(self):
+        for question in QUESTIONS:
+            with self.subTest(question=question["id"]):
+                if question["answer_type"] in {"select", "multi_select"}:
+                    if question.get("recommended_at_panel_time"):
+                        self.assertFalse(
+                            question["recommended_option_id"],
+                            "a panel-time recommendation must not be hardcoded too",
+                        )
+                        continue
+                    self.assertTrue(
+                        question["recommended_option_id"],
+                        f"{question['id']} offers options but recommends none",
+                    )
+                else:
+                    self.assertTrue(
+                        question.get("suggested_answer"),
+                        f"{question['id']} is free text and offers no starting point",
+                    )
+
+    def test_only_the_domain_question_defers_its_recommendation(self):
+        deferred = {q["id"] for q in QUESTIONS if q.get("recommended_at_panel_time")}
+        self.assertEqual({DOMAIN_QUESTION_ID}, deferred)
+
+    def test_every_recommendation_is_justified_in_why_it_matters(self):
+        for question in QUESTIONS:
+            with self.subTest(question=question["id"]):
+                self.assertGreater(len(question["why_it_matters"]), 80)
+
+
+class TestBlueprintBridgeIdsAreStable(unittest.TestCase):
+    """`core/blueprint/decisions.py::INTAKE_FACT_BRIDGE` translates option ids
+    into facts. Renaming one here silently empties a fact and changes a
+    decision, so the ids it keys on are locked."""
+
+    def test_every_bridged_question_still_exists(self):
+        for question_id in INTAKE_FACT_BRIDGE:
+            self.assertIn(question_id, QUESTIONS_BY_ID)
+
+    def test_every_bridged_option_id_still_translates(self):
+        for question_id, targets in INTAKE_FACT_BRIDGE.items():
+            for option in QUESTIONS_BY_ID[question_id].get("options") or []:
+                with self.subTest(question=question_id, option=option["option_id"]):
+                    translated = [translate(option["option_id"]) for _, translate in targets]
+                    self.assertTrue(
+                        any(value is not None for value in translated),
+                        f"{question_id}.{option['option_id']} translates to nothing",
+                    )
+
+
+class TestDomainQuestion(_TempWorkspace):
+    def _entry(self, question_id: str) -> dict:
+        return next(q for q in self.panel()["questions"] if q["id"] == question_id)
+
+    def test_it_is_asked_first(self):
+        self.assertEqual(DOMAIN_QUESTION_ID, QUESTIONS[0]["id"])
+        IntakePanelBuilder(self.repo_root, "workspaces/sample_ws").prepare()
+        self.assertEqual(DOMAIN_QUESTION_ID, self.panel()["current_question_id"])
+
+    def test_options_cover_every_domain_in_the_vocabulary_plus_other(self):
+        IntakePanelBuilder(self.repo_root, "workspaces/sample_ws").prepare()
+        ids = {o["option_id"] for o in self._entry(DOMAIN_QUESTION_ID)["options"]}
+        self.assertEqual(set(load_vocabulary()) | {"other"}, ids)
+
+    def test_no_discovery_means_no_recommendation_and_a_plain_statement(self):
+        IntakePanelBuilder(self.repo_root, "workspaces/sample_ws").prepare()
+        entry = self._entry(DOMAIN_QUESTION_ID)
+        self.assertEqual("", entry["recommended_option_id"])
+        self.assertEqual("unknown", entry["domain_signal"]["domain"])
+        self.assertIn("NOTHING is recommended", entry["why_it_matters"])
+        self.assertIn("No option is recommended", self.markdown())
+
+    def test_detected_domain_is_offered_first_with_its_evidence(self):
+        slug, entry = next(iter(load_vocabulary().items()))
+        self.write_discovery(
+            {
+                "status": "ok",
+                "tables": [{"name": f"{token}s", "size_bytes": 1} for token in entry["tokens"][:3]],
+            }
+        )
+        IntakePanelBuilder(self.repo_root, "workspaces/sample_ws").prepare()
+        question = self._entry(DOMAIN_QUESTION_ID)
+        self.assertEqual(slug, question["options"][0]["option_id"])
+        self.assertEqual(slug, question["recommended_option_id"])
+        self.assertTrue(question["domain_signal"]["evidence"])
+        self.assertEqual(slug, self.panel()["domain"]["detected"])
+
+    def test_detection_alone_does_not_retune_the_other_questions(self):
+        slug, entry = next(iter(load_vocabulary().items()))
+        self.write_discovery(
+            {
+                "status": "ok",
+                "tables": [{"name": f"{token}s", "size_bytes": 1} for token in entry["tokens"][:3]],
+            }
+        )
+        IntakePanelBuilder(self.repo_root, "workspaces/sample_ws").prepare()
+        self.assertEqual("", self.panel()["domain"]["confirmed"])
+        for question in self.panel()["questions"]:
+            self.assertNotIn("domain_tuned_for", question)
+
+
+class TestDomainRetunesWithoutMovingIds(_TempWorkspace):
+    """Confirming a domain may change option TEXT and which option is
+    recommended. It may never change an option id."""
+
+    BASELINE = {q["id"]: [o["option_id"] for o in q.get("options") or []] for q in QUESTIONS}
+
+    def _panel_for(self, domain: str) -> dict:
+        self.write_answers({DOMAIN_QUESTION_ID: domain})
+        IntakePanelBuilder(self.repo_root, "workspaces/sample_ws").prepare()
+        return self.panel()
+
+    def test_option_ids_are_identical_for_every_domain(self):
+        for domain in load_vocabulary():
+            panel = self._panel_for(domain)
+            for question in panel["questions"]:
+                with self.subTest(domain=domain, question=question["id"]):
+                    ids = [o["option_id"] for o in question.get("options") or []]
+                    self.assertEqual(
+                        sorted(self.BASELINE[question["id"]]), sorted(ids)
+                    )
+
+    def test_every_domain_recommendation_is_a_real_option(self):
+        for domain in load_vocabulary():
+            panel = self._panel_for(domain)
+            for question in panel["questions"]:
+                recommended = question.get("recommended_option_id") or ""
+                if not recommended:
+                    continue
+                with self.subTest(domain=domain, question=question["id"]):
+                    self.assertIn(
+                        recommended, {o["option_id"] for o in question["options"]}
+                    )
+
+    def test_a_confirmed_domain_actually_changes_a_default(self):
+        for domain, overlay in ((d, overlay_for(d)) for d in load_vocabulary()):
+            with self.subTest(domain=domain):
+                self.assertTrue(overlay, f"{domain} retunes nothing")
+                panel = self._panel_for(domain)
+                tuned = {
+                    q["id"]: q
+                    for q in panel["questions"]
+                    if q.get("domain_tuned_for") == domain
+                }
+                self.assertEqual(set(overlay), set(tuned))
+                for question_id, tune in overlay.items():
+                    expected = str(tune.get("recommended_option_id") or "")
+                    if expected:
+                        self.assertEqual(expected, tuned[question_id]["recommended_option_id"])
+                    suggested = str(tune.get("suggested_answer") or "")
+                    if suggested:
+                        self.assertEqual(suggested, tuned[question_id]["suggested_answer"])
+
+    def test_a_domain_tuned_label_still_resolves_to_its_option_id(self):
+        domain = next(
+            d for d in load_vocabulary()
+            if any("option_labels" in t for t in overlay_for(d).values())
+        )
+        question_id, tune = next(
+            (qid, t) for qid, t in overlay_for(domain).items() if t.get("option_labels")
+        )
+        option_id, label = next(iter(tune["option_labels"].items()))
+        recorder = IntakeAnswerRecorder(self.repo_root, "workspaces/sample_ws")
+        recorder.apply(question_id, label, answered_by="Reviewer")
+        self.assertEqual(option_id, load_intake_answers(self.layout)[question_id]["answer"])
 
 
 class TestPanel(_TempWorkspace):
@@ -229,7 +408,11 @@ class TestPlayback(_TempWorkspace):
                 self.assertTrue(
                     line.endswith("(you said)")
                     or line.endswith("(measured)")
-                    or line.endswith("(default)"),
+                    or line.endswith("(default)")
+                    # A platform-supplied answer is attributed to the platform,
+                    # never to the reader -- see PlaybackAttributionTests.
+                    or line.endswith("correct it if wrong)")
+                    or line.endswith("replace the <placeholders>)"),
                     f"untagged playback line: {line}",
                 )
 
@@ -239,6 +422,26 @@ class TestPlayback(_TempWorkspace):
         text = self.playback()
         self.assertIn("Velocity lane", text)
         self.assertIn("--question playback_confirm --answer confirmed", text)
+
+    def test_playback_states_the_confirmed_domain_and_its_evidence(self):
+        slug, entry = next(iter(load_vocabulary().items()))
+        self.write_discovery(
+            {
+                "status": "ok",
+                "tables": [{"name": f"{token}s", "size_bytes": 1} for token in entry["tokens"][:3]],
+            }
+        )
+        self.write_answers({**self.ANSWERS, DOMAIN_QUESTION_ID: slug})
+        IntakePanelBuilder(self.repo_root, "workspaces/sample_ws").prepare()
+        text = self.playback()
+        self.assertIn(f"- Business domain: {entry['label']} (you said)", text)
+        self.assertIn(f"Evidence ({slug}):", text)
+        self.assertIn(entry["tokens"][0], text)
+
+    def test_playback_says_so_when_no_domain_matched(self):
+        self.write_answers(self.ANSWERS)
+        IntakePanelBuilder(self.repo_root, "workspaces/sample_ws").prepare()
+        self.assertIn("no evidence matched a known domain", self.playback())
 
     def test_playback_is_ascii_only(self):
         self.write_answers(self.ANSWERS)
@@ -346,10 +549,10 @@ class TestAnswers(_TempWorkspace):
             self.recorder.apply("not_a_question", "yes")
 
     def test_answering_advances_the_panel(self):
-        first = QUESTIONS[0]["id"]
-        out = self.recorder.apply(first, "bi_dashboard")
+        first = QUESTIONS[0]
+        out = self.recorder.apply(first["id"], first["options"][0]["option_id"])
         self.assertEqual(out["next_panel"]["answered_count"], 1)
-        self.assertNotEqual(out["next_panel"]["current_question_id"], first)
+        self.assertNotEqual(out["next_panel"]["current_question_id"], first["id"])
         self.assertIn("[ok]", self.markdown())
 
     def test_reanswering_overwrites_rather_than_appending(self):
@@ -374,3 +577,90 @@ class StageRoutingTests(_TempWorkspace):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlaybackAttributionTests(unittest.TestCase):
+    """The alignment gate is worthless if it misattributes.
+
+    Found live: an interview answered entirely from platform recommendations was
+    played back as the operator's own words, so confirming it would have meant
+    agreeing to statements nobody made.
+    """
+
+    def _answers(self, **kw):
+        return {
+            qid: {"answer": ans, "answered_by": by, "source": src, "at": "now"}
+            for qid, (ans, by, src) in kw.items()
+        }
+
+    def test_agent_sourced_answer_is_not_labelled_you_said(self):
+        answers = self._answers(
+            grain_sentence=("one row per claim per day", "agent", "agent")
+        )
+        text = interview.render_playback("ws", {}, answers)
+        line = next(ln for ln in text.splitlines() if "one row per claim per day" in ln)
+        self.assertNotIn("(you said)", line)
+        self.assertIn("assumed by the platform", line)
+
+    def test_human_sourced_answer_is_labelled_you_said(self):
+        answers = self._answers(
+            grain_sentence=("one row per claim per day", "shubham", "human")
+        )
+        text = interview.render_playback("ws", {}, answers)
+        line = next(ln for ln in text.splitlines() if "one row per claim per day" in ln)
+        self.assertIn("(you said)", line)
+
+    def test_template_answer_is_flagged_unanswered_in_the_playback(self):
+        answers = self._answers(
+            grain_sentence=("one row per <entity> per <day>", "shubham", "human")
+        )
+        text = interview.render_playback("ws", {}, answers)
+        line = next(ln for ln in text.splitlines() if "<entity>" in ln)
+        self.assertIn("UNANSWERED", line)
+
+
+class TemplateAnswerRejectionTests(unittest.TestCase):
+    """A suggested_answer is a starting point to edit, not an answer.
+
+    Applied verbatim it reaches the blueprint as a real requirement -- a grain of
+    "one row per <business entity>" designs a pipeline on a sentence nobody wrote.
+    """
+
+    def test_unedited_template_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = root / "workspaces" / "demo"
+            (ws / "interns").mkdir(parents=True)
+            rec = interview.IntakeAnswerRecorder(root, "workspaces/demo")
+            with self.assertRaises(ValueError) as ctx:
+                rec.apply(
+                    "grain_sentence",
+                    "one row per <business entity> per <calendar day>",
+                    answered_by="shubham",
+                )
+            self.assertIn("still a template", str(ctx.exception))
+
+    def test_a_real_answer_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = root / "workspaces" / "demo"
+            (ws / "interns").mkdir(parents=True)
+            rec = interview.IntakeAnswerRecorder(root, "workspaces/demo")
+            out = rec.apply(
+                "grain_sentence", "one row per claim per service date", answered_by="shubham"
+            )
+            self.assertEqual(out["source"], "human")
+
+    def test_every_suggested_answer_would_be_refused_unedited(self):
+        """Every shipped template must actually contain a placeholder to edit;
+        a 'suggestion' with none is a hidden default masquerading as a prompt."""
+        import re as _re
+
+        for q in interview.QUESTIONS:
+            suggested = q.get("suggested_answer")
+            if not suggested:
+                continue
+            self.assertTrue(
+                _re.search(r"<[^<>]{1,80}>", suggested),
+                f"{q['id']} suggests an answer with no placeholder to edit",
+            )

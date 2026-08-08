@@ -47,14 +47,32 @@ def _norm(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
+def _tokens(value: str) -> list[str]:
+    """Word tokens of an identity, lowercased, punctuation dropped."""
+    return [t for t in re.split(r"[^a-z0-9]+", str(value or "").lower()) if t]
+
+
 def is_agent_confirmer(confirmed_by: str) -> bool:
     """True when ``confirmed_by`` is empty or an agent/automation identity.
 
-    A human name (e.g. ``"Dr. Smith"``, ``"alice"``) returns False. The literal
-    ``"agent"`` (or ``"claude"``/``"gemini"``/etc.) returns True, so an agent's
-    self-confirmation is never recorded as human.
+    A human name (e.g. ``"Dr. Smith"``, ``"alice"``) returns False. An agent
+    identity returns True, so an agent's self-confirmation is never recorded as
+    human.
+
+    Matching is per WORD, not on the whole string. Exact whole-string matching
+    let any agent bypass every human gate by appending a word:
+    ``"agent (platform recommendation)"`` normalised to
+    ``"agentplatformrecommendation"``, matched nothing, and was recorded as
+    ``human`` -- defeating the refusal that `confirm-blueprint` and the review
+    gates exist to enforce. Found live while driving a real replay.
+
+    Per-word matching also fails CLOSED: a human genuinely called "Agent" is
+    refused, which costs one flag rename; the inverse silently launders an
+    agent decision into a human approval.
     """
-    return _norm(confirmed_by) in _AGENT_TOKENS
+    if not str(confirmed_by or "").strip():
+        return True
+    return any(token in _AGENT_TOKENS for token in _tokens(confirmed_by))
 
 
 def decision_source(confirmed_by: str) -> str:
