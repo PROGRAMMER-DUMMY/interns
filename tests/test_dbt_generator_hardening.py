@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import json
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
 
 from core.onboarding.kpi import dbt_project_generator
@@ -461,3 +463,63 @@ class GhostTableReconcileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DbtParseGateTests(unittest.TestCase):
+    """`dbt parse` resolves every ref/source/Jinja/config in one offline pass.
+
+    It lives in `verify-dbt-project`, NOT in generation: parse has to render
+    profiles.yml, which resolves credentials via env_var(), and generation must
+    work on a machine that never connects to a warehouse.
+    """
+
+    def test_missing_dbt_binary_is_a_reported_skip_not_a_failure(self):
+        with mock.patch.object(dbt_project_generator.shutil, "which", return_value=None):
+            ok, detail = dbt_project_generator.run_dbt_parse(Path("proj"))
+        self.assertTrue(ok)
+        self.assertTrue(detail.startswith("[~]"), detail)
+        self.assertIn("skipped", detail)
+
+    def test_parse_failure_surfaces_dbt_own_output(self):
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return types.SimpleNamespace(
+                returncode=2, stdout="", stderr="Compilation Error in model fct_x"
+            )
+
+        with mock.patch.object(dbt_project_generator.shutil, "which", return_value="dbt"):
+            ok, detail = dbt_project_generator.run_dbt_parse(Path("proj"), runner=fake_run)
+        self.assertFalse(ok)
+        self.assertIn("Compilation Error in model fct_x", detail)
+        self.assertEqual(calls[0][1], "parse")
+        self.assertIn("--project-dir", calls[0])
+        self.assertIn("--profiles-dir", calls[0])
+
+    def test_clean_parse_passes(self):
+        def fake_run(cmd, **kwargs):
+            return types.SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        with mock.patch.object(dbt_project_generator.shutil, "which", return_value="dbt"):
+            ok, detail = dbt_project_generator.run_dbt_parse(Path("proj"), runner=fake_run)
+        self.assertTrue(ok)
+        self.assertTrue(detail.startswith("[ok]"), detail)
+
+    def test_generation_does_not_shell_out_to_dbt(self):
+        """Generation must not require a dbt binary or credentials."""
+        source = Path("core/onboarding/kpi/dbt_project_generator.py").read_text(
+            encoding="utf-8"
+        )
+        generate_body = source.split("def generate(", 1)[1].split("\n    def ", 1)[0]
+        self.assertNotIn("run_dbt_parse(", generate_body)
+
+
+class EmptySelectionTests(unittest.TestCase):
+    def test_emitted_project_promotes_empty_selection_to_an_error(self):
+        """`dbt ls --select nonexistent` exits 0; a stale selector must not look green."""
+        text = Path("core/onboarding/kpi/dbt_project_generator.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("NoNodesForSelectionCriteria", text)
+        self.assertIn("warn_error_options", text)

@@ -30,6 +30,7 @@ from typing import Any
 
 from core.contracts.versioning import register_contract
 from core.onboarding.databricks.deploy_gates import check_remote_approval
+from core.onboarding.kpi.dbt_project_generator import run_dbt_parse
 from core.paths import PROJECT_ROOT
 from core.storage.workspace_layout import WorkspaceLayout
 
@@ -104,6 +105,35 @@ class DbtShowVerifier:
         remote_gate = check_remote_approval()
         checks: list[dict[str, Any]] = []
         if remote_gate.ok:
+            # Parse BEFORE spending a `dbt show` per model. `dbt parse` resolves
+            # every ref/source/Jinja/config in one pass, so a dangling ref fails
+            # here in seconds instead of once per model against the warehouse.
+            # `subprocess.run` is resolved from THIS module so the same patch the
+            # per-model checks are tested under also covers the parse call --
+            # otherwise a test that mocks dbt here would still shell out for real.
+            parse_ok, parse_detail = run_dbt_parse(
+                dbt_dir, repo_root=self.repo_root, runner=subprocess.run
+            )
+            checks.append(
+                {
+                    "model": "(project)",
+                    "command": ["dbt", "parse"],
+                    "returncode": 0 if parse_ok else 1,
+                    "rows": None,
+                    "ok": parse_ok,
+                    # A skipped parse (no dbt on PATH) is not a pass: it is
+                    # unverified, the same distinction the per-model checks draw.
+                    "unverified": parse_ok and parse_detail.startswith("[~]"),
+                    "stdout_tail": parse_detail,
+                    "stderr_tail": "",
+                }
+            )
+            if not parse_ok:
+                raise RuntimeError(
+                    "`dbt parse` rejected the generated project; no model was "
+                    f"executed. Fix the generator or the project at {dbt_dir}:\n"
+                    f"{parse_detail}"
+                )
             for model in models:
                 cmd = [
                     "dbt", "show",

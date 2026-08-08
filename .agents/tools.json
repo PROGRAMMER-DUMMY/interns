@@ -1646,6 +1646,12 @@
       "summary": "Self-grill gate: prove generated KPI output is executable AND aligned with intent."
     },
     {
+      "name": "verify-orchestration",
+      "command": "uv run verify-orchestration",
+      "entry_point": "core.orchestration.dag_verify:main",
+      "summary": "Offline verification of the orchestration graph."
+    },
+    {
       "name": "workspace-dashboard",
       "command": "uv run workspace-dashboard --workspace <workspace>",
       "entry_point": "tools.workspace_dashboard:main",

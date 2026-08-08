@@ -16,6 +16,16 @@ from core.orchestration.dbt_verify import DbtShowVerifier, _preview_row_count
 from core.storage.workspace_layout import WorkspaceLayout
 from tests.test_dbt_backfill import _build_real_dbt_project
 
+
+def _model_check(report):
+    """The first per-model check in a verify report.
+
+    Positional indexing broke when a project-level `dbt parse` check was added
+    ahead of the per-model ones; select by field so the order of report entries
+    is free to change again.
+    """
+    return next(c for c in report["checks"] if c["model"] != "(project)")
+
 _AUTHORIZED_ENV = {"AUTORESEARCH_ALLOW_REMOTE_EXECUTION": "1"}
 
 
@@ -98,8 +108,8 @@ class VerdictTests(unittest.TestCase):
                  / "current.json").read_text(encoding="utf-8")
             )
             self.assertEqual(report["status"], "failed")
-            self.assertFalse(report["checks"][0]["ok"])
-            self.assertEqual(report["checks"][0]["rows"], 0)
+            self.assertFalse(_model_check(report)["ok"])
+            self.assertEqual(_model_check(report)["rows"], 0)
 
     def test_dbt_error_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -118,7 +128,7 @@ class VerdictTests(unittest.TestCase):
                 (root / "workspaces" / "demo" / "interns" / "reports" / "dbt_verify"
                  / "current.json").read_text(encoding="utf-8")
             )
-            self.assertTrue(report["checks"][0]["unverified"])
+            self.assertTrue(_model_check(report)["unverified"])
 
 
 if __name__ == "__main__":

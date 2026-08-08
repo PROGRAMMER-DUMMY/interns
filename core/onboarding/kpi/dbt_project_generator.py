@@ -48,6 +48,8 @@ import argparse
 import ast
 import json
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -71,6 +73,9 @@ _DBT_ADAPTER_TYPE = "databricks"
 # the generator both emits the safe form AND re-validates the finished project
 # (validate_generated_project) before declaring success.
 _MAX_CLUSTER_KEYS = 4  # Databricks liquid clustering hard limit
+# Tail of dbt's own output kept on a parse failure: enough to carry the model
+# name and the offending line, short enough not to bury the caller's message.
+_PARSE_TAIL_CHARS = 2000
 # Below this declared size, partitioning is the wrong tool -- liquid
 # clustering replaces it (end_users_data_modeling_research.md). A model that
 # genuinely needs partition_by must declare the size that justifies it.
@@ -396,6 +401,14 @@ class DbtProjectGenerator:
                 + "\n  - ".join(violations)
             )
 
+        # NOTE: `dbt parse` is deliberately NOT run here. It has to render
+        # profiles.yml, which resolves credentials via env_var(), so a parse gate
+        # at generation time would make generation require warehouse credentials
+        # -- and generation must work on a machine that never connects. The gate
+        # lives in `verify-dbt-project` instead (see run_dbt_parse), which
+        # already assumes credentials. Offline structural checking here is
+        # covered by validate_generated_project above and `dbt-index`.
+
         # Stamp the generator's own content hash so a later validator can tell
         # this project apart from one written by older code. Without it a fixed
         # generator silently never reaches an otherwise-unchanged workspace.
@@ -567,6 +580,16 @@ class DbtProjectGenerator:
                     f"  gold_schema: {self.gold_schema}",
                     f"  gold_staging_schema: {self.staging_gold_schema}",
                     f"  catalog: {self.catalog}",
+                    "",
+                    # A selection that matches nothing EXITS 0 in dbt: `dbt ls
+                    # --select nonexistent` prints "No nodes selected!" and
+                    # succeeds, so a slim-CI or scheduled run whose selector has
+                    # gone stale is indistinguishable from a green build. Promote
+                    # it to an error so a silent no-op fails loudly instead.
+                    "flags:",
+                    "  warn_error_options:",
+                    "    error:",
+                    "      - NoNodesForSelectionCriteria",
                     "",
                 ]
             ),
@@ -1313,6 +1336,43 @@ def _cluster_keys(mart_body: str) -> list[str]:
     """
     every = [alias for _, alias in _output_columns(mart_body)]
     return (_grain_keys(mart_body) or every)[:_MAX_CLUSTER_KEYS]
+
+
+def run_dbt_parse(
+    dbt_dir: Path,
+    *,
+    repo_root: Path | None = None,
+    runner: Any = None,
+) -> tuple[bool, str]:
+    """Run `dbt parse` over a generated project. Offline; no warehouse needed.
+
+    Returns ``(ok, detail)``. A missing ``dbt`` binary is ``(True, ...)`` with a
+    skip note: generation must work on a machine that never runs dbt, and a
+    silent skip is worse than a loud one. Real parse failures return the tail of
+    dbt's own output, which is where the offending model/ref is named.
+
+    argv/cwd match the module conventions already used by
+    ``core/orchestration/dbt_verify.py`` and ``dbt_backfill.py`` -- bare ``dbt``
+    resolved on PATH, project and profiles both pointed at the generated dir.
+    """
+    run = runner or subprocess.run
+    exe = shutil.which("dbt")
+    if exe is None:
+        return True, "[~] dbt not on PATH; `dbt parse` skipped (not verified)"
+    cmd = [exe, "parse", "--project-dir", str(dbt_dir), "--profiles-dir", str(dbt_dir)]
+    try:
+        proc = run(
+            cmd,
+            cwd=str(repo_root) if repo_root else None,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:  # pragma: no cover - defensive
+        return True, f"[~] could not execute dbt parse ({type(exc).__name__}); skipped"
+    if getattr(proc, "returncode", 1) == 0:
+        return True, "[ok] dbt parse resolved every ref, source and config"
+    out = f"{getattr(proc, 'stdout', '') or ''}\n{getattr(proc, 'stderr', '') or ''}".strip()
+    return False, out[-_PARSE_TAIL_CHARS:]
 
 
 def validate_generated_project(dbt_dir: Path) -> list[str]:

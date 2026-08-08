@@ -131,6 +131,9 @@ CURATED_MODULES: tuple[str, ...] = (
     # (47 of 130 CLIs undocumented). A drift guard CI never runs is the same
     # failure class it exists to catch, so it belongs in the blocking gate.
     "tests.test_instruction_drift",
+    # Orchestration graph: a stage that shells out to a renamed CLI fails only
+    # when the scheduled task runs. Offline, no Airflow needed.
+    "tests.test_dag_verify",
     # Phase 1a.2b: transcript INGEST (privacy boundary, loud liveness, run-level
     # attribution, logged dedupe).
     "tests.test_cost_ingest",
