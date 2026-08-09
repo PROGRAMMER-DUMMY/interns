@@ -345,6 +345,32 @@ class PublishDbtStateCommandTests(unittest.TestCase):
         self.assertNotIn("databricks fs cp", command)
 
 
+class BackfillPoolTests(unittest.TestCase):
+    def test_backfill_task_construction_carries_a_dedicated_pool(self):
+        # Same static-source-inspection bar DbtStateWiringOrderTests below
+        # already established for this Airflow-not-installed environment: a
+        # dedicated `backfill` pool is what stops a large replay from
+        # starving task slots the nightly scheduled run needs (gap research
+        # / airflow_cli_reference.md section "Known gaps in our wiring" #1).
+        import inspect
+
+        source = inspect.getsource(airflow_dag)
+        idx = source.index("cosmos_dag.build_backfill_task")
+        call_snippet = source[idx: idx + 200]
+        self.assertIn('pool="backfill"', call_snippet)
+
+    def test_bootstrap_command_is_documented_in_the_module_header(self):
+        # The pool itself must exist before a DAG run can use it -- that is a
+        # one-time, per-deployment `airflow pools set` call, not something a
+        # DAG-parse-time import can create. Documented (setup_pools) rather
+        # than silently assumed.
+        import inspect
+
+        source = inspect.getsource(airflow_dag)
+        self.assertIn("setup_pools", source)
+        self.assertIn('airflow pools set backfill 2 "bounded replay capacity"', source)
+
+
 class DbtStateWiringOrderTests(unittest.TestCase):
     def test_publish_dbt_state_is_wired_after_publish_gold(self):
         # Airflow is not installed in this environment (module docstring,

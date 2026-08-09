@@ -6,7 +6,7 @@ This document provides an exhaustive reference for all components in [`core/orch
 
 ## Executive Overview & Architectural Model
 
-The `core/orchestration` package manages loop iteration loops, stage execution, dbt compilation, Airflow/Cosmos DAG generation, Dagster asset definitions, dbt backfilling, dbt run-state publication, and execution governance.
+The `core/orchestration` package manages loop iteration loops, stage execution, dbt compilation, Airflow/Cosmos DAG generation, Dagster asset definitions, dbt backfilling, dbt run-state publication, Airflow REST health checks, and execution governance.
 
 ```
 ┌──────────────────┐        ┌──────────────────┐        ┌──────────────────┐
@@ -45,6 +45,20 @@ The `core/orchestration` package manages loop iteration loops, stage execution, 
 - **Failure Modes & Edge Cases**:
   - Handles missing task dependencies by inserting prerequisite check tasks.
   - `build_dag()`'s `dbt_build` stage, when wired (concrete workspace + Cosmos installed), now also chains a `publish_dbt_state` task AFTER the WAP `publish_gold` task (`build_task >> publish_task >> state_task`), via [`cosmos_dag.build_publish_dbt_state_task`](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/orchestration/cosmos_dag.py). The DAG's `tails["dbt_build"]` (what downstream stages like the anomaly check hang off) now points at this state task, not `publish_task`.
+  - `build_dag()`'s `dbt_backfill` leaf task is built via `cosmos_dag.build_backfill_task(..., pool="backfill")` -- a dedicated Airflow pool so a large replay cannot starve the task slots the nightly scheduled run needs. The pool must exist in the deployment before that matters; the module's own docstring documents the one-time `setup_pools` bootstrap command (`airflow pools set backfill 2 "bounded replay capacity"`) that creates it -- Airflow has no DAG-time API to create a pool, and silently falls back to the unbounded `default_pool` if it's missing rather than erroring, so this is a deploy-checklist item, not something a missing-pool error will surface on its own.
+
+### 1a. [`airflow_health.py`](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/orchestration/airflow_health.py)
+
+- **Exact Purpose**: Airflow operability check over REST (`/api/v2/`), never the CLI -- the CLI needs co-location with the deployment, REST does not (`docs/reference/airflow_cli_reference.md` section 7), so this is what a workflow-guard health poll against a remote/managed Airflow (Astro, MWAA, Composer) has to use.
+- **Key Functions / Classes**:
+  - `check_airflow_health(base_url, token, dag_ids, *, http=urllib.request.urlopen, timeout=10) -> dict`: `GET {base_url}/api/v2/monitor/health` for the scheduler heartbeat status, then `GET {base_url}/api/v2/dags/{dag_id}` per `dag_id` for `is_paused`. Returns `{"ok": bool, "paused_dags": [...], "scheduler": "healthy"|"unhealthy"|"unreachable"}` (plus a redacted `"detail"` on an unreachable scheduler). `http` is injectable so tests never open a real socket. A paused DAG makes `ok: False` even with a healthy scheduler -- a paused pipeline fails silently and forever (`airflow_cli_reference.md` section 8 item 4). A connection failure on the health call makes `scheduler: "unreachable"`, `ok: False`, and never raises (read-only probe). A per-DAG lookup failure after a reachable scheduler folds that dag_id into `paused_dags` rather than silently reading as healthy.
+  - `main(argv=None) -> int`: `check-airflow-health --base-url <url> --token <jwt> [--dag-id <id> ...]` console script (`AIRFLOW_API_BASE_URL`/`AIRFLOW_API_TOKEN` env fallbacks); prints the result as JSON, exit 1 when `ok` is false or when base-url/token are both missing.
+- **Inputs & Outputs**:
+  - *Inputs*: Airflow deployment `base_url`, a bearer JWT, the DAG id(s) to check.
+  - *Outputs*: the health/pause-state dict above; no files written.
+- **Failure Modes & Edge Cases**:
+  - The JWT is carried ONLY in the `Authorization: Bearer` request header -- never present in the returned dict; any exception text surfaced in `"detail"` is passed through `core.observability.log_redaction.redact` first (a connection error can echo the host it failed to reach).
+  - Never raises: every network failure resolves to a structured `{"ok": False, ...}` result.
 
 ### 2. [`cosmos_dag.py`](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/orchestration/cosmos_dag.py)
 
@@ -53,7 +67,7 @@ The `core/orchestration` package manages loop iteration loops, stage execution, 
   - `build_dbt_tasks(*, workspace, repo_root, task_id_prefix="dbt_build")`: two chained tasks -- `generate-dbt-project` (BashOperator) then `dbt build` via Cosmos's `DbtBuildLocalOperator` (DBT_RUNNER, in-process). Raises `SystemExit` without Cosmos/Airflow installed or without the remote-execution approval gate; raises `ValueError` on an empty `workspace`.
   - `publish_gold_command(*, workspace, repo_root)` / `build_publish_gold_task(...)`: the WAP swap (`dbt run-operation publish_gold`) that promotes staged marts to live gold, run only after `dbt build`'s tests pass.
   - `publish_dbt_state_command(*, workspace, repo_root)` / [`build_publish_dbt_state_task(*, workspace, repo_root, task_id="publish_dbt_state")`](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/orchestration/cosmos_dag.py): shells to the governed `publish-dbt-state` CLI (`core.orchestration.dbt_state`), publishing `target/manifest.json` + `target/run_results.json` to a UC volume. Must be wired downstream of `build_publish_gold_task`'s task (see `airflow_dag.py`).
-  - `backfill_command(*, workspace, repo_root)` / `build_backfill_task(...)`: params-driven bounded replay via `run-dbt-backfill`, with an honest `DEGRADED`/full-refresh echo when no model declares `event_time`.
+  - `backfill_command(*, workspace, repo_root)` / [`build_backfill_task(*, workspace, repo_root, task_id="dbt_backfill", pool="")`](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/orchestration/cosmos_dag.py): params-driven bounded replay via `run-dbt-backfill`, with an honest `DEGRADED`/full-refresh echo when no model declares `event_time`. `pool` (empty here -- `airflow_dag.build_dag()` passes `"backfill"`) sets the BashOperator's `pool=` kwarg only when non-empty, so a large replay queues on a dedicated slot count instead of the nightly run's.
   - `maintenance_command(*, workspace, repo_root, layer, weekday)` / `build_maintenance_task(...)`: weekly `OPTIMIZE`+`VACUUM` per generated silver/gold table, hash-offset across a fleet, retention read from the workspace's SLA contract (never `RETAIN 0 HOURS`).
   - `ghost_reconcile_command(*, workspace, repo_root, day_of_month, schema="gold")` / `build_ghost_reconcile_task(...)`: monthly report-only reconcile against `dbt_project_generator.reconcile_ghost_tables`.
   - [`_run_ghost_reconcile(*, workspace, repo_root, schema)`](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/orchestration/cosmos_dag.py#L375-L415): the subprocess-side body. Lists the schema's live tables from `information_schema` and hands them to `reconcile_ghost_tables` as **fully-qualified `catalog.schema.table`** names, matching what that function now diffs against (dbt's `relation_name`). Passing the bare `table_name` matches nothing and reports every live table as an orphan. (F20)

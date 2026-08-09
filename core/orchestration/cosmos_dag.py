@@ -223,12 +223,21 @@ def _declares_event_time(dbt_dir: Path) -> bool:
     return project_declares_event_time(dbt_dir)
 
 
-def build_backfill_task(*, workspace: str, repo_root: str, task_id: str = "dbt_backfill") -> Any:
+def build_backfill_task(
+    *, workspace: str, repo_root: str, task_id: str = "dbt_backfill", pool: str = "",
+) -> Any:
     """`backfill_command()` as a BashOperator. Not wired into the scheduled
     path: it runs when a DAG run supplies the window params (see
-    `airflow_dag.build_dag`'s `params`)."""
+    `airflow_dag.build_dag`'s `params`).
+
+    `pool` (empty by default here; `airflow_dag.build_dag()` passes
+    `"backfill"`) is what stops a large replay from starving the task slots
+    the nightly scheduled run needs -- the pool itself must already exist in
+    the deployment (`setup_pools` bootstrap, see `airflow_dag.py`'s module
+    docstring); Airflow queues the task rather than erroring if it doesn't."""
     from airflow.operators.bash import BashOperator
 
+    kwargs: dict[str, Any] = {"pool": pool} if pool else {}
     return BashOperator(
         task_id=task_id,
         bash_command=backfill_command(workspace=workspace, repo_root=repo_root),
@@ -236,6 +245,7 @@ def build_backfill_task(*, workspace: str, repo_root: str, task_id: str = "dbt_b
             "Bounded dbt backfill over the run's `event_time_start`/`event_time_end` "
             "params, via the governed run-dbt-backfill CLI (span bound + human gate)."
         ),
+        **kwargs,
     )
 
 

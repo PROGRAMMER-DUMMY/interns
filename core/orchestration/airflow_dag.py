@@ -37,6 +37,24 @@ was a `databricks-sql-connector` (legacy Thrift) vs. warehouse-endpoint 404,
 isolated to that container's own dependency resolution (a different
 connector version than this project's own venv resolves) -- a real but
 third-party environment finding, not a bug in this module.
+
+Operability, deploy-time bootstrap (run ONCE per Airflow deployment, not
+emitted per-DAG-parse -- Airflow has no "create this pool if missing" DAG
+API): the `dbt_backfill` task below runs with `pool="backfill"` so a large
+replay queues on its own bounded slot count instead of starving the task
+slots the nightly scheduled run needs (docs/reference/airflow_cli_reference.md
+"Known gaps in our wiring" #1, Shopify's Airflow-at-scale writeup). The
+`backfill` pool itself must exist before that matters -- create it with the
+`setup_pools` bootstrap command:
+
+    airflow pools set backfill 2 "bounded replay capacity"
+
+Without it Airflow silently falls back to the unbounded `default_pool`
+rather than erroring, so this is a deploy-checklist item, not something a
+missing-pool error will ever surface on its own. See also
+`check_airflow_health()` (airflow_health.py) for the sibling operability gap
+this module doesn't cover: a paused DAG dies silently too, just from the
+scheduler side rather than the pool side.
 """
 from __future__ import annotations
 
@@ -329,7 +347,9 @@ def build_dag(
         # on the scheduled chain. A scheduled run leaves the window params
         # empty; a "trigger with config" run replays exactly the given window.
         if ws:
-            cosmos_dag.build_backfill_task(workspace=ws, repo_root=str(repo_root))
+            cosmos_dag.build_backfill_task(
+                workspace=ws, repo_root=str(repo_root), pool="backfill",
+            )
             # Maintenance + ghost-reconcile (audit A11/A4, missing #6): leaf
             # tasks, same as backfill -- they run every scheduled DAG run but
             # self-gate on this workspace's own hash-derived weekly/monthly

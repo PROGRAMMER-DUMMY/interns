@@ -391,6 +391,12 @@
       ]
     },
     {
+      "name": "check-airflow-health",
+      "command": "uv run check-airflow-health",
+      "entry_point": "core.orchestration.airflow_health:main",
+      "summary": "Airflow operability: is_paused + scheduler-heartbeat health, over REST."
+    },
+    {
       "name": "check-kpi-anomalies",
       "command": "uv run check-kpi-anomalies --workspace <workspace>",
       "entry_point": "core.observability.kpi_anomaly_check:check_kpi_anomalies_main",
