@@ -316,7 +316,15 @@ def build_dag(
                     workspace=ws, repo_root=str(repo_root),
                 )
                 tasks[stage.key] >> publish_task
-                tails[stage.key] = publish_task
+                # State (manifest.json/run_results.json) should reflect a
+                # build actually promoted to live gold, not a WAP-staged one
+                # a failed test might still roll back -- publish_dbt_state
+                # runs AFTER publish_gold, never in parallel with it.
+                state_task = cosmos_dag.build_publish_dbt_state_task(
+                    workspace=ws, repo_root=str(repo_root),
+                )
+                publish_task >> state_task
+                tails[stage.key] = state_task
         # The params-driven backfill entrypoint: a leaf task, deliberately not
         # on the scheduled chain. A scheduled run leaves the window params
         # empty; a "trigger with config" run replays exactly the given window.

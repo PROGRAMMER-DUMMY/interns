@@ -205,6 +205,16 @@ def publish_gold_command(*, workspace: str, repo_root: str) -> str:
     )
 
 
+def publish_dbt_state_command(*, workspace: str, repo_root: str) -> str:
+    """The BashOperator command for `publish_dbt_state`: ships this run's
+    `target/manifest.json` + `target/run_results.json` to a UC volume via
+    the governed `publish-dbt-state` CLI (`core.orchestration.dbt_state`) --
+    never an inline `databricks fs cp` here, same "one command, two callers
+    can't diverge" reasoning as `publish_gold_command`.
+    """
+    return f"cd {repo_root} && uv run publish-dbt-state --workspace {workspace}"
+
+
 def _declares_event_time(dbt_dir: Path) -> bool:
     # Imported lazily: this module is imported at Airflow DAG-parse time, and
     # the generator pulls in the whole KPI SQL-generation stack.
@@ -239,6 +249,26 @@ def build_publish_gold_task(*, workspace: str, repo_root: str, task_id: str = "p
         doc_md=(
             "Write-Audit-Publish swap: promote the built+tested marts from the staging "
             "gold schema to live gold. Never runs when the build/tests fail."
+        ),
+    )
+
+
+def build_publish_dbt_state_task(
+    *, workspace: str, repo_root: str, task_id: str = "publish_dbt_state",
+) -> Any:
+    """`publish_dbt_state_command()` as a BashOperator. Must be wired
+    downstream of `build_publish_gold_task`'s task -- state should reflect a
+    build that was actually promoted to live gold, not a WAP-staged one a
+    failed test might still roll back."""
+    from airflow.operators.bash import BashOperator
+
+    return BashOperator(
+        task_id=task_id,
+        bash_command=publish_dbt_state_command(workspace=workspace, repo_root=repo_root),
+        doc_md=(
+            "Publish target/manifest.json + target/run_results.json to a UC volume "
+            "(timestamped + latest) -- unlocks slim CI, `dbt retry`, `dbt clone`. "
+            "Runs after publish_gold."
         ),
     )
 
@@ -489,8 +519,10 @@ __all__ = [
     "build_dbt_tasks",
     "backfill_command",
     "publish_gold_command",
+    "publish_dbt_state_command",
     "build_backfill_task",
     "build_publish_gold_task",
+    "build_publish_dbt_state_task",
     "maintenance_command",
     "ghost_reconcile_command",
     "build_maintenance_task",

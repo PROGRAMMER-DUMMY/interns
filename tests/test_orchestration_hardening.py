@@ -332,5 +332,37 @@ class GhostReconcileCommandTests(unittest.TestCase):
         self.assertIn("--schema gold", command)
 
 
+class PublishDbtStateCommandTests(unittest.TestCase):
+    def test_command_shells_to_the_governed_cli_never_inline_databricks_fs_cp(self):
+        command = cosmos_dag.publish_dbt_state_command(
+            workspace="workspaces/demo", repo_root="."
+        )
+        self.assertIn("publish-dbt-state", command)
+        self.assertIn("--workspace workspaces/demo", command)
+        # The swap/publish lives in the governed CLI, never inline here --
+        # same "one command, two callers can't diverge" rule as
+        # publish_gold_command above.
+        self.assertNotIn("databricks fs cp", command)
+
+
+class DbtStateWiringOrderTests(unittest.TestCase):
+    def test_publish_dbt_state_is_wired_after_publish_gold(self):
+        # Airflow is not installed in this environment (module docstring,
+        # top of file) -- a real DAG object can't be built here, so this
+        # pins the wiring statically, the same bar
+        # test_pipeline_orchestration.py's AirflowWiringTests already
+        # established for the sibling days_ago regression.
+        import inspect
+
+        source = inspect.getsource(airflow_dag)
+        gold_idx = source.index("cosmos_dag.build_publish_gold_task")
+        state_idx = source.index("cosmos_dag.build_publish_dbt_state_task")
+        self.assertLess(
+            gold_idx, state_idx,
+            "publish_dbt_state must be constructed after publish_gold",
+        )
+        self.assertIn("publish_task >> state_task", source)
+
+
 if __name__ == "__main__":
     unittest.main()

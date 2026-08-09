@@ -1349,6 +1349,12 @@
       ]
     },
     {
+      "name": "publish-dbt-state",
+      "command": "uv run publish-dbt-state --workspace <workspace>",
+      "entry_point": "core.orchestration.dbt_state:main",
+      "summary": "Publish dbt run state (`manifest.json` + `run_results.json`) to a UC volume."
+    },
+    {
       "name": "query-workspace-evidence-graph",
       "command": "uv run query-workspace-evidence-graph --workspace <workspace>",
       "entry_point": "core.onboarding.evidence_graph:query_main",
