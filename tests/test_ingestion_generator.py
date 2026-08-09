@@ -150,6 +150,13 @@ class ObjectStoreEmissionTests(unittest.TestCase):
         self.assertIn("'mergeSchema' = 'true'", sql)
         self.assertIn("payer_id STRING", sql)
 
+    def test_csv_declares_a_header_row(self):
+        """F23: COPY INTO defaults CSV `header` to FALSE. Without this the
+        header line lands as a DATA row and the columns come back `_c0, _c1,
+        ...` -- a silently wrong bronze table rather than a loud failure."""
+        sql = self.files["ingest_payer_dim.sql"]
+        self.assertIn("'header' = 'true'", sql)
+
     def test_manifest_shape(self):
         manifest = json.loads(self.files["jobs_manifest.json"])
         self.assertTrue(manifest["additive_only"])

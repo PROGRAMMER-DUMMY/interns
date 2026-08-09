@@ -1005,8 +1005,15 @@ def _split_distinct_entities(
             out[(key_path, fmt)].extend(members)
             continue
         for member in members:
-            stem = Path(member[0]).stem
-            child = f"{key_path}/{stem}" if key_path else stem
+            # The FILE NAME, not its stem: this key becomes the table's
+            # recorded `path`, and that path is what `generate-ingestion`
+            # writes into `COPY INTO ... FROM`. Keying on the stem dropped the
+            # extension and produced a location that does not exist --
+            # `[PATH_NOT_FOUND] ... SQLSTATE 42K03` against the live
+            # warehouse. Table naming is unaffected: it takes `Path(key).stem`
+            # downstream either way. (F22)
+            file_name = Path(member[0]).name
+            child = f"{key_path}/{file_name}" if key_path else file_name
             out[(child, fmt)].append(member)
     return out
 

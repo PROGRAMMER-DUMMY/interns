@@ -299,7 +299,15 @@ def run_workspace_command(
     except Exception:  # pragma: no cover - activation is advisory, never fatal
         pass
 
-    if record_idempotent and op_id is not None:
+    # A structured failure is NOT an applied op. The cloud-first commands
+    # report refusals and failures as a payload (`ok: False`) rather than by
+    # raising -- that is the refusal ladder's whole design -- so recording on
+    # "fn() returned" stamped runs that executed nothing as done, and every
+    # honest retry afterwards came back `idempotent_replay` telling the
+    # operator to pass --allow-replay to redo work that never happened. Only an
+    # EXPLICIT `ok: False` suppresses the record; payloads without an `ok` key
+    # are unaffected. (F24)
+    if record_idempotent and op_id is not None and payload.get("ok") is not False:
         record_op(
             workspace_path,
             op_id=op_id,

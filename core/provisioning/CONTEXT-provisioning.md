@@ -64,6 +64,8 @@ generate-ingestion ──► ingestion/*.sql + jobs_manifest.json ──► run-
   - *Outputs*: `ingestion/ingest_<table>.sql`, `ingestion/jobs_manifest.json` (`job_count`, `blocked_count`, per-job `method`/`trigger`/`idempotency`).
 - **Failure Modes & Edge Cases**:
   - Emitted `COPY INTO` files open with a bare `CREATE TABLE IF NOT EXISTS <t>;` -- the documented Databricks pattern for schema inference under `mergeSchema`, not a missing schema.
+  - `FORMAT_OPTIONS` is **format-aware**, not a fixed string: delimited text (`_TEXT_DELIMITED_FORMATS`, currently `CSV`) also gets `'header' = 'true', 'inferSchema' = 'true'`. COPY INTO defaults CSV `header` to false, which lands the header line as a data row and names every column `_c0, _c1, ...` -- silently wrong bronze rather than a loud failure (F23). Self-describing formats (parquet/avro/orc) carry their own names and must NOT receive these options.
+  - `FROM '<path>'` is `DiscoveredTable.path` verbatim, so discovery must record a location that actually exists -- see `core/intake/CONTEXT-intake.md` and F22.
   - Auto Loader must not set `cloudFiles.useNotifications=true` where the bucket denies `s3:GetBucketNotification`; directory-listing mode is used instead. (F2)
 
 ### 4. [`ingestion_run.py`](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/provisioning/ingestion_run.py)

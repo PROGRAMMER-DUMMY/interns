@@ -526,6 +526,32 @@ class EntityGroupingTests(unittest.TestCase):
             {t.name for t in tables}, {"patients", "encounters", "providers"}
         )
 
+    def test_a_split_entity_keeps_the_real_file_path(self):
+        """F22: the split keyed each entity by its STEM, so the recorded path
+        dropped the extension -- `.../hospital-a/patients` instead of
+        `.../hospital-a/patients.csv`. That path is what `generate-ingestion`
+        writes into `COPY INTO ... FROM`, and it does not exist:
+        `[PATH_NOT_FOUND] ... SQLSTATE 42K03` on the live warehouse."""
+        tables = self._tables([
+            "EMR/hospital-a/patients.csv",
+            "EMR/hospital-a/encounters.csv",
+        ])
+        by_name = {t.name: t for t in tables}
+        self.assertTrue(
+            by_name["patients"].path.endswith("patients.csv"), by_name["patients"].path
+        )
+
+    def test_a_part_file_directory_still_points_at_the_directory(self):
+        """The other half of the contract: a real part-file layout must keep
+        pointing at the FOLDER, which is what COPY INTO/Auto Loader want when
+        the dataset is many files."""
+        tables = self._tables([
+            "orders/part-00001.csv",
+            "orders/part-00002.csv",
+        ])
+        self.assertEqual(len(tables), 1)
+        self.assertTrue(tables[0].path.endswith("orders"), tables[0].path)
+
     def test_shards_of_one_dataset_stay_grouped(self):
         """part-00001/part-00002 differ only by a digit run: one dataset."""
         tables = self._tables([

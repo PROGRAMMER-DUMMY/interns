@@ -90,6 +90,10 @@ _FORMAT_SQL = {
     "text": "TEXT",
 }
 
+# Formats whose column names live in a header line rather than in the file's
+# own metadata. Only these take 'header'/'inferSchema' COPY INTO options.
+_TEXT_DELIMITED_FORMATS = {"CSV"}
+
 _LIFECYCLE_NOTE = (
     "Checkpoint + inferred-schema state live in a dedicated _checkpoints volume,\n"
     "# outside the source prefix on purpose: if an object-lifecycle expiration rule\n"
@@ -523,6 +527,15 @@ def _copy_into_sql(
     name: str, source_path: str, target: str, fmt: str, columns: list[Any]
 ) -> str:
     fileformat = _FORMAT_SQL.get(fmt, fmt.upper())
+    # COPY INTO defaults CSV `header` to FALSE, so without this the header line
+    # lands as a DATA row and every column comes back `_c0, _c1, ...`. That is
+    # a silently wrong bronze table, which is worse than a loud failure -- the
+    # names only surface as nonsense much later, in feature resolution.
+    # Self-describing formats (parquet/avro/orc/json) carry their own names and
+    # must NOT be given these options. (F23)
+    format_options = "'mergeSchema' = 'true'"
+    if fileformat in _TEXT_DELIMITED_FORMATS:
+        format_options += ", 'header' = 'true', 'inferSchema' = 'true'"
     cols = ""
     typed = [
         f"  {safe_name(col.get('name'))} {col.get('type', 'STRING')}"
@@ -542,7 +555,7 @@ CREATE TABLE IF NOT EXISTS {target}{cols};
 COPY INTO {target}
 FROM '{source_path}'
 FILEFORMAT = {fileformat}
-FORMAT_OPTIONS ('mergeSchema' = 'true')
+FORMAT_OPTIONS ({format_options})
 COPY_OPTIONS ('mergeSchema' = 'true');
 """
 

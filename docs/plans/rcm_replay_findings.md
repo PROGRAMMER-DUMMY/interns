@@ -429,3 +429,89 @@ Left open deliberately: `generate-dbt-project --workspace workspaces/rcm` still
 refuses, and correctly -- `No KPI is fully ready for SQL ... Resolve KPI feature
 mappings first.` The catalog fix is upstream of that gate; the emission itself
 is proven by tests that run the real generator end to end.
+
+---
+
+## F22 -- discovery dropped the file extension, so COPY INTO pointed at nothing
+
+**Live failure.** `run-ingestion` against the real warehouse:
+
+```
+[PATH_NOT_FOUND] Path does not exist:
+s3://amzn-workspace-rcm/datasets/EMR/trendytech-hospital-a/departments
+SQLSTATE: 42K03
+```
+
+1 failed, 11 `not_attempted` (stop-on-first-failure held, as designed).
+
+Root cause is in the F6 fix itself. `_split_distinct_entities`
+(`core/intake/discovery.py`) splits a folder of distinct entities into one
+table per file -- correct -- but keyed each new group by the file's **stem**:
+
+```python
+stem = Path(member[0]).stem
+child = f"{key_path}/{stem}" if key_path else stem
+```
+
+That key becomes `DiscoveredTable.path`, and `generate-ingestion` writes it
+verbatim into `COPY INTO ... FROM '<path>'`. So the manifest recorded
+`.../trendytech-hospital-a/departments` while the real object is
+`departments.csv`. Every one of the 12 jobs carried a location that does not
+exist; the first one to run said so.
+
+The un-split case was never wrong: a genuine part-file layout groups on the
+parent directory, which is a real path.
+
+FIX (applied): key on `Path(member[0]).name`. Table naming is untouched --
+downstream takes `Path(key).stem` either way, so `trendytech-hospital-a__
+departments` is still the bronze name. Both halves of the contract are now
+pinned: a split entity keeps its `.csv`, a part-file directory still points at
+the directory.
+
+## F23 -- CSV ingestion had no header option, and would have landed garbage
+
+Found while reading the emitted SQL for F22. The COPY INTO template hardcoded:
+
+```sql
+FORMAT_OPTIONS ('mergeSchema' = 'true')
+```
+
+COPY INTO defaults CSV `header` to **false**. Had F22's path been correct,
+every CSV would have loaded its header line as a DATA row with columns named
+`_c0, _c1, ...` -- a silently wrong bronze table, which is worse than the loud
+failure F22 produced, because the nonsense only surfaces much later in feature
+resolution.
+
+FIX (applied): `FORMAT_OPTIONS` is now format-aware -- `'header' = 'true',
+'inferSchema' = 'true'` for delimited text only. Self-describing formats
+(parquet/avro/orc) carry their own column names and must not get these options.
+
+Stated assumption: the first line of a CSV source is a header. Discovery runs
+`content_read_policy: metadata_and_paths_only` and never opens a file, so this
+cannot be derived from evidence today. Headerless CSV would need an intake
+question; no such source exists in this estate.
+
+## F24 -- a failed run was recorded as an applied op
+
+The same live run returned `status: idempotent_replay`, `previously_applied_at:
+07:10:23Z` -- for a run that executed 0 of 12 jobs and failed.
+
+`core/onboarding/workspace/cli_runner.py` called `record_op` on the sole
+condition that `fn()` RETURNED. But the cloud-first commands report refusals
+and failures as a structured payload (`ok: False`) rather than by raising --
+that is the refusal ladder's entire design. So every structured failure was
+stamped as applied, and each honest retry afterwards came back as a replay
+telling the operator to pass `--allow-replay` to redo work that never happened.
+
+Not as severe as it first reads: the replay path re-runs `fn()` under the lock
+to refresh counts, so the run did re-execute and the reported numbers are
+current. The damage is the false "already applied" record and the ceremony it
+imposes on every retry.
+
+FIX (applied): an explicit `ok: False` suppresses the record. Payloads with no
+`ok` key are unaffected, so no currently-recording command stops recording.
+
+Observation, not fixed: nothing fingerprints `discovery.json` into the
+blueprint confirmation, so re-running `discover-source` after a discovery bug
+does NOT re-open the human gate. That is convenient here and wrong in general
+-- a corrected discovery can change what a human confirmed.

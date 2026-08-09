@@ -35,6 +35,42 @@ class ComputeOpIdTests(unittest.TestCase):
         self.assertNotEqual(a, d)
 
 
+class FailedRunIsNotAnAppliedOpTests(unittest.TestCase):
+    """F24: `record_op` fired whenever `fn()` RETURNED, and the cloud-first
+    commands report failure as a structured payload (`ok: False`) instead of
+    raising -- that is the whole design of the refusal ladder. So a run that
+    executed nothing and failed was stamped as applied, and every honest retry
+    afterwards came back `idempotent_replay` telling the operator to pass
+    `--allow-replay` to redo work that never happened."""
+
+    def _run(self, payload: dict) -> Path:
+        from core.onboarding.workspace import cli_runner
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "workspaces" / "demo").mkdir(parents=True)
+        cli_runner.run_workspace_command(
+            command="run-ingestion",
+            workspace="workspaces/demo",
+            repo_root=str(root),
+            fn=lambda: payload,
+            record_idempotent=True,
+        )
+        return root / "workspaces" / "demo" / "interns" / "state" / "applied_ops.jsonl"
+
+    def test_a_failed_result_is_not_recorded_as_applied(self) -> None:
+        log = self._run({"ok": False, "status": "failed", "executed": 0, "failed": 1})
+        self.assertFalse(
+            log.exists() and log.read_text(encoding="utf-8").strip(),
+            "a failed run must never be stamped as an applied op",
+        )
+
+    def test_a_successful_result_is_still_recorded(self) -> None:
+        log = self._run({"ok": True, "status": "executed", "executed": 12, "failed": 0})
+        self.assertTrue(log.exists() and log.read_text(encoding="utf-8").strip())
+
+
 class RecordOpTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
