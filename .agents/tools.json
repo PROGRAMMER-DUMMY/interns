@@ -1459,6 +1459,12 @@
       "summary": "Bounded, dry-run-capable backfill for a workspace's dbt project."
     },
     {
+      "name": "run-ingestion",
+      "command": "uv run run-ingestion --workspace <workspace>",
+      "entry_point": "core.provisioning.cli:run_ingestion_main",
+      "summary": "Governed CLI entry points for provisioning + ingestion generation."
+    },
+    {
       "name": "run-kpi-execution-harness",
       "command": "uv run run-kpi-execution-harness --workspace <workspace>",
       "entry_point": "core.onboarding.kpi.execution_harness:main",
