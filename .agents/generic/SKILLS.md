@@ -256,6 +256,10 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Outputs: interns/reports/presentation/data-model.svg; interns/reports/presentation/data-model.mermaid.md; interns/reports/presentation/kpi_registry.xlsx; interns/reports/presentation/presentation_manifest.json
   - Safety: local_safe_presentation_export
   - Required skills: workspace-governance; domain-model; workspace-kpi-query-optimizer
+- `fetch-source-documents`
+  - Command: `uv run fetch-source-documents --workspace <workspace>`
+  - Use when: Copy the declared source's documents into the workspace.
+  - Safety: uncurated -- follow AGENTS.md safety rules for this command
 - `finalize-data-model-generation`
   - Command: `uv run finalize-data-model-generation --workspace <workspace>`
   - Use when: draft data model preview was shown and explicitly approved; write user-facing data model docs and finalized model contract
@@ -556,6 +560,10 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Command: `uv run run-dbt-backfill --workspace <workspace>`
   - Use when: Bounded, dry-run-capable backfill for a workspace's dbt project.
   - Safety: uncurated -- follow AGENTS.md safety rules for this command
+- `run-ingestion`
+  - Command: `uv run run-ingestion --workspace <workspace>`
+  - Use when: Governed CLI entry points for provisioning + ingestion generation.
+  - Safety: uncurated -- follow AGENTS.md safety rules for this command
 - `run-kpi-execution-harness`
   - Command: `uv run run-kpi-execution-harness --workspace <workspace>`
   - Use when: Execute generated KPI SQL and prove that final result views exist.
@@ -581,6 +589,10 @@ This file is generated from canonical repo skills. Do not hand-edit it.
 - `suggest-kpi-improvements`
   - Command: `uv run suggest-kpi-improvements --workspace <workspace>`
   - Use when: Per-KPI improvement suggestions, emitted ONLY when the readings warrant one.
+  - Safety: uncurated -- follow AGENTS.md safety rules for this command
+- `sync-workspace-code`
+  - Command: `uv run sync-workspace-code --workspace <workspace>`
+  - Use when: Governed CLI entry points for provisioning + ingestion generation.
   - Safety: uncurated -- follow AGENTS.md safety rules for this command
 - `token-report`
   - Command: `uv run token-report --workspace <workspace>`
@@ -634,6 +646,10 @@ This file is generated from canonical repo skills. Do not hand-edit it.
   - Command: `uv run verify-kpi-output --workspace <workspace>`
   - Use when: Self-grill gate: prove generated KPI output is executable AND aligned with intent.
   - Safety: uncurated -- follow AGENTS.md safety rules for this command
+- `verify-orchestration`
+  - Command: `uv run verify-orchestration`
+  - Use when: Offline verification of the orchestration graph.
+  - Safety: uncurated -- follow AGENTS.md safety rules for this command
 - `workspace-dashboard`
   - Command: `uv run workspace-dashboard --workspace <workspace>`
   - Use when: user wants to view or verify the workspace BI dashboard; KPI completion dashboard needs a visual screening pass
@@ -677,6 +693,11 @@ Use the narrowest role that fits the task and keep write access limited to imple
 - Default prompt: Use KPI analyst to parse KPI definitions, classify metric intent, write or review one query per KPI, show result tables, and surface only correctness-relevant assumptions.
 
 ## Available Skills
+
+### context-map-sync
+
+- Path: `skills/context-map-sync/SKILL.md`
+- Description: Keep every CONTEXT-<folder>.md true to the code beside it. Use whenever a file under a mapped directory is created, deleted, renamed, or has a signature/flag/constant change -- and ALWAYS before staging a commit that touches core/, tools/, tests/, config/, docs/, skills/ or vendor/. CONTEXT-MAP.md rule 3 makes this atomic with the code change, not a follow-up.
 
 ### dashboard-agent
 

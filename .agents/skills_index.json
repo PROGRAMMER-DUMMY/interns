@@ -9,6 +9,11 @@
   },
   "skills": [
     {
+      "name": "context-map-sync",
+      "description": "Keep every CONTEXT-<folder>.md true to the code beside it. Use whenever a file under a mapped directory is created, deleted, renamed, or has a signature/flag/constant change -- and ALWAYS before staging a commit that touches core/, tools/, tests/, config/, docs/, skills/ or vendor/. CONTEXT-MAP.md rule 3 makes this atomic with the code change, not a follow-up.",
+      "path": "skills/context-map-sync/SKILL.md"
+    },
+    {
       "name": "dashboard-agent",
       "description": "Named conversational DashboardAgent. Triggered by \"DashboardAgent, <request>\", it turns a natural-language plot request into a per-workspace dashboard spec edit + verify loop. An advisor + editor that knows the spec contract (machine_defaults vs user_overrides), the renderer chart types and axes, the live KPI result columns, and display redaction/governance. Wraps the dashboard-engineer subagent and the dashboard-design skill. Use whenever the user names \"DashboardAgent\" or asks in plain language to add, change, or remove a plot/panel on a workspace dashboard.",
       "path": "skills/dashboard-agent/SKILL.md"
@@ -777,6 +782,16 @@
           "domain-model",
           "workspace-kpi-query-optimizer"
         ]
+      },
+      {
+        "name": "fetch-source-documents",
+        "command": "uv run fetch-source-documents --workspace <workspace>",
+        "use_when": [
+          "Copy the declared source's documents into the workspace."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
       },
       {
         "name": "finalize-data-model-generation",
@@ -1676,6 +1691,16 @@
         "required_skills": []
       },
       {
+        "name": "run-ingestion",
+        "command": "uv run run-ingestion --workspace <workspace>",
+        "use_when": [
+          "Governed CLI entry points for provisioning + ingestion generation."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
         "name": "run-kpi-execution-harness",
         "command": "uv run run-kpi-execution-harness --workspace <workspace>",
         "use_when": [
@@ -1746,6 +1771,16 @@
         "command": "uv run suggest-kpi-improvements --workspace <workspace>",
         "use_when": [
           "Per-KPI improvement suggestions, emitted ONLY when the readings warrant one."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "sync-workspace-code",
+        "command": "uv run sync-workspace-code --workspace <workspace>",
+        "use_when": [
+          "Governed CLI entry points for provisioning + ingestion generation."
         ],
         "outputs": [],
         "safety": "uncurated -- follow AGENTS.md safety rules for this command",
@@ -1890,6 +1925,16 @@
         "command": "uv run verify-kpi-output --workspace <workspace>",
         "use_when": [
           "Self-grill gate: prove generated KPI output is executable AND aligned with intent."
+        ],
+        "outputs": [],
+        "safety": "uncurated -- follow AGENTS.md safety rules for this command",
+        "required_skills": []
+      },
+      {
+        "name": "verify-orchestration",
+        "command": "uv run verify-orchestration",
+        "use_when": [
+          "Offline verification of the orchestration graph."
         ],
         "outputs": [],
         "safety": "uncurated -- follow AGENTS.md safety rules for this command",

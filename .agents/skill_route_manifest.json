@@ -324,6 +324,11 @@
       ]
     },
     {
+      "tool": "fetch-source-documents",
+      "command": "uv run fetch-source-documents --workspace <workspace>",
+      "required_skills": []
+    },
+    {
       "tool": "finalize-data-model-generation",
       "command": "uv run finalize-data-model-generation --workspace <workspace>",
       "required_skills": [
@@ -742,6 +747,11 @@
       "required_skills": []
     },
     {
+      "tool": "run-ingestion",
+      "command": "uv run run-ingestion --workspace <workspace>",
+      "required_skills": []
+    },
+    {
       "tool": "run-kpi-execution-harness",
       "command": "uv run run-kpi-execution-harness --workspace <workspace>",
       "required_skills": []
@@ -773,6 +783,11 @@
     {
       "tool": "suggest-kpi-improvements",
       "command": "uv run suggest-kpi-improvements --workspace <workspace>",
+      "required_skills": []
+    },
+    {
+      "tool": "sync-workspace-code",
+      "command": "uv run sync-workspace-code --workspace <workspace>",
       "required_skills": []
     },
     {
@@ -841,6 +856,11 @@
     {
       "tool": "verify-kpi-output",
       "command": "uv run verify-kpi-output --workspace <workspace>",
+      "required_skills": []
+    },
+    {
+      "tool": "verify-orchestration",
+      "command": "uv run verify-orchestration",
       "required_skills": []
     },
     {
