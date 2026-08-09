@@ -517,3 +517,61 @@ Observation, not fixed: nothing fingerprints `discovery.json` into the
 blueprint confirmation, so re-running `discover-source` after a discovery bug
 does NOT re-open the human gate. That is convenient here and wrong in general
 -- a corrected discovery can change what a human confirmed.
+
+---
+
+## F25 -- nothing profiled the landed tables, so KPI resolution stayed blind
+
+Found while working out the execution order after F22-F24, not by a failing
+command: `run-ingestion` would have succeeded and Task 1.3 would still have
+been blocked.
+
+`workspaces/rcm` has **no local `datasets/`** and
+`interns/generated/profiles/profile_index.json` reads `{"profiles": []}`.
+Discovery is deliberately metadata-only (`content_read_policy:
+metadata_and_paths_only`) and records `columns: null` for all 12 tables. So the
+only possible source of column-level evidence is the UC profiler --
+`WorkspaceOnboarder.profile_databricks_tables` ->
+`core.profiling.databricks_table_profiler.profile_uc_table`, which exists and
+is correctly wired. What feeds it was wrong:
+
+```python
+catalog = str(source.get("catalog") or "").strip()   # "rcm"      <- the BASE
+schema  = str(source.get("schema")  or "").strip()   # "default"
+_, rows = client.execute_query(f"SHOW TABLES IN `{catalog}`.`{schema}`")
+except Exception:
+    return []                                        # silent
+```
+
+`databricks_source.catalog`/`.schema` describe the RAW SOURCE the operator
+declared at intake. Ingestion lands in the PROVISIONED catalog's bronze schema
+-- `rcm_dev.bronze`. Two independent errors in one query:
+
+1. `rcm` instead of `rcm_dev` -- F21's fifth consumer, which that fix missed.
+2. `default` instead of `bronze` -- the declared source schema is not where the
+   medallion lands.
+
+Then `except Exception: return []` made an unreachable warehouse, a missing
+catalog and a genuinely empty schema all read identically as "zero tables". The
+exclusive-mode zero-tables warning did fire, but with no reason attached it
+pointed at "fix the connection" when the connection was fine and the query was
+aimed at the wrong place.
+
+Net effect: 131 features `blocked_missing_evidence`, 7 `candidate_pattern`,
+0 resolved -- and landing the data would not have moved a single one.
+
+FIX (applied): `_profiling_source_pair()` prefers `provision_plan.json`'s
+`catalog` + `bronze_schema`; a workspace that never provisioned (one pointing at
+pre-existing UC tables) keeps its declared pair byte-for-byte. The discovery
+failure is recorded in `_databricks_discovery_error` and printed by the
+zero-tables warning.
+
+Verified against the real workspace: `_profiling_source_pair` for
+`workspaces/rcm` returns `('rcm_dev', 'bronze')`, where the 12 COPY INTO jobs
+target. Before the fix it returned `('rcm', 'default')`.
+
+**Order lesson.** Three of the last five findings (F21, F25, and F20's catalog)
+are the same mistake in different modules: a NAME that means one thing at
+declaration time and another after provisioning, read as if it never changed.
+Any future consumer of `databricks_source.catalog` should be assumed wrong
+until checked against `provision_plan.json`.

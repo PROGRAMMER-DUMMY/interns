@@ -68,6 +68,58 @@ class DatabricksSourceTablesTests(unittest.TestCase):
             )
             fake_query.assert_called_once_with("SHOW TABLES IN `zzz_widgets`.`raw_layer`")
 
+    def test_a_provisioned_workspace_profiles_the_landed_bronze_tables(self):
+        """F25: after the cloud-first spine runs, the data is in the
+        PROVISIONED catalog's bronze schema -- not in the catalog/schema the
+        operator declared at intake, which name the raw source. Querying the
+        declaration finds nothing, profile_index.json stays empty, and every
+        KPI feature stays `blocked_missing_evidence` forever."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(
+                tmp,
+                settings={"databricks_source": {"catalog": "acme", "schema": "default"}},
+            )
+            _write_json(
+                ws / "interns" / "generated" / "contracts" / "provision_plan.json",
+                {
+                    "catalog": "acme_dev",
+                    "catalog_base": "acme",
+                    "env": "dev",
+                    "bronze_schema": "bronze",
+                },
+            )
+            onboarder = WorkspaceOnboarder(repo, ws)
+            with mock.patch(
+                "core.execution.databricks_client.DatabricksClient.is_configured", return_value=True
+            ), mock.patch(
+                "core.execution.databricks_client.DatabricksClient.execute_query"
+            ) as fake_query:
+                fake_query.return_value = (
+                    ["database", "tableName", "isTemporary"],
+                    [["bronze", "orders", False]],
+                )
+                tables = onboarder._databricks_source_tables()
+            fake_query.assert_called_once_with("SHOW TABLES IN `acme_dev`.`bronze`")
+            self.assertEqual(tables, ["acme_dev.bronze.orders"])
+
+    def test_a_discovery_failure_is_surfaced_not_swallowed(self):
+        """The bare `except Exception: return []` made an unreachable
+        warehouse, a missing catalog and a genuinely empty schema all look
+        identical -- 'zero tables'. The reason has to survive."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ws = _fixture_workspace(
+                tmp, settings={"databricks_source": {"catalog": "acme", "schema": "raw"}}
+            )
+            onboarder = WorkspaceOnboarder(repo, ws)
+            with mock.patch(
+                "core.execution.databricks_client.DatabricksClient.is_configured", return_value=True
+            ), mock.patch(
+                "core.execution.databricks_client.DatabricksClient.execute_query",
+                side_effect=RuntimeError("SCHEMA_NOT_FOUND: acme.raw"),
+            ):
+                self.assertEqual(onboarder._databricks_source_tables(), [])
+            self.assertIn("SCHEMA_NOT_FOUND", onboarder._databricks_discovery_error)
+
     def test_resolves_config_through_the_per_enterprise_seam(self):
         # dbt+Airflow plan section 9: table discovery must resolve its
         # DatabricksClient via resolve_databricks_config(enterprise_id), not

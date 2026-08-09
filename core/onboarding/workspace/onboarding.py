@@ -213,6 +213,8 @@ class WorkspaceOnboarder:
         # Set by discover_inputs() when databricks_source_mode()=="exclusive"
         # and local dataset files are physically present despite that mode.
         self._exclusive_mode_stale_local_files: list[str] = []
+        # Why UC table discovery came back empty, when it did. (F25)
+        self._databricks_discovery_error: str = ""
 
     def run(self) -> OnboardingResult:
         self._validate_workspace()
@@ -878,13 +880,21 @@ class WorkspaceOnboarder:
             inputs.databricks_source_mode == "exclusive" and not inputs.databricks_tables
         )
         if exclusive_mode_zero_tables:
+            # The discovery error, when there was one, is the whole diagnosis:
+            # without it an unreachable warehouse and an empty schema read the
+            # same. (F25)
+            reason = (
+                f" Discovery failed with: {self._databricks_discovery_error}."
+                if self._databricks_discovery_error
+                else " The query returned no rows (the schema is reachable but empty)."
+            )
             exclusive_mode_warnings.append(
                 "[x] exclusive_databricks_mode_zero_tables_discovered: "
                 "databricks_source.mode is 'exclusive' but zero Unity Catalog "
                 "tables were discovered -- profile_index.json is empty. Fix the "
                 "Databricks connection (catalog/schema/credentials) before "
                 "resolving KPI features; local datasets/ is intentionally not "
-                "scanned in this mode."
+                "scanned in this mode." + reason
             )
         if self._exclusive_mode_stale_local_files:
             exclusive_mode_warnings.append(
@@ -1012,8 +1022,7 @@ class WorkspaceOnboarder:
         source = (self.layout.load_settings() or {}).get("databricks_source")
         if not isinstance(source, dict):
             return []
-        catalog = str(source.get("catalog") or "").strip()
-        schema = str(source.get("schema") or "").strip()
+        catalog, schema = self._profiling_source_pair(source)
         if not catalog or not schema:
             return []
         try:
@@ -1042,11 +1051,46 @@ class WorkspaceOnboarder:
                 for row in rows
                 if not _is_platform_written_relation(str(row[1]))
             )
-        except Exception:
+        except Exception as exc:
             # Table discovery must never break onboarding for a workspace
             # that declared a source but has no reachable warehouse right
             # now -- surfaces as an empty list, same as not declaring one.
+            # But the REASON is kept: swallowing it made an unreachable
+            # warehouse, a missing catalog and a genuinely empty schema all
+            # read as "zero tables". (F25)
+            self._databricks_discovery_error = f"{type(exc).__name__}: {exc}"
             return []
+
+    def _profiling_source_pair(self, source: dict[str, Any]) -> tuple[str, str]:
+        """Which (catalog, schema) holds this workspace's data RIGHT NOW.
+
+        `databricks_source.catalog`/`.schema` describe the raw source an
+        operator declared at intake. Once the cloud-first spine has run, the
+        data this workspace profiles is what ingestion LANDED -- the
+        provisioned catalog's bronze schema, recorded in provision_plan.json.
+        Those are different names (`acme`/`default` vs `acme_dev`/`bronze`),
+        so profiling the declaration finds nothing, profile_index.json stays
+        empty, and every KPI feature stays `blocked_missing_evidence`. (F25)
+
+        A workspace that never provisioned -- one pointing at pre-existing
+        Unity Catalog tables -- keeps its declared pair unchanged.
+        """
+        try:
+            plan = json.loads(
+                (self.layout.contracts_dir / "provision_plan.json").read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            plan = {}
+        if not isinstance(plan, dict):
+            plan = {}
+        provisioned = str(plan.get("catalog") or "").strip()
+        bronze = str(plan.get("bronze_schema") or "").strip()
+        if provisioned and bronze:
+            return provisioned, bronze
+        return (
+            str(source.get("catalog") or "").strip(),
+            str(source.get("schema") or "").strip(),
+        )
 
     def _is_platform_governance_note(self, path: Path) -> bool:
         """Whether a file is a platform-generated governance note, not input.
