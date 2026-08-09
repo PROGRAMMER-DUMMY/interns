@@ -62,6 +62,59 @@ class BuildDbtTasksTests(unittest.TestCase):
                 cosmos_dag.build_dbt_tasks(workspace="", repo_root=".")
 
 
+class GhostReconcileQualifiesTableNamesTests(unittest.TestCase):
+    """F20: `reconcile_ghost_tables` now diffs on dbt's fully-qualified
+    `relation_name` (Task C3), but this caller selected only `table_name` from
+    information_schema and passed BARE names in. On the qualified path nothing
+    would match and every live table would report as an orphan -- the exact
+    inversion of the bug C3 fixed. C3's own tests missed it because they
+    exercise the function in isolation with already-qualified input."""
+
+    def test_live_tables_are_passed_fully_qualified(self):
+        seen: dict[str, list[str]] = {}
+
+        def _fake_reconcile(dbt_dir, warehouse_tables, **kwargs):
+            seen["tables"] = list(warehouse_tables)
+            return "reconciled"
+
+        class _FakeClient:
+            def __init__(self, cfg):
+                pass
+
+            def execute_query(self, sql, **kwargs):
+                return ["table_name"], [["fct_x"], ["fct_orphan"]]
+
+        class _ActiveCfg:
+            def is_active(self):
+                return True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws_rel = "workspaces/demo"
+            (root / ws_rel / "interns").mkdir(parents=True)
+            (root / ws_rel / "workspace_settings.json").write_text(
+                '{"databricks_source": {"catalog": "cat", "enterprise_id": ""}}',
+                encoding="utf-8",
+            )
+            with mock.patch.dict(os.environ, _AUTHORIZED_ENV), \
+                mock.patch(
+                    "core.onboarding.kpi.dbt_project_generator.reconcile_ghost_tables",
+                    _fake_reconcile,
+                ), \
+                mock.patch(
+                    "core.config.resolve_databricks_config",
+                    lambda _eid: _ActiveCfg(),
+                ), \
+                mock.patch(
+                    "core.execution.databricks_client.DatabricksClient", _FakeClient
+                ):
+                cosmos_dag._run_ghost_reconcile(
+                    workspace=ws_rel, repo_root=str(root), schema="gold"
+                )
+
+        self.assertEqual(seen["tables"], ["cat.gold.fct_x", "cat.gold.fct_orphan"])
+
+
 class ReadProfileNameTests(unittest.TestCase):
     def test_reads_the_profile_key(self):
         with tempfile.TemporaryDirectory() as tmp:

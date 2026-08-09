@@ -329,3 +329,37 @@ the replay cache to short-circuit would silently skip a changed plan.
 
 Fix direction (not yet applied): include the plan file in `fingerprint_paths`
 for `apply-provisioning` so a changed plan yields a new `op_id`.
+
+## F20 [OPEN, introduced by C3] Ghost reconcile's only caller passes bare names
+
+Task C3 correctly changed `reconcile_ghost_tables` to diff on dbt's
+fully-qualified `relation_name` (commit `ac7bc49`). Its sole production caller
+was not updated and now feeds it the wrong shape.
+
+`core/orchestration/cosmos_dag.py::_run_ghost_reconcile` (L403-407) queries:
+
+```sql
+SELECT table_name FROM `<catalog>`.information_schema.tables
+WHERE table_schema = '<schema>'
+```
+
+and passes those BARE names (`fct_x`) into `reconcile_ghost_tables`. On the new
+qualified path the model set holds `cat.gold.fct_x`, so nothing matches and
+EVERY live table is reported as an orphan -- the exact inversion of the bug C3
+set out to fix.
+
+It does not fire today: `reconcile_ghost_tables` falls back to the legacy alias
+diff unless every manifest node carries `relation_name`, and this workspace has
+no built dbt project yet. It fires the first time a real manifest exists.
+
+C3's tests pass because they exercise the function in isolation with
+already-qualified input -- a reminder that a unit-level green says nothing about
+the seam.
+
+FIX (queued, not applied): select catalog and schema too and build
+`f"{catalog}.{schema}.{table_name}"` before the call. Deferred only to avoid two
+agents editing `cosmos_dag.py` concurrently while Task C1 is in flight.
+
+Noted while reading, out of scope for the fix above: that same query
+interpolates `schema` directly into SQL text. It is settings-derived rather than
+user input, so it is not currently exploitable, but it should be parameterized.

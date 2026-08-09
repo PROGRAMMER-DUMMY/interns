@@ -434,7 +434,14 @@ def _run_ghost_reconcile(*, workspace: str, repo_root: str, schema: str) -> str:
                     f"SELECT table_name FROM `{catalog}`.information_schema.tables "
                     f"WHERE table_schema = '{schema}'"
                 )
-                tables = [str(r[0]) for r in rows if r and r[0]]
+                # Fully qualified, because reconcile_ghost_tables diffs against
+                # dbt's `relation_name` (catalog.schema.table). Passing the bare
+                # table_name matches nothing there and reports every live table
+                # as an orphan. The query is already scoped to this catalog and
+                # schema, so both are known here. (F20)
+                tables = [
+                    f"{catalog}.{schema}.{str(r[0])}" for r in rows if r and r[0]
+                ]
             except Exception:
                 tables = []
     return reconcile_ghost_tables(dbt_dir, tables, layout=layout, schema=schema)
