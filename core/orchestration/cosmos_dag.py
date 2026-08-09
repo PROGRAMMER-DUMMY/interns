@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Tuple
 
 from core.onboarding.databricks.deploy_gates import check_remote_approval
+from core.sql_safety import assert_safe_identifier
 
 
 def cosmos_available() -> bool:
@@ -447,9 +448,16 @@ def _run_ghost_reconcile(*, workspace: str, repo_root: str, schema: str) -> str:
         if db_cfg.is_active():
             client = DatabricksClient(db_cfg)
             try:
+                # Both halves are interpolated into SQL text, so both are
+                # validated as identifiers first. Neither is user input today
+                # (catalog comes from provision_plan.json, schema from the DAG
+                # definition), but "not currently reachable from a user" is a
+                # property of today's callers, not of this function.
+                safe_catalog = assert_safe_identifier(catalog, context="catalog")
+                safe_schema = assert_safe_identifier(schema, context="schema")
                 _, rows = client.execute_query(
-                    f"SELECT table_name FROM `{catalog}`.information_schema.tables "
-                    f"WHERE table_schema = '{schema}'"
+                    f"SELECT table_name FROM `{safe_catalog}`.information_schema.tables "
+                    f"WHERE table_schema = '{safe_schema}'"
                 )
                 # Fully qualified, because reconcile_ghost_tables diffs against
                 # dbt's `relation_name` (catalog.schema.table). Passing the bare

@@ -365,6 +365,9 @@ declared base rather than the provisioned catalog.
 Noted while reading, out of scope for the fix above: that same query
 interpolates `schema` directly into SQL text. It is settings-derived rather than
 user input, so it is not currently exploitable, but it should be parameterized.
+CLOSED: both `catalog` and `schema` now pass through
+`core.sql_safety.assert_safe_identifier` before interpolation. "Not reachable
+from a user" was a property of that function's callers, not of the function.
 
 ---
 
