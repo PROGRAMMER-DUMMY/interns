@@ -165,6 +165,35 @@ class GateTests(unittest.TestCase):
             self.assertEqual(result.executed, 0)
 
 
+class SdkSeamTests(unittest.TestCase):
+    """The one path tests otherwise never execute is the one that touches the
+    SDK, because every other test injects a runner. A wrong symbol there fails
+    only in front of a real warehouse -- which is exactly how it did fail."""
+
+    def test_the_client_the_runner_imports_actually_exists(self):
+        from core.execution.databricks_client import DatabricksClient
+
+        self.assertTrue(hasattr(DatabricksClient, "is_configured"))
+        self.assertTrue(
+            hasattr(DatabricksClient, "execute_query"),
+            "the runner calls execute_query, which polls past its wait timeout",
+        )
+
+    def test_unconfigured_client_is_a_connection_error_not_an_import_error(self):
+        from core.provisioning import ingestion_run
+        from core.storage.workspace_layout import WorkspaceLayout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws_rel = _workspace(tmp, confirmed=True)
+            layout = WorkspaceLayout(project_root=(root / ws_rel).resolve())
+            with mock.patch(
+                "core.execution.databricks_client.DatabricksClient.is_configured",
+                return_value=False,
+            ):
+                with self.assertRaises(ConnectionError):
+                    ingestion_run._sdk_runner(layout)
+
+
 class ExecutionTests(unittest.TestCase):
     def test_confirmed_run_executes_every_job_in_order(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -104,16 +104,21 @@ def load_jobs_manifest(layout: WorkspaceLayout) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _sdk_runner(catalog: str) -> SqlRunner:
+def _sdk_runner(layout: WorkspaceLayout) -> SqlRunner:
     """Warehouse-backed runner. Imported lazily so the module stays importable
     (and testable) on a machine with no Databricks SDK configured.
+
+    Config comes through ``resolve_databricks_config`` so this is scoped to the
+    workspace's enterprise like every other workspace-driven client -- the same
+    seam ``core/intake/discovery.py`` uses.
 
     ``execute_query`` polls past its wait timeout and raises on a non-SUCCEEDED
     terminal state, which is what a COPY INTO on a cold warehouse needs -- the
     first statement pays the start-up and would otherwise come back RUNNING."""
-    from core.execution.databricks_client import DatabricksExecutionClient
+    from core.config import resolve_databricks_config
+    from core.execution.databricks_client import DatabricksClient
 
-    client = DatabricksExecutionClient()
+    client = DatabricksClient(resolve_databricks_config(layout.enterprise_id()))
     if not client.is_configured():
         raise ConnectionError(
             "no Databricks SQL warehouse configured for this workspace"
@@ -192,7 +197,7 @@ def run_ingestion_jobs(
 
     if runner is None:
         try:
-            runner = _sdk_runner(catalog)
+            runner = _sdk_runner(layout)
         except Exception as exc:
             job_records = [_record(j, "blocked", "warehouse unavailable") for j in jobs]
             return _finish(

@@ -27,6 +27,17 @@ DATA_MODEL_HINTS = (
     "create_hospital_db",
 )
 DATA_EXTENSIONS = {".csv", ".parquet", ".json", ".jsonl", ".xlsx", ".xls"}
+
+# Directories the platform WRITES inside a workspace. Their contents are
+# emissions, not inputs -- reading them back as source data made WS-BUG-001 fire
+# at critical on every cloud-native workspace once ingestion had been generated,
+# hard-blocking the KPI path. (F18)
+#
+# `interns/` is already filtered upstream; these postdate that rule. Kept as a
+# local copy rather than importing `sync_code.CODE_DIRS` because the selection
+# path must stay import-cheap -- `tests/regressions/
+# test_listing_ignores_platform_output.py` pins the two together against drift.
+PLATFORM_OUTPUT_DIRS = ("ingestion", "dbt", "context", ".databricks")
 DOC_EXTENSIONS = {
     ".csv",
     ".json",
@@ -237,7 +248,17 @@ def _classify_files(files: list[str]) -> list[dict[str, Any]]:
     return classifications
 
 
+def _is_platform_output(file: str) -> bool:
+    """True when the path sits inside a directory this platform generates.
+
+    Matched on whole path SEGMENTS, so a user dataset merely NAMED like one of
+    them (`datasets/context.csv`) still registers as real input evidence."""
+    return any(part in PLATFORM_OUTPUT_DIRS for part in Path(file).parts[:-1])
+
+
 def _file_roles_and_reasons(file: str) -> tuple[list[str], list[str]]:
+    if Path(file).name == "workspace_settings.json":
+        return [], []
     roles: list[str] = []
     reasons: list[str] = []
     suffix = Path(file).suffix.lower()
@@ -251,7 +272,7 @@ def _file_roles_and_reasons(file: str) -> tuple[list[str], list[str]]:
         roles.append("data_model_input")
         reasons.append(_data_model_reason(normalized, suffix))
 
-    if suffix in DATA_EXTENSIONS and "/docs/" not in file:
+    if suffix in DATA_EXTENSIONS and "/docs/" not in file and not _is_platform_output(file):
         roles.append("dataset_evidence")
         reasons.append(f"{suffix} file outside docs/interns")
 
@@ -314,6 +335,8 @@ def _dataset_roots(files: list[str]) -> list[str]:
     roots = set()
     for file in files:
         if "/interns/" in file:
+            continue
+        if Path(file).name == "workspace_settings.json":
             continue
         if Path(file).suffix.lower() not in DATA_EXTENSIONS:
             continue
