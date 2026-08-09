@@ -330,7 +330,7 @@ the replay cache to short-circuit would silently skip a changed plan.
 Fix direction (not yet applied): include the plan file in `fingerprint_paths`
 for `apply-provisioning` so a changed plan yields a new `op_id`.
 
-## F20 [OPEN, introduced by C3] Ghost reconcile's only caller passes bare names
+## F20 [FIXED in `913ddca`, introduced by C3] Ghost reconcile's only caller passes bare names
 
 Task C3 correctly changed `reconcile_ghost_tables` to diff on dbt's
 fully-qualified `relation_name` (commit `ac7bc49`). Its sole production caller
@@ -356,9 +356,11 @@ C3's tests pass because they exercise the function in isolation with
 already-qualified input -- a reminder that a unit-level green says nothing about
 the seam.
 
-FIX (queued, not applied): select catalog and schema too and build
-`f"{catalog}.{schema}.{table_name}"` before the call. Deferred only to avoid two
-agents editing `cosmos_dag.py` concurrently while Task C1 is in flight.
+FIX (APPLIED in `913ddca`, with a regression test): select catalog and schema too and build
+`f"{catalog}.{schema}.{table_name}"` before the call. (The deferral note here was
+written while Task C1 held `cosmos_dag.py`; the fix landed once C1 committed.)
+The catalog that expression uses was itself wrong until F21 -- it read the
+declared base rather than the provisioned catalog.
 
 Noted while reading, out of scope for the fix above: that same query
 interpolates `schema` directly into SQL text. It is settings-derived rather than
