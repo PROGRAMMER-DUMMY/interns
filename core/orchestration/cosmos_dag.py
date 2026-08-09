@@ -51,6 +51,31 @@ def cosmos_available() -> bool:
     return True
 
 
+def _dbt_target_name(repo_root: str | Path, workspace: str) -> str:
+    """Which profiles.yml target this workspace was actually PROVISIONED for.
+
+    `profiles.yml` declares `dev` and `prod` on `<base>_dev`/`<base>_prod`
+    (Task C4), but `plan-provisioning --env` defaults to `dev`, so for most
+    workspaces only `<base>_dev` exists. Hardcoding `prod` here pointed the
+    orchestrated `dbt build` at a catalog that was never created -- and since
+    sources follow `{{ target.database }}`, the whole DAG would read an absent
+    catalog rather than the bronze tables ingestion just landed. (F26)
+
+    Falls back to `prod` for a workspace with no provision plan, which is what
+    this did before and is the right default for an externally-managed catalog.
+    """
+    plan_path = (
+        Path(repo_root) / workspace
+        / "interns" / "generated" / "contracts" / "provision_plan.json"
+    )
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "prod"
+    env = str((plan or {}).get("env") or "").strip() if isinstance(plan, dict) else ""
+    return env or "prod"
+
+
 def _read_profile_name(dbt_dir: Path) -> str:
     """dbt_project.yml's `profile:` key -- generate-dbt-project derives it
     per-workspace (never a hardcoded name, see `_dbt_project_name()` in
@@ -107,7 +132,8 @@ def build_dbt_tasks(
         raise SystemExit(
             f"Cosmos dbt_build wiring refused: {remote_gate.blocking_reason} "
             "Set AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1 in the Airflow scheduler's "
-            "own environment to authorize this DAG to run dbt build against prod."
+            "own environment to authorize this DAG to run dbt build against the "
+            "workspace's provisioned target."
         )
 
     if not workspace:
@@ -141,7 +167,7 @@ def build_dbt_tasks(
 
     profile_config = ProfileConfig(
         profile_name=_read_profile_name(dbt_dir),
-        target_name="prod",
+        target_name=_dbt_target_name(repo_root, workspace),
         profiles_yml_filepath=str(dbt_dir / "profiles.yml"),
     )
     build_task = DbtBuildLocalOperator(

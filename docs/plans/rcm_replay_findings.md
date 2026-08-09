@@ -587,3 +587,94 @@ are the same mistake in different modules: a NAME that means one thing at
 declaration time and another after provisioning, read as if it never changed.
 Any future consumer of `databricks_source.catalog` should be assumed wrong
 until checked against `provision_plan.json`.
+
+---
+
+## F26 [BLOCKER, FIXED] The orchestrated dbt build targeted a catalog that was never created
+
+Found answering "what would fail in production?", not by any test -- Cosmos is
+not installed in this environment, so the operator is never constructed and no
+test could see it.
+
+`core/orchestration/cosmos_dag.py::build_dbt_tasks` hardcoded:
+
+```python
+profile_config = ProfileConfig(
+    profile_name=_read_profile_name(dbt_dir),
+    target_name="prod",
+    ...
+)
+```
+
+Before Task C4 there was exactly ONE target, named `prod`, whose catalog was
+whatever `--catalog` said -- so the literal happened to be right. C4 split
+`profiles.yml` into `dev` and `prod` on `<base>_dev` / `<base>_prod`. But
+`plan-provisioning --env` defaults to `dev`, so for `workspaces/rcm` only
+`rcm_dev` was created; `rcm_prod` does not exist.
+
+Net: the orchestrated `dbt build` would connect with `catalog: rcm_prod`, and
+because `sources.yml` follows `{{ target.database }}` (F21), it would look for
+bronze in `rcm_prod` too -- an absent catalog, not the tables ingestion just
+landed in `rcm_dev`. The DAG runs against nothing.
+
+This is the same class as F21/F25 once more: a name that means one thing at
+declaration and another after provisioning. It is the third module to get it
+wrong, and the first where the wrong value is a literal rather than a lookup.
+
+FIX (applied): `_dbt_target_name(repo_root, workspace)` reads `env` from
+`provision_plan.json` and uses it as the target, falling back to `prod` for a
+workspace with no plan (an externally-managed catalog), which preserves the old
+behavior exactly where it was correct. Pinned by a source-inspection test,
+because the operator itself is unconstructible here.
+
+## Production-readiness review (2026-08-09) -- open items, not yet fixed
+
+Found in the same pass. Recorded rather than fixed because each needs a
+decision, not just a patch.
+
+### P1 `execute_query` reads only the FIRST result chunk
+
+`core/execution/databricks_client.py::execute_query` returns
+`resp.result.data_array or []`. The SQL Statement Execution API paginates:
+large results arrive as chunks (`result.next_chunk_index` / external links) and
+`data_array` holds only the first. Nothing in `core/` references
+`next_chunk`, `external_links` or `chunk_index`.
+
+Callers today: UC table profiling (bounded samples -- safe), ghost reconcile
+(`SELECT table_name FROM information_schema.tables` -- safe until a schema has
+more tables than one chunk), and anything future that reads KPI results back.
+This does not fail loudly; it silently returns a prefix. At the TB scale this
+platform claims to target, a truncated read that looks successful is the worst
+possible failure shape.
+
+### P2 the statement poll loop has no ceiling
+
+```python
+while resp.status.state in (PENDING, RUNNING):
+    _time.sleep(2)
+    resp = client.statement_execution.get_statement(resp.statement_id)
+```
+
+No maximum wait, no deadline. A hung or very long statement makes this loop
+forever. In an Airflow task that means a worker slot held until the DAG-level
+timeout -- if one is set. There is also no retry around `get_statement`: a
+single transient network blip mid-poll raises and loses a statement that is
+running fine server-side.
+
+### P3 the Airflow worker's Databricks credentials are undocumented
+
+The generated `profiles.yml` uses `env_var('DATABRICKS_HOST')`,
+`env_var('DATABRICKS_HTTP_PATH')`, `env_var('DATABRICKS_TOKEN')`, and the Cosmos
+operator passes the worker environment through (`append_env=True`). So those
+three variables must exist in the Airflow scheduler/worker environment.
+Nothing in the repo provisions, documents, or checks that. It fails loudly
+(dbt's `env_var()` raises on a missing variable) rather than silently, so this
+is a deployment-documentation gap rather than a correctness one -- but it is
+the first thing a new deployment will hit.
+
+### Checked and NOT a problem
+
+- **Auto Loader notification mode (F2).** `useNotifications` appears nowhere in
+  `core/`, so the emitted Auto Loader code never sets it and directory-listing
+  mode is the default. F2's constraint is satisfied by construction. Worth a
+  guard test if streaming sources become common, but nothing is wrong today.

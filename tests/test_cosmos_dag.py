@@ -8,6 +8,7 @@ already established for the sibling module.
 """
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -169,6 +170,47 @@ class GhostReconcileQualifiesTableNamesTests(unittest.TestCase):
 
         self.assertIn("`cat_dev`.information_schema.tables", queried[0])
         self.assertEqual(seen["tables"], ["cat_dev.gold.fct_x"])
+
+
+class DbtTargetMatchesProvisionedEnvTests(unittest.TestCase):
+    """F26: the Cosmos task hardcoded `target_name="prod"`. Since C4 split
+    profiles.yml into dev/prod on `<base>_dev`/`<base>_prod`, and provisioning
+    defaults to `--env dev` (so only `<base>_dev` is ever created), the
+    orchestrated `dbt build` resolved to a catalog that does not exist. Sources
+    follow `{{ target.database }}`, so it would read an empty/absent catalog --
+    the DAG runs against nothing. No test could see it: Cosmos is not installed
+    here, so the operator is never constructed."""
+
+    def _ws(self, root: Path, plan: dict | None) -> str:
+        ws_rel = "workspaces/demo"
+        (root / ws_rel / "interns" / "generated" / "contracts").mkdir(parents=True)
+        if plan is not None:
+            (root / ws_rel / "interns" / "generated" / "contracts" / "provision_plan.json").write_text(
+                json.dumps(plan), encoding="utf-8"
+            )
+        return ws_rel
+
+    def test_target_is_the_provisioned_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._ws(root, {"catalog": "demo_dev", "catalog_base": "demo", "env": "dev"})
+            self.assertEqual(cosmos_dag._dbt_target_name(str(root), ws), "dev")
+
+    def test_unprovisioned_workspace_keeps_prod(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = self._ws(root, None)
+            self.assertEqual(cosmos_dag._dbt_target_name(str(root), ws), "prod")
+
+    def test_the_operator_actually_uses_it(self):
+        # The seam every other test here cannot reach, because Cosmos is not
+        # installed: assert on the source that build_dbt_tasks passes the
+        # resolved target rather than a literal. (The F19/F20 lesson.)
+        import inspect
+
+        source = inspect.getsource(cosmos_dag.build_dbt_tasks)
+        self.assertIn("_dbt_target_name", source)
+        self.assertNotIn('target_name="prod"', source)
 
 
 class ReadProfileNameTests(unittest.TestCase):

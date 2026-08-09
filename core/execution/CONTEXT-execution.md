@@ -4,6 +4,16 @@ This document provides an exhaustive reference for all components in [`core/exec
 
 ---
 
+> **Known limits of `DatabricksClient.execute_query` (production review 2026-08-09, not yet fixed).**
+> It returns `resp.result.data_array`, which is only the FIRST chunk of a paginated
+> result — nothing in `core/` handles `next_chunk_index`/`external_links`, so a large
+> read silently returns a prefix rather than failing. Its poll loop
+> (`while state in (PENDING, RUNNING): sleep(2)`) has no ceiling and no retry around
+> `get_statement`, so a hung statement loops forever and one transient network blip
+> mid-poll loses a statement that is running fine server-side. Safe for today's callers
+> (bounded profiling samples, small `information_schema` listings); not safe for the TB
+> scale this platform targets. See `docs/plans/rcm_replay_findings.md` P1/P2.
+
 ## Executive Overview & Architectural Model
 
 The `core/execution` package provides local DuckDB and remote Databricks SQL execution backends, handling query execution, Polars conversion, dataset sampling, and Unity Catalog execution.
