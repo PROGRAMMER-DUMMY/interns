@@ -30,6 +30,15 @@ def plan_provisioning_main(argv: list[str] | None = None) -> int:
         "--grant-principal", action="append", default=[],
         help="principal to grant read access on a NEWLY created catalog; repeatable",
     )
+    parser.add_argument(
+        "--storage-root", default="",
+        help=(
+            "catalog MANAGED LOCATION (e.g. s3://bucket/). Required on a metastore "
+            "with no storage root of its own; omit to inherit the metastore's. "
+            "Where managed data physically lives is a residency decision, so it is "
+            "never derived from the source location"
+        ),
+    )
     args = parser.parse_args(argv)
     schemas = tuple(args.schema) or DEFAULT_SCHEMAS
     return run_workspace_command(
@@ -43,6 +52,7 @@ def plan_provisioning_main(argv: list[str] | None = None) -> int:
             env=args.env,
             schemas=schemas,
             grant_principals=tuple(args.grant_principal),
+            storage_root=args.storage_root,
         ),
         metadata={"env": args.env, "catalog": args.catalog},
         validation="validate-workspace-artifacts",

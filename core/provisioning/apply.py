@@ -22,6 +22,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -58,10 +59,11 @@ class ProvisioningApi(Protocol):
     ``core.onboarding.databricks.uc_intake.SdkUnityCatalogApi``."""
 
     def catalog_exists(self, name: str) -> bool: ...
-    def create_catalog(self, name: str) -> None: ...
+    def create_catalog(self, name: str, storage_root: str = "") -> None: ...
     def schema_exists(self, catalog: str, schema: str) -> bool: ...
     def create_schema(self, catalog: str, schema: str) -> None: ...
     def external_location_exists(self, name: str) -> bool: ...
+    def list_external_locations(self) -> dict[str, str]: ...
     def create_external_location(self, name: str, url: str, credential: str) -> None: ...
     def volume_exists(self, catalog: str, schema: str, name: str) -> bool: ...
     def create_managed_volume(self, catalog: str, schema: str, name: str) -> None: ...
@@ -231,6 +233,34 @@ def apply_provision_plan(
     return _finish(STATUS_FAILED if failed else STATUS_APPLIED, not failed)
 
 
+def _location_url(url: str) -> str:
+    """A location URL normalized to a trailing slash, so prefix comparison
+    lands on path-segment boundaries."""
+    text = str(url or "").strip()
+    return text.rstrip("/") + "/" if text else ""
+
+
+def covering_external_location(url: str, locations: Mapping[str, str]) -> str:
+    """Name of an existing external location whose URL overlaps ``url``, or "".
+
+    Unity Catalog identifies external locations by URL prefix, not by name, and
+    forbids two of them covering overlapping paths in EITHER direction — so a
+    parent (``s3://bkt/`` over ``s3://bkt/pfx/``) and a child both count.
+    Comparison is on segment boundaries: ``s3://bkt/pfx2/`` does not cover
+    ``s3://bkt/pfx/``.
+    """
+    target = _location_url(url)
+    if not target:
+        return ""
+    for name, existing in sorted((locations or {}).items()):
+        other = _location_url(existing)
+        if not other:
+            continue
+        if target.startswith(other) or other.startswith(target):
+            return str(name)
+    return ""
+
+
 def _apply_one(api: ProvisioningApi, step: dict[str, Any]) -> tuple[str, str]:
     kind = step["kind"]
     params = step.get("params") or {}
@@ -239,6 +269,18 @@ def _apply_one(api: ProvisioningApi, step: dict[str, Any]) -> tuple[str, str]:
         name = params["name"]
         if api.external_location_exists(name):
             return "existing", f"[ok] existing external location {name}"
+        # A name miss does not mean the path is free. UC rejects a create whose
+        # URL overlaps any existing location, whatever it is called, and that
+        # location IS the access path for this data -- so reuse it rather than
+        # failing a plan that can never succeed. (F14)
+        lister = getattr(api, "list_external_locations", None)
+        if lister is not None:
+            covering = covering_external_location(params["url"], lister())
+            if covering:
+                return "existing", (
+                    f"[ok] existing external location {covering} already covers "
+                    f"{params['url']}; reusing it"
+                )
         api.create_external_location(name, params["url"], params.get("credential_ref", ""))
         return "created", f"[ok] created external location {name}"
 
@@ -246,8 +288,13 @@ def _apply_one(api: ProvisioningApi, step: dict[str, Any]) -> tuple[str, str]:
         name = params["name"]
         if api.catalog_exists(name):
             return "existing", f"[ok] existing catalog {name}"
-        api.create_catalog(name)
-        return "created", f"[ok] created catalog {name}"
+        # A metastore with no storage root cannot place managed tables, so it
+        # rejects a rootless create. Where that data lives is a residency
+        # decision, carried here from `plan-provisioning --storage-root`. (F15)
+        storage_root = str(params.get("storage_root") or "")
+        api.create_catalog(name, storage_root)
+        suffix = f" at {storage_root}" if storage_root else ""
+        return "created", f"[ok] created catalog {name}{suffix}"
 
     if kind == KIND_SCHEMA:
         catalog, schema = params["catalog"], params["schema"]

@@ -218,3 +218,114 @@ STOPPED AT: `apply-provisioning`, which requires
 `AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1`. A human must set that in the executing
 shell; an agent must never set it. Nothing has been created in the Databricks
 account by this replay.
+
+---
+
+# Phase B3 continued (2026-08-09) -- gate crossed
+
+The human set `AUTORESEARCH_ALLOW_REMOTE_EXECUTION=1` and `apply-provisioning`
+ran for real. Two blockers surfaced, in sequence; both are platform defects that
+reproduce on any account of this shape, not rcm quirks.
+
+## F14 [BLOCKER, FIXED] External-location identity: name vs path
+
+First live `apply-provisioning` failed on step 1 of 6:
+
+```
+InvalidParameterValue: Input path url 's3://amzn-workspace-rcm/datasets'
+overlaps with an existing external location within 'CreateExternalLocation'
+call. Conflicting location: healthcare_rcm_ext_loc.
+```
+
+`created: 0, existing: 0, blocked: 0, failed: 1` -- the run stopped on the first
+failure and created nothing, which is the P1-b stop-on-first-failure fix
+behaving correctly.
+
+Root cause: the platform models external-location identity as a NAME. Both the
+plan-time guard (`plan.py` `existing.get(f"external_location:{loc_name}")`) and
+the apply-time guard (`external_location_exists(name)`) ask "is there a location
+called `rcm_dev_root`?" -- there was not, so it planned a create. Unity Catalog
+models identity as a URL PREFIX and forbids two locations covering overlapping
+paths in either direction. The existing `healthcare_rcm_ext_loc` covers
+`s3://amzn-workspace-rcm/`, a strict parent of the planned
+`s3://amzn-workspace-rcm/datasets/`.
+
+This is the NORMAL enterprise case -- a platform team pre-registers the bucket,
+then a workspace tries to register a sub-path of it. It is precisely the
+scenario cloud-first targets.
+
+The same defect existed in BOTH provisioning paths: `uc_intake.py` used the
+identical `external_locations.get(name)` lookup, the identical `f"{catalog}_root"`
+naming convention, and the identical name-based skip.
+
+FIX: a pure `covering_external_location(url, locations)` in
+`core/provisioning/apply.py`, plus `list_external_locations()` on both API
+seams. A name miss now falls back to overlap detection; a covering location is
+recorded `existing` and reused, because it IS the access path for that data and
+no create could ever succeed. Overlap is bidirectional and compares on
+path-segment boundaries, so `s3://bkt/pfx2/` does not match `s3://bkt/pfx/`.
+Five tests pin it, including the exact reproduction.
+
+Verified live:
+```
+[ok] existing external location healthcare_rcm_ext_loc already covers
+     s3://amzn-workspace-rcm/datasets/; reusing it
+```
+
+## F15 [BLOCKER, FIXED] Rootless catalog create on a Default Storage metastore
+
+With F14 fixed, provisioning advanced one step and failed on the catalog:
+
+```
+InvalidState: Metastore storage root URL does not exist. Default Storage is
+enabled in your account. ... please provide a storage location for the catalog
+(for example 'CREATE CATALOG myCatalog MANAGED LOCATION '<location-path>').
+```
+
+Measured: metastore `metastore_aws_us_east_2` has `storage_root: None`. Two
+working precedents already existed in the same account -- `rcm` at
+`s3://amzn-workspace-rcm/` (OPEN), and `dbt_dev`/`workspace` at
+`s3://dbstorage-prod-.../uc/<metastore-id>` (ISOLATED, Databricks Default
+Storage). So a catalog here MUST carry an explicit MANAGED LOCATION; the
+platform had no concept of one (`create_catalog(name)` took only a name).
+
+Where managed tables physically live is a data-residency decision, and undoing
+it means dropping the catalog. So it is NOT derived from the source location:
+it is an explicit operator input, `plan-provisioning --storage-root`, recorded
+in `provision_plan.json` where it is reviewable before apply. Omitted, the
+catalog inherits the metastore root exactly as before, so metastores that have
+one are untouched.
+
+Human decision for this replay: `s3://amzn-workspace-rcm/` -- the customer's own
+bucket, matching the existing `rcm` catalog, under the credential that already
+validates.
+
+Also removed: a DUPLICATE `create_catalog` definition in
+`uc_intake.SdkUnityCatalogApi`. Python keeps the later definition, so the
+rootless one silently shadowed the fixed one.
+
+Verified live -- `applied`, `created: 5, existing: 1, blocked: 0, failed: 0`:
+```
+[ok] existing external location healthcare_rcm_ext_loc already covers ...
+[ok] created catalog rcm_dev at s3://amzn-workspace-rcm/
+[ok] created schema rcm_dev.bronze | .silver | .gold
+[ok] created volume rcm_dev.bronze._checkpoints
+```
+Confirmed independently in UC: three schemas present, catalog
+`storage_root: s3://amzn-workspace-rcm/`, `isolation_mode: OPEN`, volume created.
+
+## F16 [OPEN, not blocking] Idempotency op_id ignores plan content
+
+All three `apply-provisioning` runs reported the SAME
+`op_id: 6fc743247007ada8` and `previously_applied_at: 2026-08-09T04:52:09Z`,
+even though `provision_plan.json` materially changed between runs (the catalog
+step gained `storage_root`). The envelope therefore claimed "This exact call was
+already applied" about a call whose plan was different.
+
+No harm here: `run_workspace_command` re-executes on replay to refresh counters,
+so the new plan did apply. But the fingerprint does not cover the artifact the
+command consumes, so the replay LABEL is false, and any future path that trusts
+the replay cache to short-circuit would silently skip a changed plan.
+
+Fix direction (not yet applied): include the plan file in `fingerprint_paths`
+for `apply-provisioning` so a changed plan yields a new `op_id`.

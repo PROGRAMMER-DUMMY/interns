@@ -145,6 +145,7 @@ def build_steps(
     schemas: tuple[str, ...] = DEFAULT_SCHEMAS,
     grant_principals: tuple[str, ...] = (),
     existing_objects: dict[str, str] | None = None,
+    storage_root: str = "",
 ) -> list[dict[str, Any]]:
     """Ordered additive steps. ``existing_objects`` maps ``"<kind>:<name>"`` to
     the object's CURRENT definition (url/location; empty string when the object
@@ -177,7 +178,8 @@ def build_steps(
             ))
 
     steps.append(_step(
-        KIND_CATALOG, f"{KIND_CATALOG}:{catalog}", {"name": catalog},
+        KIND_CATALOG, f"{KIND_CATALOG}:{catalog}",
+        {"name": catalog, "storage_root": storage_root},
         {"api": "catalog_exists", "args": [catalog]},
     ))
     for schema in schemas:
@@ -247,6 +249,7 @@ def build_provision_plan(
     env: str = "dev",
     schemas: tuple[str, ...] = DEFAULT_SCHEMAS,
     grant_principals: tuple[str, ...] = (),
+    storage_root: str = "",
 ) -> ProvisionPlan:
     repo_root = Path(repo_root).resolve()
     layout = WorkspaceLayout(project_root=(repo_root / workspace).resolve())
@@ -277,6 +280,7 @@ def build_provision_plan(
         schemas=tuple(schemas),
         grant_principals=tuple(grant_principals),
         existing_objects=existing if isinstance(existing, dict) else None,
+        storage_root=storage_root,
     )
 
     notes: list[str] = []

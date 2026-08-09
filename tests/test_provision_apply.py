@@ -15,6 +15,7 @@ from core.provisioning.apply import (
     STATUS_REFUSED_NO_CONFIRMATION,
     STATUS_REFUSED_UNAVAILABLE,
     apply_provision_plan,
+    covering_external_location,
 )
 from core.provisioning.plan import build_provision_plan
 
@@ -37,10 +38,19 @@ DISCOVERY = {
 class FakeApi:
     """Records calls; `existing` seeds objects that are already present."""
 
-    def __init__(self, existing: set[str] | None = None, fail_on: str = ""):
+    def __init__(
+        self,
+        existing: set[str] | None = None,
+        fail_on: str = "",
+        locations: dict[str, str] | None = None,
+    ):
         self.existing = set(existing or ())
         self.fail_on = fail_on
         self.calls: list[str] = []
+        # name -> url, mirroring what Unity Catalog already holds.
+        self.locations = dict(locations or {})
+        # catalog name -> storage_root it was created with.
+        self.storage_roots: dict[str, str] = {}
 
     def _create(self, key: str) -> None:
         self.calls.append(key)
@@ -51,7 +61,8 @@ class FakeApi:
     def catalog_exists(self, name):
         return f"catalog:{name}" in self.existing
 
-    def create_catalog(self, name):
+    def create_catalog(self, name, storage_root=""):
+        self.storage_roots[name] = storage_root
         self._create(f"catalog:{name}")
 
     def schema_exists(self, catalog, schema):
@@ -63,8 +74,12 @@ class FakeApi:
     def external_location_exists(self, name):
         return f"external_location:{name}" in self.existing
 
+    def list_external_locations(self):
+        return dict(self.locations)
+
     def create_external_location(self, name, url, credential):
         self._create(f"external_location:{name}")
+        self.locations[name] = url
 
     def volume_exists(self, catalog, schema, name):
         return f"volume:{catalog}.{schema}.{name}" in self.existing
@@ -79,7 +94,9 @@ class FakeApi:
         self._create(f"grant:{securable}:{principal}")
 
 
-def _workspace(tmp: str, *, confirmed: bool, grants=(), existing_objects=None):
+def _workspace(
+    tmp: str, *, confirmed: bool, grants=(), existing_objects=None, storage_root=""
+):
     root = Path(tmp)
     ws_rel = "workspaces/demo"
     ws = root / ws_rel
@@ -99,7 +116,10 @@ def _workspace(tmp: str, *, confirmed: bool, grants=(), existing_objects=None):
         (marker / "current.confirmed.json").write_text(
             json.dumps({"confirmed_by": "a human", "status": "confirmed"}), encoding="utf-8"
         )
-    build_provision_plan(root, ws_rel, catalog="demo", env="dev", grant_principals=grants)
+    build_provision_plan(
+        root, ws_rel, catalog="demo", env="dev", grant_principals=grants,
+        storage_root=storage_root,
+    )
     return root, ws_rel
 
 
@@ -198,6 +218,91 @@ class IdempotencyTests(unittest.TestCase):
             self.assertEqual(result.blocked, 1)
             self.assertNotIn("external_location:demo_dev_root", api.calls)
             self.assertTrue(result.ok)  # the rest of the additive plan still lands
+
+
+class ExternalLocationOverlapTests(unittest.TestCase):
+    """F14: Unity Catalog keys external-location identity on URL prefix, not on
+    name. A name-only check plans a create that UC rejects with
+    'overlaps with an existing external location'."""
+
+    def test_parent_path_covers_the_planned_url(self):
+        found = covering_external_location(
+            "s3://bkt/pfx/", {"platform_root": "s3://bkt/"}
+        )
+        self.assertEqual(found, "platform_root")
+
+    def test_child_path_also_overlaps(self):
+        # UC rejects in both directions, so a narrower existing location counts.
+        found = covering_external_location(
+            "s3://bkt/pfx/", {"narrow": "s3://bkt/pfx/deeper/"}
+        )
+        self.assertEqual(found, "narrow")
+
+    def test_sibling_prefix_is_not_an_overlap(self):
+        # 's3://bkt/pfx2/' must not match 's3://bkt/pfx/' on a raw startswith.
+        found = covering_external_location(
+            "s3://bkt/pfx/", {"sibling": "s3://bkt/pfx2/"}
+        )
+        self.assertEqual(found, "")
+
+    def test_unrelated_bucket_is_not_an_overlap(self):
+        found = covering_external_location(
+            "s3://bkt/pfx/", {"other": "s3://different-bucket/"}
+        )
+        self.assertEqual(found, "")
+
+    def test_existing_location_under_a_different_name_is_reused_not_recreated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws = _workspace(tmp, confirmed=True)
+            # The bucket is already registered by a platform team, under a name
+            # this workspace would never guess.
+            api = FakeApi(locations={"healthcare_ext_loc": "s3://bkt/"})
+            result = apply_provision_plan(root, ws, api=api)
+
+            self.assertEqual(result.status, STATUS_APPLIED)
+            self.assertTrue(result.ok)
+            self.assertNotIn("external_location:demo_dev_root", api.calls)
+            loc_steps = [
+                s for s in result.steps if s["step_id"].startswith("create_external_location:")
+            ]
+            self.assertEqual(len(loc_steps), 1)
+            self.assertEqual(loc_steps[0]["status"], "existing")
+            self.assertIn("healthcare_ext_loc", loc_steps[0]["detail"])
+
+
+class CatalogStorageRootTests(unittest.TestCase):
+    """F15: a metastore with no storage root cannot create a catalog without an
+    explicit MANAGED LOCATION. Where managed data physically lives is a
+    residency decision, so it is an operator input recorded in the plan --
+    never derived silently from the source location."""
+
+    def test_storage_root_is_absent_by_default(self):
+        # Metastores that DO have a root must keep working untouched.
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws = _workspace(tmp, confirmed=True)
+            api = FakeApi()
+            apply_provision_plan(root, ws, api=api)
+            self.assertEqual(api.storage_roots["demo_dev"], "")
+
+    def test_declared_storage_root_reaches_catalog_creation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws = _workspace(
+                tmp, confirmed=True, storage_root="s3://bkt/"
+            )
+            api = FakeApi()
+            result = apply_provision_plan(root, ws, api=api)
+            self.assertEqual(result.status, STATUS_APPLIED)
+            self.assertEqual(api.storage_roots["demo_dev"], "s3://bkt/")
+
+    def test_storage_root_is_recorded_in_the_plan_for_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws = _workspace(tmp, confirmed=True, storage_root="s3://bkt/")
+            plan = json.loads(
+                (Path(root) / ws / "interns/generated/contracts/provision_plan.json").read_text()
+            )
+            catalog_steps = [s for s in plan["steps"] if s["kind"] == "create_catalog"]
+            self.assertEqual(len(catalog_steps), 1)
+            self.assertEqual(catalog_steps[0]["params"]["storage_root"], "s3://bkt/")
 
 
 class FailureTests(unittest.TestCase):

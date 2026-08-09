@@ -87,7 +87,8 @@ class UnityCatalogApi(Protocol):
     def external_location_exists(self, name: str) -> bool: ...
     def create_external_location(self, name: str, url: str, credential: str) -> None: ...
     def catalog_exists(self, name: str) -> bool: ...
-    def create_catalog(self, name: str) -> None: ...
+    def create_catalog(self, name: str, storage_root: str = "") -> None: ...
+    def list_external_locations(self) -> dict[str, str]: ...
     def schema_exists(self, catalog: str, schema: str) -> bool: ...
     def create_schema(self, catalog: str, schema: str) -> None: ...
     def volume_exists(self, catalog: str, schema: str, name: str) -> bool: ...
@@ -124,6 +125,20 @@ class SdkUnityCatalogApi:
     def external_location_exists(self, name: str) -> bool:
         return self._exists(self.client.external_locations.get, name)
 
+    def list_external_locations(self) -> dict[str, str]:
+        """name -> url for every external location the caller can see.
+
+        Unity Catalog rejects a create whose URL overlaps an existing location
+        regardless of its name, so callers need the URLs, not just the names.
+        """
+        found: dict[str, str] = {}
+        for loc in self.client.external_locations.list():
+            name = getattr(loc, "name", "") or ""
+            url = getattr(loc, "url", "") or ""
+            if name and url:
+                found[str(name)] = str(url)
+        return found
+
     def create_external_location(self, name: str, url: str, credential: str) -> None:
         self.client.external_locations.create(
             name=name, url=url, credential_name=credential
@@ -132,8 +147,14 @@ class SdkUnityCatalogApi:
     def catalog_exists(self, name: str) -> bool:
         return self._exists(self.client.catalogs.get, name)
 
-    def create_catalog(self, name: str) -> None:
-        self.client.catalogs.create(name=name)
+    def create_catalog(self, name: str, storage_root: str = "") -> None:
+        """``storage_root`` is the catalog's MANAGED LOCATION. Omitted, UC falls
+        back to the metastore root -- which some metastores (Default Storage
+        accounts) do not have, and then a rootless create is rejected."""
+        if storage_root:
+            self.client.catalogs.create(name=name, storage_root=storage_root)
+        else:
+            self.client.catalogs.create(name=name)
 
     def schema_exists(self, catalog: str, schema: str) -> bool:
         return self._exists(self.client.schemas.get, f"{catalog}.{schema}")
