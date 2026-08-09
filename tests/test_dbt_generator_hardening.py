@@ -461,6 +461,88 @@ class GhostTableReconcileTests(unittest.TestCase):
             self.assertIn("No orphaned relations found", report)
 
 
+def _manifest_dbt_dir(tmp: Path, models: dict[str, dict]) -> Path:
+    """A bare dbt project dir carrying only `target/manifest.json` -- the
+    shape reconcile reads from without a real `dbt build`."""
+    dbt_dir = tmp / "dbt"
+    (dbt_dir / "target").mkdir(parents=True)
+    (dbt_dir / "models").mkdir(parents=True)
+    nodes = {
+        f"model.demo.{unique_id}": {"resource_type": "model", **fields}
+        for unique_id, fields in models.items()
+    }
+    (dbt_dir / "target" / "manifest.json").write_text(
+        json.dumps({"nodes": nodes}), encoding="utf-8"
+    )
+    return dbt_dir
+
+
+class GhostTableReconcileRelationNameTests(unittest.TestCase):
+    """Two models can share a bare alias across different schemas -- diffing
+    on the alias alone collides them. dbt's manifest carries the fully
+    qualified `relation_name` for exactly this reason."""
+
+    def test_reports_fully_qualified_orphan_and_never_a_bare_alias(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dbt_dir = _manifest_dbt_dir(
+                Path(tmp),
+                {
+                    "fct_x": {
+                        "alias": "fct_x",
+                        "name": "fct_x",
+                        "relation_name": "`cat`.`gold`.`fct_x`",
+                    }
+                },
+            )
+            layout = WorkspaceLayout(project_root=Path(tmp) / "workspaces" / "demo")
+            report_path = reconcile_ghost_tables(
+                dbt_dir, ["cat.gold.fct_x", "cat.gold.fct_orphan"], layout=layout
+            )
+            report = Path(report_path).read_text(encoding="utf-8")
+            orphan_section = report.split("## Orphaned relations")[-1]
+            self.assertIn("cat.gold.fct_orphan", orphan_section)
+            self.assertNotIn("cat.gold.fct_x", orphan_section)
+            self.assertNotIn("DROP", report.upper())
+
+    def test_bare_alias_collision_across_schemas_is_not_a_false_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # The project's only model is cat.gold.fct_x. A DIFFERENT schema
+            # (cat.silver) also has a table aliased fct_x -- a bare-alias diff
+            # would wrongly treat it as "still in the project".
+            dbt_dir = _manifest_dbt_dir(
+                Path(tmp),
+                {
+                    "fct_x": {
+                        "alias": "fct_x",
+                        "name": "fct_x",
+                        "relation_name": "`cat`.`gold`.`fct_x`",
+                    }
+                },
+            )
+            layout = WorkspaceLayout(project_root=Path(tmp) / "workspaces" / "demo")
+            report_path = reconcile_ghost_tables(
+                dbt_dir, ["cat.silver.fct_x"], layout=layout
+            )
+            report = Path(report_path).read_text(encoding="utf-8")
+            orphan_section = report.split("## Orphaned relations")[-1]
+            self.assertIn("cat.silver.fct_x", orphan_section)
+            self.assertNotIn("DROP", report.upper())
+
+    def test_pre_1_0_manifest_without_relation_name_falls_back_to_alias_diff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dbt_dir = _manifest_dbt_dir(
+                Path(tmp), {"fct_x": {"alias": "fct_x", "name": "fct_x"}}
+            )
+            layout = WorkspaceLayout(project_root=Path(tmp) / "workspaces" / "demo")
+            report = Path(
+                reconcile_ghost_tables(dbt_dir, ["fct_x", "fct_orphan"], layout=layout)
+            ).read_text(encoding="utf-8")
+            orphan_section = report.split("## Orphaned relations")[-1]
+            self.assertIn("fct_orphan", orphan_section)
+            self.assertNotIn("fct_x", orphan_section.replace("fct_orphan", ""))
+            self.assertNotIn("DROP", report.upper())
+
+
 if __name__ == "__main__":
     unittest.main()
 

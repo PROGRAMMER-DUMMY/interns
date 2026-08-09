@@ -1578,9 +1578,12 @@ def reconcile_ghost_tables(
     `information_schema.tables`) -- this function issues no warehouse query, so
     it stays testable and unable to touch anything.
     """
-    model_names = _manifest_model_names(dbt_dir)
+    model_names, qualified = _manifest_model_names(dbt_dir)
     tables = sorted({str(name).strip() for name in warehouse_tables if str(name).strip()})
-    orphans = [name for name in tables if name not in model_names]
+    if qualified:
+        orphans = [name for name in tables if _normalize_relation(name) not in model_names]
+    else:
+        orphans = [name for name in tables if name not in model_names]
 
     lines = [
         "# dbt Ghost-Table Reconcile (dry run)",
@@ -1609,23 +1612,46 @@ def reconcile_ghost_tables(
     return report.as_posix()
 
 
-def _manifest_model_names(dbt_dir: Path) -> set[str]:
-    """The project's model set: dbt's own manifest when a build has produced
-    one, otherwise the generated model files (same set, one build earlier)."""
+def _normalize_relation(name: str) -> str:
+    """dbt quotes `relation_name` per segment (`` `cat`.`gold`.`fct_x` `` on
+    Databricks, `"cat"."gold"."fct_x"` elsewhere) -- strip the quoting and
+    casefold so a warehouse listing (usually unquoted) diffs against it."""
+    return re.sub(r'[`"\[\]]', "", str(name)).strip().casefold()
+
+
+def _manifest_model_names(dbt_dir: Path) -> tuple[set[str], bool]:
+    """The project's model set to diff the warehouse listing against.
+
+    Prefers dbt's own fully-qualified `relation_name` (catalog.schema.table,
+    normalized) so two models that share a bare alias in different schemas
+    can't collide into a false "still present" match. Returns `(names,
+    True)` in that case. Manifests from before `relation_name` was populated
+    (pre-1.0), and the no-manifest-yet case, fall back to the alias/name set
+    the caller compared against before -- returned as `(names, False)` so the
+    caller knows not to normalize the warehouse side.
+    """
     manifest = dbt_dir / "target" / "manifest.json"
     if manifest.exists():
         try:
             nodes = json.loads(manifest.read_text(encoding="utf-8")).get("nodes") or {}
-            names = {
-                str(node.get("alias") or node.get("name"))
+            models = [
+                node
                 for node in nodes.values()
                 if isinstance(node, dict) and node.get("resource_type") == "model"
+            ]
+            qualified = {
+                _normalize_relation(node["relation_name"])
+                for node in models
+                if node.get("relation_name")
             }
+            if qualified and len(qualified) == len(models):
+                return qualified, True
+            names = {str(node.get("alias") or node.get("name")) for node in models}
             if names:
-                return names
+                return names, False
         except (json.JSONDecodeError, OSError):
             pass
-    return {path.stem for path in (dbt_dir / "models").rglob("*.sql")}
+    return {path.stem for path in (dbt_dir / "models").rglob("*.sql")}, False
 
 
 def _render_dbt_test(decision: dict[str, Any]) -> list[str]:
