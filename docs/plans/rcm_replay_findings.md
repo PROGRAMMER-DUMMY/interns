@@ -314,7 +314,7 @@ Verified live -- `applied`, `created: 5, existing: 1, blocked: 0, failed: 0`:
 Confirmed independently in UC: three schemas present, catalog
 `storage_root: s3://amzn-workspace-rcm/`, `isolation_mode: OPEN`, volume created.
 
-## F16 [OPEN, not blocking] Idempotency op_id ignores plan content
+## F16 [FIXED] Idempotency op_id ignores plan content
 
 All three `apply-provisioning` runs reported the SAME
 `op_id: 6fc743247007ada8` and `previously_applied_at: 2026-08-09T04:52:09Z`,
@@ -327,8 +327,17 @@ so the new plan did apply. But the fingerprint does not cover the artifact the
 command consumes, so the replay LABEL is false, and any future path that trusts
 the replay cache to short-circuit would silently skip a changed plan.
 
-Fix direction (not yet applied): include the plan file in `fingerprint_paths`
-for `apply-provisioning` so a changed plan yields a new `op_id`.
+FIX (applied): `apply-provisioning` now folds
+`fingerprint_paths(provision_plan.json)` into its `op_args` as
+`plan_fingerprint`, and `run-ingestion` does the same with
+`jobs_manifest.json` as `manifest_fingerprint` -- the emitted manifest IS that
+command's input, so a regenerated manifest must not replay as the prior run
+(which is exactly what F22's regeneration would have produced). The helper
+already existed and was simply not wired in.
+
+Pinned by tests that read the shipped CLI source, not just the hash function:
+a unit test proving a changed plan yields a new op_id says nothing about
+whether the COMMAND passes the fingerprint. (The F19 lesson.)
 
 ## F20 [FIXED in `913ddca`, introduced by C3] Ghost reconcile's only caller passes bare names
 

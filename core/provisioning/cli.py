@@ -3,9 +3,11 @@ from __future__ import annotations
 from core.observability.cost_ledger import anchored
 
 import argparse
+from pathlib import Path
 from typing import Any
 
 from core.onboarding.workspace.cli_runner import run_workspace_command
+from core.onboarding.workspace.idempotency import fingerprint_paths
 from core.paths import PROJECT_ROOT
 from core.provisioning.apply import apply_provision_plan
 from core.provisioning.ingestion import generate_ingestion
@@ -87,12 +89,24 @@ def apply_provisioning_main(argv: list[str] | None = None) -> int:
         )
         return holder["result"]
 
+    # The op-id must cover the ARTIFACT this command consumes, not just its
+    # flags. Without the plan's fingerprint, three runs against three
+    # materially different plans shared one op_id and the envelope reported
+    # "this exact call was already applied" about a call whose plan had
+    # changed. (F16)
     code = run_workspace_command(
         command="apply-provisioning",
         workspace=args.workspace,
         repo_root=args.repo_root,
         fn=_run,
-        op_args={"workspace": args.workspace, "dry_run": args.dry_run},
+        op_args={
+            "workspace": args.workspace,
+            "dry_run": args.dry_run,
+            "plan_fingerprint": fingerprint_paths(
+                Path(args.repo_root) / args.workspace
+                / "interns" / "generated" / "contracts" / "provision_plan.json"
+            ),
+        },
         allow_replay=args.allow_replay,
         metadata={"dry_run": args.dry_run},
         record_idempotent=True,
@@ -153,12 +167,21 @@ def run_ingestion_main(argv: list[str] | None = None) -> int:
         )
         return holder["result"]
 
+    # Same contract as apply-provisioning: the emitted jobs manifest IS the
+    # input, so a regenerated manifest must not replay as the prior run. (F16)
     code = run_workspace_command(
         command="run-ingestion",
         workspace=args.workspace,
         repo_root=args.repo_root,
         fn=_run,
-        op_args={"workspace": args.workspace, "dry_run": args.dry_run},
+        op_args={
+            "workspace": args.workspace,
+            "dry_run": args.dry_run,
+            "manifest_fingerprint": fingerprint_paths(
+                Path(args.repo_root) / args.workspace
+                / "ingestion" / "jobs_manifest.json"
+            ),
+        },
         allow_replay=args.allow_replay,
         metadata={"dry_run": args.dry_run},
         record_idempotent=True,

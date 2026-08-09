@@ -71,6 +71,64 @@ class FailedRunIsNotAnAppliedOpTests(unittest.TestCase):
         self.assertTrue(log.exists() and log.read_text(encoding="utf-8").strip())
 
 
+class OpIdCoversConsumedArtifactTests(unittest.TestCase):
+    """F16: all three live `apply-provisioning` runs reported the SAME op_id
+    even though `provision_plan.json` had materially changed between them (the
+    catalog step gained `storage_root`). The envelope claimed "this exact call
+    was already applied" about a call whose PLAN was different. Harmless only
+    because replay re-runs `fn()` to refresh; any future path that trusts the
+    cache to short-circuit would silently skip a changed plan."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        # ONE stable path, rewritten between calls -- `fingerprint_paths` hashes
+        # the path alongside the bytes, which is what a real workspace has.
+        self.plan = Path(self._tmp.name) / "provision_plan.json"
+
+    def _op_id_for_plan(self, plan_body: str) -> str:
+        from core.onboarding.workspace.idempotency import fingerprint_paths
+
+        self.plan.write_text(plan_body, encoding="utf-8")
+        return compute_op_id(
+            "apply-provisioning",
+            workspace="workspaces/demo",
+            dry_run=False,
+            plan_fingerprint=fingerprint_paths(self.plan),
+        )
+
+    def test_a_changed_plan_yields_a_different_op_id(self) -> None:
+        before = self._op_id_for_plan('{"steps": [{"kind": "create_catalog"}]}')
+        after = self._op_id_for_plan(
+            '{"steps": [{"kind": "create_catalog", "storage_root": "s3://b/"}]}'
+        )
+        self.assertNotEqual(before, after)
+
+    def test_an_unchanged_plan_still_replays(self) -> None:
+        body = '{"steps": [{"kind": "create_catalog"}]}'
+        self.assertEqual(self._op_id_for_plan(body), self._op_id_for_plan(body))
+
+    def test_apply_provisioning_actually_passes_a_plan_fingerprint(self) -> None:
+        # The seam every other test here mocks away: the CLI must really put
+        # the artifact into op_args, or the two tests above prove nothing about
+        # the shipped command. (The F19 lesson.)
+        import inspect
+
+        from core.provisioning import cli
+
+        source = inspect.getsource(cli.apply_provisioning_main)
+        self.assertIn("plan_fingerprint", source)
+        self.assertIn("fingerprint_paths", source)
+
+    def test_run_ingestion_fingerprints_its_manifest(self) -> None:
+        import inspect
+
+        from core.provisioning import cli
+
+        source = inspect.getsource(cli.run_ingestion_main)
+        self.assertIn("fingerprint_paths", source)
+
+
 class RecordOpTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
