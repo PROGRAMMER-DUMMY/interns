@@ -174,7 +174,7 @@ The `core/onboarding/workspace` subsystem provides a governed, local-first and c
   - `DelegationEvent`: ([L69-L113](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/onboarding/workspace/delegation.py#L69-L113)) - Recorded delegation event log entry.
     - `to_trajectory_event()`: ([L96-L113](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/onboarding/workspace/delegation.py#L96-L113)) - Converts event for `trajectory.jsonl`.
   - Constants & Routing Maps:
-    - `STAGE_ROUTING`: ([L220-L364](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/onboarding/workspace/delegation.py#L220-L364)) - Mapping of workflow stages to required specialists and suggested skills.
+    - `STAGE_ROUTING`: ([L220-L364](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/onboarding/workspace/delegation.py#L220-L364)) - Mapping of workflow stages to required specialists and suggested skills. `tests.test_agent_skill_routing::test_every_skill_is_routed` fails if any skill under `skills/` is unrouted, so adding a skill means adding it here in the same change. `context-map-sync` sits on `regression_review` because it fires on CODE change (new symbol, changed signature or CLI flag, changed failure mode), not on a workspace stage.
   - Core Functions:
     - `routing_for()`: ([L367-L374](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/onboarding/workspace/delegation.py#L367-L374)) - Retrieves agent and skill roster for a given stage.
     - `_build_delegation_request()`: ([L377-L395](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/onboarding/workspace/delegation.py#L377-L395)) - Constructs `DelegationRequest` from stage brief templates.

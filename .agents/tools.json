@@ -1256,7 +1256,7 @@
       "name": "prepare-solution-blueprint",
       "command": "uv run prepare-solution-blueprint --workspace <workspace>",
       "entry_point": "core.onboarding.blueprint:prepare_main",
-      "summary": "The solution blueprint: what we will do, end to end, before we do any of it."
+      "summary": "Deprecated: delegates to the cloud-first `prepare-blueprint`."
     },
     {
       "name": "prepare-source-catalog",

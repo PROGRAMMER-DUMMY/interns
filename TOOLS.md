@@ -1310,16 +1310,23 @@ confirmation again by design -- the previous confirmation covered the previous r
 
 ### prepare-solution-blueprint
 
-LEGACY producer -- see the strangler note at the end of this section before using it.
-
-Command:
+RETIRED (Task D1) -- this is now a deprecation redirect to `prepare-blueprint`. It writes no
+blueprint of its own.
 
 ```powershell
-uv run prepare-solution-blueprint --workspace workspaces/<project> `
-  --source-root s3://<bucket>/ --catalog <name> `
-  [--bronze-schema bronze] [--silver-schema silver] [--gold-schema gold] `
-  [--ingestion-mode system|manual]
+uv run prepare-solution-blueprint --workspace workspaces/<project> [--catalog <name>] `
+  [--bronze-schema bronze] [--silver-schema silver] [--gold-schema gold]
 ```
+
+Forwards `--workspace`, `--repo-root`, `--catalog` and the three schema flags to
+`prepare-blueprint` and returns its exit code. `--source-root` and `--ingestion-mode` are DROPPED
+with a named reason on stderr: the source now comes from `declare-source`
+(`workspace_settings.source_declaration`), and ingestion is emitted by `generate-ingestion` and
+executed by the separately-gated `run-ingestion`. Any other flag is dropped the same way, never
+silently.
+
+Use `prepare-blueprint` directly. What follows describes the behaviour this command had BEFORE the
+redirect, kept because `apply-blueprint-answer` can still edit artifacts it produced.
 
 Turns an external-source discovery listing into a per-group plan -- what becomes a table, what
 becomes a Unity Catalog volume, what is not ingested at all -- and states it in plain English before
@@ -1340,12 +1347,13 @@ Refuses when `interns/generated/requirements/external_source_discovery.json` doe
 `discover-external-sources --workspace <ws> --external-root <root>` first, because a blueprint
 without a listing is a guess.
 
-Strangler overlap: this command and the new `prepare-blueprint` both write
-`interns/reports/solution_blueprint/current.json`. The new renderer preserves anything this legacy
-command wrote as `current.legacy.{json,md}` rather than overwriting it. Per
-`docs/plans/2026-08-05-finish-cloud-first-restructure.md` Task D1, `prepare-solution-blueprint` is
-slated to become a deprecation redirect to `prepare-blueprint` at the flip; prefer
-`prepare-blueprint` + `confirm-blueprint` for new work.
+Strangler overlap, still live: the legacy producer (`build_blueprint`) is no longer reachable
+through this command, but `apply-blueprint-answer` still calls it and still stamps
+`generated_by: prepare-solution-blueprint`. So the new renderer's preservation of
+`current.legacy.{json,md}` remains load bearing and must NOT be deleted until
+`apply-blueprint-answer` is retired too -- which needs an answer for what replaces blueprint EDITS
+(exclude/include/as_volume/as_managed) in the new spine, where `prepare-blueprint` has no
+equivalent. Use `prepare-blueprint` + `confirm-blueprint` for all new work.
 
 ### apply-blueprint-answer
 

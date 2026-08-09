@@ -740,10 +740,18 @@ def prepare_blueprint(
     current_json = out_dir / "current.json"
     current_md = out_dir / "current.md"
 
-    # Strangler overlap: the pre-existing `prepare-solution-blueprint`
-    # (core/onboarding/blueprint.py) writes this same path. Until the flip slice
-    # retires it, keep its artifact instead of silently overwriting someone's
-    # approved plan.
+    # Strangler overlap: a legacy producer writes this same path, so keep its
+    # artifact instead of silently overwriting someone's approved plan.
+    #
+    # KEEP THIS. D1 retired `prepare-solution-blueprint` (it now redirects
+    # here), and the plan called for deleting this block along with it -- but
+    # `apply-blueprint-answer` is a SECOND entry into the same legacy producer
+    # (`core/onboarding/blueprint.py::apply_main` -> `build_blueprint`, which
+    # still stamps `generated_by: prepare-solution-blueprint`). Until that
+    # command is retired too -- which needs an answer for what replaces
+    # blueprint EDITS (exclude/include/as_volume/as_managed) in the new spine,
+    # since `prepare-blueprint` has no equivalent -- this net is still load
+    # bearing.
     if current_json.exists():
         try:
             prior = json.loads(current_json.read_text(encoding="utf-8"))

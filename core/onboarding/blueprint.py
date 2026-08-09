@@ -37,12 +37,14 @@ from core.observability.cost_ledger import anchored
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from core.contracts.versioning import register_contract
+from core.onboarding.cli_deprecation import announce_deprecated_cli_redirect
 from core.governance.provenance import decision_source as decision_source_for
 from core.paths import PROJECT_ROOT
 from core.storage.workspace_layout import WorkspaceLayout
@@ -502,36 +504,78 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+# Flags the cloud-first `prepare-blueprint` understands. Anything else a caller
+# passes to the legacy CLI is dropped on the way through, with a named reason.
+_REDIRECT_FLAGS = (
+    "--workspace",
+    "--repo-root",
+    "--catalog",
+    "--bronze-schema",
+    "--silver-schema",
+    "--gold-schema",
+)
+
+# Legacy-only flags and why the new spine has no equivalent.
+_DROPPED_FLAGS = {
+    "--source-root": (
+        "the source now comes from `declare-source` "
+        "(workspace_settings.source_declaration), not a flag"
+    ),
+    "--ingestion-mode": (
+        "ingestion code is emitted by `generate-ingestion` and executed by "
+        "`run-ingestion`, which is gated separately"
+    ),
+}
+
+
+def _forwardable_argv(argv: list[str]) -> tuple[list[str], list[str]]:
+    """Split a legacy argv into (forwarded, notes-about-what-was-dropped)."""
+    forwarded: list[str] = []
+    notes: list[str] = []
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        flag = token.split("=", 1)[0]
+        takes_value = "=" not in token
+        if flag in _DROPPED_FLAGS:
+            notes.append(f"{flag} ignored: {_DROPPED_FLAGS[flag]}")
+            index += 2 if takes_value and index + 1 < len(argv) else 1
+            continue
+        if flag in _REDIRECT_FLAGS:
+            forwarded.append(token)
+            if takes_value and index + 1 < len(argv):
+                forwarded.append(argv[index + 1])
+                index += 2
+            else:
+                index += 1
+            continue
+        notes.append(f"{flag} ignored: not a `prepare-blueprint` option")
+        index += 2 if takes_value and index + 1 < len(argv) else 1
+    return forwarded, notes
+
+
 @anchored("prepare-solution-blueprint")
 def prepare_main(argv: list[str] | None = None) -> int:
-    from core.onboarding.workspace.cli_runner import run_workspace_command
+    """Deprecated: delegates to the cloud-first `prepare-blueprint`.
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--workspace", required=True)
-    parser.add_argument("--repo-root", default=str(PROJECT_ROOT))
-    parser.add_argument("--source-root", required=True, help="s3://... or a local path")
-    parser.add_argument("--catalog", required=True)
-    parser.add_argument("--bronze-schema", default="bronze")
-    parser.add_argument("--silver-schema", default="silver")
-    parser.add_argument("--gold-schema", default="gold")
-    parser.add_argument(
-        "--ingestion-mode", choices=("system", "manual"), default="system",
-        help="system = we run the bootstrap; manual = we only emit the commands",
+    Two producers for one artifact is how they drift. `prepare-blueprint`
+    (`core.blueprint.cli`) is the one that the intake playback gate, the
+    provisioning planner and `confirm-blueprint` all read, so this legacy
+    entry point forwards to it rather than writing a second blueprint of its
+    own. Flags with no equivalent are dropped with a named reason on stderr,
+    never silently.
+    """
+    from core.blueprint.cli import prepare_blueprint_main
+
+    announce_deprecated_cli_redirect(
+        "prepare-solution-blueprint",
+        prefer="prepare-blueprint",
+        reason="the cloud-first spine owns the blueprint artifact",
     )
-    args = parser.parse_args(argv)
-    return run_workspace_command(
-        command="prepare-solution-blueprint",
-        workspace=args.workspace,
-        repo_root=args.repo_root,
-        fn=lambda: build_blueprint(
-            args.repo_root, args.workspace,
-            source_root=args.source_root, catalog=args.catalog,
-            ingestion_mode=args.ingestion_mode,
-            bronze_schema=args.bronze_schema, silver_schema=args.silver_schema,
-            gold_schema=args.gold_schema,
-        ),
-        metadata={"source_root": args.source_root, "catalog": args.catalog},
-    )
+    forwarded, notes = _forwardable_argv(list(argv or []))
+    for note in notes:
+        print(f"[~] {note}", file=sys.stderr)
+    return prepare_blueprint_main(forwarded)
 
 
 @anchored("apply-blueprint-answer")
@@ -558,7 +602,13 @@ def apply_main(argv: list[str] | None = None) -> int:
             WorkspaceLayout(project_root=(Path(args.repo_root).resolve() / args.workspace).resolve())
         )
         if not prior:
-            raise FileNotFoundError("no blueprint yet; run `prepare-solution-blueprint` first.")
+            raise FileNotFoundError(
+                "no legacy blueprint to edit. `prepare-solution-blueprint` now "
+                "redirects to `prepare-blueprint`, which produces the cloud-first "
+                "blueprint that `confirm-blueprint` and `plan-provisioning` read -- "
+                "this command only edits a legacy artifact produced before that "
+                "redirect."
+            )
         return build_blueprint(
             args.repo_root, args.workspace,
             source_root=str(prior.get("source_root") or ""),

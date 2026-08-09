@@ -149,6 +149,70 @@ class BlockerQuestionPanelRedirectTest(unittest.TestCase):
         builder.assert_called_once()
 
 
+class PrepareSolutionBlueprintRedirectTest(unittest.TestCase):
+    """D1: `prepare-solution-blueprint` was the legacy blueprint producer,
+    superseded by the cloud-first spine's `prepare-blueprint`. Two producers
+    for one artifact is how they drift."""
+
+    def test_default_invocation_redirects_to_prepare_blueprint(self) -> None:
+        from core.onboarding import blueprint as legacy
+
+        with _clean_env(), mock.patch(
+            "core.blueprint.cli.prepare_blueprint_main", return_value=0
+        ) as prepare:
+            with redirect_stderr(io.StringIO()):
+                code = legacy.prepare_main(
+                    [
+                        "--workspace", "workspaces/demo",
+                        "--repo-root", ".",
+                        "--catalog", "acme",
+                        "--gold-schema", "marts",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        prepare.assert_called_once_with(
+            [
+                "--workspace", "workspaces/demo",
+                "--repo-root", ".",
+                "--catalog", "acme",
+                "--gold-schema", "marts",
+            ]
+        )
+
+    def test_source_root_is_dropped_because_the_source_is_declared(self) -> None:
+        # The new spine reads the source from `declare-source`
+        # (workspace_settings.source_declaration), so --source-root has no
+        # equivalent and must not be forwarded as an unknown flag.
+        from core.onboarding import blueprint as legacy
+
+        with _clean_env(), mock.patch(
+            "core.blueprint.cli.prepare_blueprint_main", return_value=0
+        ) as prepare:
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                legacy.prepare_main(
+                    [
+                        "--workspace", "workspaces/demo",
+                        "--source-root", "s3://bkt/pfx",
+                        "--catalog", "acme",
+                    ]
+                )
+        forwarded = prepare.call_args[0][0]
+        self.assertNotIn("--source-root", forwarded)
+        self.assertNotIn("s3://bkt/pfx", forwarded)
+        self.assertIn("declare-source", buf.getvalue())
+
+    def test_exit_code_is_the_delegates(self) -> None:
+        from core.onboarding import blueprint as legacy
+
+        with _clean_env(), mock.patch(
+            "core.blueprint.cli.prepare_blueprint_main", return_value=3
+        ):
+            with redirect_stderr(io.StringIO()):
+                code = legacy.prepare_main(["--workspace", "workspaces/demo"])
+        self.assertEqual(code, 3)
+
+
 class DeprecationHelperTest(unittest.TestCase):
     def test_redirect_notice_suppressed_by_env(self) -> None:
         with mock.patch.dict(

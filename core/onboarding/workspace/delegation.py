@@ -259,8 +259,14 @@ STAGE_ROUTING: dict[str, dict[str, list[str]]] = {
         # regression-sweep agent removed (Phase 1): it wrapped one CLI call
         # (green-gate --sweep); validation-gatekeeper owns running/interpreting
         # validation suites.
+        #
+        # context-map-sync belongs here rather than at a workspace stage: it
+        # fires on CODE change (a symbol added, a signature or CLI flag
+        # changed, a failure mode changed), and this is the stage that reviews
+        # what a change did. A CONTEXT doc that drifts from the code is how an
+        # agent gets confidently wrong -- F19 was exactly that.
         "agents": ["validation-gatekeeper"],
-        "skills": ["green-gate"],
+        "skills": ["green-gate", "context-map-sync"],
     },
     "parallel_kpi_completion": {
         "agents": ["workspace-flow-orchestrator", "kpi-analyst"],
