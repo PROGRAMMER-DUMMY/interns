@@ -62,7 +62,10 @@ def check_local_green(workspace: Path) -> GateVerdict:
     """G1: the latest medallion run and the execution harness are green."""
     gate = "G1_local_green"
     runs_dir = workspace / "interns" / "state" / "medallion" / "runs"
-    run_dirs = sorted(d for d in runs_dir.iterdir() if d.is_dir()) if runs_dir.is_dir() else []
+    try:
+        run_dirs = sorted(d for d in runs_dir.iterdir() if d.is_dir()) if runs_dir.is_dir() else []
+    except OSError as exc:
+        return GateVerdict(gate, False, blocking_reason=f"cannot list medallion runs at {runs_dir}: {exc}")
     if not run_dirs:
         return GateVerdict(gate, False, blocking_reason="no medallion run recorded; run `medallion build` first")
     run = _load_json(run_dirs[-1] / "run.json")
@@ -111,8 +114,19 @@ def check_design_ratified(workspace: Path) -> GateVerdict:
             gate, False,
             blocking_reason="no medallion design panel found; run `medallion design` first",
         )
-    open_count = int(panel.get("open_count") or 0)
-    items = [str(i.get("id") or "?") for i in (panel.get("items") or [])]
+    raw_open = panel.get("open_count") or 0
+    try:
+        open_count = int(raw_open)
+    except (TypeError, ValueError):
+        return GateVerdict(
+            gate, False,
+            evidence={"open_count": raw_open},
+            blocking_reason=f"panel open_count is not a number: {raw_open!r}; regenerate the design panel",
+        )
+    items = [
+        str(i.get("id") or "?") if isinstance(i, dict) else str(i)
+        for i in (panel.get("items") or [])
+    ]
     evidence = {"open_count": open_count, "open_items": items[:10]}
     if open_count:
         return GateVerdict(

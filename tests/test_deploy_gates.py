@@ -90,6 +90,22 @@ class G1LocalGreenTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertFalse(check_local_green(_ws(tmp)).ok)
 
+    def test_unlistable_runs_dir_fails_closed(self) -> None:
+        # A gate that RAISES is a gate that did not block: the caller sees a
+        # traceback, not a refusal. Unreadable run state must read as "not
+        # green", never as an exception escaping the check.
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = _ws(tmp)
+            (ws / "interns" / "state" / "medallion" / "runs").mkdir(parents=True)
+
+            def _denied(self):
+                raise PermissionError("access is denied")
+
+            with mock.patch.object(Path, "iterdir", _denied):
+                verdict = check_local_green(ws)
+            self.assertFalse(verdict.ok)
+            self.assertIn("cannot list medallion runs", verdict.blocking_reason)
+
 
 class G2DesignRatifiedTest(unittest.TestCase):
     def test_open_decisions_block_with_names(self) -> None:
@@ -115,6 +131,19 @@ class G2DesignRatifiedTest(unittest.TestCase):
     def test_missing_panel_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             self.assertFalse(check_design_ratified(_ws(tmp)).ok)
+
+    def test_non_numeric_open_count_fails_closed(self) -> None:
+        # A malformed panel is not a ratified panel. int("many") raises, and a
+        # raising gate blocks nothing.
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = _ws(tmp)
+            _write(
+                ws / "interns" / "reports" / "medallion_design_panel" / "current.json",
+                {"open_count": "many", "items": [{"id": "fact:a"}]},
+            )
+            verdict = check_design_ratified(ws)
+            self.assertFalse(verdict.ok)
+            self.assertIn("open_count", verdict.blocking_reason)
 
 
 class G3ProvenanceTest(unittest.TestCase):

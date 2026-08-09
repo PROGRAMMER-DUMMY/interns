@@ -85,16 +85,31 @@ def materialize_salt_if_missing(workspace: str) -> str:
     cfg_dir.mkdir(parents=True, exist_ok=True)
     cfg = cfg_dir / "secrets.toml"
 
-    try:
-        import toml
-        data = toml.loads(cfg.read_text(encoding="utf-8")) if cfg.exists() else {}
-    except Exception:
+    import toml
+
+    if cfg.exists():
+        # A present-but-unreadable store must NOT be replaced with a fresh one:
+        # secrets.toml is shared across every workspace on this box, and a lost
+        # salt makes previously hashed PII unjoinable forever. Refuse, and let a
+        # human repair or move the file.
+        try:
+            data = toml.loads(cfg.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise RuntimeError(
+                f"{cfg} exists but is unreadable ({exc}); refusing to overwrite it "
+                f"-- it may hold other workspaces' salts. Repair or move it, then re-run."
+            ) from exc
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"{cfg} exists but is unreadable (top level is not a table); refusing "
+                f"to overwrite it -- it may hold other workspaces' salts."
+            )
+    else:
         data = {}
 
     data.setdefault("workspaces", {}).setdefault(workspace, {})["medallion_salt"] = new_salt
 
     try:
-        import toml
         cfg.write_text(toml.dumps(data), encoding="utf-8")
     except Exception as exc:
         raise RuntimeError(f"Could not write salt to {cfg}: {exc}") from exc
