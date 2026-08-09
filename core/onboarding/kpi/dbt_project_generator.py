@@ -63,6 +63,7 @@ from core.dev.generator_stamp import stamp
 from core.paths import PROJECT_ROOT
 from core.profiling.data_model_profiler import _is_temporal_dtype
 from core.profiling.dataset_identity import dataset_display_stem
+from core.provisioning.plan import env_catalog
 from core.storage.workspace_layout import WorkspaceLayout
 
 _DBT_ADAPTER_TYPE = "databricks"
@@ -149,6 +150,35 @@ class DbtProjectResult:
         }
 
 
+def resolve_catalog_and_base(layout: WorkspaceLayout, catalog: str = "") -> tuple[str, str]:
+    """`(concrete_catalog, catalog_base)` for a workspace.
+
+    These are two DIFFERENT names and conflating them was F21.
+    `workspace_settings.databricks_source.catalog` is the base an operator
+    declared at intake ("rcm"); provisioning creates `env_catalog(base, env)`
+    ("rcm_dev"). Reading the base as the concrete catalog points sources,
+    `vars.catalog` and every fully-qualified generated reference at a catalog
+    that was never created.
+
+    `provision_plan.json` records both, so it is the authority. An explicit
+    `catalog` names that exact catalog and is its own base -- the env suffix is
+    never re-applied on top of an operator's literal. A workspace that never
+    ran provisioning (local/POC) keeps its declared value unchanged: no suffix
+    is invented for it.
+    """
+    named = str(catalog or "").strip()
+    if named:
+        return named, named
+    plan = _read_json(layout.contracts_dir / "provision_plan.json")
+    concrete = str(plan.get("catalog") or "").strip()
+    base = str(plan.get("catalog_base") or "").strip()
+    if concrete:
+        return concrete, base or concrete
+    declared = layout.load_settings().get("databricks_source")
+    declared = str((declared if isinstance(declared, dict) else {}).get("catalog") or "").strip()
+    return declared, declared
+
+
 class DbtProjectGenerator:
     def __init__(
         self,
@@ -157,6 +187,7 @@ class DbtProjectGenerator:
         *,
         catalog: str,
         schema: str,
+        catalog_base: str = "",
         enterprise_id: str = "",
         silver_schema: str = "silver",
         gold_schema: str = "gold",
@@ -175,7 +206,11 @@ class DbtProjectGenerator:
         # bronze/silver/gold semantics as this platform's local medallion
         # pipeline (WorkspaceLayout.bronze_dir/silver_dir/gold_dir), just
         # expressed as dbt schemas instead of local directories.
+        # Concrete catalog (what every fully-qualified reference resolves to)
+        # vs the base the per-env profile targets are derived from. See
+        # resolve_catalog_and_base -- conflating them was F21.
         self.catalog = catalog
+        self.catalog_base = catalog_base or catalog
         self.schema = schema
         self.silver_schema = silver_schema
         self.gold_schema = gold_schema
@@ -702,7 +737,7 @@ class DbtProjectGenerator:
             profiles_lines += [
                 f"    {target}:",
                 f"      type: {_DBT_ADAPTER_TYPE}",
-                f"      catalog: {self.catalog}_{target}",
+                f"      catalog: {env_catalog(self.catalog_base, target)}",
                 "      schema: " + self.schema,
                 "      host: \"{{ env_var('DATABRICKS_HOST') }}\"",
                 "      http_path: \"{{ env_var('DATABRICKS_HTTP_PATH') }}\"",
@@ -733,7 +768,13 @@ class DbtProjectGenerator:
                     "",
                     "sources:",
                     "  - name: raw",
-                    f"    database: {self.catalog}",
+                    # NOT a literal: profiles.yml declares two targets on two
+                    # different catalogs, so any literal here is wrong for at
+                    # least one of them. dbt-databricks aliases the profile's
+                    # `catalog` key onto `database` (DatabricksCredentials
+                    # _ALIASES), so `target.database` IS the active target's
+                    # catalog -- verified against the installed adapter. (F21)
+                    '    database: "{{ target.database }}"',
                     f"    schema: {self.schema}",
                     "    tables:",
                     source_tables,
@@ -1005,13 +1046,17 @@ class DbtProjectGenerator:
                     "    {%- set incremental_marts = "
                     + json.dumps(incremental_marts).replace('"', "'")
                     + " -%}",
-                    "    {%- do run_query('CREATE SCHEMA IF NOT EXISTS `' ~ var('catalog') "
+                    # target.database, not var('catalog'): the var is a single
+                    # static value, but the project has a dev AND a prod target
+                    # on different catalogs -- publishing must land in the one
+                    # the run actually targets. (F21)
+                    "    {%- do run_query('CREATE SCHEMA IF NOT EXISTS `' ~ target.database "
                     "~ '`.`' ~ var('gold_schema') ~ '`') -%}",
                     "    {%- for mart in marts %}",
                     "    {%- set swap_sql %}",
-                    "        CREATE OR REPLACE TABLE `{{ var('catalog') }}`."
+                    "        CREATE OR REPLACE TABLE `{{ target.database }}`."
                     "`{{ var('gold_schema') }}`.`{{ mart }}`",
-                    "        AS SELECT * FROM `{{ var('catalog') }}`."
+                    "        AS SELECT * FROM `{{ target.database }}`."
                     "`{{ var('gold_staging_schema') }}`.`{{ mart }}`",
                     "    {%- endset %}",
                     "    {%- do log('publish_gold: ' ~ mart, info=True) -%}",
@@ -1019,9 +1064,9 @@ class DbtProjectGenerator:
                     "    {%- endfor %}",
                     "    {%- for mart in incremental_marts %}",
                     "    {%- set clone_sql %}",
-                    "        CREATE OR REPLACE TABLE `{{ var('catalog') }}`."
+                    "        CREATE OR REPLACE TABLE `{{ target.database }}`."
                     "`{{ var('gold_schema') }}`.`{{ mart }}`",
-                    "        SHALLOW CLONE `{{ var('catalog') }}`."
+                    "        SHALLOW CLONE `{{ target.database }}`."
                     "`{{ var('gold_staging_schema') }}`.`{{ mart }}`",
                     "    {%- endset %}",
                     "    {%- do log('publish_gold (metadata swap): ' ~ mart, info=True) -%}",
@@ -1745,22 +1790,23 @@ def main(argv: list[str] | None = None) -> int:
         "successful `dbt build`; a mart that doesn't exist yet is skipped, not an error.",
     )
     args = parser.parse_args(argv)
-    catalog, schema = args.catalog, args.schema
-    if not catalog or not schema:
-        layout = WorkspaceLayout(project_root=Path(args.repo_root).resolve() / args.workspace)
+    layout = WorkspaceLayout(project_root=Path(args.repo_root).resolve() / args.workspace)
+    catalog, catalog_base = resolve_catalog_and_base(layout, args.catalog)
+    schema = args.schema
+    if not schema:
         declared = layout.load_settings().get("databricks_source")
         declared = declared if isinstance(declared, dict) else {}
-        catalog = catalog or str(declared.get("catalog") or "")
-        schema = schema or str(declared.get("schema") or "")
-        if not catalog or not schema:
-            parser.error(
-                "--catalog/--schema were not given and workspace_settings.json declares no "
-                "databricks_source.catalog/.schema to default from."
-            )
+        schema = str(declared.get("schema") or "")
+    if not catalog or not schema:
+        parser.error(
+            "--catalog/--schema were not given and neither provision_plan.json nor "
+            "workspace_settings.json declares a catalog/schema to default from."
+        )
     result = DbtProjectGenerator(
         args.repo_root,
         args.workspace,
         catalog=catalog,
+        catalog_base=catalog_base,
         schema=schema,
         silver_schema=args.silver_schema,
         gold_schema=args.gold_schema,

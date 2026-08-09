@@ -421,7 +421,10 @@ def _run_ghost_reconcile(*, workspace: str, repo_root: str, schema: str) -> str:
     remote_gate = check_remote_approval()
     if not remote_gate.ok:
         return f"ghost-reconcile refused: {remote_gate.blocking_reason}"
-    from core.onboarding.kpi.dbt_project_generator import reconcile_ghost_tables
+    from core.onboarding.kpi.dbt_project_generator import (
+        reconcile_ghost_tables,
+        resolve_catalog_and_base,
+    )
     from core.storage.workspace_layout import WorkspaceLayout
 
     repo_root_p = Path(repo_root)
@@ -429,7 +432,11 @@ def _run_ghost_reconcile(*, workspace: str, repo_root: str, schema: str) -> str:
     dbt_dir = layout.project_root / "dbt"
     declared = layout.load_settings().get("databricks_source")
     declared = declared if isinstance(declared, dict) else {}
-    catalog = str(declared.get("catalog") or "")
+    # The CONCRETE catalog, not workspace_settings' declared base: provisioning
+    # creates `<base>_<env>`, so querying the base's information_schema hits a
+    # catalog that does not exist and every project model reads as an orphan.
+    # (F21 -- same conflation F20 fixed one layer up.)
+    catalog, _base = resolve_catalog_and_base(layout)
     enterprise_id = str(declared.get("enterprise_id") or "")
     tables: list[str] = []
     if catalog:

@@ -143,7 +143,9 @@ class DbtProjectGeneratorLocalCsvTests(unittest.TestCase):
             self.assertNotIn("DATABRICKS_TOKEN=", profiles)  # never a literal secret value
             sources_yml = (dbt_dir / "models" / "sources.yml").read_text(encoding="utf-8")
             self.assertIn("name: transactions", sources_yml)
-            self.assertIn("database: main", sources_yml)
+            # Follows the active target, not a literal: profiles.yml declares
+            # dev and prod on different catalogs (F21).
+            self.assertIn('database: "{{ target.database }}"', sources_yml)
             self.assertIn("schema: rcm", sources_yml)
 
             # Query Tags (dbt-databricks 1.11+): per-enterprise cost

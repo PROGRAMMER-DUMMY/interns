@@ -114,6 +114,62 @@ class GhostReconcileQualifiesTableNamesTests(unittest.TestCase):
 
         self.assertEqual(seen["tables"], ["cat.gold.fct_x", "cat.gold.fct_orphan"])
 
+    def test_the_provisioned_catalog_wins_over_the_declared_base(self):
+        """F21: `databricks_source.catalog` is the base an operator declared;
+        provisioning creates `<base>_<env>`. Querying the base's
+        information_schema hits a catalog that does not exist -- an empty
+        listing, which this function treats as "no live tables" and which then
+        reports every project model as an orphan."""
+        seen: dict[str, list[str]] = {}
+        queried: list[str] = []
+
+        def _fake_reconcile(dbt_dir, warehouse_tables, **kwargs):
+            seen["tables"] = list(warehouse_tables)
+            return "reconciled"
+
+        class _FakeClient:
+            def __init__(self, cfg):
+                pass
+
+            def execute_query(self, sql, **kwargs):
+                queried.append(sql)
+                return ["table_name"], [["fct_x"]]
+
+        class _ActiveCfg:
+            def is_active(self):
+                return True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws_rel = "workspaces/demo"
+            (root / ws_rel / "interns" / "generated" / "contracts").mkdir(parents=True)
+            (root / ws_rel / "workspace_settings.json").write_text(
+                '{"databricks_source": {"catalog": "cat", "enterprise_id": ""}}',
+                encoding="utf-8",
+            )
+            (root / ws_rel / "interns" / "generated" / "contracts" / "provision_plan.json").write_text(
+                '{"catalog": "cat_dev", "catalog_base": "cat", "env": "dev"}',
+                encoding="utf-8",
+            )
+            with mock.patch.dict(os.environ, _AUTHORIZED_ENV), \
+                mock.patch(
+                    "core.onboarding.kpi.dbt_project_generator.reconcile_ghost_tables",
+                    _fake_reconcile,
+                ), \
+                mock.patch(
+                    "core.config.resolve_databricks_config",
+                    lambda _eid: _ActiveCfg(),
+                ), \
+                mock.patch(
+                    "core.execution.databricks_client.DatabricksClient", _FakeClient
+                ):
+                cosmos_dag._run_ghost_reconcile(
+                    workspace=ws_rel, repo_root=str(root), schema="gold"
+                )
+
+        self.assertIn("`cat_dev`.information_schema.tables", queried[0])
+        self.assertEqual(seen["tables"], ["cat_dev.gold.fct_x"])
+
 
 class ReadProfileNameTests(unittest.TestCase):
     def test_reads_the_profile_key(self):

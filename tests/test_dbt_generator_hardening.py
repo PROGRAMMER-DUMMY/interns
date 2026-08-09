@@ -21,6 +21,7 @@ from core.onboarding.kpi import dbt_project_generator
 from core.onboarding.kpi.dbt_project_generator import (
     DbtProjectGenerator,
     reconcile_ghost_tables,
+    resolve_catalog_and_base,
     validate_generated_project,
 )
 from core.onboarding.kpi.feature_resolver import KPIFeatureResolver
@@ -102,6 +103,54 @@ def _generate_temporal(root: Path, **kwargs) -> Path:
     return root / result.dbt_project_dir
 
 
+class CatalogBaseResolutionTests(unittest.TestCase):
+    """F21: `workspace_settings.databricks_source.catalog` is the catalog BASE
+    the operator declared at intake; provisioning creates `env_catalog(base,
+    env)`. Reading the base as if it were the concrete catalog points the whole
+    generated project at a catalog that was never created. The provisioning
+    plan is the authority -- it records both names."""
+
+    def _layout(self, root: Path, *, plan: dict | None, declared: str) -> WorkspaceLayout:
+        ws = root / "workspaces" / "demo"
+        (ws / "interns" / "generated" / "contracts").mkdir(parents=True)
+        (ws / "workspace_settings.json").write_text(
+            json.dumps({"databricks_source": {"catalog": declared, "schema": "raw"}}),
+            encoding="utf-8",
+        )
+        if plan is not None:
+            (ws / "interns" / "generated" / "contracts" / "provision_plan.json").write_text(
+                json.dumps(plan), encoding="utf-8"
+            )
+        return WorkspaceLayout(project_root=ws)
+
+    def test_provision_plan_supplies_the_concrete_catalog_and_its_base(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            layout = self._layout(
+                Path(tmp),
+                plan={"catalog": "demo_dev", "catalog_base": "demo", "env": "dev"},
+                declared="demo",
+            )
+            self.assertEqual(resolve_catalog_and_base(layout, ""), ("demo_dev", "demo"))
+
+    def test_explicit_catalog_wins_and_is_its_own_base(self):
+        # An operator naming a catalog outright means that exact catalog; the
+        # env suffix is not re-applied on top of it.
+        with tempfile.TemporaryDirectory() as tmp:
+            layout = self._layout(
+                Path(tmp),
+                plan={"catalog": "demo_dev", "catalog_base": "demo", "env": "dev"},
+                declared="demo",
+            )
+            self.assertEqual(resolve_catalog_and_base(layout, "other"), ("other", "other"))
+
+    def test_without_a_plan_the_declared_value_is_used_unchanged(self):
+        # Local/POC workspaces never run provisioning. Their behavior must not
+        # change: no suffix is invented for them.
+        with tempfile.TemporaryDirectory() as tmp:
+            layout = self._layout(Path(tmp), plan=None, declared="main")
+            self.assertEqual(resolve_catalog_and_base(layout, ""), ("main", "main"))
+
+
 class EmittedProjectInvariantTests(unittest.TestCase):
     def test_generated_project_passes_its_own_validation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -140,6 +189,21 @@ class EmittedProjectInvariantTests(unittest.TestCase):
             self.assertIn("prod:", profiles)
             self.assertIn("catalog: main_dev", profiles)
             self.assertIn("catalog: main_prod", profiles)
+
+    def test_nothing_inside_the_project_hardcodes_one_targets_catalog(self):
+        """F21: profiles.yml now names TWO catalogs (`<base>_dev`/`<base>_prod`),
+        so any other emitted file that hardcodes a single catalog literal
+        contradicts at least one of them -- and `sources.yml` hardcoded the
+        un-suffixed base, a catalog provisioning never creates. Everything
+        that runs INSIDE dbt must follow the active target instead."""
+        with tempfile.TemporaryDirectory() as tmp:
+            dbt_dir = _generate(Path(tmp))
+            sources = (dbt_dir / "models" / "sources.yml").read_text(encoding="utf-8")
+            self.assertIn("database: \"{{ target.database }}\"", sources)
+            self.assertNotIn("database: main", sources)
+            macro = (dbt_dir / "macros" / "publish_gold.sql").read_text(encoding="utf-8")
+            self.assertIn("target.database", macro)
+            self.assertNotIn("var('catalog')", macro)
 
     def test_dbt_project_declares_a_require_dbt_version(self):
         with tempfile.TemporaryDirectory() as tmp:

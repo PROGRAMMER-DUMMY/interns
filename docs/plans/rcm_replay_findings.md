@@ -363,3 +363,69 @@ agents editing `cosmos_dag.py` concurrently while Task C1 is in flight.
 Noted while reading, out of scope for the fix above: that same query
 interpolates `schema` directly into SQL text. It is settings-derived rather than
 user input, so it is not currently exploitable, but it should be parameterized.
+
+---
+
+## F21 -- the declared catalog is a BASE, and four consumers read it as concrete
+
+Found while reviewing Task C4, which split `profiles.yml` into `dev`/`prod`
+targets on `<base>_dev`/`<base>_prod` catalogs. That change is correct, but it
+made a latent contradiction unavoidable: the same generated project named two
+catalogs in `profiles.yml` and a third, different one everywhere else.
+
+Ground truth for `workspaces/rcm`:
+
+| where | key | value |
+|---|---|---|
+| `workspace_settings.json` | `databricks_source.catalog` | `rcm` |
+| `interns/generated/contracts/provision_plan.json` | `catalog_base` | `rcm` |
+| same | `env` | `dev` |
+| same | `catalog` | **`rcm_dev`** |
+
+`core/provisioning/plan.py::env_catalog` applies the catalog-per-env rule, so
+the catalog that the live `apply-provisioning` run actually created is
+`rcm_dev`. **The catalog `rcm` does not exist.** Four consumers read the base as
+if it were the concrete catalog:
+
+1. `dbt_project_generator.main()` -- defaulted `--catalog` from
+   `databricks_source.catalog`, so `sources.yml` emitted `database: rcm`,
+   `dbt_project.yml` emitted `vars.catalog: rcm`, and `--enforce-contracts`
+   ran `DESCRIBE TABLE \`rcm\`....`.
+2. `cosmos_dag._run_ghost_reconcile` -- queried
+   `\`rcm\`.information_schema.tables`. A nonexistent catalog yields an empty
+   listing, which this function treats as "no live tables", which reports
+   every project model as an orphan. Same conflation F20 fixed one layer up.
+3. `dbt_state.state_remote_root` -- built `/Volumes/rcm/_state/dbt/...` from
+   `vars.catalog`, while the provisioned volume root is `/Volumes/rcm_dev/`.
+4. `profiles.yml` (post-C4) -- the ONLY site that was accidentally right, and
+   only for `dev`.
+
+Nothing in the test suite caught it: every test passes `--catalog main`
+explicitly, so the defaulting path -- the one real workspaces take -- was never
+exercised, and with an explicit catalog no base/concrete distinction exists.
+
+FIX (applied): `resolve_catalog_and_base(layout, catalog="")` returns the pair,
+reading `provision_plan.json` as the authority and falling back to the declared
+value unchanged for workspaces that never provisioned (local/POC keep today's
+behavior byte for byte). An explicit `--catalog` names that exact catalog and is
+its own base -- the env suffix is never re-applied on top of an operator's
+literal.
+
+Inside the emitted project, nothing hardcodes a catalog any more: `sources.yml`
+and the `publish_gold` macro use `{{ target.database }}`, so they follow
+whichever target the run selects. dbt-databricks aliases the profile's `catalog`
+key onto `database` (verified against the installed adapter's
+`DatabricksCredentials._ALIASES`), so `target.database` IS the active catalog.
+`profiles.yml` derives its two targets through the shared `env_catalog`, not a
+second inline copy of the naming rule.
+
+Verified against the real workspace, not a fixture:
+`resolve_catalog_and_base(WorkspaceLayout('workspaces/rcm'))` returns
+`('rcm_dev', 'rcm')`; profile targets `rcm_dev` / `rcm_prod`;
+`vars.catalog` `rcm_dev`, which makes `dbt_state`'s volume path agree with the
+provisioned `checkpoint_root` (`/Volumes/rcm_dev/bronze/_checkpoints`).
+
+Left open deliberately: `generate-dbt-project --workspace workspaces/rcm` still
+refuses, and correctly -- `No KPI is fully ready for SQL ... Resolve KPI feature
+mappings first.` The catalog fix is upstream of that gate; the emission itself
+is proven by tests that run the real generator end to end.
