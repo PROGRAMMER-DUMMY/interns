@@ -581,6 +581,13 @@ class DbtProjectGenerator:
                     f"  gold_staging_schema: {self.staging_gold_schema}",
                     f"  catalog: {self.catalog}",
                     "",
+                    # Pinned to the same range this repo installs dbt-core
+                    # against (pyproject.toml's dbt extra) -- a project
+                    # generated for one dbt-core version and later run under
+                    # an incompatible one fails at `dbt parse` with a clear
+                    # version error instead of a confusing compile failure.
+                    "require-dbt-version: '>=1.11.0,<2.0.0'",
+                    "",
                     # A selection that matches nothing EXITS 0 in dbt: `dbt ls
                     # --select nonexistent` prints "No nodes selected!" and
                     # succeeds, so a slim-CI or scheduled run whose selector has
@@ -645,19 +652,6 @@ class DbtProjectGenerator:
             ),
             encoding="utf-8",
         )
-        profiles_lines = [
-            f"{self._project_name}:",
-            "  target: prod",
-            "  outputs:",
-            "    prod:",
-            f"      type: {_DBT_ADAPTER_TYPE}",
-            "      catalog: " + self.catalog,
-            "      schema: " + self.schema,
-            "      host: \"{{ env_var('DATABRICKS_HOST') }}\"",
-            "      http_path: \"{{ env_var('DATABRICKS_HTTP_PATH') }}\"",
-            "      token: \"{{ env_var('DATABRICKS_TOKEN') }}\"",
-            "      threads: 4",
-        ]
         # dbt-databricks 1.11+ Query Tags: auto-injects dbt_model_name/
         # dbt_materialized/dbt_core_version/dbt_databricks_version into every
         # query with zero config; project_name/env below are the ONLY custom
@@ -670,13 +664,11 @@ class DbtProjectGenerator:
         # (today's single-tenant default) -- still valid YAML, just an
         # empty-string tag until a real enterprise_id is declared.
         #
-        # `env` is a literal, not `{{ target.name }}`: found live -- `target`
-        # is only in scope inside MODEL/macro Jinja compilation, not inside
-        # profiles.yml's own (much more limited) rendering context, which
-        # only exposes env_var() and a few connection-level helpers. Only
-        # one target ("prod") exists in this generator's scope today, so a
-        # literal is honest; this needs to become genuinely target-aware
-        # once a second (e.g. dev/duckdb) target is added.
+        # `env` is a literal per output block, not `{{ target.name }}`: found
+        # live -- `target` is only in scope inside MODEL/macro Jinja
+        # compilation, not inside profiles.yml's own (much more limited)
+        # rendering context, which only exposes env_var() and a few
+        # connection-level helpers.
         #
         # `query_tags` is a JSON-encoded STRING, not a YAML mapping -- found
         # live: the adapter's own credentials.py types it `Optional[str]`
@@ -695,17 +687,39 @@ class DbtProjectGenerator:
         # (`AUTORESEARCH_RUN_ID`, exported by core.observability.cost_ledger's
         # RUN_ID_ENV). Absent -> empty string: the reconciler then finds nothing
         # for that run and says so, which is honest.
-        query_tags_json = json.dumps({
-            "project_name": self.enterprise_id,
-            "env": "prod",
-            "run_id": "{{ env_var('" + RUN_ID_ENV + "', '') }}",
-        })
-        # Double-quoted YAML scalar (not single-quoted): the value contains
-        # single quotes from the Jinja call, and YAML's '' escape nested inside a
-        # JSON string is unreadable. Escaping the JSON's own double quotes is the
-        # legible half of the trade.
-        yaml_scalar = query_tags_json.replace("\\", "\\\\").replace('"', '\\"')
-        profiles_lines.append(f'      query_tags: "{yaml_scalar}"')
+        profiles_lines = [
+            f"{self._project_name}:",
+            "  target: prod",
+            "  outputs:",
+        ]
+        # dev and prod are separate CATALOGS ("<catalog>_dev"/"<catalog>_prod"),
+        # not just separate schemas -- a dev run that mistakenly points at the
+        # prod catalog can silently corrupt production data through a shared
+        # schema name. Credentials (host/http_path/token) stay one shared
+        # env_var() indirection: this platform runs both targets against the
+        # same Databricks workspace, only the catalog differs.
+        for target in ("dev", "prod"):
+            profiles_lines += [
+                f"    {target}:",
+                f"      type: {_DBT_ADAPTER_TYPE}",
+                f"      catalog: {self.catalog}_{target}",
+                "      schema: " + self.schema,
+                "      host: \"{{ env_var('DATABRICKS_HOST') }}\"",
+                "      http_path: \"{{ env_var('DATABRICKS_HTTP_PATH') }}\"",
+                "      token: \"{{ env_var('DATABRICKS_TOKEN') }}\"",
+                "      threads: 4",
+            ]
+            query_tags_json = json.dumps({
+                "project_name": self.enterprise_id,
+                "env": target,
+                "run_id": "{{ env_var('" + RUN_ID_ENV + "', '') }}",
+            })
+            # Double-quoted YAML scalar (not single-quoted): the value contains
+            # single quotes from the Jinja call, and YAML's '' escape nested
+            # inside a JSON string is unreadable. Escaping the JSON's own
+            # double quotes is the legible half of the trade.
+            yaml_scalar = query_tags_json.replace("\\", "\\\\").replace('"', '\\"')
+            profiles_lines.append(f'      query_tags: "{yaml_scalar}"')
         profiles_lines.append("")
         (dbt_dir / "profiles.yml").write_text("\n".join(profiles_lines), encoding="utf-8")
         source_tables = "\n".join(

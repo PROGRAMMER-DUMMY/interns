@@ -132,6 +132,21 @@ class EmittedProjectInvariantTests(unittest.TestCase):
                 "query_tags", (dbt_dir / "profiles.yml").read_text(encoding="utf-8")
             )
 
+    def test_profiles_declare_a_dev_and_a_prod_target_on_separate_catalogs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dbt_dir = _generate(Path(tmp))
+            profiles = (dbt_dir / "profiles.yml").read_text(encoding="utf-8")
+            self.assertIn("dev:", profiles)
+            self.assertIn("prod:", profiles)
+            self.assertIn("catalog: main_dev", profiles)
+            self.assertIn("catalog: main_prod", profiles)
+
+    def test_dbt_project_declares_a_require_dbt_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dbt_dir = _generate(Path(tmp))
+            project = (dbt_dir / "dbt_project.yml").read_text(encoding="utf-8")
+            self.assertIn("require-dbt-version:", project)
+
     def test_wap_marts_build_to_staging_and_publish_replaces_only_its_own_pair(self):
         with tempfile.TemporaryDirectory() as tmp:
             dbt_dir = _generate(Path(tmp))

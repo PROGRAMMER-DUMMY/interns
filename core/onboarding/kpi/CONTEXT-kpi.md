@@ -288,7 +288,7 @@ The system is designed around five primary architectural sub-pipelines:
 ---
 ### [`dbt_project_generator.py`](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/onboarding/kpi/dbt_project_generator.py#L1-L1735)
 
-**Exact Purpose**: Compiles fully-resolved KPI definitions and data models into a production-ready dbt project with staging models, gold KPI models, macros, schema YAMLs, and project configs.
+**Exact Purpose**: Compiles fully-resolved KPI definitions and data models into a production-ready dbt project with staging models, gold KPI models, macros, schema YAMLs, and project configs. The emitted `profiles.yml` declares both a `dev` and a `prod` target (separate `<catalog>_dev`/`<catalog>_prod` catalogs, shared credential `env_var()`s, `target: prod` default); `dbt_project.yml` pins `require-dbt-version` to the same range this repo installs dbt-core against.
 
 **Key Functions & Classes**:
 

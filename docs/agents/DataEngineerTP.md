@@ -982,7 +982,7 @@ Every data pipeline must be idempotent: running it N times produces the same res
 ### 18.2 Backfill Strategy
 
 - Always design pipelines to accept a `start_date` / `end_date` parameter.
-- Use Airflow backfill (`airflow dags backfill`) or Dagster partition backfill.
+- Use Airflow backfill (`airflow backfill create --dag-id <dag_id> --from-date <start> --to-date <end>`) or Dagster partition backfill.
 - Limit concurrency during backfill — don't overwhelm source systems or downstream warehouses.
 - Backfill in reverse chronological order if consumers need recent data first.
 

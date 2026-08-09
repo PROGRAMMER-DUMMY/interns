@@ -377,7 +377,7 @@ with DAG(
 **Airflow production pain points:**
 - Scheduler is a single point of failure (mitigated with HA mode, but complex to configure)
 - No native data asset awareness — Airflow knows about tasks, not data
-- Backfills require manual intervention (`airflow dags backfill -s 2024-01-01 -e 2024-01-31 dag_id`)
+- Backfills require manual intervention (`airflow backfill create --dag-id dag_id --from-date 2024-01-01 --to-date 2024-01-31`)
 - Dynamic DAGs (DAGs generated from configuration) have terrible UX in Airflow UI
 - Heavy Python dependencies between DAGs are hard to manage
 - Limited built-in data quality integration
