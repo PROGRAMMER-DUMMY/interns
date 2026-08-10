@@ -129,6 +129,9 @@ class KPIFeatureResolver:
         self.workspace = (self.repo_root / workspace).resolve()
         self.domain = domain
         self.include_candidates = include_candidates
+        # Why a detector produced nothing, when it produced nothing because it
+        # BROKE. Empty means "no pattern applied", which is a different fact.
+        self.derivation_pattern_error: str = ""
         self.layout = WorkspaceLayout(project_root=self.workspace)
         self.searcher = DerivationPatternSearcher()
         self.metadata_store = build_metadata_store(self.layout, repo_root=self.repo_root)
@@ -300,7 +303,9 @@ class KPIFeatureResolver:
         features = []
         for token in extracted.identifiers:
             norm = normalize_blocker(token)
-            contextual_candidates = contextual_column_candidates(token, full_context, schema_index)
+            contextual_candidates = contextual_column_candidates(
+                token, full_context, schema_index, metric=metric
+            )
             # An exact physical-column hit is a direct mapping, not an alias: let the
             # schema_index branch below classify it as proven_direct. The contextual
             # auto-proven path only applies when the token is NOT a literal column name.
@@ -494,7 +499,15 @@ class KPIFeatureResolver:
     def _derivation_pattern_options(self, kpi: dict[str, Any]) -> list[dict[str, Any]]:
         """Reusable derived-feature options (duration bucket / recurrence) that
         match this KPI's question + profiled columns. Returns [] when none apply
-        or profiles are absent; never raises."""
+        or profiles are absent; never raises.
+
+        A crash is still swallowed -- pattern detection is genuinely advisory
+        and must not break resolution -- but the REASON survives in
+        `derivation_pattern_error` instead of vanishing. A bare `except` here
+        made a broken detector indistinguishable from "no pattern applies",
+        which is the same failure class as F25 (a swallowed discovery error
+        reading as "zero tables").
+        """
         try:
             from core.onboarding.features.derivation_patterns import (
                 detect_derivation_patterns,
@@ -507,7 +520,8 @@ class KPIFeatureResolver:
                 return []
             columns = columns_from_profile_index(json.loads(path.read_text(encoding="utf-8")))
             return detect_derivation_patterns(question, columns)
-        except Exception:  # pragma: no cover - pattern detection is advisory
+        except Exception as exc:
+            self.derivation_pattern_error = f"{type(exc).__name__}: {exc}"
             return []
 
     def _json_leaf_promotion_options(
@@ -1181,10 +1195,56 @@ def _expression_shaped_feature(feature: str) -> bool:
     return bool(re.search(r"\d", text) and _EXPRESSION_SHAPED_NAME_RE.search(text))
 
 
+_NUMERIC_AGGREGATES = ("sum", "avg", "mean", "average", "median", "stddev", "stdev", "std", "var", "variance")
+_NUMERIC_DTYPE_TOKENS = ("int", "float", "double", "decimal", "numeric", "real", "long", "short")
+_NUMERIC_VALUE_PATTERNS = ("currency", "numeric", "percent", "decimal")
+
+
+def _numerically_aggregated(feature: str, metric: str) -> bool:
+    """True when `metric` applies a numeric aggregate TO this feature.
+
+    Keyed on the aggregate call, never on the feature's name -- `ContractedRate`
+    used as a cut is a different question from `sum(ContractedRate)`, and only
+    the second one makes a text column impossible.
+    """
+    if not metric:
+        return False
+    feature_norm = normalize_blocker(feature)
+    if not feature_norm:
+        return False
+    for match in re.finditer(
+        r"(?P<fn>[A-Za-z_]+)\s*\((?P<args>[^()]*)\)", str(metric)
+    ):
+        if match.group("fn").strip().lower() not in _NUMERIC_AGGREGATES:
+            continue
+        if feature_norm in normalize_blocker(match.group("args")):
+            return True
+    return False
+
+
+def _contradicts_numeric_aggregate(entry: dict[str, Any]) -> bool:
+    """True when this column's OBSERVED evidence rules it out as a numeric
+    measure. Absent evidence is never a contradiction -- a column the profiler
+    could not type has told us nothing, and treating unknown as disqualifying
+    would drop real candidates on any workspace with a weaker profiler.
+    """
+    dtype = str(entry.get("dtype") or "").lower()
+    pattern = str(entry.get("value_pattern") or "").lower()
+    if not dtype and not pattern:
+        return False
+    if any(token in dtype for token in _NUMERIC_DTYPE_TOKENS):
+        return False
+    if any(token in pattern for token in _NUMERIC_VALUE_PATTERNS):
+        return False
+    return bool(dtype or pattern)
+
+
 def contextual_column_candidates(
     feature: str,
     full_context: str,
     schema_index: dict[str, list[dict[str, Any]]],
+    *,
+    metric: str = "",
 ) -> list[dict[str, Any]]:
     """Score columns against a feature using the surrounding KPI context.
 
@@ -1192,6 +1252,14 @@ def contextual_column_candidates(
     any non-trivial feature name; lexical filtering happens via
     `_semantic_tokens` against actual context evidence rather than against
     a hardcoded vocabulary.
+
+    `metric` drives ONE disqualifier: a feature the KPI sums or averages
+    cannot be a column whose observed evidence says it is not numeric. Found
+    live -- `sum(ContractedRate)` was offered `payors.PayorName` (a String of
+    company names) because "payor" overlapped the KPI text and dataset name,
+    scoring ~8 with nothing to subtract. It is a DISQUALIFIER rather than a
+    negative bonus on purpose: name signals reach +30 here, so any penalty
+    small enough to be safe is also small enough to be outvoted.
     """
     feature_norm = normalize_blocker(feature)
     if not feature_norm or feature_norm in {"year", "quarter", "month", "day", "duration"}:
@@ -1210,9 +1278,12 @@ def contextual_column_candidates(
     if not context_tokens:
         return []
     context_norm = normalize_blocker(full_context)
+    numeric_required = _numerically_aggregated(feature, metric)
     scored: list[dict[str, Any]] = []
     for entries in schema_index.values():
         for entry in entries:
+            if numeric_required and _contradicts_numeric_aggregate(entry):
+                continue
             score, reasons, name_matched = _contextual_score(
                 feature_norm, context_tokens, context_norm, entry
             )

@@ -86,6 +86,31 @@ class RelationshipContractBuilder:
         self.repo_root = Path(repo_root).resolve()
         self.workspace = (self.repo_root / workspace).resolve()
         self.layout = WorkspaceLayout(project_root=self.workspace)
+        self._client: Any = None
+        self._client_resolved = False
+
+    def _warehouse_client(self) -> Any:
+        """A read-only warehouse client for key-overlap evidence, or None.
+
+        Same per-enterprise resolution path onboarding.py already uses for
+        Databricks table profiling. Read-only and best-effort: a workspace with
+        no Databricks config, or an unreachable one, resolves to None, and the
+        RI check degrades to "signal absent" exactly as it did before -- it
+        never blocks contract building.
+        """
+        if self._client_resolved:
+            return self._client
+        self._client_resolved = True
+        try:
+            from core.config import resolve_databricks_config
+            from core.execution.databricks_client import DatabricksClient
+
+            cfg = resolve_databricks_config(self.layout.enterprise_id())
+            client = DatabricksClient(cfg)
+            self._client = client if client.is_configured() else None
+        except Exception:
+            self._client = None
+        return self._client
 
     def build(self) -> RelationshipContractResult:
         self._validate_workspace()
@@ -104,7 +129,7 @@ class RelationshipContractBuilder:
         # Documented-but-unproven joins are promoted to proven_data_model only
         # when observed key values prove them (profile key-overlap check).
         doc_relationships = _promote_documented_relationships(
-            doc_relationships, profiles, self.repo_root
+            doc_relationships, profiles, self.repo_root, self._warehouse_client
         )
         diagram_relationships = _relationships_from_diagram_sidecars(
             self.layout,
@@ -718,6 +743,7 @@ def _promote_documented_relationships(
     relationships: list[dict[str, Any]],
     profiles: dict[str, dict[str, Any]],
     repo_root: Path | None,
+    client: Any = None,
 ) -> list[dict[str, Any]]:
     """Promote documented joins that observed key values prove.
 
@@ -740,7 +766,8 @@ def _promote_documented_relationships(
         right_column = str(relationship.get("right_column") or "")
         right_uniqueness = _column_uniqueness(profiles.get(right, {}), right_column, repo_root)
         ri_ratio = _left_key_resolution_ratio(
-            profiles.get(left, {}), left_column, profiles.get(right, {}), right_column, repo_root
+            profiles.get(left, {}), left_column, profiles.get(right, {}), right_column,
+            repo_root, client,
         )
         if _is_unique_ratio(right_uniqueness):
             dimension_key_unique: bool | None = True
@@ -1681,6 +1708,7 @@ def _left_key_resolution_ratio(
     right_profile: dict[str, Any],
     right_column: str,
     repo_root: Path | None,
+    client: Any = None,
 ) -> float | None:
     """Fraction of distinct left-key values that exist in the right key column.
 
@@ -1690,6 +1718,24 @@ def _left_key_resolution_ratio(
     undeterminable (no readable CSV), so RI gating is skipped rather than guessed.
     Workspace-agnostic — compares observed values only, no key name is special-cased.
     """
+    # UC-backed profiles have no readable CSV, so the value comparison below is
+    # structurally impossible for them -- which meant NO join on a cloud
+    # workspace could ever reach proven_data_model. Push the same computation
+    # into the warehouse instead (one row back, never a value set: see
+    # _uc_key_overlap_ratio on why this must not be sampled).
+    if _is_non_csv_source(left_profile) and _is_non_csv_source(right_profile):
+        # Resolved HERE, not by the caller: `DatabricksClient.is_configured()`
+        # costs ~3s, and a pure-local workspace must never pay it. `client` may
+        # be a zero-arg factory (the builder passes one) or an already-built
+        # client (tests pass one directly).
+        client = client() if callable(client) else client
+        return _uc_key_overlap_ratio(
+            client,
+            str(left_profile.get("path") or ""),
+            left_column,
+            str(right_profile.get("path") or ""),
+            right_column,
+        )
     left_values = _distinct_values(left_profile, left_column, repo_root)
     if left_values is None or not left_values:
         return None
@@ -1698,6 +1744,58 @@ def _left_key_resolution_ratio(
         return None
     resolved = sum(1 for value in left_values if value in right_values)
     return resolved / len(left_values)
+
+
+def _uc_key_overlap_ratio(
+    client: Any,
+    left_fqn: str,
+    left_column: str,
+    right_fqn: str,
+    right_column: str,
+) -> float | None:
+    """`|left ∩ right| / |left|` for two Unity Catalog tables, computed IN SQL.
+
+    The CSV path materializes both distinct value sets in Python and intersects
+    them. That is fine at GB and fatal at TB -- a 500M-cardinality key will not
+    fit in memory -- so this pushes the whole computation into the warehouse and
+    brings back ONE ROW.
+
+    Deliberately no LIMIT. A bounded sample of left keys intersected with a
+    bounded sample of right keys under-counts overlap catastrophically and
+    would report a perfectly valid foreign key as broken; an approximate answer
+    is worse than none here, because the ratio gates whether a join may be used
+    at all.
+
+    Returns None for every undeterminable path (no client, unsafe identifier,
+    query failure, nothing measured) -- "signal absent", never zero, matching
+    the CSV path's own contract.
+    """
+    if client is None:
+        return None
+    from core.sql_safety import assert_safe_identifier
+
+    try:
+        left_col = assert_safe_identifier(left_column, context="relationship left key")
+        right_col = assert_safe_identifier(right_column, context="relationship right key")
+    except Exception:
+        return None
+    if not is_uc_fqn(left_fqn) or not is_uc_fqn(right_fqn):
+        return None
+    sql = (
+        "SELECT count(*) AS left_distinct, count(r.k) AS resolved FROM "
+        f"(SELECT DISTINCT `{left_col}` AS k FROM {left_fqn}) l "
+        f"LEFT JOIN (SELECT DISTINCT `{right_col}` AS k FROM {right_fqn}) r "
+        "ON l.k = r.k"
+    )
+    try:
+        _columns, rows = client.execute_query(sql)
+        left_distinct = int(rows[0][0])
+        resolved = int(rows[0][1])
+    except Exception:
+        return None
+    if left_distinct <= 0:
+        return None
+    return resolved / left_distinct
 
 
 def _distinct_values(

@@ -288,6 +288,23 @@ CURATED_MODULES: tuple[str, ...] = (
     "tests.test_databricks_client_read_path",
     "tests.test_dbt_state_publish",
     "tests.test_airflow_health",
+    # Structural stop on domain vocabulary re-entering the workspace-agnostic
+    # feature-resolution core. The T12 `procedure`->`description` scoring branch
+    # got written and shipped because nothing failed when it did; convention
+    # alone does not hold. Gated so the regression is loud, not archaeological.
+    # (Scans *.py only -- derivation_patterns.json is known-pending by design.)
+    "tests.test_features_genericity_guard",
+    # Resolver semantic guards: a summed feature can never be a column whose
+    # observed evidence says it is not numeric. Found live -- `sum(ContractedRate)`
+    # was offered a String of company names as a selectable panel option, so a
+    # human could sign off on a wrong number.
+    "tests.test_resolver_semantic_guards",
+    # Referential-integrity evidence for UC-backed profiles. The value check
+    # that separates a real foreign key from two columns sharing a name read
+    # only local CSV, so NO join on a cloud workspace could reach
+    # proven_data_model. Also pins the TB properties: computed in SQL, one row
+    # back, never sampled.
+    "tests.test_relationship_uc_evidence",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.
