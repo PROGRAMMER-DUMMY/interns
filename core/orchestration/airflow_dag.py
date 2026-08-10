@@ -285,7 +285,15 @@ def build_dag(
         # command. Empty by default: a scheduled run backfills nothing; a
         # deliberate "Trigger DAG w/ config" run supplies the window and the
         # dbt_backfill task replays exactly it.
-        params={"event_time_start": "", "event_time_end": ""},
+        # `allow_full_refresh` is the deliberate override for
+        # cosmos_dag.backfill_command's refusal: empty means "refuse an
+        # unbounded backfill", "yes" means the operator asked for the full
+        # refresh on purpose and the DAG run conf records that they did.
+        params={
+            "event_time_start": "",
+            "event_time_end": "",
+            "allow_full_refresh": "",
+        },
         tags=["autoresearch", "medallion", "kpi"],
     )
     banner = _alerting_banner(

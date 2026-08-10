@@ -101,6 +101,10 @@ _NONDETERMINISTIC_KEY = re.compile(
 # only a passing build publishes. Delta has no Iceberg-style WAP branch, so
 # staging-table + atomic swap is the documented equivalent.
 _STAGING_SCHEMA_SUFFIX = "__staging"
+# Where store-failures lands the rows a data test rejected. dbt's own
+# conventional name, kept verbatim so an engineer who knows dbt finds it
+# without reading this generator.
+_TEST_AUDIT_SCHEMA = "dbt_test__audit"
 
 # Velocity lanes (blueprint `velocity_lane` decision) whose marts are worth
 # building incrementally. Batch rebuilds a table; a lane that lands data
@@ -215,6 +219,7 @@ class DbtProjectGenerator:
         self.silver_schema = silver_schema
         self.gold_schema = gold_schema
         self.staging_gold_schema = f"{gold_schema}{_STAGING_SCHEMA_SUFFIX}"
+        self.test_audit_schema = _TEST_AUDIT_SCHEMA
         self.enterprise_id = enterprise_id or self.layout.enterprise_id()
         self.enforce_contracts = enforce_contracts
         # Internal reuse only -- never writes sql_generator.py's own
@@ -410,7 +415,7 @@ class DbtProjectGenerator:
             )
 
         self._write_project_files(dbt_dir, sources_needed)
-        self._write_data_quality_tests(staging_dir)
+        self._write_data_quality_tests(staging_dir, relationships)
         self._write_exposures(dbt_dir, generated_kpi_ids)
         self._write_publish_gold_macro(dbt_dir, generated_kpi_ids, incremental_kpi_ids)
         if self.late_arriving_dimensions:
@@ -607,6 +612,22 @@ class DbtProjectGenerator:
                     # DQ test therefore leaves the last-good live tables
                     # untouched instead of publishing bad numbers.
                     f"      +schema: {self.staging_gold_schema}",
+                    "",
+                    # A failing test that reports only a COUNT is not
+                    # actionable at 3am -- whoever is on call has to re-derive
+                    # the predicate by hand to find out WHICH rows broke.
+                    # store-failures persists the offending rows instead, so
+                    # the failure is a table you can query. `as: table`
+                    # deliberately, not dbt's default view: a view re-evaluates
+                    # its predicate at SELECT time, so by the time anyone looks
+                    # the next run has moved the data and the evidence is gone.
+                    # The audit schema is created by dbt on first write, the
+                    # same way the WAP staging gold schema above already is.
+                    "data_tests:",
+                    f"  {self._project_name}:",
+                    "    +store_failures: true",
+                    "    +store_failures_as: table",
+                    f"    +schema: {self.test_audit_schema}",
                     "",
                     # The live/published gold schema, declared explicitly so a
                     # reader (dashboard, reconcile) resolves the SERVING layer
@@ -1203,24 +1224,95 @@ class DbtProjectGenerator:
         lines.append("")
         (marts_dir / "_contracts.yml").write_text("\n".join(lines), encoding="utf-8")
 
-    def _write_data_quality_tests(self, staging_dir: Path) -> None:
-        """Emit dbt schema tests from confirmed data_quality_panel.py answers
-        (data_quality_decisions.json) -- never hand-maintained YAML. Attached
-        to the STAGING model for the decided column: shift-left, catches a
-        violation at the earliest point in the pipeline, before it can
-        silently propagate into a KPI number. A workspace with no confirmed
-        DQ decisions yet gets no schema.yml at all (byte-identical to before
-        this method existed) -- an empty/absent decisions file is not an
-        error, it just means no test has been authored yet.
+    def _relationship_quality_decisions(
+        self,
+        relationships: list[dict[str, Any]],
+        model_by_stem: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        """DQ-R2 (`silver_uniqueness_referential_null_type`, severity `fail`)
+        as emitted tests rather than a decision nobody reads.
+
+        The evidence is already on disk and already human-approved: a
+        relationship contract records `right_key_uniqueness_check_required`
+        and `orphan_left_key_check_required` -- it ASKS for these two checks.
+        Nothing generated them, so a mart could publish facts whose foreign
+        keys resolve to nothing.
+
+        The trigger is the CONTRACT, not blueprint_decisions.json: the
+        contract is per-relationship evidence a human approved, while the
+        blueprint records workspace-wide policy. `find_executable_relationship`
+        is the gate deliberately -- the same predicate that decides a join may
+        be EXECUTED decides whether it may be ASSERTED, so an unproven
+        candidate can never fail a build. Severity is `error` because a
+        referential break that only warns publishes orphaned facts.
         """
+        from core.onboarding.relationships.contracts import find_executable_relationship
+
+        out: list[dict[str, Any]] = []
+        for relationship in relationships:
+            left_dataset = str(relationship.get("left_dataset") or "")
+            right_dataset = str(relationship.get("right_dataset") or "")
+            if not find_executable_relationship(
+                [relationship], left_dataset, right_dataset
+            ):
+                continue
+            left_column = str(relationship.get("left_column") or "")
+            right_column = str(relationship.get("right_column") or "")
+            if not left_column or not right_column:
+                continue
+            right_model = model_by_stem.get(
+                _safe_name(dataset_display_stem(right_dataset))
+            )
+            if not right_model:
+                continue  # the dimension side was not staged by this run
+            uniqueness = relationship.get("uniqueness_checks") or {}
+            referential = relationship.get("referential_integrity_checks") or {}
+            if referential.get("orphan_left_key_check_required"):
+                out.append(
+                    {
+                        "dataset": left_dataset,
+                        "column": left_column,
+                        "check_type": "relationships",
+                        "check_config": {
+                            "to": f"ref('{right_model}')",
+                            "field": right_column,
+                        },
+                        "severity": "error",
+                    }
+                )
+            if uniqueness.get("right_key_uniqueness_check_required"):
+                out.append(
+                    {
+                        "dataset": right_dataset,
+                        "column": right_column,
+                        "check_type": "unique",
+                        "check_config": {},
+                        "severity": "error",
+                    }
+                )
+        return out
+
+    def _write_data_quality_tests(
+        self, staging_dir: Path, relationships: list[dict[str, Any]] | None = None
+    ) -> None:
+        """Emit dbt schema tests from confirmed data_quality_panel.py answers
+        (data_quality_decisions.json) plus the uniqueness/referential checks a
+        PROVEN relationship contract already asks for -- never hand-maintained
+        YAML. Attached to the STAGING model for the decided column: shift-left,
+        catches a violation at the earliest point in the pipeline, before it
+        can silently propagate into a KPI number. A workspace with neither
+        confirmed DQ decisions nor an executable relationship gets no
+        schema.yml at all -- an empty/absent decisions file is not an error, it
+        just means no test has been authored yet.
+        """
+        decisions: list[dict[str, Any]] = []
         decisions_path = self.layout.contracts_dir / "data_quality_decisions.json"
-        if not decisions_path.exists():
-            return
-        try:
-            data = json.loads(decisions_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return
-        decisions = [d for d in (data.get("decisions") or []) if isinstance(d, dict)]
+        if decisions_path.exists():
+            try:
+                data = json.loads(decisions_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                data = {}
+            decisions = [d for d in (data.get("decisions") or []) if isinstance(d, dict)]
         # Match by STEM, not the raw dataset string: kpi_feature_mapping.json's
         # source_columns[].dataset stores an absolute local path for a CSV
         # profile, while _required_source_columns()/_written_staging key by
@@ -1233,6 +1325,9 @@ class DbtProjectGenerator:
             _safe_name(dataset_display_stem(source)): model_name
             for source, model_name in self._written_staging.items()
         }
+        decisions.extend(
+            self._relationship_quality_decisions(relationships or [], model_by_stem)
+        )
         by_model: dict[str, list[dict[str, Any]]] = {}
         for decision in decisions:
             check_type = str(decision.get("check_type") or "")
@@ -1726,7 +1821,18 @@ def _render_dbt_test(decision: dict[str, Any]) -> list[str]:
             "              config:",
             f"                severity: {severity}",
         ]
-    # not_null and any future no-arg check type share this shape.
+    if check_type == "relationships":
+        # `to` is already a rendered ref() expression -- the referenced model
+        # is one this generator wrote, so the dependency dbt infers from it is
+        # real rather than a dangling name.
+        return [
+            "          - relationships:",
+            f"              to: {config.get('to', '')}",
+            f"              field: {config.get('field', '')}",
+            "              config:",
+            f"                severity: {severity}",
+        ]
+    # not_null, unique, and any future no-arg check type share this shape.
     return [
         f"          - {check_type}:",
         "              config:",

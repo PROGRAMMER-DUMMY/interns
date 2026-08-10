@@ -103,6 +103,138 @@ def _generate_temporal(root: Path, **kwargs) -> Path:
     return root / result.dbt_project_dir
 
 
+def _related_workspace(root: Path) -> Path:
+    """A two-dataset workspace whose relationship contract is APPROVED and
+    executable -- a fact (transactions.ClaimID) referencing a dimension
+    (claims.ClaimID). This is the evidence DQ-R2's uniqueness/referential
+    checks are supposed to be generated from."""
+    workspace = root / "workspaces" / "demo"
+    (workspace / "datasets").mkdir(parents=True)
+    (workspace / "docs").mkdir(parents=True)
+    (workspace / "datasets" / "transactions.csv").write_text(
+        "ClaimID,PaidAmount,LineOfBusiness\nC1,10.50,Commercial\nC2,20.25,Medicare\n",
+        encoding="utf-8",
+    )
+    (workspace / "datasets" / "claims.csv").write_text(
+        "ClaimID,PayorID\nC1,P1\nC2,P2\n", encoding="utf-8"
+    )
+    (workspace / "docs" / "kpi_registry.csv").write_text(
+        "Key business question,Description,Cuts / grain hints,Metric,"
+        "Data model refinement required\n"
+        "What is paid amount by payor?,Baseline KPI,PayorID,"
+        "sum(PaidAmount),\n",
+        encoding="utf-8",
+    )
+    WorkspaceOnboarder(root, "workspaces/demo", sample_rows=10).run()
+    KPIFeatureResolver(root, "workspaces/demo", domain="healthcare").run()
+    layout = WorkspaceLayout(project_root=workspace)
+    (layout.contracts_dir / "relationship_contracts.json").write_text(
+        json.dumps(
+            {
+                "artifact_type": "relationship_contracts.json",
+                "version": 1,
+                "generated_by": "build-relationship-contracts",
+                "workspace": "workspaces/demo",
+                "relationships": [
+                    {
+                        "relationship_id": "rel_001",
+                        "left_dataset": "workspaces/demo/datasets/transactions.csv",
+                        "left_column": "ClaimID",
+                        "right_dataset": "workspaces/demo/datasets/claims.csv",
+                        "right_column": "ClaimID",
+                        "join_type": "left",
+                        "relationship_type": "foreign_key",
+                        "state": "user_confirmed",
+                        "executable_usage_policy": {"allowed_in_sql_generation": True},
+                        "uniqueness_checks": {
+                            "right_key_uniqueness_check_required": True,
+                            "right_key_unique": True,
+                            "status": "right_key_unique",
+                        },
+                        "referential_integrity_checks": {
+                            "orphan_left_key_check_required": True,
+                            "left_keys_resolve": True,
+                            "status": "left_keys_resolve",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return workspace
+
+
+class RelationshipDerivedQualityTests(unittest.TestCase):
+    """DQ-R2 (`silver_uniqueness_referential_null_type`, severity: fail) was
+    DECIDED by the blueprint with a citation and never emitted -- the generator
+    never read blueprint_decisions.json, and the DQ panel only ever offered
+    not_null/accepted_values. The evidence was already on disk: an approved
+    relationship contract literally records
+    `right_key_uniqueness_check_required` and `orphan_left_key_check_required`.
+    These tests pin that a proven join now generates the two checks it asks for.
+    """
+
+    def _quality_yaml(self, root: Path) -> str:
+        _related_workspace(root)
+        result = dbt_project_generator.DbtProjectGenerator(
+            root, "workspaces/demo", catalog="main", schema="rcm"
+        ).generate()
+        path = root / result.dbt_project_dir / "models" / "staging" / "_data_quality.yml"
+        self.assertTrue(path.exists(), "no _data_quality.yml was written")
+        return path.read_text(encoding="utf-8")
+
+    def test_a_proven_join_emits_referential_integrity_on_the_fact_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            text = self._quality_yaml(Path(tmp))
+            self.assertIn("- relationships:", text)
+            self.assertIn("field: ClaimID", text)
+            self.assertIn("ref('stg_claims')", text)
+
+    def test_a_proven_join_emits_uniqueness_on_the_dimension_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            text = self._quality_yaml(Path(tmp))
+            self.assertIn("- unique:", text)
+
+    def test_referential_and_uniqueness_are_errors_not_warnings(self):
+        """DQ-R2 carries severity `fail`. A referential break that only warns
+        publishes a mart with orphaned facts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            text = self._quality_yaml(Path(tmp))
+            self.assertNotIn("severity: warn", text)
+            self.assertIn("severity: error", text)
+
+
+class UnprovenRelationshipTests(unittest.TestCase):
+    def test_an_unproven_join_refuses_generation_rather_than_asserting_it(self):
+        """One gate covers both uses. `find_executable_relationship` decides
+        whether a join may be EXECUTED, and this change reuses it to decide
+        whether that join may be ASSERTED -- so a referential test can never
+        outrun the approval its own join required.
+
+        The refusal is stronger than "emit no test": a KPI that needs an
+        unapproved join is not generated at all, naming the command that
+        would approve it. Pinned here because it is the reason the deriver
+        needs no separate safety check of its own."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = _related_workspace(root)
+            layout = WorkspaceLayout(project_root=workspace)
+            path = layout.contracts_dir / "relationship_contracts.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["relationships"][0]["executable_usage_policy"] = {
+                "allowed_in_sql_generation": False
+            }
+            path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaises(ValueError) as caught:
+                dbt_project_generator.DbtProjectGenerator(
+                    root, "workspaces/demo", catalog="main", schema="rcm"
+                ).generate()
+            self.assertIn("no executable relationship contract", str(caught.exception))
+            self.assertFalse((root / "workspaces" / "demo" / "dbt" / "models"
+                              / "staging" / "_data_quality.yml").exists())
+
+
 class CatalogBaseResolutionTests(unittest.TestCase):
     """F21: `workspace_settings.databricks_source.catalog` is the catalog BASE
     the operator declared at intake; provisioning creates `env_catalog(base,
@@ -210,6 +342,19 @@ class EmittedProjectInvariantTests(unittest.TestCase):
             dbt_dir = _generate(Path(tmp))
             project = (dbt_dir / "dbt_project.yml").read_text(encoding="utf-8")
             self.assertIn("require-dbt-version:", project)
+
+    def test_failing_tests_persist_the_rows_that_failed(self):
+        """A test that reports only a COUNT is not debuggable at 3am -- the
+        on-call engineer has to re-derive the predicate by hand to see which
+        rows broke. dbt's store-failures writes the offending rows to a real
+        table instead, so the failure is queryable. `as: table` because the
+        default view re-runs the predicate against data that has since moved."""
+        with tempfile.TemporaryDirectory() as tmp:
+            dbt_dir = _generate(Path(tmp))
+            project = (dbt_dir / "dbt_project.yml").read_text(encoding="utf-8")
+            self.assertIn("data_tests:", project)
+            self.assertIn("+store_failures: true", project)
+            self.assertIn("+store_failures_as: table", project)
 
     def test_wap_marts_build_to_staging_and_publish_replaces_only_its_own_pair(self):
         with tempfile.TemporaryDirectory() as tmp:

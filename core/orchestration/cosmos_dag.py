@@ -194,11 +194,19 @@ def backfill_command(*, workspace: str, repo_root: str) -> str:
     gate + report artifact) rather than calling `dbt` directly, so the DAG
     path and the CLI path cannot diverge in safety.
 
-    Honesty about degradation (design spec section 8): a bounded replay needs
-    a declared `event_time`. Without one, dbt's `--event-time-start/-end` match
-    no batch and the invocation is a full rebuild of the selected models -- the
-    command SAYS so in the task log instead of implying a partition-aligned
-    backfill it cannot deliver.
+    Refusal, not degradation (design spec section 8): a bounded replay needs a
+    declared `event_time`. Without one, dbt's `--event-time-start/-end` match no
+    batch and the invocation silently becomes a full rebuild of every selected
+    model. This used to print a DEGRADED warning and run anyway, which is the
+    wrong control for an operation whose two outcomes differ by orders of
+    magnitude in runtime and spend at multi-TB -- by the time the warning
+    scrolls past, the expensive path is already running and nobody is watching.
+
+    So it refuses, and names both ways out: declare `event_time` (the real fix),
+    or set the `allow_full_refresh` DAG-run param (the deliberate override,
+    recorded in the run conf alongside who triggered it). Refusing is not
+    blocking -- a full refresh is sometimes exactly what is wanted; it just has
+    to be asked for by name.
     """
     dbt_dir = Path(repo_root) / workspace / "dbt"
     command = (
@@ -207,11 +215,18 @@ def backfill_command(*, workspace: str, repo_root: str) -> str:
         "--event-time-end {{ params.event_time_end }}"
     )
     if dbt_dir.exists() and not _declares_event_time(dbt_dir):
+        # The guard runs BEFORE the invocation: a refusal that follows the
+        # command it is refusing has refused nothing.
         return (
-            "echo 'DEGRADED: no model in this dbt project declares event_time, so this "
-            "backfill is a FULL REFRESH of the selected models, not a bounded "
-            "partition-aligned replay. Declare event_time on the incremental models to "
-            "get a bounded backfill.' && " + command
+            'if [ "{{ params.allow_full_refresh }}" != "yes" ]; then '
+            "echo 'REFUSED: no model in this dbt project declares event_time, so "
+            "--event-time-start/-end bound nothing and this would be a FULL REFRESH "
+            "of every selected model, not a partition-aligned replay. Fix it by "
+            "declaring event_time on the incremental models. To run the full refresh "
+            'deliberately, re-trigger with DAG config {"allow_full_refresh": "yes"}.\' '
+            ">&2; exit 1; fi; "
+            "echo 'WARNING: full-refresh backfill authorized via allow_full_refresh.'; "
+            + command
         )
     return command
 

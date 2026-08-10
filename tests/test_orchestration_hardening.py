@@ -54,19 +54,51 @@ class BackfillSeamTests(unittest.TestCase):
             self.assertIn("run-dbt-backfill", command)
             self.assertIn("--workspace workspaces/demo", command)
 
-    def test_no_declared_event_time_reports_full_refresh_degradation(self):
+    def _project_without_event_time(self, tmp: str) -> None:
+        models = Path(tmp) / "workspaces" / "demo" / "dbt" / "models" / "marts"
+        models.mkdir(parents=True)
+        (models / "fct_x.sql").write_text(
+            "{{ config(materialized='table', cluster_by=['a']) }}\nselect 1 as a\n",
+            encoding="utf-8",
+        )
+
+    def test_no_declared_event_time_refuses_instead_of_warning(self):
+        """A backfill that cannot be bounded is a FULL REFRESH of the selected
+        models. At multi-TB the two differ by orders of magnitude in runtime and
+        cost, so a printed warning is the wrong control -- the operator has
+        already walked away by the time it scrolls past. Refuse, and make the
+        expensive path something a human opts into by name."""
         with tempfile.TemporaryDirectory() as tmp:
-            models = Path(tmp) / "workspaces" / "demo" / "dbt" / "models" / "marts"
-            models.mkdir(parents=True)
-            (models / "fct_x.sql").write_text(
-                "{{ config(materialized='table', cluster_by=['a']) }}\nselect 1 as a\n",
-                encoding="utf-8",
-            )
+            self._project_without_event_time(tmp)
             command = cosmos_dag.backfill_command(
                 workspace="workspaces/demo", repo_root=tmp
             )
-            self.assertIn("DEGRADED", command)
-            self.assertIn("FULL REFRESH", command)
+            self.assertIn("REFUSED", command)
+            self.assertIn("exit 1", command)
+            # The refusal must come BEFORE the invocation, or it has refused
+            # nothing -- the expensive command would already have run.
+            self.assertLess(command.index("exit 1"), command.index("run-dbt-backfill"))
+
+    def test_the_refusal_names_both_ways_out(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._project_without_event_time(tmp)
+            command = cosmos_dag.backfill_command(
+                workspace="workspaces/demo", repo_root=tmp
+            )
+            self.assertIn("event_time", command)          # the real fix
+            self.assertIn("allow_full_refresh", command)  # the deliberate override
+
+    def test_an_explicit_operator_override_still_runs_it(self):
+        """Refusing is not blocking: a full refresh is sometimes exactly what
+        the operator wants. It just has to be asked for, in the DAG run config,
+        where the audit trail records who asked."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._project_without_event_time(tmp)
+            command = cosmos_dag.backfill_command(
+                workspace="workspaces/demo", repo_root=tmp
+            )
+            self.assertIn("{{ params.allow_full_refresh }}", command)
+            self.assertIn("run-dbt-backfill", command)
 
     def test_declared_event_time_promises_no_degradation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -358,6 +390,18 @@ class BackfillPoolTests(unittest.TestCase):
         idx = source.index("cosmos_dag.build_backfill_task")
         call_snippet = source[idx: idx + 200]
         self.assertIn('pool="backfill"', call_snippet)
+
+    def test_the_dag_declares_the_override_param_the_backfill_guard_reads(self):
+        """`backfill_command` renders `{{ params.allow_full_refresh }}`. An
+        Airflow param that is templated but never declared raises at render
+        time, so the guard would break the task instead of gating it -- and
+        the failure would look like a bug in backfill rather than a missing
+        declaration. Same static-source bar as the pool test above."""
+        import inspect
+
+        source = inspect.getsource(airflow_dag)
+        idx = source.index("params={")
+        self.assertIn("allow_full_refresh", source[idx: idx + 200])
 
     def test_bootstrap_command_is_documented_in_the_module_header(self):
         # The pool itself must exist before a DAG run can use it -- that is a
