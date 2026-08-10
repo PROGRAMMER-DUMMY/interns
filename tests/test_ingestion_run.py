@@ -75,6 +75,101 @@ class FakeRunner:
             raise RuntimeError("warehouse said no")
 
 
+class CountingRunner(FakeRunner):
+    """A runner that answers COUNT(*) like the warehouse does, so the
+    post-load verification has something real to read. `counts` maps a bronze
+    table name to the rows it landed."""
+
+    def __init__(self, counts: dict[str, int]):
+        super().__init__()
+        self.counts = counts
+
+    def execute(self, sql: str):
+        super().execute(sql)
+        if sql.lstrip().upper().startswith("SELECT COUNT"):
+            table = sql.rsplit(" ", 1)[-1].strip().rstrip(";")
+            return [[str(self.counts.get(table.rsplit(".", 1)[-1], 0))]]
+        return None
+
+
+def _discovery(ws: Path, sizes: dict[str, int]) -> None:
+    intake = ws / "interns" / "generated" / "intake"
+    intake.mkdir(parents=True, exist_ok=True)
+    (intake / "discovery.json").write_text(
+        json.dumps(
+            {
+                "artifact_type": "intake/discovery.json",
+                "version": 1,
+                "generated_by": "discover-source",
+                "workspace": "workspaces/demo",
+                "connector": "s3",
+                "status": "ok",
+                "tables": [
+                    {"name": name, "path": f"s3://bkt/pfx/{name}", "format": "csv",
+                     "size_bytes": size, "row_estimate": None}
+                    for name, size in sizes.items()
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+class LandedRowVerificationTests(unittest.TestCase):
+    """Handbook Category 3, "Zero-Row Detection: alert immediately if an
+    ingestion job succeeds but inserts 0 rows".
+
+    A COPY INTO that matches no file still SUCCEEDS -- that is the whole point
+    of its file bookkeeping -- so an empty bronze table reads as a green run
+    all the way to a KPI that quietly returns nothing. discovery.json carries
+    no row_estimate (the scan reads sizes, not contents), so the assertion that
+    can actually be made is the one that matters: a source discovery measured
+    as NON-EMPTY must not land zero rows.
+    """
+
+    def test_a_job_that_lands_no_rows_from_a_nonempty_source_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws_rel = _workspace(tmp, confirmed=True)
+            _discovery(root / ws_rel, {"a": 420, "b": 900})
+            runner = CountingRunner({"a": 12, "b": 0})
+            result = run_ingestion_jobs(
+                root, ws_rel, dry_run=False, runner=runner
+            )
+            self.assertFalse(result.ok)
+            detail = " ".join(j["detail"] for j in result.jobs)
+            self.assertIn("0 rows", detail)
+
+    def test_all_jobs_landing_rows_stay_green(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws_rel = _workspace(tmp, confirmed=True)
+            _discovery(root / ws_rel, {"a": 420, "b": 900})
+            runner = CountingRunner({"a": 12, "b": 7})
+            result = run_ingestion_jobs(root, ws_rel, dry_run=False, runner=runner)
+            self.assertTrue(result.ok)
+
+    def test_an_empty_source_landing_zero_rows_is_not_a_failure(self):
+        """Zero from zero is correct, not a defect -- flagging it would train
+        operators to ignore the check."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws_rel = _workspace(tmp, confirmed=True)
+            _discovery(root / ws_rel, {"a": 420, "b": 0})
+            runner = CountingRunner({"a": 12, "b": 0})
+            result = run_ingestion_jobs(root, ws_rel, dry_run=False, runner=runner)
+            self.assertTrue(result.ok)
+
+    def test_a_runner_that_cannot_report_counts_does_not_fabricate_a_verdict(self):
+        """The plain FakeRunner returns None. Unknown must read as unverified,
+        never as verified-zero -- inventing a failure here would break every
+        caller that cannot read results back."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root, ws_rel = _workspace(tmp, confirmed=True)
+            _discovery(root / ws_rel, {"a": 420, "b": 900})
+            result = run_ingestion_jobs(
+                root, ws_rel, dry_run=False, runner=FakeRunner()
+            )
+            self.assertTrue(result.ok)
+
+
 def _workspace(tmp: str, *, confirmed: bool) -> tuple[Path, str]:
     root = Path(tmp)
     ws_rel = "workspaces/demo"
@@ -204,10 +299,12 @@ class ExecutionTests(unittest.TestCase):
             self.assertTrue(result.ok)
             self.assertEqual(result.executed, 2)
             self.assertEqual(result.failed, 0)
-            # two statements per job, jobs in manifest order
-            self.assertEqual(len(runner.statements), 4)
+            # Two load statements per job plus the landed-row verification
+            # COUNT, jobs in manifest order.
+            self.assertEqual(len(runner.statements), 6)
             self.assertIn("demo_dev.bronze.a", runner.statements[0])
-            self.assertIn("demo_dev.bronze.b", runner.statements[2])
+            self.assertTrue(runner.statements[2].startswith("SELECT COUNT"))
+            self.assertIn("demo_dev.bronze.b", runner.statements[3])
 
     def test_failure_stops_and_remaining_jobs_are_not_attempted(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -230,7 +327,8 @@ class ExecutionTests(unittest.TestCase):
             run_ingestion_jobs(root, ws, runner=runner)
             second = run_ingestion_jobs(root, ws, runner=runner)
             self.assertEqual(second.status, STATUS_EXECUTED)
-            self.assertEqual(len(runner.statements), 8)
+            # 2 runs x 2 jobs x (2 load + 1 verification COUNT)
+            self.assertEqual(len(runner.statements), 12)
 
     def test_missing_manifest_refuses(self):
         with tempfile.TemporaryDirectory() as tmp:

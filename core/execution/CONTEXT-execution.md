@@ -4,15 +4,20 @@ This document provides an exhaustive reference for all components in [`core/exec
 
 ---
 
-> **Known limits of `DatabricksClient.execute_query` (production review 2026-08-09, not yet fixed).**
-> It returns `resp.result.data_array`, which is only the FIRST chunk of a paginated
-> result — nothing in `core/` handles `next_chunk_index`/`external_links`, so a large
-> read silently returns a prefix rather than failing. Its poll loop
-> (`while state in (PENDING, RUNNING): sleep(2)`) has no ceiling and no retry around
-> `get_statement`, so a hung statement loops forever and one transient network blip
-> mid-poll loses a statement that is running fine server-side. Safe for today's callers
-> (bounded profiling samples, small `information_schema` listings); not safe for the TB
-> scale this platform targets. See `docs/plans/rcm_replay_findings.md` P1/P2.
+> **`DatabricksClient.execute_query` bounds (P1/P2, production review 2026-08-09 — FIXED 2026-08-10).**
+> It used to return `resp.result.data_array`, only the FIRST chunk of a paginated
+> result, so a large read silently returned a prefix that looked like a complete,
+> successful answer. It now follows `next_chunk_index` through
+> `get_statement_result_chunk_n` until the result is exhausted. `max_rows`
+> (default 1,000,000) bounds memory and **raises** when passed — a cap that
+> truncated would reintroduce the bug it guards.
+> Polling is bounded too: `timeout` (default 1800s — a cold warehouse plus a slow
+> query) raises `TimeoutError` instead of pinning a caller forever, and up to
+> `_POLL_MAX_CONSECUTIVE_ERRORS` transient `get_statement` failures are retried,
+> because a control-plane blip says nothing about a statement that is very likely
+> still running. Caps are deliberately generous: this is the metadata/sample read
+> path, so they exist to make an unbounded read FAIL, not to tune throughput.
+> Pinned by `tests/test_databricks_client_read_path.py`.
 
 ## Executive Overview & Architectural Model
 

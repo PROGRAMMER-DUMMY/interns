@@ -276,6 +276,18 @@ CURATED_MODULES: tuple[str, ...] = (
     # Airflow absence is a capability gap for the cloud-native path, never
     # a blocker, since the local-DuckDB KPI flow works without either.
     "tests.test_platform_readiness",
+    # The cloud-first spine's own emitted-code invariants. These were written
+    # against real defects (F16, F21-F26) and were in NEITHER list, so the gate
+    # reported "all green" without ever loading them -- the same drift the
+    # `regression_modules()` docstring below records finding for the whole
+    # tests/regressions/ tree. Curated here rather than left to be remembered.
+    "tests.test_dbt_generator_hardening",
+    "tests.test_orchestration_hardening",
+    "tests.test_ingestion_run",
+    "tests.test_ingestion_generator",
+    "tests.test_databricks_client_read_path",
+    "tests.test_dbt_state_publish",
+    "tests.test_airflow_health",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

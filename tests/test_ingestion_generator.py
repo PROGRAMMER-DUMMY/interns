@@ -123,6 +123,10 @@ class ObjectStoreEmissionTests(unittest.TestCase):
         self.assertIn('format("cloudFiles")', code)
         self.assertIn('"cloudFiles.format", "parquet"', code)
         self.assertIn('"cloudFiles.schemaEvolutionMode", "addNewColumns"', code)
+        # addNewColumns absorbs ADDED columns; it does nothing for a value
+        # whose TYPE changed underneath, which nulls silently. The rescued
+        # column is independent of evolution mode and covers exactly that.
+        self.assertIn('"cloudFiles.rescuedDataColumn", "_rescued_data"', code)
         self.assertIn("cloudFiles.maxFilesPerTrigger", code)
         self.assertIn('outputMode("append")', code)
         self.assertIn("trigger(availableNow=True)", code)
@@ -156,6 +160,16 @@ class ObjectStoreEmissionTests(unittest.TestCase):
         ...` -- a silently wrong bronze table rather than a loud failure."""
         sql = self.files["ingest_payer_dim.sql"]
         self.assertIn("'header' = 'true'", sql)
+
+    def test_csv_rescues_values_that_do_not_match_the_column_type(self):
+        """Without a rescued-data column a value that will not parse into its
+        column lands as NULL, which is indistinguishable from a real null and
+        reaches a KPI as a quietly wrong number. Rescued, it is still visible
+        and still queryable -- the handbook's Bronze inspection step
+        (`SELECT _rescued_data ... WHERE _rescued_data IS NOT NULL`) has
+        something to read."""
+        sql = self.files["ingest_payer_dim.sql"]
+        self.assertIn("'rescuedDataColumn' = '_rescued_data'", sql)
 
     def test_manifest_shape(self):
         manifest = json.loads(self.files["jobs_manifest.json"])

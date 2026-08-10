@@ -501,6 +501,12 @@ stream = (
     # Explicit on purpose: left unset, new source columns would not be carried
     # forward into bronze and the gap is silent.
     .option("cloudFiles.schemaEvolutionMode", "addNewColumns")
+    # addNewColumns handles an ADDED column. It does nothing for a value whose
+    # TYPE changed underneath -- that parses to NULL, indistinguishable from a
+    # real null, and reaches a KPI as a quietly wrong number. The rescued
+    # column is independent of evolution mode and keeps that data visible and
+    # queryable instead (`WHERE _rescued_data IS NOT NULL`).
+    .option("cloudFiles.rescuedDataColumn", "_rescued_data")
     # Ingest-side cost throttle; whichever limit is hit first governs.
     .option("cloudFiles.maxFilesPerTrigger", 1000)
     # Bounds the replay horizon; backfillInterval catches files missed by
@@ -533,9 +539,17 @@ def _copy_into_sql(
     # names only surface as nonsense much later, in feature resolution.
     # Self-describing formats (parquet/avro/orc/json) carry their own names and
     # must NOT be given these options. (F23)
+    # A value that will not parse into its inferred column type lands as NULL,
+    # indistinguishable from a real null and silently wrong by the time it
+    # reaches a KPI. Rescued, it stays visible and queryable
+    # (`WHERE _rescued_data IS NOT NULL`) -- the inspection step a bronze
+    # failure otherwise has nothing to offer.
     format_options = "'mergeSchema' = 'true'"
     if fileformat in _TEXT_DELIMITED_FORMATS:
-        format_options += ", 'header' = 'true', 'inferSchema' = 'true'"
+        format_options += (
+            ", 'header' = 'true', 'inferSchema' = 'true'"
+            ", 'rescuedDataColumn' = '_rescued_data'"
+        )
     cols = ""
     typed = [
         f"  {safe_name(col.get('name'))} {col.get('type', 'STRING')}"

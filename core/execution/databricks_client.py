@@ -15,6 +15,15 @@ from core.observability.log_redaction import redact
 if TYPE_CHECKING:
     from core.config import DatabricksConfig
 
+# execute_query's bounds. Generous rather than tight: this client is the
+# metadata/sample read path (profiling samples, information_schema listings),
+# not a bulk export, so the caps exist to make an unbounded read FAIL rather
+# than to tune throughput. Any caller that legitimately needs more says so.
+_POLL_INTERVAL_SECONDS = 2
+_POLL_DEADLINE_SECONDS = 1800.0        # 30 min: a cold warehouse plus a slow query
+_POLL_MAX_CONSECUTIVE_ERRORS = 4       # ~5 control-plane failures in a row before giving up
+_MAX_RESULT_ROWS = 1_000_000
+
 
 class DatabricksClient:
     """Thin wrapper around databricks-sdk WorkspaceClient."""
@@ -188,7 +197,14 @@ class DatabricksClient:
             wait_timeout="30s",
         )
 
-    def execute_query(self, sql: str, *, wait_timeout: str = "50s") -> Tuple[list, list]:
+    def execute_query(
+        self,
+        sql: str,
+        *,
+        wait_timeout: str = "50s",
+        timeout: float = _POLL_DEADLINE_SECONDS,
+        max_rows: int = _MAX_RESULT_ROWS,
+    ) -> Tuple[list, list]:
         """
         Execute SQL against the configured SQL warehouse and return
         (column_names, rows) -- rows as lists of string values (the SQL
@@ -200,6 +216,18 @@ class DatabricksClient:
         status/row-count, never resp.result.data_array. Building this properly
         here (not duplicated per caller) so profiling, cost-tag verification,
         and anything else that needs to read the warehouse can reuse it.
+
+        Reads EVERY chunk (P1). The Statement Execution API paginates: the
+        first response carries `next_chunk_index` when more data exists, and
+        returning only `data_array` silently yields a PREFIX that looks like a
+        complete, successful result. `max_rows` bounds memory, but passing it
+        RAISES rather than truncating -- a cap that quietly returns a prefix
+        would reintroduce the exact bug it guards.
+
+        Polling is bounded (P2). `timeout` caps total wait so a hung statement
+        cannot pin a caller (an Airflow worker slot, in practice) forever, and
+        a transient `get_statement` failure is retried rather than abandoning a
+        statement that is running fine server-side.
         """
         import time as _time
         from databricks.sdk.service.sql import StatementState
@@ -213,10 +241,31 @@ class DatabricksClient:
         # execute_statement blocks synchronously up to wait_timeout; if the
         # warehouse is still cold-starting or the query is still running past
         # that, it returns PENDING/RUNNING instead of raising -- poll until a
-        # terminal state.
+        # terminal state, the deadline, or exhausted retries.
+        deadline = _time.monotonic() + max(float(timeout), 0.0)
+        consecutive_errors = 0
         while resp.status.state in (StatementState.PENDING, StatementState.RUNNING):
-            _time.sleep(2)
-            resp = client.statement_execution.get_statement(resp.statement_id)
+            if _time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Databricks SQL statement {resp.statement_id} is still "
+                    f"{resp.status.state} after {timeout}s; giving up the wait "
+                    "(the statement may still be running server-side)"
+                )
+            _time.sleep(_POLL_INTERVAL_SECONDS)
+            try:
+                resp = client.statement_execution.get_statement(resp.statement_id)
+                consecutive_errors = 0
+            except Exception as exc:
+                # A blip against the control plane says nothing about the
+                # statement, which is very likely still running. Retry a
+                # bounded number of times before surfacing it.
+                consecutive_errors += 1
+                if consecutive_errors > _POLL_MAX_CONSECUTIVE_ERRORS:
+                    raise RuntimeError(
+                        f"Databricks SQL statement {resp.statement_id}: "
+                        f"{_POLL_MAX_CONSECUTIVE_ERRORS + 1} consecutive polling "
+                        f"failures; last error: {redact(str(exc))}"
+                    ) from exc
 
         if resp.status.state != StatementState.SUCCEEDED:
             error = resp.status.error
@@ -224,7 +273,24 @@ class DatabricksClient:
             raise RuntimeError(f"Databricks SQL statement failed ({resp.status.state}): {message}")
 
         columns = [col.name for col in (resp.manifest.schema.columns or [])]
-        rows = resp.result.data_array or [] if resp.result else []
+        rows: list = []
+        chunk = resp.result if resp.result else None
+        while chunk is not None:
+            rows.extend(getattr(chunk, "data_array", None) or [])
+            if len(rows) > max_rows:
+                raise RuntimeError(
+                    f"Databricks SQL result exceeded max_rows={max_rows}. Refusing to "
+                    "return a truncated prefix -- narrow the query (LIMIT/aggregate/"
+                    "filter) or raise max_rows deliberately."
+                )
+            next_index = getattr(chunk, "next_chunk_index", None)
+            chunk = (
+                client.statement_execution.get_statement_result_chunk_n(
+                    resp.statement_id, next_index
+                )
+                if next_index is not None
+                else None
+            )
         return columns, rows
 
     def submit_job_run(self, task: dict, time_budget: int) -> int:

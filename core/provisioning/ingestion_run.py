@@ -54,7 +54,9 @@ class SqlRunner(Protocol):
     """One statement at a time, so tests substitute a recorder and never reach
     a warehouse."""
 
-    def execute(self, sql: str) -> None: ...
+    def execute(self, sql: str): ...
+    """Returns result rows when the runner can read them back, else None.
+    None means UNVERIFIED, never verified-empty -- see _landed_rows()."""
 
 
 @dataclass
@@ -125,8 +127,9 @@ def _sdk_runner(layout: WorkspaceLayout) -> SqlRunner:
         )
 
     class _WarehouseRunner:
-        def execute(self, sql: str) -> None:
-            client.execute_query(sql)
+        def execute(self, sql: str):
+            _columns, rows = client.execute_query(sql)
+            return rows
 
     return _WarehouseRunner()
 
@@ -214,14 +217,32 @@ def run_ingestion_jobs(
             continue
         try:
             count = _run_one(runner, layout, job)
+            landed = _landed_rows(runner, job)
         except Exception as exc:
             job_records.append(
                 _record(job, "failed", f"{type(exc).__name__}: {redact(str(exc))}")
             )
             stopped = True
             continue
+        if landed == 0 and _discovered_size(layout, job) > 0:
+            # COPY INTO succeeds when it matches no file -- that is its file
+            # bookkeeping working as designed -- so an empty bronze table
+            # otherwise reads as a green run all the way to a KPI that
+            # silently returns nothing.
+            job_records.append(
+                _record(
+                    job, "failed",
+                    f"ran {count} statement(s) but {job.get('target_table', '')} "
+                    "holds 0 rows while discovery measured this source as "
+                    "non-empty -- the load matched no file (check the path and "
+                    "format in the manifest)",
+                )
+            )
+            stopped = True
+            continue
+        landed_note = "" if landed is None else f", {landed} row(s) in target"
         job_records.append(
-            _record(job, STATUS_EXECUTED, f"[ok] ran {count} statement(s)")
+            _record(job, STATUS_EXECUTED, f"[ok] ran {count} statement(s){landed_note}")
         )
 
     failed = any(record["status"] == "failed" for record in job_records)
@@ -237,6 +258,48 @@ def _run_one(runner: SqlRunner, layout: WorkspaceLayout, job: dict[str, Any]) ->
     for statement in statements:
         runner.execute(statement)
     return len(statements)
+
+
+def _landed_rows(runner: SqlRunner, job: dict[str, Any]) -> int | None:
+    """Rows now in the job's bronze table, or None when this runner cannot read
+    results back.
+
+    None is deliberately distinct from 0: a runner that returns nothing has
+    told us nothing, and treating unverified as verified-empty would fail every
+    caller that only writes. The COUNT is a separate statement rather than
+    parsing COPY INTO's own output because the target is what matters -- a
+    re-run legitimately copies zero NEW files into a table that is already full.
+    """
+    target = str(job.get("target_table") or "")
+    if not target:
+        return None
+    rows = runner.execute(f"SELECT COUNT(*) FROM {target}")
+    try:
+        return int(rows[0][0])
+    except (TypeError, IndexError, ValueError):
+        return None
+
+
+def _discovered_size(layout: WorkspaceLayout, job: dict[str, Any]) -> int:
+    """`size_bytes` discovery measured for this job's source table, or 0 when
+    unknown. discovery.json records no row_estimate (the scan reads sizes, not
+    contents), so size is the only evidence available for "the source was not
+    empty" -- and 0/unknown must stay non-accusing."""
+    path = layout.project_root / "interns" / "generated" / "intake" / "discovery.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    name = str(job.get("table") or "")
+    for table in payload.get("tables") or []:
+        if isinstance(table, dict) and str(table.get("name") or "") == name:
+            try:
+                return int(table.get("size_bytes") or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
 
 
 def _record(job: dict[str, Any], status: str, detail: str = "") -> dict[str, Any]:
