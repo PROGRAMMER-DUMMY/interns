@@ -475,6 +475,22 @@ The `core/onboarding/workspace` subsystem provides a governed, local-first and c
 
 ---
 
+### 19. `team_state.py`
+- **File Link**: [`team_state.py`](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/onboarding/workspace/team_state.py)
+- **Exact Purpose**: Mirrors a workspace's **decision state** to a Unity Catalog volume so a teammate on another machine inherits accepted answers instead of re-answering the same blockers. `workspaces/**/interns/` is gitignored, so git cannot carry this state between engineers.
+- **Key Functions/Classes**:
+  - `TEAM_STATE_ARTIFACTS`: The only two artifacts that are decision state — `generated/contracts/workspace_feature_definitions.json` (accepted workspace-level business definitions) and `state/applied_ops.jsonl` (the idempotency ledger). Everything else under `interns/` is derived and regenerates from these.
+  - `team_state_remote_root(catalog, schema, project)`: `/Volumes/<catalog>/<schema>/_state/dbt/<project>`.
+  - `mirror_team_state(workspace, *, runner=subprocess.run)`: Ships present artifacts via `databricks fs cp --overwrite`. Returns a structured dict; never raises.
+  - `mirror_team_state_safe(...)`: Blanket-guarded variant used inside the governed CLI envelope.
+- **Wiring**: Called from [`cli_runner.run_workspace_command`](file:///C:/Users/shubh/OneDrive/Desktop/interns/core/onboarding/workspace/cli_runner.py) immediately after `record_op`, so a decision is mirrored only once it is durably local. Non-skipped results are reported on the command payload as `team_state_mirror`.
+- **Failure Modes & Edge Cases**:
+  - **Never blocks the local flow.** A workspace with no `databricks_source` catalog *and* schema makes no subprocess call at all (`skipped: True`, which is a normal outcome, not a failure). A partial declaration (catalog but no schema) is also skipped rather than guessing a volume path.
+  - A `databricks fs cp` failure, a missing CLI, or an unreachable volume is reported in the payload, never raised — the decision is already on local disk, and losing the mirror must not lose the answer.
+  - Stops at the first failure rather than retrying the rest.
+  - Failure text passes through `redact()` and is tail-bounded to `STDERR_TAIL_CHARS`, so an auth dump cannot ride along in an error string (same bound as `dbt_state.py` / `sync_code.py`).
+- **Tests**: [`tests/test_team_state_mirror.py`](file:///C:/Users/shubh/OneDrive/Desktop/interns/tests/test_team_state_mirror.py) — 11 cases, injected runner, no network.
+
 ## 3. Code Hygiene & Integrity Audit Section
 
 ### A. Dead Code & Unused Helpers
