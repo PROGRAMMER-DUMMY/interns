@@ -15,7 +15,7 @@ jobs:
           distribution: temurin
           java-version: "17"   # Spark 3.5 supports Java 8/11/17 only -- green-gate's
                                 # curated suite includes Spark-backed medallion tests.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install (Spark 3.5 / Scala 2.12 + Delta 3.2, pinned to match pyspark-parity job)
@@ -38,7 +38,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"   # Spark 3.5 supports Java 8/11/17 only
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install (Spark 3.5 / Scala 2.12 + Delta 3.2)
