@@ -39,7 +39,9 @@ from core.observability.cost_ledger import anchored
 
 import argparse
 import hashlib
+import hmac
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -96,7 +98,7 @@ def append_audit_record(chain_path: Path, record: dict[str, Any]) -> dict[str, A
     with workspace_lock(workspace_path):
         prev_hash, seq = _tail(chain_path)
         canonical = _canonical_json(record)
-        entry_hash = _sha256(prev_hash + canonical)
+        entry_hash = _entry_digest(prev_hash + canonical)
         entry: dict[str, Any] = {
             "seq": seq,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -185,7 +187,7 @@ def verify_chain(chain_path: Path) -> dict[str, Any]:
         stored_hash = entry.get("entry_hash", "")
         record = entry.get("record", {})
         canonical = _canonical_json(record)
-        recomputed = _sha256(expected_prev + canonical)
+        recomputed = _entry_digest(expected_prev + canonical)
         if recomputed != stored_hash:
             return {
                 "ok": False,
@@ -272,6 +274,25 @@ def _canonical_json(obj: Any) -> str:
 def _sha256(data: str) -> str:
     """Return the hex-encoded SHA-256 digest of UTF-8-encoded *data*."""
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+def _entry_digest(data: str) -> str:
+    """Return the entry-hash for *data* (``prev_hash + canonical_json(record)``).
+
+    Opt-in upgrade over plain SHA-256 (see module docstring's "Security
+    note"): when ``AUTORESEARCH_AUDIT_HMAC_KEY`` is set, uses HMAC-SHA256
+    with that key -- an attacker who can write the chain file but not read
+    the key cannot forge a valid-looking chain. When unset, falls back to
+    today's plain SHA-256 unchanged, so every existing chain keeps verifying
+    exactly as before. A workspace that opts in starts a stronger chain from
+    that point forward; ``append_audit_record`` and ``verify_chain`` must
+    agree on the same key, or a mixed-mode chain fails verification loudly
+    rather than silently passing.
+    """
+    key = os.environ.get("AUTORESEARCH_AUDIT_HMAC_KEY", "")
+    if key:
+        return hmac.new(key.encode("utf-8"), data.encode("utf-8"), hashlib.sha256).hexdigest()
+    return _sha256(data)
 
 
 def _tail(chain_path: Path) -> tuple[str, int]:

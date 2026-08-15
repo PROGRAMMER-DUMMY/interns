@@ -11,21 +11,24 @@ from pathlib import Path
 
 import toml
 
-from core.observability.log_redaction import assert_installed, install_log_redaction
+from core.observability.log_redaction import assert_installed, install_log_redaction_everywhere
 from core.paths import PROJECT_ROOT
 
 # core.config is imported at the start of virtually every CLI entrypoint
 # (via load_config()), making it the natural single choke point to wire
 # secret/PII redaction into the root logger. Previously RedactionFilter was
 # built and unit-tested but never called from any real startup path.
-install_log_redaction()
+# install_log_redaction_everywhere() also covers third-party loggers
+# (aiohttp, databricks, pyspark, urllib3) that may attach their own handler
+# and bypass a root-only filter (Gap 7 residual risk 1).
+install_log_redaction_everywhere()
 assert_installed()
 
 @dataclass
 class DatabricksConfig:
     """Parsed from lock.toml [databricks] block + environment variables."""
     enabled: bool = False
-    execution: str = "duckdb"          # duckdb | jobs | warehouse | connect
+    execution: str = "duckdb"          # duckdb | jobs | warehouse | connect | isolated
     loop_on_databricks: bool = False
     fallback: str = "duckdb"           # duckdb | fail
     host: str = ""

@@ -528,8 +528,15 @@ def build_execution_backend(cfg: "Config") -> ExecutionBackend:
     """
     Build the correct ExecutionBackend from config.
     Returns DuckDBBackend if Databricks is disabled or credentials are absent.
+
+    ``execution = "isolated"`` selects IsolatedDuckDBBackend (restricted
+    subprocess environment) regardless of whether Databricks is configured --
+    it's a local-subprocess isolation policy, not a remote-execution target,
+    so it is checked before the Databricks-active branch below.
     """
     db_cfg = cfg.databricks
+    if db_cfg.execution == "isolated":
+        return IsolatedDuckDBBackend()
     if not db_cfg.is_active():
         return DuckDBBackend()
     if os.environ.get("AUTORESEARCH_ALLOW_REMOTE_EXECUTION") != "1":

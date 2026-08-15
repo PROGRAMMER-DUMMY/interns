@@ -1,14 +1,36 @@
 import json
+import logging
 import re
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
 from typing import Optional
 
+_log = logging.getLogger(__name__)
+
 class LLMEngine(ABC):
     @abstractmethod
     def generate(self, system: str, user: str, max_tokens: int, model: str) -> Optional[str]:
         pass
+
+# Gemini API request-body character budget for the `user` prompt. Content
+# beyond this is truncated -- previously silently (a caller/model had no way
+# to know part of the prompt was missing); now a warning is logged and an
+# explicit marker is appended so the model itself knows content was cut.
+_GEMINI_USER_TEXT_LIMIT = 4000
+_TRUNCATION_MARKER_TEMPLATE = "\n[...truncated, {omitted} characters omitted...]"
+
+
+def _truncate_with_signal(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    omitted = len(text) - limit
+    _log.warning(
+        "APIEngine: user prompt truncated from %d to %d characters (%d omitted)",
+        len(text), limit, omitted,
+    )
+    return text[:limit] + _TRUNCATION_MARKER_TEMPLATE.format(omitted=omitted)
+
 
 class APIEngine(LLMEngine):
     def __init__(self, api_key: str):
@@ -20,7 +42,7 @@ class APIEngine(LLMEngine):
         try:
             payload = json.dumps({
                 "system_instruction": {"parts": [{"text": system}]},
-                "contents":          [{"parts": [{"text": user[:4000]}]}],
+                "contents":          [{"parts": [{"text": _truncate_with_signal(user, _GEMINI_USER_TEXT_LIMIT)}]}],
                 "generationConfig":  {"temperature": 0.3, "maxOutputTokens": max_tokens},
             }).encode()
             url = (

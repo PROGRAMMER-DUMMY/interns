@@ -173,37 +173,67 @@ def validate_spark_config() -> None:
         raise RuntimeError("Spark is required for this path but PySpark is not installed.")
 
 def fix_inferred_schema(df: Any, schema_overrides: Optional[Dict[str, Any]] = None) -> Any:
+    """Detect ID-like/ZIP-like integer columns and high-null-ratio float
+    columns, cast them to String. Works on both a LazyFrame and an eager
+    DataFrame -- ``df`` may be either. The two data-dependent probes (ZIP-
+    pattern sample match rate, float null ratio) are batched into ONE bounded
+    query via ``.select(...).collect()`` rather than per-column eager Series
+    access, so this stays scale-safe on a lazily-scanned file: it never
+    materializes the whole file, only a `.head(100)` sample per integer
+    column and a null-count/length aggregate per float column, all in one
+    pass. Semantics are unchanged from the original eager version -- same
+    thresholds, same sample size, same full-column null ratio (not a
+    sampled one) for the float check.
+    """
     if not pl:
         return df
-    overrides = {}
-    for col in df.columns:
-        series = df.get_column(col)
+    is_lazy = hasattr(df, "collect_schema")
+    schema = df.collect_schema() if is_lazy else {c: df.schema[c] for c in df.columns}
+
+    overrides: Dict[str, Any] = {}
+    probe_exprs = []
+    int_cols = []
+    float_cols = []
+    for col, dtype in schema.items():
         if ID_PATTERN.match(col):
             overrides[col] = pl.String
             continue
-        if series.dtype in (pl.Int64, pl.Int32, pl.UInt64, pl.UInt32):
-            sample = series.drop_nulls().head(100).cast(pl.String)
-            if sample.len() > 0:
-                matches = sample.str.contains(ZIP_PATTERN.pattern).mean()
-                if matches and matches > 0.8:
-                    overrides[col] = pl.String
-                    continue
-        if series.dtype in (pl.Float64, pl.Float32) and series.len() > 0:
-            null_ratio = series.null_count() / series.len()
-            if null_ratio > 0.3:
+        if dtype in (pl.Int64, pl.Int32, pl.UInt64, pl.UInt32):
+            int_cols.append(col)
+            probe_exprs.append(
+                pl.col(col).drop_nulls().head(100).cast(pl.String)
+                .str.contains(ZIP_PATTERN.pattern).mean().alias(f"__zip__{col}")
+            )
+        elif dtype in (pl.Float64, pl.Float32):
+            float_cols.append(col)
+            probe_exprs.append(pl.col(col).null_count().alias(f"__nulls__{col}"))
+            probe_exprs.append(pl.col(col).len().alias(f"__len__{col}"))
+
+    if probe_exprs:
+        probe_lf = df if is_lazy else df.lazy()
+        stats = probe_lf.select(probe_exprs).collect().row(0, named=True)
+        for col in int_cols:
+            matches = stats.get(f"__zip__{col}")
+            if matches and matches > 0.8:
                 overrides[col] = pl.String
+        for col in float_cols:
+            total = stats.get(f"__len__{col}") or 0
+            nulls = stats.get(f"__nulls__{col}") or 0
+            if total and (nulls / total) > 0.3:
+                overrides[col] = pl.String
+
     if schema_overrides:
         overrides.update(schema_overrides)
     if not overrides:
         return df
     return df.with_columns([
         pl.col(col).cast(dtype, strict=False) for col, dtype in overrides.items()
-        if col in df.columns
+        if col in schema
     ])
 
 def load_csv(path: str, schema_overrides: Optional[Dict[str, Any]] = None) -> Any:
-    df = pl.read_csv(path, infer_schema_length=5000, ignore_errors=True, glob=True)
-    return fix_inferred_schema(df, schema_overrides)
+    lf = pl.scan_csv(path, infer_schema_length=5000, ignore_errors=True, glob=True)
+    return fix_inferred_schema(lf, schema_overrides)
 
 def load_polars_frame(path: str, schema_overrides: Optional[Dict[str, Any]] = None) -> Tuple[Any, str]:
     p = Path(path)
@@ -213,11 +243,11 @@ def load_polars_frame(path: str, schema_overrides: Optional[Dict[str, Any]] = No
     if p.is_dir() and list(p.rglob("*.parquet")):
         return pl.scan_parquet(str(p)), "parquet"
     if p.is_dir() and list(p.rglob("*.csv")):
-        return load_csv(str(p / "*.csv"), schema_overrides).lazy(), "csv"
+        return load_csv(str(p / "*.csv"), schema_overrides), "csv"
     if ext in [".parquet", ".pq"]:
         return pl.scan_parquet(path), "parquet"
     if ext == ".csv":
-        return load_csv(path, schema_overrides).lazy(), "csv"
+        return load_csv(path, schema_overrides), "csv"
     if ext == ".json":
         return pl.read_json(path).lazy(), "json"
     if ext == ".ndjson":
@@ -1049,15 +1079,41 @@ class SparkEngine(AbstractDataEngine):
     async def quick_profile(self, sample_rows: int = 200_000) -> Any:
         def _profile():
             sampled = self.df.limit(sample_rows)
-            # In Spark, profiling is expensive. We compute categorical heuristics quickly.
             dtypes = dict(sampled.dtypes)
-            records = []
-            for col, dtype in dtypes.items():
-                is_cat = dtype in ['string', 'boolean']
-                records.append({
-                    "column": col, "is_categorical": is_cat,
-                    "fill_pct": 100.0, "n_unique": 2, "unique_ratio": 0.01 # Mocked for quick strat selection
-                })
+            total = sampled.count()
+            if total == 0 or not dtypes:
+                records = [
+                    {"column": c, "is_categorical": dt in ['string', 'boolean'],
+                     "fill_pct": 0.0, "n_unique": 0, "unique_ratio": 0.0}
+                    for c, dt in dtypes.items()
+                ]
+            else:
+                # One aggregate pass, all columns: approx_count_distinct is
+                # HyperLogLog-based (O(1) memory, fast even at billions of
+                # rows) -- appropriate here since this is explicitly the
+                # QUICK pre-check used only for stratification-column
+                # selection (full_profile above already does exact
+                # countDistinct for the real profile). This replaces
+                # hardcoded mock values that previously made every column
+                # look identically eligible for stratification, silently
+                # picking an arbitrary column on exactly the datasets large
+                # enough to have routed to Spark in the first place.
+                exprs = []
+                for col in dtypes:
+                    exprs.append(F.count(F.col(col)).alias(f"{col}__nonnull"))
+                    exprs.append(F.approx_count_distinct(F.col(col)).alias(f"{col}__nunique"))
+                stats = sampled.agg(*exprs).collect()[0].asDict()
+                records = []
+                for col, dtype in dtypes.items():
+                    non_null = stats[f"{col}__nonnull"] or 0
+                    n_unique = stats[f"{col}__nunique"] or 0
+                    records.append({
+                        "column": col,
+                        "is_categorical": dtype in ['string', 'boolean'],
+                        "fill_pct": round(100 * non_null / total, 2),
+                        "n_unique": n_unique,
+                        "unique_ratio": round(n_unique / total, 4),
+                    })
             if pl:
                 return pl.DataFrame(records)
             return records

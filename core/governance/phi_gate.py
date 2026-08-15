@@ -135,16 +135,32 @@ _COMPILED_PCI: dict[str, tuple[re.Pattern[str], ...]] = {
 }
 
 
+def _leaf_match_candidates(name: str) -> list[str]:
+    """Names to try an anchored identifier regex against.
+
+    A physical column is just itself. A nested-JSON dot path
+    (`metadata.patient.ssn`) or array-element leaf (`visits[].ssn`) also tries
+    its last segment (`ssn`) -- `rsplit(".", 1)[-1]` strips both everything
+    before the last dot AND a trailing `[]` marker, since the marker is only
+    ever attached to an intermediate segment, never the leaf's own name.
+    """
+    candidates = [name]
+    if "." in name:
+        candidates.append(name.rsplit(".", 1)[-1])
+    return candidates
+
+
 def _match_category(
     column_name: str, compiled: dict[str, tuple[re.Pattern[str], ...]]
 ) -> str | None:
     if not isinstance(column_name, str) or not column_name.strip():
         return None
     name = column_name.strip()
-    for category, regexes in compiled.items():
-        for regex in regexes:
-            if regex.match(name):
-                return category
+    for candidate in _leaf_match_candidates(name):
+        for category, regexes in compiled.items():
+            for regex in regexes:
+                if regex.match(candidate):
+                    return category
     return None
 
 
@@ -205,10 +221,11 @@ def identifier_category(column_name: str, table: Any = None) -> str | None:
     if category:
         return category
     name = column_name if isinstance(column_name, str) else ""
-    if _BARE_NAME_RE.match(name.strip()) and _is_person_entity_table(table):
-        return "name"
-    if _AMBIGUOUS_DATE_RE.match(name.strip()) and _is_person_entity_table(table):
-        return "individual_linked_date"
+    for candidate in _leaf_match_candidates(name.strip()):
+        if _BARE_NAME_RE.match(candidate) and _is_person_entity_table(table):
+            return "name"
+        if _AMBIGUOUS_DATE_RE.match(candidate) and _is_person_entity_table(table):
+            return "individual_linked_date"
     return None
 
 
@@ -258,9 +275,17 @@ class PHIAssessment:
 
 
 def _iter_profile_columns(profile_index: dict[str, Any] | None):
-    """Yield (dataset, column) pairs from a profile_index.json payload."""
+    """Yield (dataset, column) pairs from a profile_index.json payload.
+
+    Includes both physical top-level columns AND fields nested inside a
+    Struct/List column (e.g. `metadata.patient.ssn` from a JSON-sourced API
+    payload) via the profiler's `nested_leaf_columns` -- without this, PHI/PCI
+    hidden inside a JSON payload column would never be classified at all.
+    """
     if not isinstance(profile_index, dict):
         return
+    from core.onboarding.features.derived_evidence import iter_nested_leaf_entries
+
     for profile in profile_index.get("profiles") or []:
         if not isinstance(profile, dict):
             continue
@@ -279,6 +304,8 @@ def _iter_profile_columns(profile_index: dict[str, Any] | None):
             columns = []
         for column in columns:
             yield dataset, column
+        for leaf in iter_nested_leaf_entries(profile):
+            yield dataset, leaf["name"]
 
 
 def detect_phi_columns(profile_index: dict[str, Any] | None) -> list[PHIFinding]:

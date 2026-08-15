@@ -4938,6 +4938,21 @@ def _resolve_host() -> str:
     return host
 
 
+def _refuse_debug_on_non_loopback(debug: bool, host: str, loopback_addrs: set[str]) -> None:
+    """Exit the process before ``app.run`` if debug mode is on and the host
+    is not loopback -- Werkzeug's interactive debugger is arbitrary Python
+    code execution; this must never be reachable over the network."""
+    if debug and host not in loopback_addrs:
+        print(
+            f"[SECURITY REFUSAL] Refusing to start: AUTORESEARCH_DASHBOARD_DEBUG=1 "
+            f"with a non-loopback host ({host!r}) would expose the Werkzeug "
+            "interactive debugger (arbitrary code execution) to the network. "
+            "Unset AUTORESEARCH_DASHBOARD_DEBUG or bind to a loopback host.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 def _setup_auth(flask_app) -> bool:  # type: ignore[type-arg]
     """Attach HTTP Basic Auth to *flask_app* when auth env vars are set.
 
@@ -5049,6 +5064,12 @@ if __name__ == "__main__":
             "Ensure auth is configured and access is restricted.",
             file=sys.stderr,
         )
+
+    # --- Debug + non-loopback is a hard stop, not a warning ---
+    # The Werkzeug interactive debugger allows arbitrary Python execution on
+    # the server. A warning an operator can miss in a container's stdout is
+    # not the right bar for RCE prevention -- refuse to start instead.
+    _refuse_debug_on_non_loopback(debug, host, _loopback_addrs)
 
     # --- Auth setup ---
     auth_active = _setup_auth(app.server)
