@@ -328,6 +328,11 @@ CURATED_MODULES: tuple[str, ...] = (
     # lived only on the machine that gave them. Pins that a local-only workspace
     # makes NO remote call and that a mirror failure never fails the command.
     "tests.test_team_state_mirror",
+    # Gold OBT unknown member: the fact side already LEFT JOINs, but every dimension
+    # attribute came back NULL for an early-arriving fact. Columns are resolved by
+    # build-time DuckDB introspection because this layer carries no column list.
+    # Runs real DuckDB -- the point is that the emitted statement executes.
+    "tests.test_gold_obt_unknown_member",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

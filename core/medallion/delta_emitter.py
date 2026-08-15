@@ -247,14 +247,103 @@ df = spark.table("{first_source}")
     return path
 
 
-def emit_gold_duckdb(table: GoldTable, out_dir: Path) -> Path:
+#: Unknown-member sentinel. Same string the dbt path uses
+#: (`dbt_project_generator._UNKNOWN_MEMBER`) so one workspace does not render two
+#: spellings of the same concept across its local OBT and its warehouse models.
+UNKNOWN_MEMBER = "__unknown_member__"
+
+
+def introspect_columns(con, table: str) -> list[tuple[str, str]]:
+    """`[(column_name, duckdb_type)]` for a table that already exists.
+
+    Build-time introspection is what makes the typed OBT possible at all: this
+    layer is deliberately schema-agnostic (silver and gold both emit `SELECT *`
+    with REPLACE/EXCLUDE, and neither Manifest.SilverTable nor TableContract
+    carries a column list), so the only authoritative schema is the one DuckDB
+    already has once silver is built. `PRAGMA table_info` is sub-millisecond.
+
+    Returns [] on any failure -- the caller falls back to star expansion, which
+    is exactly today's behaviour.
+    """
+    try:
+        rows = con.execute(f'PRAGMA table_info("{table}")').fetchall()
+    except Exception:
+        try:
+            schema, _, name = table.partition(".")
+            rows = con.execute(f'PRAGMA table_info("{schema}"."{name}")').fetchall()
+        except Exception:
+            return []
+    # PRAGMA table_info -> (cid, name, type, notnull, dflt_value, pk)
+    return [(str(row[1]), str(row[2])) for row in rows if len(row) > 2]
+
+
+def unknown_member_literal(duckdb_type: str) -> str | None:
+    """Typed fallback for a missing dimension attribute, or None to leave NULL.
+
+    Mirrors the dbt side's choices so the two paths agree: numeric -> -1,
+    date/timestamp -> the epoch, text -> the sentinel. A BOOLEAN is deliberately
+    left NULL -- there is no honest "unknown" boolean, and substituting false
+    would assert something the data never said.
+    """
+    text = str(duckdb_type or "").strip().upper()
+    if not text or text.startswith("BOOL"):
+        return None
+    # Container types FIRST: `INTEGER[]` starts with `INTEGER`, and coalescing a
+    # list to -1 is a runtime type error, not a cosmetic one.
+    if "[]" in text or text.startswith(("STRUCT", "MAP", "LIST", "UNION", "ARRAY")):
+        return None
+    if text.startswith(("TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
+                        "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT",
+                        "FLOAT", "DOUBLE", "DECIMAL", "REAL", "NUMERIC")):
+        return "-1"
+    if text.startswith("TIMESTAMP") or text.startswith("DATETIME"):
+        return "TIMESTAMP '1970-01-01 00:00:00'"
+    if text.startswith("DATE"):
+        return "DATE '1970-01-01'"
+    if text.startswith(("VARCHAR", "CHAR", "TEXT", "STRING", "UUID")):
+        return f"'{UNKNOWN_MEMBER}'"
+    return None  # BLOB / STRUCT / LIST / MAP: no sensible unknown value
+
+
+def _dimension_select(alias: str, join_key: str, columns: list[tuple[str, str]]) -> str:
+    """Explicit, COALESCEd projection of a dimension's non-key columns.
+
+    Replaces `{alias}.* EXCLUDE (key)` when the real schema is known, so an
+    early-arriving fact reads a named unknown instead of a blank NULL in every
+    consumer of the materialised table -- CLI queries, the Dash app, and CSV or
+    Excel exports alike, not just wherever rendering happens to mask it.
+    """
+    items: list[str] = []
+    for name, dtype in columns:
+        if name == join_key:
+            continue
+        ref = f'{alias}."{name}"'
+        literal = unknown_member_literal(dtype)
+        items.append(f'{ref} AS "{name}"' if literal is None
+                     else f'coalesce({ref}, {literal}) AS "{name}"')
+    return ", ".join(items)
+
+
+def emit_gold_duckdb(
+    table: GoldTable,
+    out_dir: Path,
+    *,
+    dimension_columns: dict[str, list[tuple[str, str]]] | None = None,
+) -> Path:
     """Emit the DuckDB Gold SQL.
 
     A fact with proven foreign keys is denormalised into a wide One-Big-Table
-    (OBT): the fact LEFT JOINed to each dimension, with the dimension's non-key
-    columns prefixed (``<dim>_<col>``) to avoid collisions. The join happens ONCE
-    here so dashboards scan a flat table with no runtime joins. A fact without
-    FKs (or a dimension) stays a full-refresh copy.
+    (OBT): the fact LEFT JOINed to each dimension. The join happens ONCE here so
+    dashboards scan a flat table with no runtime joins. A fact without FKs (or a
+    dimension) stays a full-refresh copy.
+
+    ``dimension_columns`` maps a dimension's silver table to its real
+    ``[(name, type)]`` schema, obtained at build time via
+    :func:`introspect_columns`. When supplied, each dimension attribute is
+    projected explicitly and COALESCEd to a typed unknown member, so a
+    late-arriving fact never lands on a row of blank NULLs. When absent (pure
+    emit, before any table exists), the projection falls back to star expansion
+    -- unchanged behaviour.
     """
     first_silver = (
         f"silver.{table.derived_from[0].split('.', 1)[-1]}"
@@ -266,16 +355,18 @@ def emit_gold_duckdb(table: GoldTable, out_dir: Path) -> Path:
         select_cols = ["f.*"]
         for i, fk in enumerate(fks):
             dim_silver = f"silver.{str(fk['to_table']).split('.', 1)[-1]}"
-            dim_entity = dim_silver.split(".", 1)[-1]
             alias = f"d{i}"
             fcol = assert_safe_identifier(str(fk["from_column"]), context="gold OBT fk col")
             tcol = assert_safe_identifier(str(fk["to_column"]), context="gold OBT to col")
             joins.append(
                 f"LEFT JOIN {dim_silver} {alias} ON f.\"{fcol}\" = {alias}.\"{tcol}\"")
-            # Prefix the dimension's columns so a flat OBT has no name clashes.
-            # COLUMNS(...) excludes the join key (already on the fact).
-            select_cols.append(
-                f"{alias}.* EXCLUDE (\"{tcol}\")")
+            # With the dimension's real schema in hand (build-time introspection),
+            # project its non-key columns explicitly and COALESCE each to a typed
+            # unknown member. Without it, fall back to star expansion minus the
+            # join key, which is already on the fact.
+            resolved = (dimension_columns or {}).get(dim_silver) or []
+            projection = _dimension_select(alias, tcol, resolved) if resolved else ""
+            select_cols.append(projection or f"{alias}.* EXCLUDE (\"{tcol}\")")
         sql = (
             f"-- gold.{table.name}: OBT (fact silver.{table.derived_from[0].split('.',1)[-1]} "
             f"pre-joined with {len(fks)} dimension(s))\n"

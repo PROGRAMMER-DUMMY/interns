@@ -615,6 +615,36 @@ def _execute_silver(
 
 # ── Gold execution ─────────────────────────────────────────────────────────────
 
+def _resolve_gold_obt_sql(gold_table, paths: dict[str, Path], con) -> None:
+    """Rewrite a fact OBT's SQL using the dimensions' real, introspected schemas.
+
+    No-op for anything that is not a fact with foreign keys, and a no-op if
+    introspection comes back empty (the dimension has not been built, or the
+    PRAGMA failed) -- in both cases the design-time star-expansion SQL already on
+    disk stands, which is the previous behaviour. Never raises: a failure here
+    must not fail the build when the un-COALESCEd table would still be correct,
+    just uglier.
+    """
+    fks = getattr(gold_table, "foreign_keys", None) or []
+    if getattr(gold_table, "kind", "") != "fact" or not fks:
+        return
+    try:
+        from core.medallion.delta_emitter import emit_gold_duckdb, introspect_columns
+
+        dimension_columns: dict[str, list[tuple[str, str]]] = {}
+        for fk in fks:
+            dim_silver = f"silver.{str(fk['to_table']).split('.', 1)[-1]}"
+            if dim_silver in dimension_columns:
+                continue
+            columns = introspect_columns(con, dim_silver)
+            if columns:
+                dimension_columns[dim_silver] = columns
+        if dimension_columns:
+            emit_gold_duckdb(gold_table, paths["gold"], dimension_columns=dimension_columns)
+    except Exception:
+        return  # keep the design-time SQL; correctness is unchanged
+
+
 def _execute_gold(
     manifest: Manifest,
     paths: dict[str, Path],
@@ -634,6 +664,14 @@ def _execute_gold(
         if _skip_unchanged(key, con, state, inc_plan):
             continue
         sql_path = paths["gold"] / f"{g.name}.duckdb.sql"
+        # Re-emit a fact OBT with the dimensions' REAL schemas, read from the
+        # silver tables that exist by now. The emitted-at-design-time file could
+        # only star-expand, which leaves an early-arriving fact on a row of blank
+        # NULLs; with the columns known we COALESCE each to a typed unknown
+        # member. Rewriting the artifact (rather than executing a different
+        # string) keeps the .sql on disk equal to what actually ran, so lint,
+        # lineage, and audit all still describe the real statement.
+        _resolve_gold_obt_sql(g, paths, con)
         if not sql_path.exists():
             state.per_table_status[key] = TableRunStatus(status="failed", error="SQL file missing")
             _route(governor, state, "GOLD_DERIVATION_FAIL", f"Missing {sql_path}", fatal=True)

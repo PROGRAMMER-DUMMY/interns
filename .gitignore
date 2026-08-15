@@ -33,6 +33,12 @@ __pycache__/
 .venv_docling/
 # Serena MCP server state (cache + its own memories); tool-local, not repo content.
 .serena/
+# Per-tool skill adapters are GENERATED, never hand-maintained. Canonical bodies
+# live in skills/*/SKILL.md; regenerate with `uv run generate-skill-adapters`.
+# Tracking near-duplicate copies per tool is exactly the drift that generator
+# exists to prevent (AGENTS.md > Cross-Tool Skill Adapters).
+.claude/skills/
+.github/skills/
 # Raw agent session transcripts dumped at the repo root. Large, and a raw log can
 # carry pasted credentials -- never history.
 *-local-command-caveat*.txt
