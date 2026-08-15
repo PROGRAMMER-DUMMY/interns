@@ -29,6 +29,7 @@ from core.onboarding.workspace.idempotency import (
     get_applied_op,
     record_op,
 )
+from core.onboarding.workspace.team_state import mirror_team_state_safe
 from core.storage.workspace_lock import WorkspaceLockTimeout, workspace_lock
 
 # Commands that mutate user-decided/accepted state. The reliability hook only
@@ -314,6 +315,15 @@ def run_workspace_command(
             command=command,
             payload=payload,
         )
+        # A decision is now durably on local disk. Mirror it to the workspace's UC
+        # volume so a teammate on another machine inherits it instead of re-answering
+        # the same blocker (interns/ is gitignored, so git cannot carry it). Best
+        # effort by construction: a local-only workspace makes no remote call at all,
+        # and a mirror failure is reported in the payload, never raised -- losing the
+        # mirror must not lose the answer that was just recorded.
+        mirror = mirror_team_state_safe(workspace_path)
+        if not mirror.get("skipped"):
+            payload["team_state_mirror"] = mirror
 
     record_trajectory_event_safe(
         repo_root,

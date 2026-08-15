@@ -18,6 +18,25 @@
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_secrets.py\""
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ ! -f \"$CLAUDE_PROJECT_DIR/core/governance/selection_guard.py\" ] || python \"$CLAUDE_PROJECT_DIR/core/governance/selection_guard.py\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ ! -f \"$CLAUDE_PROJECT_DIR/core/governance/selection_guard.py\" ] || python \"$CLAUDE_PROJECT_DIR/core/governance/selection_guard.py\""
+          }
+        ]
       }
     ]
   }

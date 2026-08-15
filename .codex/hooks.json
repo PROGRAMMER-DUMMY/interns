@@ -24,6 +24,31 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ ! -f \"core/governance/selection_guard.py\" ] || python \"core/governance/selection_guard.py\"",
+            "timeout": 5,
+            "statusMessage": "Selection-turn write guard"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ ! -f \"core/governance/selection_guard.py\" ] || python \"core/governance/selection_guard.py\"",
+            "timeout": 5,
+            "statusMessage": "Selection-turn write guard"
+          }
+        ]
+      }
     ]
   }
 }

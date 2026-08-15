@@ -28,12 +28,24 @@ mlflow.db
 __pycache__/
 *.py[cod]
 .venv/
+# Isolated docling env -- kept OUT of .venv so torch cannot resolve against
+# pinned pyspark<4 / deltalake / numpy<2.0. See core/onboarding/documents/docling_loader.py
+.venv_docling/
+# Serena MCP server state (cache + its own memories); tool-local, not repo content.
+.serena/
+# Raw agent session transcripts dumped at the repo root. Large, and a raw log can
+# carry pasted credentials -- never history.
+*-local-command-caveat*.txt
 .idea/
 .ruff_cache/
 .pytest_cache/
 node_modules/
 dist/
 build/
+
+# --- superpowers subagent-driven-development scratch (ledgers, briefs, review packages) ---
+.superpowers/
+.worktrees/
 
 # --- Working/implementation plans: kept locally under docs/plans/, not committed ---
 /PLAN_*.md

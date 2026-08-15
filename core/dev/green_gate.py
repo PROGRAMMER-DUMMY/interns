@@ -305,6 +305,29 @@ CURATED_MODULES: tuple[str, ...] = (
     # proven_data_model. Also pins the TB properties: computed in SQL, one row
     # back, never sampled.
     "tests.test_relationship_uc_evidence",
+    # Selection-turn write guard: AGENTS.md Step 0 is a HARD STOP, and it was prose
+    # only (restated in CLAUDE.md because one statement of it did not hold). Pins the
+    # rule AND the cross-harness normalization that keeps it agent-agnostic rather
+    # than Claude-Code-specific.
+    "tests.test_selection_guard",
+    # Docling runs in an isolated interpreter so torch cannot resolve against the
+    # primary venv's pinned pyspark<4 / numpy<2.0. Pins the fallback contract: an
+    # unavailable engine must never fail the run.
+    "tests.onboarding.test_docling_loader",
+    # Grain bucketing: `\bage\b` never matched `Patient_Age` (`_` is a word char), so
+    # share KPIs cut by a real column name skipped the banding blocker and computed
+    # percentages over one-row denominators. Silently wrong, not loudly stuck.
+    "tests.test_grain_bucketing_autoband",
+    # Late-arriving dimensions: the unknown-member COALESCE cast every attribute to
+    # string, so a numeric dimension attribute came out as text.
+    "tests.test_late_arriving_typed_coalesce",
+    # CONTEXT-MAP rule 4 ("zero spec drift") had nothing enforcing it; the map linked
+    # core/skills/CONTEXT-skills.md for months while the file did not exist.
+    "tests.test_context_map_drift",
+    # Team decision state mirrored to UC: interns/ is gitignored, so blocker answers
+    # lived only on the machine that gave them. Pins that a local-only workspace
+    # makes NO remote call and that a mirror failure never fails the command.
+    "tests.test_team_state_mirror",
 )
 
 # Enterprise optimization suite -- broad behavioral coverage, also expected green.

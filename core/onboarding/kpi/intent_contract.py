@@ -149,6 +149,44 @@ _RAW_CONTINUOUS_CUT_RE = re.compile(
 )
 _COMPARISON_OP_RE = re.compile(r"[<>]=?|!?=")
 
+# A real cut is usually a COLUMN NAME (`Patient_Age`, `patientAge`, `DOB`), not the
+# bare prose word the regex above matches -- `_` is a word character, so `\bage\b`
+# never fires on `Patient_Age`. Matching on sub-tokens instead keeps `percentage`,
+# `average`, and `coverage_amount` from false-positiving the way a substring search
+# would.
+_CONTINUOUS_SUBTOKENS = frozenset({"age", "dob"})
+# A cut that is ALREADY bucketed does not fragment the denominator, so it must not
+# raise the banding blocker. (`intent_coverage` emits `age_band` as the banded column.)
+_BANDED_SUBTOKENS = frozenset({
+    "band", "bands", "banded", "banding", "group", "groups", "grouped", "bucket",
+    "buckets", "bucketed", "range", "ranges", "bin", "bins", "binned", "cohort",
+    "cohorts", "tier", "tiers", "bracket", "brackets", "category", "categories",
+})
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _subtokens(token: str) -> list[str]:
+    """Split a cut token into lowercase sub-tokens across `_`, `-`, space, and camelCase."""
+    spaced = _CAMEL_BOUNDARY_RE.sub(" ", str(token))
+    return [part.lower() for part in re.split(r"[^A-Za-z0-9]+", spaced) if part]
+
+
+def _is_raw_continuous_token(token: str) -> bool:
+    """True when this cut groups by a raw continuous value that fragments a share.
+
+    Deliberately limited to age / date-of-birth / days-since. A generic `*_date` cut
+    is NOT included: dates are the normal grain of every trend KPI, and treating them
+    as continuous would block those on a banding question they should never be asked.
+    """
+    parts = set(_subtokens(token))
+    if parts & _BANDED_SUBTOKENS:
+        return False
+    if parts & _CONTINUOUS_SUBTOKENS:
+        return True
+    if "birth" in parts and ("date" in parts or "dt" in parts):
+        return True
+    return bool(_RAW_CONTINUOUS_CUT_RE.search(token))
+
 # Top-N ranking in name
 _TOP_N_RE = re.compile(r"\btop\s+(\d+)\b", re.IGNORECASE)
 
@@ -295,7 +333,7 @@ def _raw_continuous_cuts(cuts_text: str) -> list[str]:
     for token in _split_cuts(cuts_text):
         if _COMPARISON_OP_RE.search(token):
             continue
-        if _RAW_CONTINUOUS_CUT_RE.search(token):
+        if _is_raw_continuous_token(token):
             out.append(token)
     return out
 
@@ -932,6 +970,34 @@ def build_intent_contract(
     }
 
 
+# Facets whose choice set is fixed and whose options deserve real operator-facing
+# wording. The `label` IS the recorded decision value, so each must be a token the
+# apply path accepts -- `band_continuous_cuts:<width>` is parsed by
+# result_view_builder._band_width_from_decision, which reads the trailing integer.
+_FACET_INTERPRETATIONS: dict[str, tuple[dict[str, str], ...]] = {
+    "grain_bucketing": (
+        {
+            "label": "band_continuous_cuts:10",
+            "description": (
+                "Bin the continuous cut into 10-unit bands (e.g. age 20-29, 30-39) so "
+                "each band holds enough rows for the share denominator to mean something. "
+                "Width is in the cut's own unit -- 10 years for an age cut, 10 days for a "
+                "days-since cut. Use band_continuous_cuts:<width> for a different width."
+            ),
+        },
+        {
+            "label": "exact_value_grain",
+            "description": (
+                "Compute the denominator per exact value. Warning: this produces one row "
+                "per distinct value, so each share is computed over a tiny (often "
+                "single-row) denominator. Choose this only when exact-value rows are "
+                "genuinely wanted."
+            ),
+        },
+    ),
+}
+
+
 def low_confidence_facets(contract: dict[str, Any]) -> list[dict[str, Any]]:
     """Return facets with confidence in {low} or metric=none that should become
     blocker questions.  For each, produce a panel-ready question dict naming
@@ -954,12 +1020,21 @@ def low_confidence_facets(contract: dict[str, Any]) -> list[dict[str, Any]]:
         alts = facet.get("alternatives") or []
         evidence = facet.get("evidence") or []
 
-        # Build interpretations list
-        interpretations: list[dict[str, Any]] = []
-        if value is not None:
-            interpretations.append({"label": str(value), "description": "current default / derived value"})
-        for alt in alts:
-            interpretations.append({"label": str(alt), "description": "alternative interpretation"})
+        # Build interpretations list. Facets with a fixed, meaningful choice set
+        # supply their own wording -- the generic "current default / derived value"
+        # text tells an operator nothing about what they are choosing between.
+        interpretations: list[dict[str, Any]] = [
+            dict(entry) for entry in _FACET_INTERPRETATIONS.get(fname, ())
+        ]
+        if not interpretations:
+            if value is not None:
+                interpretations.append(
+                    {"label": str(value), "description": "current default / derived value"}
+                )
+            for alt in alts:
+                interpretations.append(
+                    {"label": str(alt), "description": "alternative interpretation"}
+                )
         if not interpretations:
             interpretations.append({"label": "unknown", "description": "no interpretation available"})
 

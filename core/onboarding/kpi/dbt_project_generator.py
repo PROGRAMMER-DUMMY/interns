@@ -58,10 +58,15 @@ from core.onboarding.kpi.sql_generator import (
     DuckDBKPISQLGenerator,
     READY_STATES,
     _safe_name,
+    _schema,
 )
 from core.dev.generator_stamp import stamp
 from core.paths import PROJECT_ROOT
-from core.profiling.data_model_profiler import _is_temporal_dtype
+from core.profiling.data_model_profiler import (
+    _is_nested_dtype,
+    _is_numeric_dtype,
+    _is_temporal_dtype,
+)
 from core.profiling.dataset_identity import dataset_display_stem
 from core.provisioning.plan import env_catalog
 from core.storage.workspace_layout import WorkspaceLayout
@@ -566,7 +571,7 @@ class DbtProjectGenerator:
                 continue
             feat_name = feature["feature"]
             if self.late_arriving_dimensions and str(feat_name).lower() not in metric_tokens:
-                column = _late_arriving_expr(column)
+                column = _late_arriving_expr(column, source_aliases, profile_map)
             feat_cols = {
                 str(sc.get("column") or "").lower()
                 for sc in (feature.get("source_columns") or [])
@@ -1413,20 +1418,86 @@ def _render_config(options: dict[str, Any]) -> str:
     return "{{ config(%s) }}" % rendered
 
 
-def _late_arriving_expr(expr: str) -> str:
+_ALIAS_COLUMN_RE = re.compile(r'^(s[1-9]\d*)\.[`"]?([^`".]+)[`"]?$')
+
+# Typed unknown-member literals. Preserving the column's type matters: the old
+# blanket `cast(... as string)` turned every numeric dimension attribute into
+# text, silently breaking downstream numeric comparison and ordering on the OBT.
+_UNKNOWN_NUMERIC = "-1"
+_UNKNOWN_TIMESTAMP = "timestamp('1970-01-01 00:00:00')"
+_UNKNOWN_DATE = "date '1970-01-01'"
+
+
+def _unknown_member_literal(dtype: str | None) -> str | None:
+    """Typed fallback for a missing dimension attribute, or None for the
+    string-sentinel path.
+
+    Deliberately NOT typed:
+
+    * boolean -- there is no honest "unknown" boolean. Substituting false would
+      assert something the data never said; NULL is the truthful answer, so the
+      caller skips the coalesce entirely.
+    * time-of-day and nested types -- no sensible epoch equivalent.
+    * unknown dtype -- keeps the previous string-cast behaviour rather than
+      guessing a type from nothing.
+    """
+    text = str(dtype or "").strip()
+    if not text or _is_nested_dtype(text):
+        return None
+    if _is_numeric_dtype(text):
+        return _UNKNOWN_NUMERIC
+    if _is_temporal_dtype(text):
+        lowered = text.lower()
+        if lowered.startswith("datetime") or "timestamp" in lowered:
+            return _UNKNOWN_TIMESTAMP
+        if lowered.startswith("date"):
+            return _UNKNOWN_DATE
+        return None  # time-of-day only
+    return None
+
+
+def _dtype_for_expr(
+    expr: str,
+    source_aliases: dict[str, str],
+    profile_map: dict[str, dict[str, Any]],
+) -> str | None:
+    """Resolve the profiled dtype behind a qualified `s<N>."col"` reference."""
+    match = _ALIAS_COLUMN_RE.match(expr.strip())
+    if not match:
+        return None
+    alias, column = match.group(1), match.group(2)
+    for source, source_alias in source_aliases.items():
+        if source_alias == alias:
+            return _schema(profile_map.get(source, {})).get(column)
+    return None
+
+
+def _late_arriving_expr(
+    expr: str,
+    source_aliases: dict[str, str] | None = None,
+    profile_map: dict[str, dict[str, Any]] | None = None,
+) -> str:
     """COALESCE a DIMENSION-side attribute to the unknown member so an
     early-arriving fact keeps its measure (audit missing #1). The join is
     already LEFT; without this the fact lands in a NULL group.
 
-    ponytail: the coalesce casts to string, so a numeric dimension attribute
-    comes out as text in that mode. The typed fix is a real unknown-member ROW
-    in a generated dimension table (macros/inferred_member.sql maintains one);
-    do that once this generator emits dimension models.
+    The fallback is typed from the column's profiled dtype (numeric -> -1,
+    date/timestamp -> the epoch, text -> the string sentinel), so the coalesce no
+    longer rewrites a numeric attribute into text. A boolean attribute is left
+    NULL on purpose -- see :func:`_unknown_member_literal`. With no profile
+    evidence for the column, this falls back to the previous string-cast form
+    rather than guessing.
     """
     match = re.match(r"^s([1-9]\d*)\.", expr.strip())
     if not match:
         return expr  # base (fact) side, or an expression with no single source
-    return f"coalesce(cast({expr} as string), '{_UNKNOWN_MEMBER}')"
+    dtype = _dtype_for_expr(expr, source_aliases or {}, profile_map or {})
+    if str(dtype or "").strip().lower().startswith("bool"):
+        return expr  # no honest unknown boolean; keep the NULL
+    literal = _unknown_member_literal(dtype)
+    if literal is None:
+        return f"coalesce(cast({expr} as string), '{_UNKNOWN_MEMBER}')"
+    return f"coalesce({expr}, {literal})"
 
 
 def _drop_excluded(select_list: str, excluded: set[str]) -> tuple[str, list[str]]:
