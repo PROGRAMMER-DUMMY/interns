@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync --extra dbt --extra storage
       # unittest, never pytest -- the repo blocks pytest by hook.
       - run: uv run green-gate
@@ -38,7 +38,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync --extra dbt
       - name: dbt-index every generated project
         run: |
@@ -67,7 +67,7 @@ jobs:
     needs: gate
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync --extra dbt
       - name: dbt build (state:modified+)
         if: env.DBT_STATE_PATH != ''
@@ -92,7 +92,7 @@ jobs:
     needs: gate
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync --extra dbt
       - name: dbt build (full), then publish the manifest
         if: env.DBT_STATE_PATH != ''
