@@ -245,7 +245,7 @@ documents = [
     # Local-safe PDF document ingestion (opendataloader free mode: deterministic,
     # no upload). Needs a Java 11+ runtime; the PDF path degrades gracefully
     # (a [~] warning) when this extra or Java is absent.
-    "opendataloader-pdf==2.4.7",
+    "opendataloader-pdf==2.5.7",
 ]
 notebook = [
     "notebook>=7.5.6",
